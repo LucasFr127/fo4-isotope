@@ -64,4 +64,17 @@ double EncodeSt2084Pq(double nits) noexcept
     return std::clamp(std::pow(ratio, 2523.0 / 32.0), 0.0, 1.0);
 }
 
+std::uint16_t QuantizeR10Unorm(double encoded) noexcept
+{
+    // D3D FLOAT-to-UNORM uses nearest integer after range containment.
+    // https://learn.microsoft.com/en-us/windows/win32/direct3d10/d3d10-graphics-programming-guide-resources-data-conversion
+    return static_cast<std::uint16_t>(
+        std::floor(BoundLight(encoded, 1.0) * 1023.0 + 0.5));
+}
+
+double NormalizeR10Unorm(std::uint16_t code) noexcept
+{
+    return std::min<double>(code, 1023.0) / 1023.0;
+}
+
 }  // namespace fo4hdr

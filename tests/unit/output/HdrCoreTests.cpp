@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 
@@ -93,20 +94,21 @@ void TestSt2084ReferenceVectors()
     {
         double nits;
         double encoded;
+        std::uint16_t r10Code;
     };
     constexpr std::array<Reference, 12> references{{
-        {0.0, 7.309559025783966e-7},
-        {0.001, 0.006302377054571391},
-        {0.01, 0.02148621379868528},
-        {0.1, 0.06233686566269587},
-        {1.0, 0.14994573210018022},
-        {80.0, 0.4858567653886785},
-        {100.0, 0.508078421517399},
-        {203.0, 0.5806888810416109},
-        {400.0, 0.6525785975630672},
-        {1000.0, 0.751827096247041},
-        {2000.0, 0.8274246448588193},
-        {10000.0, 1.0}
+        {0.0, 7.309559025783966e-7, 0},
+        {0.001, 0.006302377054571391, 6},
+        {0.01, 0.02148621379868528, 22},
+        {0.1, 0.06233686566269587, 64},
+        {1.0, 0.14994573210018022, 153},
+        {80.0, 0.4858567653886785, 497},
+        {100.0, 0.508078421517399, 520},
+        {203.0, 0.5806888810416109, 594},
+        {400.0, 0.6525785975630672, 668},
+        {1000.0, 0.751827096247041, 769},
+        {2000.0, 0.8274246448588193, 846},
+        {10000.0, 1.0, 1023}
     }};
 
     double previous = -1.0;
@@ -116,6 +118,12 @@ void TestSt2084ReferenceVectors()
         FO4HDR_CHECK(fo4hdr::test::Approx(encoded, reference.encoded, 1.0e-12));
         FO4HDR_CHECK(encoded >= previous);
         FO4HDR_CHECK(encoded >= 0.0 && encoded <= 1.0);
+        const auto code = fo4hdr::QuantizeR10Unorm(encoded);
+        FO4HDR_CHECK(code == reference.r10Code);
+        FO4HDR_CHECK(code <= 1023);
+        FO4HDR_CHECK(
+            std::abs(fo4hdr::NormalizeR10Unorm(code) - encoded) <=
+            0.5 / 1023.0 + 1.0e-12);
         previous = encoded;
     }
 }
@@ -132,6 +140,27 @@ void TestSt2084InputBounds()
         EncodeSt2084Pq(0.0));
 }
 
+void TestR10ChannelBounds()
+{
+    using fo4hdr::NormalizeR10Unorm;
+    using fo4hdr::QuantizeR10Unorm;
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    FO4HDR_CHECK(QuantizeR10Unorm(-1.0) == 0);
+    FO4HDR_CHECK(QuantizeR10Unorm(2.0) == 1023);
+    FO4HDR_CHECK(QuantizeR10Unorm(nan) == 0);
+    FO4HDR_CHECK(QuantizeR10Unorm(infinity) == 1023);
+    FO4HDR_CHECK(QuantizeR10Unorm(-infinity) == 0);
+    FO4HDR_CHECK(QuantizeR10Unorm(0.5) == 512);
+    FO4HDR_CHECK(NormalizeR10Unorm(65535) == 1.0);
+    for (std::uint16_t code = 0; code <= 1023; ++code)
+    {
+        const auto normalized = NormalizeR10Unorm(code);
+        FO4HDR_CHECK(normalized >= 0.0 && normalized <= 1.0);
+        FO4HDR_CHECK(QuantizeR10Unorm(normalized) == code);
+    }
+}
+
 }  // namespace
 
 int main()
@@ -140,5 +169,6 @@ int main()
     TestDisplayStandardsOracle();
     TestSt2084ReferenceVectors();
     TestSt2084InputBounds();
+    TestR10ChannelBounds();
     return fo4hdr::test::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

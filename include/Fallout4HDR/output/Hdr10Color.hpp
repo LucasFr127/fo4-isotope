@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <cstdint>
+
 namespace fo4hdr {
 
 struct LinearRgb
@@ -21,5 +23,8 @@ struct LinearRgb
 // Encodes absolute luminance in nits as the ST 2084 signal in [0, 1].
 // Negative and NaN inputs use black; values above 10000 nits use the ceiling.
 [[nodiscard]] double EncodeSt2084Pq(double nits) noexcept;
+
+[[nodiscard]] std::uint16_t QuantizeR10Unorm(double encoded) noexcept;
+[[nodiscard]] double NormalizeR10Unorm(std::uint16_t code) noexcept;
 
 }  // namespace fo4hdr
