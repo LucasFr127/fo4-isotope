@@ -3,10 +3,38 @@
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace fo4hdr {
 namespace {
+
+using Matrix = std::array<std::array<double, 3>, 3>;
+
+// Derived from the specified primaries and D65 by solving the XYZ white scale.
+// Binary32 rounding fixes the coefficient precision of the transform.
+// https://www.itu.int/rec/R-REC-BT.709-6-201506-I/en
+// https://www.itu.int/rec/R-REC-BT.2020-2-201510-I/en
+constexpr Matrix primaryTransform{{
+    {0.627403895934699F, 0.329283038377884F, 0.043313065687417F},
+    {0.069097289358232F, 0.919540395075459F, 0.011362315566309F},
+    {0.016391438875150F, 0.088013307877226F, 0.895595253247624F}
+}};
+
+// Invert the rounded forward transform for comparison round trips.
+constexpr Matrix comparisonTransform{{
+    {1.6604909457791666, -0.5876410948776531, -0.0728498646690886},
+    {-0.12455046636659303, 1.1328998802803918, -0.008349422033247976},
+    {-0.01815076427030725, -0.10057889487266629, 1.118729662272663}
+}};
+
+LinearRgb Transform(const Matrix& matrix, LinearRgb rgb) noexcept
+{
+    const auto channel = [&](const auto& row) {
+        return row[0] * rgb.red + row[1] * rgb.green + row[2] * rgb.blue;
+    };
+    return {channel(matrix[0]), channel(matrix[1]), channel(matrix[2])};
+}
 
 double BoundLight(double nits, double ceiling) noexcept
 {
@@ -14,6 +42,16 @@ double BoundLight(double nits, double ceiling) noexcept
 }
 
 }  // namespace
+
+LinearRgb ConvertBt709ToBt2020(LinearRgb value) noexcept
+{
+    return Transform(primaryTransform, value);
+}
+
+LinearRgb ConvertBt2020ToBt709ForComparison(LinearRgb value) noexcept
+{
+    return Transform(comparisonTransform, value);
+}
 
 double EncodeSt2084Pq(double nits) noexcept
 {
