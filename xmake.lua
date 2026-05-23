@@ -23,6 +23,11 @@ end
 target("fo4hdr-tests")
     set_kind("binary")
     set_targetdir("build/$(plat)/$(arch)/$(mode)")
-    add_includedirs("include", "tests/support")
-    add_files("src/output/Hdr10Color.cpp", "tests/unit/output/HdrCoreTests.cpp")
+    add_includedirs("include", "tests/support", "tests/unit")
+    add_files(
+        "src/output/Hdr10Color.cpp",
+        "src/runtime/RuntimeValidation.cpp",
+        "tests/unit/main.cpp",
+        "tests/unit/output/HdrCoreTests.cpp",
+        "tests/unit/runtime/RuntimeValidationTests.cpp")
 target_end()

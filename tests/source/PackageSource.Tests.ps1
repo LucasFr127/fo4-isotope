@@ -10,11 +10,16 @@ $expected = [string[]]@(
     ".gitignore",
     "COPYING.GPL-3.0-or-later",
     "include/Fallout4HDR/output/Hdr10Color.hpp",
+    "include/Fallout4HDR/runtime/RuntimeValidation.hpp",
     "scripts/package-source.ps1",
     "src/output/Hdr10Color.cpp",
+    "src/runtime/RuntimeValidation.cpp",
     "tests/source/PackageSource.Tests.ps1",
     "tests/support/TestHarness.hpp",
+    "tests/unit/main.cpp",
     "tests/unit/output/HdrCoreTests.cpp",
+    "tests/unit/runtime/RuntimeValidationTests.cpp",
+    "tests/unit/UnitTestSuite.hpp",
     "xmake.lua"
 )
 [Array]::Sort($expected, [StringComparer]::Ordinal)

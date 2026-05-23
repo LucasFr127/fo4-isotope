@@ -2,12 +2,12 @@
 
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
+#include "UnitTestSuite.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <limits>
 
 namespace {
@@ -163,12 +163,15 @@ void TestR10ChannelBounds()
 
 }  // namespace
 
-int main()
+namespace fo4hdr::tests {
+
+void RunHdrCoreTests()
 {
     TestBt709ToBt2020();
     TestDisplayStandardsOracle();
     TestSt2084ReferenceVectors();
     TestSt2084InputBounds();
     TestR10ChannelBounds();
-    return fo4hdr::test::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
+}  // namespace fo4hdr::tests
