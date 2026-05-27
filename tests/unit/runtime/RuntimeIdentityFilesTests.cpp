@@ -35,7 +35,8 @@ void RunRuntimeIdentityFilesTests()
     const RuntimeVersion maximum{65535, 65535, 65535, 65535};
     FO4HDR_CHECK(DecodeFixedFileVersion(bytes) == maximum);
 
-    FO4HDR_CHECK(ReadCurrentExecutableVersion() == expected);
+    const RuntimeVersion executableVersion{1, 10, 163, FO4HDR_TEST_EXECUTABLE_BUILD};
+    FO4HDR_CHECK(ReadCurrentExecutableVersion() == executableVersion);
 }
 
 }  // namespace fo4hdr::tests

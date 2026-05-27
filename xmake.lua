@@ -74,15 +74,21 @@ target("Fallout4HDR")
     add_syslinks("version")
 target_end()
 
-target("fo4hdr-tests")
-    set_kind("binary")
-    add_rules("win.sdk.resource")
-    add_includedirs("include", "src/runtime", "tests/support", "tests/unit")
-    add_syslinks("version")
-    add_files("src/output/Hdr10Color.cpp", "src/runtime/RuntimeValidation.cpp",
-        "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
-        "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
-        "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
-        "tests/unit/plugin/PluginBootstrapTests.cpp",
-        "tests/unit/runtime/RuntimeVersionFixture.rc")
-target_end()
+for _, fixture in ipairs({
+    { name = "fo4hdr-tests", build = 0 },
+    { name = "fo4hdr-tests-executable-mismatch", build = 1 }
+}) do
+    target(fixture.name)
+        set_kind("binary")
+        add_rules("win.sdk.resource")
+        add_defines("FO4HDR_TEST_EXECUTABLE_BUILD=" .. fixture.build)
+        add_includedirs("include", "src/runtime", "tests/support", "tests/unit")
+        add_syslinks("version")
+        add_files("src/output/Hdr10Color.cpp", "src/runtime/RuntimeValidation.cpp",
+            "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
+            "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
+            "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
+            "tests/unit/plugin/PluginBootstrapTests.cpp",
+            "tests/unit/runtime/RuntimeVersionFixture.rc")
+    target_end()
+end
