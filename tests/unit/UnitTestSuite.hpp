@@ -5,5 +5,7 @@ namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
 void RunRuntimeValidationTests();
+void RunRuntimeIdentityFilesTests();
+void RunPluginBootstrapSmokeTests(const wchar_t* pluginPath);
 
 }  // namespace fo4hdr::tests

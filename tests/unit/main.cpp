@@ -5,9 +5,15 @@
 
 #include <cstdlib>
 
-int main()
+int wmain(int argc, wchar_t** argv)
 {
     fo4hdr::tests::RunHdrCoreTests();
     fo4hdr::tests::RunRuntimeValidationTests();
+    fo4hdr::tests::RunRuntimeIdentityFilesTests();
+    FO4HDR_CHECK(argc == 2);
+    if (argc == 2)
+    {
+        fo4hdr::tests::RunPluginBootstrapSmokeTests(argv[1]);
+    }
     return fo4hdr::test::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
