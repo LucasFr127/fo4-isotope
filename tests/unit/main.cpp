@@ -8,6 +8,7 @@
 int wmain(int argc, wchar_t** argv)
 {
     fo4hdr::tests::RunHdrCoreTests();
+    fo4hdr::tests::RunGameSnapshotStoreTests();
     fo4hdr::tests::RunRuntimeValidationTests();
     fo4hdr::tests::RunRuntimeIdentityFilesTests();
     FO4HDR_CHECK(argc == 2);
