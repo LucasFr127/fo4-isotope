@@ -15,6 +15,16 @@ void TestInitialSnapshot()
     const fo4hdr::GameSnapshotStore store;
     const auto snapshot = store.Read();
     FO4HDR_CHECK(snapshot.generation == 0);
+    FO4HDR_CHECK(snapshot.resourceGeneration == 0);
+    FO4HDR_CHECK(snapshot.lifecycleGeneration == 0);
+    FO4HDR_CHECK(snapshot.observationGeneration == 0);
+    FO4HDR_CHECK(snapshot.lifecycleEvent == fo4hdr::GameLifecycleEvent::None);
+    FO4HDR_CHECK(snapshot.collectorThreadId == 0);
+    FO4HDR_CHECK(!snapshot.messagingAvailable);
+    FO4HDR_CHECK(!snapshot.lifecycleSucceeded);
+    FO4HDR_CHECK(!snapshot.loading);
+    FO4HDR_CHECK(!snapshot.taskCollectionAvailable);
+    FO4HDR_CHECK(!snapshot.collectorFailed);
     FO4HDR_CHECK(!snapshot.rendererInitialized);
     FO4HDR_CHECK(!snapshot.rendererBorderless);
     FO4HDR_CHECK(!snapshot.rendererVsync);
@@ -135,6 +145,92 @@ void TestConcurrentWriters()
     FO4HDR_CHECK(snapshot.generation == 2 * iterations);
 }
 
+void TestLifecycleOutcome()
+{
+    using Event = fo4hdr::GameLifecycleEvent;
+    for (const auto event : {Event::PostLoadGame, Event::GameDataReady})
+    {
+        FO4HDR_CHECK(fo4hdr::DecodeGameLifecycleOutcome(event, 1, 0) == false);
+        FO4HDR_CHECK(fo4hdr::DecodeGameLifecycleOutcome(event, 1, 1) == true);
+        FO4HDR_CHECK(!fo4hdr::DecodeGameLifecycleOutcome(event, 0, 0));
+        FO4HDR_CHECK(!fo4hdr::DecodeGameLifecycleOutcome(event, 2, 1));
+        FO4HDR_CHECK(!fo4hdr::DecodeGameLifecycleOutcome(event, 1, 2));
+    }
+    FO4HDR_CHECK(fo4hdr::DecodeGameLifecycleOutcome(Event::PreSaveGame, 12, 42) == true);
+    FO4HDR_CHECK(fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::PostLoadGame, true));
+    FO4HDR_CHECK(!fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::PostLoadGame, false));
+    FO4HDR_CHECK(fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::NewGame, true));
+    FO4HDR_CHECK(fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::PreSaveGame, true));
+    FO4HDR_CHECK(!fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::PreLoadGame, true));
+    FO4HDR_CHECK(!fo4hdr::ShouldCollectGameSnapshotAtLifecycle(Event::GameDataReady, true));
+}
+
+void TestLifecycleTransitions()
+{
+    using Event = fo4hdr::GameLifecycleEvent;
+    fo4hdr::GameHdrSnapshot snapshot{};
+    snapshot.rendererInitialized = true;
+    snapshot.rendererBorderless = true;
+    snapshot.rendererVsync = true;
+    snapshot.rendererDeviceIdentity = 17;
+    snapshot.rendererContextIdentity = 23;
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PreLoadGame, true);
+    FO4HDR_CHECK(snapshot.loading);
+    FO4HDR_CHECK(snapshot.resourceGeneration == 1);
+    FO4HDR_CHECK(!snapshot.rendererInitialized);
+    FO4HDR_CHECK(!snapshot.rendererBorderless);
+    FO4HDR_CHECK(!snapshot.rendererVsync);
+    FO4HDR_CHECK(snapshot.rendererDeviceIdentity == 0);
+    FO4HDR_CHECK(snapshot.rendererContextIdentity == 0);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, false);
+    FO4HDR_CHECK(snapshot.loading);
+    FO4HDR_CHECK(!snapshot.lifecycleSucceeded);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, true);
+    FO4HDR_CHECK(!snapshot.loading);
+    FO4HDR_CHECK(snapshot.lifecycleSucceeded);
+    FO4HDR_CHECK(snapshot.resourceGeneration == 1);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::NewGame, true);
+    FO4HDR_CHECK(snapshot.loading);
+    FO4HDR_CHECK(snapshot.resourceGeneration == 2);
+    FO4HDR_CHECK(snapshot.lifecycleGeneration == 4);
+    FO4HDR_CHECK(snapshot.lifecycleEvent == Event::NewGame);
+}
+
+void TestCollectedPublication()
+{
+    fo4hdr::GameHdrSnapshot unavailable{};
+    FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(unavailable, 0, 42));
+    FO4HDR_CHECK(unavailable.collectorThreadId == 0);
+    unavailable.taskCollectionAvailable = true;
+    FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(unavailable, 0, 0));
+    FO4HDR_CHECK(unavailable.collectorFailed);
+
+    fo4hdr::GameHdrSnapshot snapshot{};
+    snapshot.messagingAvailable = true;
+    snapshot.taskCollectionAvailable = true;
+    const auto retiredWorld = snapshot.resourceGeneration;
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::PreLoadGame, true);
+    const auto currentWorld = snapshot.resourceGeneration;
+    FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(snapshot, retiredWorld, 99));
+    FO4HDR_CHECK(snapshot.collectorThreadId == 0);
+    FO4HDR_CHECK(snapshot.observationGeneration == 0);
+    FO4HDR_CHECK(!snapshot.collectorFailed);
+    FO4HDR_CHECK(fo4hdr::PublishCollectedGameSnapshot(snapshot, currentWorld, 42));
+    FO4HDR_CHECK(fo4hdr::PublishCollectedGameSnapshot(snapshot, currentWorld, 42));
+    FO4HDR_CHECK(snapshot.collectorThreadId == 42);
+    FO4HDR_CHECK(snapshot.observationGeneration == 2);
+    FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(snapshot, currentWorld, 43));
+    FO4HDR_CHECK(snapshot.collectorFailed);
+    FO4HDR_CHECK(!snapshot.taskCollectionAvailable);
+    FO4HDR_CHECK(snapshot.messagingAvailable);
+    FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(snapshot, currentWorld, 42));
+    FO4HDR_CHECK(snapshot.observationGeneration == 2);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::NewGame, true);
+    FO4HDR_CHECK(snapshot.collectorFailed);
+    FO4HDR_CHECK(!snapshot.taskCollectionAvailable);
+    FO4HDR_CHECK(snapshot.messagingAvailable);
+}
+
 }  // namespace
 
 namespace fo4hdr::tests {
@@ -146,6 +242,9 @@ void RunGameSnapshotStoreTests()
     TestReplacementGeneration();
     TestCoherentConcurrentReads();
     TestConcurrentWriters();
+    TestLifecycleOutcome();
+    TestLifecycleTransitions();
+    TestCollectedPublication();
 }
 
 }  // namespace fo4hdr::tests

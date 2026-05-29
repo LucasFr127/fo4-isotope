@@ -13,6 +13,7 @@ $expected = [string[]]@(
     "include/Fallout4HDR/output/Hdr10Color.hpp",
     "include/Fallout4HDR/runtime/RuntimeValidation.hpp",
     "scripts/package-source.ps1", "src/game/GameSnapshotStore.hpp",
+    "src/game/GameStateObserver.cpp", "src/game/GameStateObserver.hpp",
     "src/output/Hdr10Color.cpp", "src/plugin/PluginMain.cpp",
     "src/runtime/RuntimeIdentityFiles.cpp", "src/runtime/RuntimeIdentityFiles.hpp",
     "src/runtime/RuntimeValidation.cpp", "tests/source/PackageSource.Tests.ps1",

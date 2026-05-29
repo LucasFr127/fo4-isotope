@@ -20,6 +20,8 @@ $files = [string[]]@(
     "include/Fallout4HDR/runtime/RuntimeValidation.hpp",
     "scripts/package-source.ps1",
     "src/game/GameSnapshotStore.hpp",
+    "src/game/GameStateObserver.cpp",
+    "src/game/GameStateObserver.hpp",
     "src/output/Hdr10Color.cpp",
     "src/plugin/PluginMain.cpp",
     "src/runtime/RuntimeIdentityFiles.cpp",

@@ -70,7 +70,7 @@ target("Fallout4HDR")
     add_includedirs("include", "src/runtime")
     add_defines("COMMONLIB_RUNTIMECOUNT=3")
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
-        "src/runtime/RuntimeValidation.cpp")
+        "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp")
     add_syslinks("version")
 target_end()
 

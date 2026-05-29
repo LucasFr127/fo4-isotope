@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <span>
 #include <string_view>
 
@@ -74,6 +75,183 @@ using Load = bool (__cdecl*)(const F4seInterface*);
 
 constexpr F4seInterface supportedF4se{0x00060170, 0x010A0A30};
 constexpr bool executableMatches = FO4HDR_TEST_EXECUTABLE_BUILD == 0;
+
+struct Message
+{
+    const char* sender;
+    std::uint32_t type;
+    std::uint32_t dataLength;
+    void* data;
+};
+
+class TaskDelegate
+{
+public:
+    virtual ~TaskDelegate() noexcept = default;
+    virtual void Run() = 0;
+};
+
+struct MessagingInterface
+{
+    std::uint32_t version;
+    bool (__cdecl* registerListener)(std::uint32_t, const char*, void*);
+    bool (__cdecl* dispatch)(std::uint32_t, std::uint32_t, void*, std::uint32_t, const char*);
+    void* (__cdecl* getEventDispatcher)(std::uint32_t);
+};
+
+struct TaskInterface
+{
+    std::uint32_t version;
+    void (__cdecl* addTask)(void*);
+    void (__cdecl* addUiTask)(void*);
+};
+
+static_assert(sizeof(Message) == 0x18);
+static_assert(sizeof(MessagingInterface) == 0x20);
+static_assert(offsetof(MessagingInterface, registerListener) == 0x08);
+static_assert(sizeof(TaskInterface) == 0x18);
+static_assert(offsetof(TaskInterface, addTask) == 0x08);
+
+using Listener = void (__cdecl*)(Message*);
+Listener listener{};
+std::uint32_t mockHandle = 1;
+std::uint32_t registrationAttempts{};
+std::uint32_t registrations{};
+std::uint32_t enqueueAttempts{};
+bool registrationSucceeds{};
+bool enqueueFails{};
+std::array<TaskDelegate*, 4> queuedTasks{};
+std::size_t queuedCount{};
+
+bool __cdecl RegisterListener(std::uint32_t handle, const char* sender, void* callback)
+{
+    ++registrationAttempts;
+    FO4HDR_CHECK(handle == 1);
+    FO4HDR_CHECK(std::string_view{sender} == "F4SE");
+    FO4HDR_CHECK(callback != nullptr);
+    if (!registrationSucceeds)
+    {
+        return false;
+    }
+    listener = reinterpret_cast<Listener>(callback);
+    ++registrations;
+    return true;
+}
+
+void __cdecl AddTask(void* task)
+{
+    ++enqueueAttempts;
+    if (enqueueFails || queuedCount == queuedTasks.size())
+    {
+        throw std::bad_alloc{};
+    }
+    queuedTasks[queuedCount++] = static_cast<TaskDelegate*>(task);
+}
+
+MessagingInterface mockMessaging{1, &RegisterListener};
+TaskInterface mockTasks{2, &AddTask};
+
+void* __cdecl QueryInterface(std::uint32_t id)
+{
+    if (id == 1)
+    {
+        return &mockMessaging;
+    }
+    return id == 5 ? &mockTasks : nullptr;
+}
+
+std::uint32_t __cdecl GetPluginHandle()
+{
+    return mockHandle;
+}
+
+void SendLifecycleMessage(std::uint32_t type, std::uint32_t length = 0, std::uintptr_t bits = 0)
+{
+    Message message{"F4SE", type, length, reinterpret_cast<void*>(bits)};
+    listener(&message);
+}
+
+void RunQueuedTasks()
+{
+    const auto enqueued = enqueueAttempts;
+    const auto count = queuedCount;
+    queuedCount = 0;
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        auto* task = queuedTasks[index];
+        queuedTasks[index] = nullptr;
+        task->Run();
+        delete task;
+    }
+    FO4HDR_CHECK(enqueueAttempts == enqueued);
+}
+
+void CheckObserverMessages()
+{
+    listener(nullptr);
+    SendLifecycleMessage(99);
+    SendLifecycleMessage(3, 0, 1);
+    SendLifecycleMessage(3, 1, 2);
+    SendLifecycleMessage(2);
+    SendLifecycleMessage(3, 1, 0);
+    FO4HDR_CHECK(queuedCount == 0);
+    SendLifecycleMessage(3, 1, 1);
+    FO4HDR_CHECK(queuedCount == 1);
+    SendLifecycleMessage(2);
+    RunQueuedTasks();
+    SendLifecycleMessage(8);
+    FO4HDR_CHECK(queuedCount == 1);
+    RunQueuedTasks();
+    SendLifecycleMessage(4);
+    FO4HDR_CHECK(queuedCount == 1);
+    RunQueuedTasks();
+    SendLifecycleMessage(10, 1, 0);
+    SendLifecycleMessage(10, 1, 1);
+    FO4HDR_CHECK(queuedCount == 0);
+}
+
+void CheckObserverIntegration(Load load)
+{
+    auto f4se = supportedF4se;
+    f4se.queryInterface = &QueryInterface;
+    f4se.getPluginHandle = &GetPluginHandle;
+    if (!executableMatches)
+    {
+        FO4HDR_CHECK(!load(&f4se));
+        FO4HDR_CHECK(registrations == 0);
+        return;
+    }
+    mockHandle = UINT32_MAX;
+    FO4HDR_CHECK(load(&f4se));
+    FO4HDR_CHECK(registrationAttempts == 0);
+    mockHandle = 1;
+    mockMessaging.version = 2;
+    FO4HDR_CHECK(load(&f4se));
+    FO4HDR_CHECK(registrationAttempts == 0);
+    mockMessaging.version = 1;
+    FO4HDR_CHECK(load(&f4se));
+    FO4HDR_CHECK(registrationAttempts == 1);
+    FO4HDR_CHECK(registrations == 0);
+    registrationSucceeds = true;
+    FO4HDR_CHECK(load(&f4se));
+    FO4HDR_CHECK(load(&f4se));
+    FO4HDR_CHECK(registrationAttempts == 2);
+    FO4HDR_CHECK(registrations == 1);
+    FO4HDR_CHECK(listener != nullptr);
+    if (listener != nullptr)
+    {
+        CheckObserverMessages();
+        enqueueFails = true;
+        SendLifecycleMessage(4);
+        enqueueFails = false;
+        const auto attempts = enqueueAttempts;
+        SendLifecycleMessage(4);
+        FO4HDR_CHECK(enqueueAttempts == attempts);
+        FO4HDR_CHECK(queuedCount == 0);
+        FO4HDR_CHECK(load(&f4se));
+        FO4HDR_CHECK(registrations == 1);
+    }
+}
 
 void CheckVersionData(const PluginVersionData& data)
 {
@@ -182,6 +360,8 @@ void RunPluginBootstrapSmokeTests(const wchar_t* pluginPath)
     if (query != nullptr && load != nullptr)
     {
         CheckStartup(query, load);
+        CheckObserverIntegration(load);
+        CheckRejectedInputs(query, load);
     }
     FO4HDR_CHECK(FreeLibrary(module));
 }

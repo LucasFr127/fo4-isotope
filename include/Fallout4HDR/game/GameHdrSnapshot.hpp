@@ -6,9 +6,35 @@
 
 namespace fo4hdr {
 
+enum class GameLifecycleEvent : std::uint8_t
+{
+    None,
+    PostLoad,
+    PostPostLoad,
+    PreLoadGame,
+    PostLoadGame,
+    PreSaveGame,
+    PostSaveGame,
+    DeleteGame,
+    InputLoaded,
+    NewGame,
+    GameLoaded,
+    GameDataReady
+};
+
 struct GameHdrSnapshot
 {
     std::uint64_t generation{};
+    std::uint64_t resourceGeneration{};
+    std::uint64_t lifecycleGeneration{};
+    std::uint64_t observationGeneration{};
+    GameLifecycleEvent lifecycleEvent{};
+    std::uint32_t collectorThreadId{};
+    bool lifecycleSucceeded{};
+    bool loading{};
+    bool messagingAvailable{};
+    bool taskCollectionAvailable{};
+    bool collectorFailed{};
     bool rendererInitialized{};
     bool rendererBorderless{};
     bool rendererVsync{};

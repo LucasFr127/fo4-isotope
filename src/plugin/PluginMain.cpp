@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Fallout4HDR/runtime/RuntimeValidation.hpp"
+#include "../game/GameStateObserver.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
 
 #include <F4SE/F4SE.h>
@@ -79,6 +80,7 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
         std::call_once(startup, [] {
             spdlog::info("Fallout4HDR 0.1.0 loaded: runtime 1.10.163, F4SE 0.6.23");
         });
+        fo4hdr::game::InitializeGameStateObserver(f4se);
         return true;
     }
     catch (...)
