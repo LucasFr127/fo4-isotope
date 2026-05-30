@@ -174,7 +174,7 @@ void TestLifecycleTransitions()
     snapshot.rendererVsync = true;
     snapshot.rendererDeviceIdentity = 17;
     snapshot.rendererContextIdentity = 23;
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PreLoadGame, true);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PreLoadGame, true, 0);
     FO4HDR_CHECK(snapshot.loading);
     FO4HDR_CHECK(snapshot.resourceGeneration == 1);
     FO4HDR_CHECK(!snapshot.rendererInitialized);
@@ -182,14 +182,14 @@ void TestLifecycleTransitions()
     FO4HDR_CHECK(!snapshot.rendererVsync);
     FO4HDR_CHECK(snapshot.rendererDeviceIdentity == 0);
     FO4HDR_CHECK(snapshot.rendererContextIdentity == 0);
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, false);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, false, 0);
     FO4HDR_CHECK(snapshot.loading);
     FO4HDR_CHECK(!snapshot.lifecycleSucceeded);
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, true);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::PostLoadGame, true, 0);
     FO4HDR_CHECK(!snapshot.loading);
     FO4HDR_CHECK(snapshot.lifecycleSucceeded);
     FO4HDR_CHECK(snapshot.resourceGeneration == 1);
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::NewGame, true);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::NewGame, true, 0);
     FO4HDR_CHECK(snapshot.loading);
     FO4HDR_CHECK(snapshot.resourceGeneration == 2);
     FO4HDR_CHECK(snapshot.lifecycleGeneration == 4);
@@ -209,7 +209,7 @@ void TestCollectedPublication()
     snapshot.messagingAvailable = true;
     snapshot.taskCollectionAvailable = true;
     const auto retiredWorld = snapshot.resourceGeneration;
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::PreLoadGame, true);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::PreLoadGame, true, 0);
     const auto currentWorld = snapshot.resourceGeneration;
     FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(snapshot, retiredWorld, 99));
     FO4HDR_CHECK(snapshot.collectorThreadId == 0);
@@ -225,7 +225,7 @@ void TestCollectedPublication()
     FO4HDR_CHECK(snapshot.messagingAvailable);
     FO4HDR_CHECK(!fo4hdr::PublishCollectedGameSnapshot(snapshot, currentWorld, 42));
     FO4HDR_CHECK(snapshot.observationGeneration == 2);
-    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::NewGame, true);
+    fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::NewGame, true, 0);
     FO4HDR_CHECK(snapshot.collectorFailed);
     FO4HDR_CHECK(!snapshot.taskCollectionAvailable);
     FO4HDR_CHECK(snapshot.messagingAvailable);

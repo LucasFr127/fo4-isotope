@@ -14,11 +14,13 @@ $expected = [string[]]@(
     "include/Fallout4HDR/runtime/RuntimeValidation.hpp",
     "scripts/package-source.ps1", "src/game/GameSnapshotStore.hpp",
     "src/game/GameStateObserver.cpp", "src/game/GameStateObserver.hpp",
+    "src/game/MenuEventQueue.hpp",
     "src/output/Hdr10Color.cpp", "src/plugin/PluginMain.cpp",
     "src/runtime/RuntimeIdentityFiles.cpp", "src/runtime/RuntimeIdentityFiles.hpp",
     "src/runtime/RuntimeValidation.cpp", "tests/source/PackageSource.Tests.ps1",
     "tests/support/TestHarness.hpp", "tests/unit/main.cpp", "tests/unit/output/HdrCoreTests.cpp",
     "tests/unit/game/GameSnapshotStoreTests.cpp",
+    "tests/unit/game/MenuEventQueueTests.cpp",
     "tests/unit/plugin/PluginBootstrapTests.cpp", "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
     "tests/unit/runtime/RuntimeValidationTests.cpp", "tests/unit/runtime/RuntimeVersionFixture.rc",
     "tests/unit/UnitTestSuite.hpp", "xmake.lua"

@@ -28,8 +28,17 @@ struct GameHdrSnapshot
     std::uint64_t resourceGeneration{};
     std::uint64_t lifecycleGeneration{};
     std::uint64_t observationGeneration{};
+    std::uint64_t lastMenuSequence{};
+    std::uint64_t menuEventsDropped{};
+    std::uint64_t menuResetFloor{};
     GameLifecycleEvent lifecycleEvent{};
     std::uint32_t collectorThreadId{};
+    std::uint32_t lastMenuSourceThread{};
+    std::uint8_t lastMenuCode{};
+    bool lastMenuOpening{};
+    bool menuEventAvailable{};
+    // Completion is relative to the last drain cutoff; newer publications can remain.
+    bool menuHistoryCaughtUp{true};
     bool lifecycleSucceeded{};
     bool loading{};
     bool messagingAvailable{};

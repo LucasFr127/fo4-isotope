@@ -88,6 +88,7 @@ for _, fixture in ipairs({
             "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
             "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
             "tests/unit/game/GameSnapshotStoreTests.cpp",
+            "tests/unit/game/MenuEventQueueTests.cpp",
             "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
             "tests/unit/plugin/PluginBootstrapTests.cpp",
             "tests/unit/runtime/RuntimeVersionFixture.rc")

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Fallout4HDR/game/GameHdrSnapshot.hpp"
+#include "MenuEventQueue.hpp"
 
 #include <functional>
 #include <mutex>
@@ -53,7 +54,8 @@ private:
 }
 
 constexpr void ApplyGameLifecycleTransition(
-    GameHdrSnapshot& snapshot, GameLifecycleEvent event, bool succeeded) noexcept
+    GameHdrSnapshot& snapshot, GameLifecycleEvent event, bool succeeded,
+    std::uint64_t menuPublication) noexcept
 {
     snapshot.lifecycleEvent = event;
     snapshot.lifecycleSucceeded = succeeded;
@@ -68,6 +70,13 @@ constexpr void ApplyGameLifecycleTransition(
         snapshot.rendererVsync = false;
         snapshot.rendererDeviceIdentity = 0;
         snapshot.rendererContextIdentity = 0;
+        // This floor separates copied publications, not the source event's world lifetime.
+        snapshot.menuResetFloor = menuPublication;
+        snapshot.menuEventAvailable = false;
+        snapshot.lastMenuCode = 0;
+        snapshot.lastMenuOpening = false;
+        snapshot.lastMenuSourceThread = 0;
+        snapshot.menuHistoryCaughtUp = snapshot.lastMenuSequence >= menuPublication;
     }
     else if (event == GameLifecycleEvent::PostLoadGame && succeeded)
     {
@@ -108,6 +117,20 @@ constexpr void DisableGameSnapshotCollection(GameHdrSnapshot& snapshot) noexcept
     }
     snapshot.collectorThreadId = threadId;
     ++snapshot.observationGeneration;
+    return true;
+}
+
+template <std::size_t Capacity>
+[[nodiscard]] bool CollectGameMenuSnapshot(GameHdrSnapshot& snapshot,
+    MenuEventQueue<Capacity>& queue, std::uint64_t resourceGeneration,
+    std::uint32_t threadId) noexcept
+{
+    if (!PublishCollectedGameSnapshot(snapshot, resourceGeneration, threadId))
+    {
+        return false;
+    }
+    // Reset and cursor advancement share the store's single publication boundary.
+    DrainMenuEvents(snapshot, queue);
     return true;
 }
 

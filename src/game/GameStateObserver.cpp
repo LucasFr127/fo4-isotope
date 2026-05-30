@@ -22,6 +22,7 @@ enum class InitializationState
 };
 
 fo4hdr::GameSnapshotStore snapshotStore;
+fo4hdr::MenuEventQueue<256> menuEvents;
 std::atomic<InitializationState> initializationState{};
 std::atomic<bool> collectorFailed{};
 std::atomic_flag collectionActive = ATOMIC_FLAG_INIT;
@@ -55,8 +56,8 @@ void RunCollectedRequest(std::uint64_t resourceGeneration) noexcept
         const auto threadId = GetCurrentThreadId();
         snapshotStore.Update([resourceGeneration, threadId](
             fo4hdr::GameHdrSnapshot& snapshot) noexcept {
-            static_cast<void>(fo4hdr::PublishCollectedGameSnapshot(
-                snapshot, resourceGeneration, threadId));
+            static_cast<void>(fo4hdr::CollectGameMenuSnapshot(
+                snapshot, menuEvents, resourceGeneration, threadId));
             if (snapshot.collectorFailed)
             {
                 collectorFailed.store(true, std::memory_order_release);
@@ -128,7 +129,8 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
         std::uint64_t resourceGeneration{};
         snapshotStore.Update([event, succeeded = *outcome, &resourceGeneration](
             fo4hdr::GameHdrSnapshot& snapshot) noexcept {
-            fo4hdr::ApplyGameLifecycleTransition(snapshot, event, succeeded);
+            fo4hdr::ApplyGameLifecycleTransition(
+                snapshot, event, succeeded, menuEvents.PublishedSequence());
             resourceGeneration = snapshot.resourceGeneration;
         });
         if (fo4hdr::ShouldCollectGameSnapshotAtLifecycle(event, *outcome))
