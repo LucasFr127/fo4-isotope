@@ -140,6 +140,59 @@ void TestSt2084InputBounds()
         EncodeSt2084Pq(0.0));
 }
 
+void TestDisplayContainment()
+{
+    const double infinity = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const auto exceptional = fo4hdr::ContainBt2020Nits({nan, -infinity, infinity}, 400.0);
+    FO4HDR_CHECK(exceptional.red == 0.0);
+    FO4HDR_CHECK(exceptional.green == 0.0);
+    FO4HDR_CHECK(exceptional.blue == 400.0);
+    const auto interior = fo4hdr::ContainBt2020Nits({0.001, 203.0, 401.0}, 400.0);
+    FO4HDR_CHECK(interior.red == 0.001);
+    FO4HDR_CHECK(interior.green == 203.0);
+    FO4HDR_CHECK(interior.blue == 400.0);
+    const auto endpoints = fo4hdr::ContainBt2020Nits({-1.0, 0.0, 400.0}, 400.0);
+    FO4HDR_CHECK(endpoints.red == 0.0);
+    FO4HDR_CHECK(endpoints.green == 0.0);
+    FO4HDR_CHECK(endpoints.blue == 400.0);
+    const auto maximum = fo4hdr::ContainBt2020Nits({10000.0, infinity, 0.0}, 10000.0);
+    FO4HDR_CHECK(maximum.red == 10000.0);
+    FO4HDR_CHECK(maximum.green == 10000.0);
+    FO4HDR_CHECK(maximum.blue == 0.0);
+    for (const auto invalidPeak : {0.0, -1.0, 10001.0, nan, infinity, -infinity})
+    {
+        const auto black = fo4hdr::ContainBt2020Nits({203.0, 400.0, infinity}, invalidPeak);
+        FO4HDR_CHECK(black.red == 0.0);
+        FO4HDR_CHECK(black.green == 0.0);
+        FO4HDR_CHECK(black.blue == 0.0);
+    }
+}
+
+void TestRgbPq()
+{
+    const auto infinity = std::numeric_limits<double>::infinity();
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto input : {fo4hdr::LinearRgb{0.001, 203.0, 400.0},
+             fo4hdr::LinearRgb{nan, -infinity, infinity}})
+    {
+        const auto encoded = fo4hdr::EncodeSt2084Pq(input);
+        FO4HDR_CHECK(encoded.red == fo4hdr::EncodeSt2084Pq(input.red));
+        FO4HDR_CHECK(encoded.green == fo4hdr::EncodeSt2084Pq(input.green));
+        FO4HDR_CHECK(encoded.blue == fo4hdr::EncodeSt2084Pq(input.blue));
+    }
+    const auto wide = fo4hdr::ConvertBt709ToBt2020({406.0, 406.0, 406.0});
+    const auto contained = fo4hdr::ContainBt2020Nits(wide, 1000.0);
+    FO4HDR_CHECK(fo4hdr::test::Approx(contained.red, 406.0, 1.0e-7));
+    FO4HDR_CHECK(fo4hdr::test::Approx(contained.green, 406.0, 1.0e-7));
+    FO4HDR_CHECK(fo4hdr::test::Approx(contained.blue, 406.0, 1.0e-7));
+    const auto encoded = fo4hdr::EncodeSt2084Pq(contained);
+    const auto white = fo4hdr::EncodeSt2084Pq(fo4hdr::kSceneReferenceWhiteNits);
+    FO4HDR_CHECK(encoded.red > white);
+    FO4HDR_CHECK(encoded.green > white);
+    FO4HDR_CHECK(encoded.blue > white);
+}
+
 void TestR10ChannelBounds()
 {
     using fo4hdr::NormalizeR10Unorm;
@@ -171,6 +224,8 @@ void RunHdrCoreTests()
     TestDisplayStandardsOracle();
     TestSt2084ReferenceVectors();
     TestSt2084InputBounds();
+    TestDisplayContainment();
+    TestRgbPq();
     TestR10ChannelBounds();
 }
 

@@ -53,6 +53,16 @@ LinearRgb ConvertBt2020ToBt709ForComparison(LinearRgb value) noexcept
     return Transform(comparisonTransform, value);
 }
 
+LinearRgb ContainBt2020Nits(LinearRgb value, double displayPeakNits) noexcept
+{
+    if (!(displayPeakNits > 0.0 && displayPeakNits <= 10000.0))
+    {
+        return {};
+    }
+    return {BoundLight(value.red, displayPeakNits),
+        BoundLight(value.green, displayPeakNits), BoundLight(value.blue, displayPeakNits)};
+}
+
 double EncodeSt2084Pq(double nits) noexcept
 {
     // Inverse display EOTF, BT.2100 Table 4, with absolute luminance units.
@@ -62,6 +72,12 @@ double EncodeSt2084Pq(double nits) noexcept
     const double ratio = (3424.0 / 4096.0 + power * (2413.0 / 128.0)) /
         (1.0 + power * (2392.0 / 128.0));
     return std::clamp(std::pow(ratio, 2523.0 / 32.0), 0.0, 1.0);
+}
+
+LinearRgb EncodeSt2084Pq(LinearRgb nits) noexcept
+{
+    return {EncodeSt2084Pq(nits.red), EncodeSt2084Pq(nits.green),
+        EncodeSt2084Pq(nits.blue)};
 }
 
 std::uint16_t QuantizeR10Unorm(double encoded) noexcept
