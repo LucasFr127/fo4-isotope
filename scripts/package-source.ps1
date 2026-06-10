@@ -42,7 +42,12 @@ $files = [string[]]@(
     "tests/unit/runtime/RuntimeValidationTests.cpp",
     "tests/unit/runtime/RuntimeVersionFixture.rc",
     "tests/unit/UnitTestSuite.hpp",
-    "xmake.lua"
+    "xmake.lua",
+    "tests/shader/main.cpp",
+    "tests/shader/shaders/TransferEvaluation.cs.hlsl",
+    "tests/support/d3d11/GpuHarness.hpp",
+    "tests/support/d3d11/GpuHarness.cpp",
+    "scripts/compile-shaders.ps1"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

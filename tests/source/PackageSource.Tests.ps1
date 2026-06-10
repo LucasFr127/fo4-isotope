@@ -26,7 +26,12 @@ $expected = [string[]]@(
     "tests/unit/game/MenuEventQueueTests.cpp",
     "tests/unit/plugin/PluginBootstrapTests.cpp", "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
     "tests/unit/runtime/RuntimeValidationTests.cpp", "tests/unit/runtime/RuntimeVersionFixture.rc",
-    "tests/unit/UnitTestSuite.hpp", "xmake.lua"
+    "tests/unit/UnitTestSuite.hpp", "xmake.lua",
+    "tests/shader/main.cpp",
+    "tests/shader/shaders/TransferEvaluation.cs.hlsl",
+    "tests/support/d3d11/GpuHarness.hpp",
+    "tests/support/d3d11/GpuHarness.cpp",
+    "scripts/compile-shaders.ps1"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null

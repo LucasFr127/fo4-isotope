@@ -96,3 +96,18 @@ for _, fixture in ipairs({
             "tests/unit/runtime/RuntimeVersionFixture.rc")
     target_end()
 end
+
+target("fo4hdr-shader-tests")
+    set_kind("binary")
+    set_default(false)
+    add_includedirs("include", "tests/support")
+    add_syslinks("d3d11")
+    add_files("src/output/Hdr10Color.cpp", "tests/shader/main.cpp",
+        "tests/support/d3d11/GpuHarness.cpp")
+    before_build(function(target)
+        local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
+        os.vrunv(pwsh, { "-NoProfile", "-File",
+            path.join(os.projectdir(), "scripts/compile-shaders.ps1"),
+            "-Output", path.join(os.projectdir(), target:targetdir(), "TransferEvaluation.dxbc") })
+    end)
+target_end()
