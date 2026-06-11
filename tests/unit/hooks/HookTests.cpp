@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Fallout4HDR/hooks/PeIat.hpp"
+#include "Fallout4HDR/hooks/HookOwnership.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <new>
 #include <span>
+#include <thread>
+
+#include <Windows.h>
 
 namespace {
 
@@ -198,6 +205,386 @@ void TestOrdinalAndAmbiguity()
     static_cast<void>(CheckLookup(image, Status::duplicateSymbol));
 }
 
+using Owner = fo4hdr::PointerHookOwnership;
+using OwnerState = fo4hdr::HookOwnershipState;
+using ChainFunction = int (*)(int) noexcept;
+std::atomic<void*> publishedNext{};
+std::atomic<unsigned> publications{};
+unsigned originalCalls{};
+unsigned foreignCalls{};
+unsigned replacementCalls{};
+
+int Original(int value) noexcept
+{
+    ++originalCalls;
+    return value + 1;
+}
+
+int Foreign(int value) noexcept
+{
+    ++foreignCalls;
+    return Original(value) + 2;
+}
+
+int Replacement(int value) noexcept
+{
+    ++replacementCalls;
+    const auto next = reinterpret_cast<ChainFunction>(publishedNext.load());
+    return next(value) + 4;
+}
+
+void* OriginalPointer() noexcept { return reinterpret_cast<void*>(&Original); }
+void* ForeignPointer() noexcept { return reinterpret_cast<void*>(&Foreign); }
+void* ReplacementPointer() noexcept { return reinterpret_cast<void*>(&Replacement); }
+
+bool PublishNext(void* next) noexcept
+{
+    publishedNext.store(next, std::memory_order_release);
+    publications.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+bool RejectPublication(void*) noexcept { return false; }
+bool RejectWrite(void**, void*, void*) noexcept { return false; }
+
+void* ComparePointer(void** slot, void* expected, void* value) noexcept
+{
+    std::atomic_ref<void*> pointer(*slot);
+    static_cast<void>(pointer.compare_exchange_strong(expected, value));
+    return expected;
+}
+
+bool OrderedWrite(void** slot, void* expected, void* value) noexcept
+{
+    if (publishedNext.load(std::memory_order_acquire) != expected)
+    {
+        return false;
+    }
+    return ComparePointer(slot, expected, value) == expected;
+}
+
+bool AtomicWrite(void** slot, void* expected, void* value) noexcept
+{
+    return ComparePointer(slot, expected, value) == expected;
+}
+
+bool InstallOwner(Owner& owner, void** slot, fo4hdr::HookPointerWriter writer = OrderedWrite)
+{
+    return owner.Install(slot, ReplacementPointer(), writer, PublishNext);
+}
+
+void TestCooperativeOwnership()
+{
+    originalCalls = foreignCalls = replacementCalls = 0;
+    publications = 0;
+    publishedNext = nullptr;
+    void* slot = ForeignPointer();
+    Owner owner;
+    FO4HDR_CHECK(InstallOwner(owner, &slot));
+    FO4HDR_CHECK(owner.Next() == ForeignPointer());
+    FO4HDR_CHECK(publications == 1);
+    FO4HDR_CHECK(owner.Health() == OwnerState::owned);
+    FO4HDR_CHECK(reinterpret_cast<ChainFunction>(slot)(10) == 17);
+    FO4HDR_CHECK(originalCalls == 1);
+    FO4HDR_CHECK(foreignCalls == 1);
+    FO4HDR_CHECK(replacementCalls == 1);
+    FO4HDR_CHECK(!InstallOwner(owner, &slot));
+    FO4HDR_CHECK(owner.Remove(AtomicWrite));
+    FO4HDR_CHECK(owner.State() == OwnerState::restored);
+    FO4HDR_CHECK(slot == ForeignPointer());
+    FO4HDR_CHECK(owner.Next() == ForeignPointer());
+    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
+    FO4HDR_CHECK(!InstallOwner(owner, &slot));
+}
+
+void TestOwnershipRefusals()
+{
+    publications = 0;
+    void* slot = OriginalPointer();
+    for (const auto candidate : {static_cast<void*>(nullptr), ReplacementPointer()})
+    {
+        slot = candidate;
+        Owner owner;
+        FO4HDR_CHECK(!InstallOwner(owner, &slot));
+        FO4HDR_CHECK(slot == candidate);
+        FO4HDR_CHECK(owner.State() == OwnerState::installFailed);
+    }
+    Owner nullSlot;
+    FO4HDR_CHECK(!InstallOwner(nullSlot, nullptr));
+    slot = OriginalPointer();
+    Owner rejectedTarget;
+    void* uncallable = &slot;
+    FO4HDR_CHECK(!rejectedTarget.Install(&uncallable, ReplacementPointer(), AtomicWrite,
+        PublishNext));
+    FO4HDR_CHECK(slot == OriginalPointer());
+    Owner refusedPublication;
+    FO4HDR_CHECK(!refusedPublication.Install(&slot, ReplacementPointer(), AtomicWrite,
+        RejectPublication));
+    FO4HDR_CHECK(slot == OriginalPointer());
+    FO4HDR_CHECK(refusedPublication.Next() == OriginalPointer());
+    Owner noWriter;
+    FO4HDR_CHECK(!InstallOwner(noWriter, &slot, nullptr));
+    Owner noPublisher;
+    FO4HDR_CHECK(!noPublisher.Install(&slot, ReplacementPointer(), AtomicWrite,
+        nullptr));
+    Owner nullReplacement;
+    FO4HDR_CHECK(!nullReplacement.Install(&slot, nullptr, AtomicWrite,
+        PublishNext));
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(nullptr) == nullptr);
+    FO4HDR_CHECK(!fo4hdr::IsExecutableHookTarget(nullptr));
+    FO4HDR_CHECK(!fo4hdr::IsExecutableHookTarget(&slot));
+    FO4HDR_CHECK(publications == 0);
+}
+
+void TestForeignDisplacement()
+{
+    void* slot = OriginalPointer();
+    Owner owner;
+    FO4HDR_CHECK(InstallOwner(owner, &slot));
+    FO4HDR_CHECK(AtomicWrite(&slot, ReplacementPointer(), ForeignPointer()));
+    FO4HDR_CHECK(owner.Health() == OwnerState::ownershipLost);
+    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
+    FO4HDR_CHECK(slot == ForeignPointer());
+    FO4HDR_CHECK(owner.Next() == OriginalPointer());
+    FO4HDR_CHECK(!InstallOwner(owner, &slot));
+    Owner rejected;
+    slot = OriginalPointer();
+    FO4HDR_CHECK(!InstallOwner(rejected, &slot, RejectWrite));
+    FO4HDR_CHECK(slot == OriginalPointer());
+    FO4HDR_CHECK(rejected.Next() == OriginalPointer());
+    FO4HDR_CHECK(rejected.State() == OwnerState::installFailed);
+}
+
+void TestFailedRemovalKeepsNext()
+{
+    void* slot = OriginalPointer();
+    Owner owner;
+    FO4HDR_CHECK(InstallOwner(owner, &slot));
+    FO4HDR_CHECK(!owner.Remove(RejectWrite));
+    FO4HDR_CHECK(owner.State() == OwnerState::passive);
+    FO4HDR_CHECK(owner.Next() == OriginalPointer());
+    FO4HDR_CHECK(reinterpret_cast<ChainFunction>(slot)(10) == 15);
+    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
+    FO4HDR_CHECK(AtomicWrite(&slot, ReplacementPointer(), OriginalPointer()));
+}
+
+enum class WriteFault
+{
+    none,
+    refuseProtection,
+    refuseRestoration,
+    persistentRestoration,
+    foreignBeforeWrite,
+    foreignBeforeRollback,
+    reachableAfterRollback
+};
+
+struct WriteEvidence
+{
+    WriteFault fault{};
+    std::uint32_t protection{PAGE_READONLY};
+    unsigned protects{};
+    unsigned exchanges{};
+};
+WriteEvidence writeEvidence;
+
+bool ShouldRefuseProtection(unsigned call, WriteFault fault) noexcept
+{
+    switch (call)
+    {
+    case 1:
+        return fault == WriteFault::refuseProtection;
+    case 2:
+        return fault != WriteFault::none && fault != WriteFault::foreignBeforeWrite;
+    case 3:
+        return fault == WriteFault::persistentRestoration;
+    default:
+        return false;
+    }
+}
+
+bool FaultProtection(void*, std::size_t bytes, std::uint32_t protection,
+    std::uint32_t& previous) noexcept
+{
+    ++writeEvidence.protects;
+    previous = writeEvidence.protection;
+    if (bytes != sizeof(void*))
+    {
+        return false;
+    }
+    if (ShouldRefuseProtection(writeEvidence.protects, writeEvidence.fault))
+    {
+        return false;
+    }
+    writeEvidence.protection = protection;
+    return true;
+}
+
+void* FaultExchange(void** slot, void* expected, void* value) noexcept
+{
+    ++writeEvidence.exchanges;
+    if (writeEvidence.exchanges == 1 &&
+        writeEvidence.fault == WriteFault::foreignBeforeWrite)
+    {
+        std::atomic_ref<void*>(*slot).store(ForeignPointer());
+    }
+    if (writeEvidence.exchanges == 2)
+    {
+        if (writeEvidence.fault == WriteFault::foreignBeforeRollback ||
+            writeEvidence.fault == WriteFault::reachableAfterRollback)
+        {
+            std::atomic_ref<void*>(*slot).store(ForeignPointer());
+        }
+    }
+    const auto observed = ComparePointer(slot, expected, value);
+    if (writeEvidence.exchanges == 2 &&
+        writeEvidence.fault == WriteFault::reachableAfterRollback)
+    {
+        std::atomic_ref<void*>(*slot).store(ReplacementPointer());
+    }
+    return observed;
+}
+
+bool ProtectedFaultWrite(void** slot, void* expected, void* value) noexcept
+{
+    const fo4hdr::HookPointerWriteOperations operations{FaultProtection, FaultExchange};
+    return fo4hdr::WriteProtectedPointer(slot, expected, value, operations);
+}
+
+void TestProtectionTransaction()
+{
+    for (const auto fault : {WriteFault::none, WriteFault::refuseProtection,
+             WriteFault::refuseRestoration, WriteFault::persistentRestoration,
+             WriteFault::foreignBeforeWrite, WriteFault::foreignBeforeRollback})
+    {
+        writeEvidence = {fault};
+        void* slot = OriginalPointer();
+        const auto written = ProtectedFaultWrite(&slot, OriginalPointer(), ReplacementPointer());
+        FO4HDR_CHECK(written == (fault == WriteFault::none));
+        const auto expected = fault == WriteFault::none ? ReplacementPointer() : OriginalPointer();
+        if (fault == WriteFault::foreignBeforeWrite || fault == WriteFault::foreignBeforeRollback)
+        {
+            FO4HDR_CHECK(slot == ForeignPointer());
+        }
+        else
+        {
+            FO4HDR_CHECK(slot == expected);
+        }
+        if (fault == WriteFault::refuseProtection)
+        {
+            FO4HDR_CHECK(writeEvidence.exchanges == 0);
+        }
+        if (fault == WriteFault::persistentRestoration)
+        {
+            FO4HDR_CHECK(writeEvidence.protection == PAGE_READWRITE);
+        }
+        else
+        {
+            FO4HDR_CHECK(writeEvidence.protection == PAGE_READONLY);
+        }
+    }
+}
+
+void TestInvalidWriteOperations()
+{
+    void* slot = OriginalPointer();
+    const fo4hdr::HookPointerWriteOperations noProtection{nullptr, FaultExchange};
+    const fo4hdr::HookPointerWriteOperations noExchange{FaultProtection, nullptr};
+    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(&slot, OriginalPointer(),
+        ReplacementPointer(), noProtection));
+    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(&slot, OriginalPointer(),
+        ReplacementPointer(), noExchange));
+    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(nullptr, OriginalPointer(), ReplacementPointer()));
+    alignas(void*) std::array<std::byte, sizeof(void*) + 1> unaligned{};
+    auto** address = reinterpret_cast<void**>(unaligned.data() + 1);
+    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(address, OriginalPointer(), ReplacementPointer()));
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(address) == nullptr);
+    Owner owner;
+    FO4HDR_CHECK(!InstallOwner(owner, address));
+    FO4HDR_CHECK(slot == OriginalPointer());
+}
+
+void TestReachableFailedHook()
+{
+    writeEvidence = {WriteFault::reachableAfterRollback};
+    publishedNext = nullptr;
+    void* slot = ForeignPointer();
+    Owner owner;
+    FO4HDR_CHECK(!InstallOwner(owner, &slot, ProtectedFaultWrite));
+    FO4HDR_CHECK(slot == ReplacementPointer());
+    FO4HDR_CHECK(owner.State() == OwnerState::passive);
+    FO4HDR_CHECK(owner.Next() == ForeignPointer());
+    FO4HDR_CHECK(publishedNext == ForeignPointer());
+    FO4HDR_CHECK(reinterpret_cast<ChainFunction>(slot)(10) == 17);
+    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
+    FO4HDR_CHECK(!InstallOwner(owner, &slot));
+    FO4HDR_CHECK(slot == ReplacementPointer());
+    FO4HDR_CHECK(AtomicWrite(&slot, ReplacementPointer(), ForeignPointer()));
+}
+
+void TestConcurrentOwnershipClaim()
+{
+    publications = 0;
+    publishedNext = nullptr;
+    void* slot = OriginalPointer();
+    Owner owner;
+    std::barrier start(2);
+    bool workerInstalled{};
+    std::jthread worker([&] {
+        start.arrive_and_wait();
+        workerInstalled = InstallOwner(owner, &slot);
+    });
+    start.arrive_and_wait();
+    const auto mainInstalled = InstallOwner(owner, &slot);
+    worker.join();
+    FO4HDR_CHECK(mainInstalled != workerInstalled);
+    FO4HDR_CHECK(publications == 1);
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(&slot) == ReplacementPointer());
+    FO4HDR_CHECK(owner.State() == OwnerState::owned);
+    FO4HDR_CHECK(owner.Next() == OriginalPointer());
+    FO4HDR_CHECK(owner.Remove(AtomicWrite));
+}
+
+struct OwnedPointerPage
+{
+    OwnedPointerPage() = default;
+    OwnedPointerPage(const OwnedPointerPage&) = delete;
+    OwnedPointerPage& operator=(const OwnedPointerPage&) = delete;
+
+    void* address{VirtualAlloc(nullptr, sizeof(void*), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)};
+    ~OwnedPointerPage()
+    {
+        if (address != nullptr)
+        {
+            FO4HDR_CHECK(VirtualFree(address, 0, MEM_RELEASE) != FALSE);
+        }
+    }
+};
+
+void TestNativeOwnedPage()
+{
+    OwnedPointerPage page;
+    FO4HDR_CHECK(page.address != nullptr);
+    if (page.address == nullptr)
+    {
+        return;
+    }
+    auto** slot = ::new (page.address) void*(OriginalPointer());
+    DWORD previous{};
+    FO4HDR_CHECK(VirtualProtect(slot, sizeof(void*), PAGE_READONLY, &previous) != FALSE);
+    FO4HDR_CHECK(previous == PAGE_READWRITE);
+    Owner owner;
+    FO4HDR_CHECK(InstallOwner(owner, slot, fo4hdr::WriteProtectedPointer));
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(slot) == ReplacementPointer());
+    MEMORY_BASIC_INFORMATION information{};
+    FO4HDR_CHECK(VirtualQuery(slot, &information, sizeof(information)) == sizeof(information));
+    FO4HDR_CHECK(information.Protect == PAGE_READONLY);
+    FO4HDR_CHECK(owner.Remove(fo4hdr::WriteProtectedPointer));
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(slot) == OriginalPointer());
+    FO4HDR_CHECK(VirtualQuery(slot, &information, sizeof(information)) == sizeof(information));
+    FO4HDR_CHECK(information.Protect == PAGE_READONLY);
+}
+
 }  // namespace
 
 namespace fo4hdr::tests {
@@ -209,6 +596,15 @@ void RunHookTests()
     TestImportBounds();
     TestNamesAndAlignment();
     TestOrdinalAndAmbiguity();
+    TestCooperativeOwnership();
+    TestOwnershipRefusals();
+    TestForeignDisplacement();
+    TestFailedRemovalKeepsNext();
+    TestProtectionTransaction();
+    TestInvalidWriteOperations();
+    TestReachableFailedHook();
+    TestConcurrentOwnershipClaim();
+    TestNativeOwnedPage();
 }
 
 }  // namespace fo4hdr::tests
