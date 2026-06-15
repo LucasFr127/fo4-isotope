@@ -5,6 +5,7 @@ namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
 void RunHookTests();
+void RunDeviceCreationHookTests();
 void RunHdrSettingsMathTests();
 void RunGameSnapshotStoreTests();
 void RunMenuEventQueueTests();

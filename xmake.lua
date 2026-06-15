@@ -82,11 +82,13 @@ for _, fixture in ipairs({
         set_kind("binary")
         add_rules("win.sdk.resource")
         add_defines("FO4HDR_TEST_EXECUTABLE_BUILD=" .. fixture.build)
-        add_includedirs("include", "src/runtime", "src/game", "tests/support", "tests/unit")
+        add_includedirs("include", "src/runtime", "src/game", "src/graphics", "tests/support", "tests/unit")
         add_syslinks("version")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
             "tests/unit/hooks/HookTests.cpp",
+            "src/graphics/DeviceCreationHook.cpp",
+            "tests/unit/graphics/DeviceCreationHookTests.cpp",
             "src/runtime/RuntimeValidation.cpp",
             "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
             "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
