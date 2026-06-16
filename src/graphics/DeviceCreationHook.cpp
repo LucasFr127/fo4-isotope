@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "DeviceCreationHook.hpp"
+#include "SwapChainObservation.hpp"
 
 #include <atomic>
 #include <type_traits>
@@ -93,6 +94,10 @@ void ObserveSuccessfulCreation(const CreationArguments& arguments) noexcept
     {
         observationBusy.clear(std::memory_order_release);
         return;
+    }
+    if (event.swapChainReturned)
+    {
+        OfferCreatedSwapChain(*arguments.swapChain);
     }
     if (!DeliverObservation(event))
     {

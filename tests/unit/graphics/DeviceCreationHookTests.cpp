@@ -43,6 +43,7 @@ struct CreationEvidence
     std::array<std::byte, 8> deviceToken{};
     std::array<std::byte, 8> contextToken{};
     IDXGISwapChain* chain{};
+    IDXGISwapChain* ownedChain{};
     ID3D11Device* device{};
     ID3D11DeviceContext* context{};
     D3D_FEATURE_LEVEL level{D3D_FEATURE_LEVEL_10_0};
@@ -52,9 +53,14 @@ struct CreationEvidence
 };
 
 CreationEvidence evidence;
+PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN lifecycleCreation{};
 
 IDXGISwapChain* ReturnedChain() noexcept
 {
+    if (evidence.ownedChain != nullptr)
+    {
+        return evidence.ownedChain;
+    }
     return reinterpret_cast<IDXGISwapChain*>(evidence.chainToken.data());
 }
 
@@ -231,15 +237,25 @@ void CheckOptionalOutputs(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
 void CheckObserverFailure(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
 {
     const auto request = MakeRequest();
+    const auto observations = evidence.observations;
     evidence.throwObserver = true;
     CheckCreation(function, request, 17);
-    FO4HDR_CHECK(evidence.observations == 3);
+    FO4HDR_CHECK(evidence.observations == observations + 1);
     FO4HDR_CHECK(!fo4hdr::DeviceCreationObservationActive());
     CheckCreation(function, request, 17);
-    FO4HDR_CHECK(evidence.observations == 3);
+    FO4HDR_CHECK(evidence.observations == observations + 1);
     evidence.throwNext = true;
     CheckCreation(function, request, E_FAIL);
-    FO4HDR_CHECK(evidence.observations == 3);
+    FO4HDR_CHECK(evidence.observations == observations + 1);
+}
+
+void CreateLifecycleChain(IDXGISwapChain* chain)
+{
+    evidence.ownedChain = chain;
+    const auto observations = evidence.observations;
+    CheckCreation(lifecycleCreation, MakeRequest(), 17);
+    FO4HDR_CHECK(evidence.observations == observations + 1);
+    evidence.ownedChain = nullptr;
 }
 
 }  // namespace
@@ -266,6 +282,8 @@ void RunDeviceCreationHookTests()
     const auto function = reinterpret_cast<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN>(slot);
     CheckFailedAndSuccessfulCreation(function);
     CheckOptionalOutputs(function);
+    lifecycleCreation = function;
+    RunSwapChainObservationTests(CreateLifecycleChain);
     CheckObserverFailure(function);
     FO4HDR_CHECK(owner.Remove(WriteOwnedSlot));
     FO4HDR_CHECK(slot == reinterpret_cast<void*>(&ControlledCreation));
