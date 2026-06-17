@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "Fallout4HDR/hooks/HookOwnership.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
 #include <array>
+#include <barrier>
 #include <cstddef>
 #include <new>
+#include <thread>
 
 #include <Windows.h>
 
@@ -29,6 +32,8 @@ struct LifecycleEvidence
 {
     OwnedChain* object{};
     unsigned presentCalls{};
+    unsigned foreignCalls{};
+    std::barrier<>* presentGate{};
     unsigned resizeCalls{};
     unsigned releaseCalls{};
     unsigned descriptorCalls{};
@@ -100,6 +105,7 @@ HRESULT STDMETHODCALLTYPE GetInterface(IDXGISwapChain*, REFIID, void**) noexcept
 
 HRESULT STDMETHODCALLTYPE Present(IDXGISwapChain* chain, UINT interval, UINT flags) noexcept
 {
+    const auto result = evidence.presentResult;
     ++evidence.presentCalls;
     evidence.interval = interval;
     evidence.presentFlags = flags;
@@ -109,7 +115,18 @@ HRESULT STDMETHODCALLTYPE Present(IDXGISwapChain* chain, UINT interval, UINT fla
         const auto function = reinterpret_cast<PresentFunction>(evidence.object->table[8]);
         FO4HDR_CHECK(function(chain, interval, flags) == evidence.presentResult);
     }
-    return evidence.presentResult;
+    if (auto* gate = evidence.presentGate)
+    {
+        gate->arrive_and_wait();
+        gate->arrive_and_wait();
+    }
+    return result;
+}
+
+HRESULT STDMETHODCALLTYPE ForeignPresent(IDXGISwapChain*, UINT, UINT) noexcept
+{
+    ++evidence.foreignCalls;
+    return 41;
 }
 
 HRESULT STDMETHODCALLTYPE GetBuffer(IDXGISwapChain*, UINT, REFIID, void**) noexcept
@@ -185,6 +202,50 @@ IDXGISwapChain* Chain() noexcept
     return reinterpret_cast<IDXGISwapChain*>(evidence.object);
 }
 
+class InFlightPresent
+{
+public:
+    ~InFlightPresent()
+    {
+        if (callback_.joinable())
+        {
+            Finish();
+        }
+    }
+
+    bool Start(PresentFunction function)
+    {
+        evidence.presentGate = &gate_;
+        const auto chain = Chain();
+        try
+        {
+            callback_ = std::jthread([this, function, chain] {
+                result = function(chain, 5, 0x94);
+            });
+        }
+        catch (...)
+        {
+            evidence.presentGate = nullptr;
+            return false;
+        }
+        gate_.arrive_and_wait();
+        return true;
+    }
+
+    void Finish()
+    {
+        gate_.arrive_and_wait();
+        callback_.join();
+        evidence.presentGate = nullptr;
+    }
+
+    HRESULT result{};
+
+private:
+    std::barrier<> gate_{2};
+    std::jthread callback_;
+};
+
 void CheckTail(const std::array<void*, 18>& table, const std::array<void*, 18>& original)
 {
     for (std::size_t index = 0; index < table.size(); ++index)
@@ -249,19 +310,84 @@ void CheckResizeTransitions(std::array<void*, 18>& table)
     FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().active);
 }
 
-void CheckRelease(std::array<void*, 18>& table)
+void CheckNonfinalRelease(std::array<void*, 18>& table)
 {
     const auto function = reinterpret_cast<ReleaseFunction>(table[2]);
     const auto calls = evidence.releaseCalls;
+    FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().active);
     FO4HDR_CHECK(function(Chain()) == 1);
     FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().active);
+    FO4HDR_CHECK(evidence.releaseCalls == calls + 1);
+}
+
+void CheckFinalRelease(std::array<void*, 18>& table)
+{
+    const auto function = reinterpret_cast<ReleaseFunction>(table[2]);
+    const auto calls = evidence.releaseCalls;
     FO4HDR_CHECK(function(Chain()) == 0);
-    FO4HDR_CHECK(evidence.releaseCalls == calls + 2);
+    FO4HDR_CHECK(evidence.releaseCalls == calls + 1);
     FO4HDR_CHECK(!fo4hdr::ReadSwapChainObservation().active);
     // Release made receiver storage unreadable; callback retirement has already completed.
     DWORD previous{};
     FO4HDR_CHECK(VirtualProtect(evidence.object, sizeof(OwnedChain), PAGE_READWRITE,
         &previous) != FALSE);
+}
+
+void CheckFatalPresentAcrossResize(std::array<void*, 18>& table)
+{
+    FO4HDR_CHECK(evidence.references == 2);
+    const auto initial = fo4hdr::ReadSwapChainObservation().generation;
+    const auto calls = evidence.presentCalls;
+    const auto function = reinterpret_cast<PresentFunction>(fo4hdr::AtomicPointerLoad(&table[8]));
+    evidence.presentResult = DXGI_ERROR_DEVICE_RESET;
+    InFlightPresent callback;
+    if (!callback.Start(function))
+    {
+        FO4HDR_CHECK(false);
+        evidence.presentResult = 31;
+        return;
+    }
+    CheckResize(table, 37);
+    FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().active);
+    FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().generation != initial);
+    callback.Finish();
+    evidence.presentResult = 31;
+    FO4HDR_CHECK(callback.result == DXGI_ERROR_DEVICE_RESET);
+    FO4HDR_CHECK(evidence.presentCalls == calls + 1);
+    FO4HDR_CHECK(evidence.interval == 5);
+    FO4HDR_CHECK(evidence.presentFlags == 0x94);
+    FO4HDR_CHECK(!fo4hdr::ReadSwapChainObservation().active);
+    CheckResize(table, 37);
+    FO4HDR_CHECK(!fo4hdr::ReadSwapChainObservation().active);
+}
+
+void CheckInFlightForeignConflict(std::array<void*, 18>& table)
+{
+    FO4HDR_CHECK(fo4hdr::ReadSwapChainObservation().active);
+    FO4HDR_CHECK(evidence.references == 1);
+    const auto calls = evidence.presentCalls;
+    const auto owned = fo4hdr::AtomicPointerLoad(&table[8]);
+    const auto foreign = reinterpret_cast<void*>(&ForeignPresent);
+    InFlightPresent callback;
+    if (!callback.Start(reinterpret_cast<PresentFunction>(owned)))
+    {
+        FO4HDR_CHECK(false);
+        return;
+    }
+    FO4HDR_CHECK(fo4hdr::WriteProtectedPointer(&table[8], owned, foreign));
+    CheckResize(table, 37);
+    FO4HDR_CHECK(!fo4hdr::ReadSwapChainObservation().active);
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(&table[8]) == foreign);
+    callback.Finish();
+    FO4HDR_CHECK(callback.result == 31);
+    FO4HDR_CHECK(evidence.presentCalls == calls + 1);
+    FO4HDR_CHECK(evidence.interval == 5);
+    FO4HDR_CHECK(evidence.presentFlags == 0x94);
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(&table[8]) == foreign);
+    const auto displaced = reinterpret_cast<PresentFunction>(fo4hdr::AtomicPointerLoad(&table[8]));
+    FO4HDR_CHECK(displaced(Chain(), 7, 0x55) == 41);
+    FO4HDR_CHECK(evidence.foreignCalls == 1);
+    FO4HDR_CHECK(evidence.presentCalls == calls + 1);
 }
 
 void CheckDeviceLoss(std::array<void*, 18>& table)
@@ -316,6 +442,7 @@ void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*))
     CheckTail(first, original);
     CheckPresent(first);
     CheckResizeTransitions(first);
+    CheckFatalPresentAcrossResize(first);
     CheckDeviceLoss(first);
     evidence.references = 1;
     const auto firstRelease = reinterpret_cast<ReleaseFunction>(first[2]);
@@ -332,7 +459,9 @@ void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*))
     FO4HDR_CHECK(ReadSwapChainObservation().generation != firstGeneration);
     FO4HDR_CHECK(second[8] != firstPresent);
     CheckTail(second, original);
-    CheckRelease(second);
+    CheckNonfinalRelease(second);
+    CheckInFlightForeignConflict(second);
+    CheckFinalRelease(second);
     auto exhausted = MakeTable();
     const auto untouched = exhausted;
     new (evidence.object) OwnedChain{exhausted.data()};
