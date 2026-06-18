@@ -21,31 +21,35 @@ else
     set_runtimes("MT")
 end
 
-local spdlog_source = os.getenv("FO4HDR_SPDLOG_SOURCE") or "lib/spdlog"
-local commonlib_source = "lib/commonlibf4"
-local shared_source = path.join(commonlib_source, "lib/commonlib-shared")
+local dependency_profile = {
+    spdlog_source = os.getenv("FO4HDR_SPDLOG_SOURCE") or "lib/spdlog",
+    commonlib_source = "lib/commonlibf4",
+    runtime_count = 3
+}
+dependency_profile.shared_source = path.join(dependency_profile.commonlib_source, "lib/commonlib-shared")
+local commonlib_runtime_define = "COMMONLIB_RUNTIMECOUNT=" .. dependency_profile.runtime_count
 
 target("spdlog")
     set_kind("static")
-    add_includedirs(path.join(spdlog_source, "include"), { public = true })
+    add_includedirs(path.join(dependency_profile.spdlog_source, "include"), { public = true })
     -- CommonLib file sinks receive std::string paths.
     add_defines("SPDLOG_COMPILED_LIB", "SPDLOG_USE_STD_FORMAT",
         "SPDLOG_WCHAR_TO_UTF8_SUPPORT", { public = true })
-    add_files(path.join(spdlog_source, "src/spdlog.cpp"),
-        path.join(spdlog_source, "src/stdout_sinks.cpp"),
-        path.join(spdlog_source, "src/color_sinks.cpp"),
-        path.join(spdlog_source, "src/file_sinks.cpp"),
-        path.join(spdlog_source, "src/async.cpp"),
-        path.join(spdlog_source, "src/cfg.cpp"))
+    add_files(path.join(dependency_profile.spdlog_source, "src/spdlog.cpp"),
+        path.join(dependency_profile.spdlog_source, "src/stdout_sinks.cpp"),
+        path.join(dependency_profile.spdlog_source, "src/color_sinks.cpp"),
+        path.join(dependency_profile.spdlog_source, "src/file_sinks.cpp"),
+        path.join(dependency_profile.spdlog_source, "src/async.cpp"),
+        path.join(dependency_profile.spdlog_source, "src/cfg.cpp"))
 target_end()
 
 target("commonlib-shared")
     set_kind("static")
     add_deps("spdlog", { public = true })
-    add_includedirs(path.join(shared_source, "include"), { public = true })
-    add_defines("COMMONLIB_RUNTIMECOUNT=3", { public = true })
-    add_files(path.join(shared_source, "src/**.cpp"))
-    set_pcxxheader(path.join(shared_source, "src/REX/PCH.h"))
+    add_includedirs(path.join(dependency_profile.shared_source, "include"), { public = true })
+    add_defines(commonlib_runtime_define, { public = true })
+    add_files(path.join(dependency_profile.shared_source, "src/**.cpp"))
+    set_pcxxheader(path.join(dependency_profile.shared_source, "src/REX/PCH.h"))
     add_cxxflags("/EHsc", "/permissive-", "cl::/bigobj", "cl::/cgthreads8",
         "cl::/diagnostics:caret", "cl::/external:W0", "cl::/fp:contract",
         "cl::/fp:except-", "cl::/guard:cf-", "cl::/Zc:enumTypes",
@@ -58,17 +62,17 @@ target_end()
 target("commonlibf4")
     set_kind("static")
     add_deps("commonlib-shared", { public = true })
-    add_includedirs(path.join(commonlib_source, "include"), { public = true })
-    add_defines("COMMONLIB_RUNTIMECOUNT=3", { public = true })
-    add_files(path.join(commonlib_source, "src/**.cpp"))
-    set_pcxxheader(path.join(commonlib_source, "include/F4SE/Impl/PCH.h"))
+    add_includedirs(path.join(dependency_profile.commonlib_source, "include"), { public = true })
+    add_defines(commonlib_runtime_define, { public = true })
+    add_files(path.join(dependency_profile.commonlib_source, "src/**.cpp"))
+    set_pcxxheader(path.join(dependency_profile.commonlib_source, "include/F4SE/Impl/PCH.h"))
 target_end()
 
 target("Fallout4HDR")
     set_kind("shared")
     add_deps("commonlibf4")
     add_includedirs("include", "src/runtime")
-    add_defines("COMMONLIB_RUNTIMECOUNT=3")
+    add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp")
     add_syslinks("version")
