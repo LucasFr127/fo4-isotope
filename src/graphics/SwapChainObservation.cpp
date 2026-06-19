@@ -2,6 +2,8 @@
 
 #include "SwapChainObservation.hpp"
 
+#include "RendererLifetime.hpp"
+
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
 
 #include <algorithm>
@@ -9,7 +11,6 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
-#include <limits>
 
 namespace fo4hdr {
 namespace {
@@ -20,7 +21,7 @@ using ResizeFunction = HRESULT (STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT,
     DXGI_FORMAT, UINT);
 using DescriptionFunction = HRESULT (STDMETHODCALLTYPE*)(IDXGISwapChain*, DXGI_SWAP_CHAIN_DESC*);
 
-constexpr auto terminalToken = (std::numeric_limits<std::uint64_t>::max)() - 1;
+constexpr auto terminalToken = RendererLifetime::terminalEpoch;
 
 struct ChainRecord
 {
@@ -35,8 +36,7 @@ struct ChainRecord
     PointerHookOwnership releaseOwner;
     PointerHookOwnership presentOwner;
     PointerHookOwnership resizeOwner;
-    std::uint64_t epochLimit{};
-    std::atomic<std::uint64_t> token{};
+    RendererLifetime lifetime;
     std::atomic<bool> offered{};
 };
 
@@ -101,15 +101,15 @@ bool SlotsOwned(ChainRecord& record) noexcept
 
 std::uint64_t ObserveEntry(ChainRecord& record, IDXGISwapChain* chain) noexcept
 {
-    const auto token = record.token.load(std::memory_order_acquire);
+    const auto token = record.lifetime.CurrentEpoch();
     if (selected.load(std::memory_order_acquire) != &record)
     {
-        record.token.store(terminalToken, std::memory_order_release);
+        record.lifetime.Retire();
         return terminalToken;
     }
     if (!SameTable(record, chain) || !SlotsOwned(record))
     {
-        record.token.store(terminalToken, std::memory_order_release);
+        record.lifetime.Retire();
         return terminalToken;
     }
     return token;
@@ -120,24 +120,8 @@ void RetireDeviceLoss(ChainRecord& record, HRESULT result) noexcept
     if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET)
     {
         // Resize cannot recreate this device; loss invalidates even a later same-record epoch.
-        record.token.store(terminalToken, std::memory_order_release);
+        record.lifetime.Retire();
     }
-}
-
-std::uint64_t BeginResize(ChainRecord& record, std::uint64_t token) noexcept
-{
-    if (token >= record.epochLimit - 2)
-    {
-        static_cast<void>(record.token.compare_exchange_strong(token, terminalToken,
-            std::memory_order_acq_rel));
-        return terminalToken;
-    }
-    const auto transition = (token | 1) + 1;
-    if (!record.token.compare_exchange_strong(token, transition, std::memory_order_acq_rel))
-    {
-        return terminalToken;
-    }
-    return transition;
 }
 
 void CompleteResize(ChainRecord& record, std::uint64_t transition, HRESULT result) noexcept
@@ -150,8 +134,7 @@ void CompleteResize(ChainRecord& record, std::uint64_t transition, HRESULT resul
     {
         return;
     }
-    static_cast<void>(record.token.compare_exchange_strong(transition, transition + 1,
-        std::memory_order_acq_rel));
+    record.lifetime.CompleteResize(transition);
 }
 
 template <std::size_t Index>
@@ -168,7 +151,7 @@ ULONG STDMETHODCALLTYPE HookRelease(IDXGISwapChain* chain) noexcept
     // Zero can destroy the receiver and its table; touch only permanent record storage now.
     if (count == 0)
     {
-        record.token.store(terminalToken, std::memory_order_release);
+        record.lifetime.Retire();
     }
     return count;
 }
@@ -196,7 +179,7 @@ HRESULT STDMETHODCALLTYPE HookResize(IDXGISwapChain* chain, UINT count, UINT wid
     const auto next = record.resize;
     ObservationScope scope;
     const auto token = scope.Entered() ? ObserveEntry(record, chain) : terminalToken;
-    const auto transition = scope.Entered() ? BeginResize(record, token) : terminalToken;
+    const auto transition = scope.Entered() ? record.lifetime.BeginResize(token) : terminalToken;
     const auto result = next(chain, count, width, height, format, flags);
     RetireDeviceLoss(record, result);
     if (scope.Entered())
@@ -231,7 +214,7 @@ bool WriteSlot(void** slot, void* expected, void* value) noexcept
 
 void RollBack(ChainRecord& record) noexcept
 {
-    record.token.store(terminalToken, std::memory_order_release);
+    record.lifetime.Retire();
     static_cast<void>(record.resizeOwner.Remove(WriteSlot));
     static_cast<void>(record.presentOwner.Remove(WriteSlot));
     static_cast<void>(record.releaseOwner.Remove(WriteSlot));
@@ -266,7 +249,7 @@ bool CallableTable(std::span<void*, 18> table) noexcept
     return true;
 }
 
-void PrepareRecord(ChainRecord& record, IDXGISwapChain* chain,
+bool PrepareRecord(ChainRecord& record, IDXGISwapChain* chain,
     std::span<void*, 18> table, HWND window) noexcept
 {
     record.chain = chain;
@@ -277,9 +260,12 @@ void PrepareRecord(ChainRecord& record, IDXGISwapChain* chain,
     record.present = reinterpret_cast<PresentFunction>(table[8]);
     record.resize = reinterpret_cast<ResizeFunction>(table[13]);
     record.description = reinterpret_cast<DescriptionFunction>(table[12]);
+    if (!SameTable(record, chain))
+    {
+        return false;
+    }
     // Each never-reused record owns a disjoint epoch interval, including inactive transitions.
-    record.epochLimit = (recordCount + 2) << 32;
-    record.token.store((recordCount + 1) << 32, std::memory_order_relaxed);
+    return record.lifetime.Prepare((recordCount + 1) << 32, (recordCount + 2) << 32);
 }
 
 }  // namespace
@@ -299,14 +285,13 @@ bool SelectOwnedSwapChain(IDXGISwapChain* chain, std::span<void*, 18> table, HWN
         return false;
     }
     auto& record = records[recordCount];
-    PrepareRecord(record, chain, table, window);
-    if (!SameTable(record, chain))
+    if (!PrepareRecord(record, chain, table, window))
     {
         return false;
     }
     if (auto* previous = selected.load(std::memory_order_acquire))
     {
-        previous->token.store(terminalToken, std::memory_order_release);
+        previous->lifetime.Retire();
     }
     ++recordCount;
     selected.store(&record, std::memory_order_release);
@@ -326,7 +311,7 @@ void OfferCreatedSwapChain(IDXGISwapChain* chain) noexcept
     }
     if (!SameDescription(*record))
     {
-        record->token.store(terminalToken, std::memory_order_release);
+        record->lifetime.Retire();
         return;
     }
     const auto installed = record == &records[0] ? InstallSlots<0>(*record) : InstallSlots<1>(*record);
@@ -335,7 +320,7 @@ void OfferCreatedSwapChain(IDXGISwapChain* chain) noexcept
         RollBack(*record);
         return;
     }
-    record->token.fetch_add(1, std::memory_order_release);
+    record->lifetime.PublishInitial();
 }
 
 SwapChainObservation ReadSwapChainObservation() noexcept
@@ -345,7 +330,7 @@ SwapChainObservation ReadSwapChainObservation() noexcept
     {
         return {};
     }
-    const auto token = record->token.load(std::memory_order_acquire);
+    const auto token = record->lifetime.CurrentEpoch();
     return {token, (token & 1) != 0};
 }
 

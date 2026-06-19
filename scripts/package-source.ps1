@@ -33,6 +33,8 @@ $files = [string[]]@(
     "src/graphics/DeviceCreationHook.cpp",
     "src/graphics/SwapChainObservation.hpp",
     "src/graphics/SwapChainObservation.cpp",
+    "src/graphics/RendererLifetime.hpp",
+    "src/graphics/RendererLifetime.cpp",
     "src/config/HdrSettings.cpp",
     "src/output/Hdr10Color.cpp",
     "src/plugin/PluginMain.cpp",

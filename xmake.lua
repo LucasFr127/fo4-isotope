@@ -93,6 +93,7 @@ for _, fixture in ipairs({
             "tests/unit/hooks/HookTests.cpp",
             "src/graphics/DeviceCreationHook.cpp",
             "src/graphics/SwapChainObservation.cpp",
+            "src/graphics/RendererLifetime.cpp",
             "tests/unit/graphics/DeviceCreationHookTests.cpp",
             "tests/unit/graphics/SwapChainObservationTests.cpp",
             "src/runtime/RuntimeValidation.cpp",
