@@ -51,6 +51,7 @@ $files = [string[]]@(
     "tests/unit/graphics/DeviceCreationHookTests.cpp",
     "tests/unit/graphics/SwapChainObservationTests.cpp",
     "tests/unit/output/HdrCoreTests.cpp",
+    "tests/unit/output/PipelineContractTests.cpp",
     "tests/unit/plugin/PluginBootstrapTests.cpp",
     "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
     "tests/unit/runtime/RuntimeValidationTests.cpp",

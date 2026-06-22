@@ -6,6 +6,7 @@ struct IDXGISwapChain;
 namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
+void RunPipelineContractTests();
 void RunHookTests();
 void RunDeviceCreationHookTests();
 void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));

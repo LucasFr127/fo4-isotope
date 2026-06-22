@@ -8,6 +8,7 @@
 int wmain(int argc, wchar_t** argv)
 {
     fo4hdr::tests::RunHdrCoreTests();
+    fo4hdr::tests::RunPipelineContractTests();
     fo4hdr::tests::RunHookTests();
     fo4hdr::tests::RunDeviceCreationHookTests();
     fo4hdr::tests::RunHdrSettingsMathTests();
