@@ -32,11 +32,14 @@ struct CreationEvidence
 {
     unsigned nativeCalls{};
     unsigned observations{};
+    unsigned typedObservations{};
+    unsigned disabledNotifications{};
     HRESULT result{17};
     bool throwObserver{};
     bool throwNext{};
     CreationRequest captured;
     fo4hdr::DeviceCreationObservation observed;
+    fo4hdr::CreatedDeviceBinding typed;
     std::array<std::byte, 8> adapterToken{};
     std::array<std::byte, 8> softwareToken{};
     std::array<std::byte, 8> chainToken{};
@@ -130,6 +133,18 @@ bool ObserveCreation(const fo4hdr::DeviceCreationObservation& event)
     return true;
 }
 
+bool ObserveTypedCreation(const fo4hdr::CreatedDeviceBinding& binding)
+{
+    ++evidence.typedObservations;
+    evidence.typed = binding;
+    return true;
+}
+
+void ObserveDisabled() noexcept
+{
+    ++evidence.disabledNotifications;
+}
+
 bool WriteOwnedSlot(void** slot, void* expected, void* value) noexcept
 {
     return std::atomic_ref<void*>(*slot).compare_exchange_strong(expected, value);
@@ -208,6 +223,7 @@ void CheckFailedAndSuccessfulCreation(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN fun
     evidence.result = E_FAIL;
     CheckCreation(function, request, E_FAIL);
     FO4HDR_CHECK(evidence.observations == 0);
+    FO4HDR_CHECK(evidence.typedObservations == 0);
     evidence.result = 17;
     CheckCreation(function, request, 17);
     FO4HDR_CHECK(evidence.observations == 1);
@@ -215,6 +231,12 @@ void CheckFailedAndSuccessfulCreation(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN fun
     FO4HDR_CHECK(evidence.observed.swapChainReturned);
     FO4HDR_CHECK(evidence.observed.deviceReturned);
     FO4HDR_CHECK(evidence.observed.contextReturned);
+    FO4HDR_CHECK(evidence.typedObservations == 1);
+    FO4HDR_CHECK(evidence.typed.device == ReturnedDevice());
+    FO4HDR_CHECK(evidence.typed.context == ReturnedContext());
+    FO4HDR_CHECK(evidence.typed.swapChain == ReturnedChain());
+    FO4HDR_CHECK(evidence.typed.result == 17);
+    FO4HDR_CHECK(evidence.typed.flags == request.flags);
 }
 
 void CheckOptionalOutputs(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
@@ -228,10 +250,13 @@ void CheckOptionalOutputs(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
     FO4HDR_CHECK(!evidence.observed.swapChainReturned);
     FO4HDR_CHECK(evidence.observed.deviceReturned);
     FO4HDR_CHECK(evidence.observed.contextReturned);
+    FO4HDR_CHECK(evidence.typedObservations == 2);
+    FO4HDR_CHECK(evidence.typed.swapChain == nullptr);
     request.device = nullptr;
     request.context = nullptr;
     CheckCreation(function, request, 17);
     FO4HDR_CHECK(evidence.observations == 2);
+    FO4HDR_CHECK(evidence.typedObservations == 2);
 }
 
 void CheckObserverFailure(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
@@ -242,6 +267,7 @@ void CheckObserverFailure(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN function)
     CheckCreation(function, request, 17);
     FO4HDR_CHECK(evidence.observations == observations + 1);
     FO4HDR_CHECK(!fo4hdr::DeviceCreationObservationActive());
+    FO4HDR_CHECK(evidence.disabledNotifications == 1);
     CheckCreation(function, request, 17);
     FO4HDR_CHECK(evidence.observations == observations + 1);
     evidence.throwNext = true;
@@ -269,7 +295,8 @@ void RunDeviceCreationHookTests()
     FO4HDR_CHECK(evidence.nativeCalls == 0);
     FO4HDR_CHECK(!PublishD3dNext(reinterpret_cast<void*>(&ControlledCreation)));
     FO4HDR_CHECK(!PrepareDeviceCreationObserver(nullptr));
-    FO4HDR_CHECK(PrepareDeviceCreationObserver(ObserveCreation));
+    FO4HDR_CHECK(PrepareDeviceCreationObserver(DeviceCreationCallbacks{
+        ObserveCreation, ObserveTypedCreation, ObserveDisabled}));
     FO4HDR_CHECK(!PrepareDeviceCreationObserver(ObserveCreation));
     FO4HDR_CHECK(!PublishD3dNext(nullptr));
     FO4HDR_CHECK(!PublishD3dNext(reinterpret_cast<void*>(&HookD3dCreate)));

@@ -11,6 +11,8 @@ namespace {
 
 std::atomic_flag preparationClaim = ATOMIC_FLAG_INIT;
 std::atomic<DeviceCreationObserver> creationObserver{};
+std::atomic<CreatedDeviceObserver> typedObserver{};
+std::atomic<CreationDisabledObserver> disabledObserver{};
 std::atomic<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN> capturedNext{};
 std::atomic<bool> observationActive{};
 std::atomic_flag observationBusy = ATOMIC_FLAG_INIT;
@@ -31,6 +33,15 @@ struct CreationArguments
     ID3D11DeviceContext** context;
 };
 
+void DisableObservation() noexcept
+{
+    observationActive.store(false, std::memory_order_release);
+    if (const auto disabled = disabledObserver.load(std::memory_order_acquire))
+    {
+        disabled();
+    }
+}
+
 HRESULT ForwardCreation(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN next,
     const CreationArguments& arguments) noexcept
 {
@@ -43,7 +54,7 @@ HRESULT ForwardCreation(PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN next,
     }
     catch (...)
     {
-        observationActive.store(false, std::memory_order_release);
+        DisableObservation();
         return E_FAIL;
     }
 }
@@ -53,11 +64,24 @@ bool HasReturnedObject(const DeviceCreationObservation& event) noexcept
     return event.swapChainReturned || event.deviceReturned || event.contextReturned;
 }
 
-bool DeliverObservation(const DeviceCreationObservation& event) noexcept
+bool DeliverObservation(const CreationArguments& arguments,
+    const DeviceCreationObservation& event, HRESULT result) noexcept
 {
     try
     {
-        return creationObserver.load(std::memory_order_acquire)(event);
+        if (const auto created = typedObserver.load(std::memory_order_acquire))
+        {
+            const CreatedDeviceBinding binding{
+                event.deviceReturned ? *arguments.device : nullptr,
+                event.contextReturned ? *arguments.context : nullptr,
+                event.swapChainReturned ? *arguments.swapChain : nullptr, result, event.flags};
+            if (!created(binding))
+            {
+                return false;
+            }
+        }
+        const auto facts = creationObserver.load(std::memory_order_acquire);
+        return facts == nullptr || facts(event);
     }
     catch (...)
     {
@@ -73,7 +97,7 @@ DeviceCreationObservation CaptureCreatedOutputs(const CreationArguments& argumen
         arguments.context != nullptr && *arguments.context != nullptr};
 }
 
-void ObserveSuccessfulCreation(const CreationArguments& arguments) noexcept
+void ObserveSuccessfulCreation(const CreationArguments& arguments, HRESULT result) noexcept
 {
     if (!observationActive.load(std::memory_order_acquire))
     {
@@ -84,33 +108,27 @@ void ObserveSuccessfulCreation(const CreationArguments& arguments) noexcept
     {
         return;
     }
-    // An overlapping/reentrant observer has no proven ownership; stop without waiting.
-    if (observationBusy.test_and_set(std::memory_order_acquire))
-    {
-        observationActive.store(false, std::memory_order_release);
-        return;
-    }
-    if (!observationActive.load(std::memory_order_acquire))
-    {
-        observationBusy.clear(std::memory_order_release);
-        return;
-    }
-    if (event.swapChainReturned)
+    // The copied-facts fixture route is absent from the retained game-device callback setup.
+    if (event.swapChainReturned && creationObserver.load(std::memory_order_acquire) != nullptr)
     {
         OfferCreatedSwapChain(*arguments.swapChain);
     }
-    if (!DeliverObservation(event))
+    if (!DeliverObservation(arguments, event, result))
     {
-        observationActive.store(false, std::memory_order_release);
+        DisableObservation();
     }
-    observationBusy.clear(std::memory_order_release);
 }
 
 }  // namespace
 
 bool PrepareDeviceCreationObserver(DeviceCreationObserver observer) noexcept
 {
-    if (observer == nullptr)
+    return PrepareDeviceCreationObserver(DeviceCreationCallbacks{observer});
+}
+
+bool PrepareDeviceCreationObserver(DeviceCreationCallbacks callbacks) noexcept
+{
+    if (callbacks.facts == nullptr && callbacks.created == nullptr)
     {
         return false;
     }
@@ -119,7 +137,9 @@ bool PrepareDeviceCreationObserver(DeviceCreationObserver observer) noexcept
         return false;
     }
     observationActive.store(true, std::memory_order_relaxed);
-    creationObserver.store(observer, std::memory_order_release);
+    creationObserver.store(callbacks.facts, std::memory_order_release);
+    typedObserver.store(callbacks.created, std::memory_order_release);
+    disabledObserver.store(callbacks.disabled, std::memory_order_release);
     return true;
 }
 
@@ -129,7 +149,8 @@ bool PublishD3dNext(void* next) noexcept
     {
         return false;
     }
-    if (creationObserver.load(std::memory_order_acquire) == nullptr)
+    if (creationObserver.load(std::memory_order_acquire) == nullptr &&
+        typedObserver.load(std::memory_order_acquire) == nullptr)
     {
         return false;
     }
@@ -156,10 +177,20 @@ HRESULT WINAPI HookD3dCreate(IDXGIAdapter* adapter, D3D_DRIVER_TYPE driverType, 
     }
     const CreationArguments arguments{adapter, driverType, software, flags, levels, levelCount,
         sdkVersion, description, swapChain, device, featureLevel, context};
-    const auto result = ForwardCreation(next, arguments);
-    if (SUCCEEDED(result))
+    // Native creation still forwards on overlap; only the optional observation is revoked.
+    const auto entered = !observationBusy.test_and_set(std::memory_order_acquire);
+    if (!entered)
     {
-        ObserveSuccessfulCreation(arguments);
+        DisableObservation();
+    }
+    const auto result = ForwardCreation(next, arguments);
+    if (entered && SUCCEEDED(result))
+    {
+        ObserveSuccessfulCreation(arguments, result);
+    }
+    if (entered)
+    {
+        observationBusy.clear(std::memory_order_release);
     }
     return result;
 }
