@@ -4,9 +4,15 @@
 #include "UnitTestSuite.hpp"
 
 #include <cstdlib>
+#include <string_view>
 
 int wmain(int argc, wchar_t** argv)
 {
+    if (argc == 2 && std::wstring_view{argv[1]} == L"--characterize-presentation")
+    {
+        fo4hdr::tests::RunPresentationCharacterizationTests();
+        return fo4hdr::test::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+    }
     fo4hdr::tests::RunHdrCoreTests();
     fo4hdr::tests::RunPipelineContractTests();
     fo4hdr::tests::RunHookTests();

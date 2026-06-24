@@ -39,6 +39,7 @@ $expected = [string[]]@(
     "tests/unit/hooks/HookTests.cpp",
     "tests/unit/graphics/DeviceCreationHookTests.cpp",
     "tests/unit/graphics/SwapChainObservationTests.cpp",
+    "tests/unit/graphics/PresentationCharacterizationTests.cpp",
     "tests/unit/plugin/PluginBootstrapTests.cpp", "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
     "tests/unit/runtime/RuntimeValidationTests.cpp", "tests/unit/runtime/RuntimeVersionFixture.rc",
     "tests/unit/UnitTestSuite.hpp", "xmake.lua",

@@ -7,6 +7,7 @@ namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
 void RunPipelineContractTests();
+void RunPresentationCharacterizationTests();
 void RunHookTests();
 void RunDeviceCreationHookTests();
 void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
