@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "TestHarness.hpp"
+#include "DisplayDiscovery.hpp"
 #include "UnitTestSuite.hpp"
 
 #ifndef NOMINMAX
@@ -185,6 +186,18 @@ void ReportOutput(IDXGISwapChain& chain)
               << " maxFullFrameLuminance=" << description.MaxFullFrameLuminance << '\n';
 }
 
+
+void ReportWindowDisplay(HWND window)
+{
+    const auto unavailable = fo4hdr::QueryDisplayCapabilities(nullptr);
+    FO4HDR_CHECK(!unavailable.known);
+    FO4HDR_CHECK(unavailable.monitorDevicePath.front() == L'\0');
+    const auto display = fo4hdr::QueryDisplayCapabilities(window);
+    std::cout << "window output known=" << display.known
+              << " monitor identity available=" << (display.monitorDevicePath.front() != L'\0')
+              << " SDK SDR white nits=" << display.sdrWhiteNits << '\n';
+}
+
 bool ClearFrame(NativePresentation& native)
 {
     // Reverse destruction releases the view before the direct backbuffer reference.
@@ -239,6 +252,7 @@ void fo4hdr::tests::RunPresentationCharacterizationTests()
         return;
     }
     ReportOutput(*native.chain.Get());
+    ReportWindowDisplay(window.window);
     if (!ClearFrame(native))
     {
         return;

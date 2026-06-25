@@ -21,6 +21,8 @@ $expected = [string[]]@(
     "src/game/MenuEventQueue.hpp",
     "src/hooks/PeIat.cpp",
     "src/hooks/HookOwnership.cpp",
+    "src/graphics/DisplayDiscovery.hpp",
+    "src/graphics/DisplayDiscovery.cpp",
     "src/graphics/GameDeviceGeneration.hpp",
     "src/graphics/GameDeviceGeneration.cpp",
     "src/graphics/DeviceCreationHook.hpp",
