@@ -3,6 +3,7 @@
 #include "TestHarness.hpp"
 #include "DisplayDiscovery.hpp"
 #include "UnitTestSuite.hpp"
+#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -21,9 +22,14 @@ namespace {
 using Microsoft::WRL::ComPtr;
 constexpr wchar_t windowClassName[] = L"Fallout4HDRPresentationCharacterization";
 constexpr UINT imageSize = 64;
+fo4hdr::HdrSettingsInput* windowInput{};
 
 LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wparam, LPARAM lparam) noexcept
 {
+    if (windowInput != nullptr)
+    {
+        windowInput->Observe(window, message, wparam, lparam);
+    }
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
@@ -32,9 +38,16 @@ struct OwnedWindow
     HINSTANCE module{};
     ATOM registered{};
     HWND window{};
+    fo4hdr::HdrSettingsInput input;
+    bool inputAttached{};
 
     ~OwnedWindow()
     {
+        if (inputAttached)
+        {
+            windowInput = nullptr;
+            FO4HDR_CHECK(input.Stop());
+        }
         if (window != nullptr)
         {
             const auto destroyed = DestroyWindow(window);
@@ -71,9 +84,31 @@ struct OwnedWindow
         window = CreateWindowExW(0, windowClassName, L"Presentation characterization",
             WS_OVERLAPPEDWINDOW, 0, 0, imageSize, imageSize, nullptr, nullptr, module, nullptr);
         FO4HDR_CHECK(window != nullptr);
-        return window != nullptr;
+        if (window == nullptr) return false;
+        inputAttached = input.Initialize(window);
+        FO4HDR_CHECK(inputAttached);
+        if (inputAttached) windowInput = &input;
+        return inputAttached;
     }
 };
+
+void CheckOwnedInput(OwnedWindow& window)
+{
+    static_cast<void>(SendMessageW(window.window, WM_KEYDOWN, VK_F10, 1));
+    static_cast<void>(SendMessageW(window.window, WM_KEYDOWN, VK_F10,
+        LPARAM{1} | (LPARAM{1} << 30)));
+    static_cast<void>(SendMessageW(window.window, WM_KILLFOCUS, 0, 0));
+    const auto lost = window.input.Drain();
+    FO4HDR_CHECK(lost.focusLost && lost.toggles == 0);
+    static_cast<void>(SendMessageW(window.window, WM_KEYDOWN, VK_F10,
+        LPARAM{1} | (LPARAM{1} << 30)));
+    static_cast<void>(SendMessageW(window.window, WM_KEYUP, VK_F10, 1));
+    static_cast<void>(SendMessageW(window.window, WM_KEYDOWN, VK_F10, 1));
+    static_cast<void>(SendMessageW(window.window, WM_KEYUP, VK_F10, 1));
+    const auto toggled = window.input.Drain();
+    FO4HDR_CHECK(!toggled.focusLost && toggled.toggles == 1);
+    FO4HDR_CHECK(window.input.Drain().toggles == 0);
+}
 
 struct NativePresentation
 {
@@ -241,6 +276,7 @@ void fo4hdr::tests::RunPresentationCharacterizationTests()
     {
         return;
     }
+    CheckOwnedInput(window);
     // Native owners retire before their HWND; this path stays on the calling thread.
     NativePresentation native;
     if (!CreatePresentation(native, window.window))

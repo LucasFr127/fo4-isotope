@@ -15,6 +15,8 @@ $files = [string[]]@(
     "COPYING.CommonLib-Exceptions",
     "COPYING.GPL-3.0-or-later",
     "THIRD_PARTY_NOTICES.md",
+    "include/Fallout4HDR/ui/HdrSettingsInput.hpp",
+    "src/ui/HdrSettingsInput.cpp",
     "include/Fallout4HDR/config/HdrSettings.hpp",
     "include/Fallout4HDR/game/GameHdrSnapshot.hpp",
     "include/Fallout4HDR/graphics/DeviceCreationObservation.hpp",
