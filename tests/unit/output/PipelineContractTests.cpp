@@ -1,10 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "RendererLifetime.hpp"
+#include "RenoDxShaderIdentity.hpp"
+#include "Fallout4HDR/output/RenderPipelineContract.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
+#include <array>
+#include <cstddef>
+
 namespace {
+
+void TestShaderCrc32()
+{
+    constexpr std::array digits{std::byte{0x31}, std::byte{0x32}, std::byte{0x33},
+        std::byte{0x34}, std::byte{0x35}, std::byte{0x36}, std::byte{0x37},
+        std::byte{0x38}, std::byte{0x39}};
+    FO4HDR_CHECK(fo4hdr::ComputeRenoDxShaderCrc32({}) == 0);
+    FO4HDR_CHECK(fo4hdr::ComputeRenoDxShaderCrc32(digits) == 0xCBF43926u);
+}
+
+void TestShaderIdentityLookup()
+{
+    const auto* known = fo4hdr::FindRenoDxFallout4Shader(0x8024E8B5u);
+    FO4HDR_CHECK(known != nullptr);
+    if (known != nullptr)
+    {
+        FO4HDR_CHECK(known->pass == fo4hdr::RenoDxShaderPass::toneMapA);
+        FO4HDR_CHECK(known->sceneInputSlot == 1);
+    }
+    FO4HDR_CHECK(fo4hdr::FindRenoDxFallout4Shader(0) == nullptr);
+    FO4HDR_CHECK(fo4hdr::DecideUnknownShaderOutcome(fo4hdr::PipelinePassRequirement::untracked) ==
+        fo4hdr::UnknownShaderOutcome::passThrough);
+}
 
 void TestLifetimePreparation()
 {
@@ -113,6 +141,8 @@ namespace fo4hdr::tests {
 
 void RunPipelineContractTests()
 {
+    TestShaderCrc32();
+    TestShaderIdentityLookup();
     TestLifetimePreparation();
     TestStaleResizeCompletion();
     TestEpochExhaustion();
