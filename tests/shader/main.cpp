@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "d3d11/GpuHarness.hpp"
+#include "ShippingPixelShaderTests.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 
@@ -81,6 +82,8 @@ int wmain(int argc, wchar_t** argv)
         const auto input = TransferInputs();
         const auto output = fo4hdr::tests::gpu::EvaluateTransfer(argv[1], input, displayPeakNits);
         const auto error = CheckTransfer(input, output);
+        fo4hdr::tests::gpu::VerifyShippingPixelShaders(
+            std::filesystem::path{argv[1]}.parent_path());
         if (fo4hdr::test::failures != 0)
         {
             return EXIT_FAILURE;

@@ -39,7 +39,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 MIT License
 
+Copyright (C) 2023 Carlos Lopez
+
 Copyright (C) 2024 Carlos Lopez
+
+Copyright (c) 2024 Carlos Lopez Jr.
 
 Copyright (c) 2025 Carlos Lopez Jr.
 

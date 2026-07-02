@@ -1,11 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <d3d11.h>
+#include <wrl/client.h>
+
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <string_view>
+#include <vector>
 
 namespace fo4hdr::tests::gpu {
+
+struct Device
+{
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+};
+
+void CheckHresult(HRESULT result, std::string_view operation);
+[[nodiscard]] Device CreateWarpDevice();
+[[nodiscard]] std::vector<char> ReadShader(const std::filesystem::path& path);
 
 struct Float4
 {

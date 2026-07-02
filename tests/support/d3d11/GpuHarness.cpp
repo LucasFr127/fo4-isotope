@@ -21,12 +21,6 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-struct Device
-{
-    ComPtr<ID3D11Device> device;
-    ComPtr<ID3D11DeviceContext> context;
-};
-
 struct TransferResources
 {
     ComPtr<ID3D11Texture2D> input;
@@ -47,6 +41,8 @@ struct TransferConstants
 };
 static_assert(sizeof(TransferConstants) == 16);
 static_assert(sizeof(Float4) == 16);
+
+}  // namespace
 
 void CheckHresult(HRESULT result, std::string_view operation)
 {
@@ -92,6 +88,8 @@ std::vector<char> ReadShader(const std::filesystem::path& path)
     }
     return bytes;
 }
+
+namespace {
 
 D3D11_TEXTURE2D_DESC TextureDescription()
 {

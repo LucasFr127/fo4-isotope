@@ -49,7 +49,21 @@ $expected = [string[]]@(
     "tests/shader/shaders/TransferEvaluation.cs.hlsl",
     "tests/support/d3d11/GpuHarness.hpp",
     "tests/support/d3d11/GpuHarness.cpp",
-    "scripts/compile-shaders.ps1"
+    "scripts/compile-shaders.ps1",
+    "shaders/fallout4/CreativeGradeLut.ps.hlsl",
+    "shaders/fallout4/GradeTransfer.hlsli",
+    "shaders/fallout4/ToneMapA.ps.hlsl",
+    "shaders/fallout4/ToneMapB.ps.hlsl",
+    "shaders/fallout4/ToneMapBypassCommon.hlsli",
+    "shaders/fallout4/ToneMapNewA.ps.hlsl",
+    "shaders/fallout4/ToneMapNewB.ps.hlsl",
+    "src/graphics/HdrRenderer.hpp",
+    "src/graphics/HdrRenderer.cpp",
+    "src/graphics/resources/HdrResourcePolicy.hpp",
+    "tests/shader/ShippingPixelShaderTests.hpp",
+    "tests/shader/ShippingPixelShaderTests.cpp",
+    "tests/shader/shaders/Fullscreen.vs.hlsl",
+    "tests/shader/shaders/ScenePassSentinel.ps.hlsl"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null

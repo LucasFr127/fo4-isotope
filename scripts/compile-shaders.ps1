@@ -23,12 +23,41 @@ $fileVersion = "{0}.{1}.{2}.{3}" -f $version.FileMajorPart, $version.FileMinorPa
 if ($fileVersion -cne "10.0.26100.8249") {
     throw "Unexpected FXC servicing version: $fileVersion"
 }
-$source = [IO.Path]::Combine($projectRoot, "tests/shader/shaders/TransferEvaluation.cs.hlsl")
-[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($outputPath)) | Out-Null
-if ([IO.File]::Exists($outputPath)) { Remove-Item -LiteralPath $outputPath }
-& $compilerPath /nologo /T cs_5_0 /E main /WX /Ges /Gis /O3 /Fo $outputPath $source
-if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($outputPath)) {
-    if ([IO.File]::Exists($outputPath)) { Remove-Item -LiteralPath $outputPath }
-    throw "TransferEvaluation shader compilation failed."
+
+function Invoke-ShaderCompilation {
+    param([hashtable]$Program, [string]$Destination)
+
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination)) | Out-Null
+    if ([IO.File]::Exists($Destination)) { Remove-Item -LiteralPath $Destination }
+    $arguments = @("/nologo", "/T", $Program.Profile, "/E", $Program.Entry, "/WX", "/Ges", "/Gis", "/O3")
+    if ($Program.Symbol) { $arguments += @("/Fh", $Destination, "/Vn", $Program.Symbol) }
+    else { $arguments += @("/Fo", $Destination) }
+    $arguments += [IO.Path]::Combine($projectRoot, $Program.Source)
+    & $compilerPath @arguments
+    if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($Destination)) {
+        if ([IO.File]::Exists($Destination)) { Remove-Item -LiteralPath $Destination }
+        throw "Shader compilation failed: $($Program.Source) ($($Program.Entry))"
+    }
 }
-Write-Host "Compiled TransferEvaluation.dxbc with FXC $fileVersion"
+
+Invoke-ShaderCompilation -Program @{
+    Source = "tests/shader/shaders/TransferEvaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
+} -Destination $outputPath
+
+$shaderDirectory = [IO.Path]::Combine($projectRoot, "build/include/fo4hdr-shaders")
+foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "CreativeGradeLut")) {
+    Invoke-ShaderCompilation -Program @{
+        Source = "shaders/fallout4/$name.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Symbol = "k$($name)Bytecode"
+    } -Destination ([IO.Path]::Combine($shaderDirectory, "$name.hpp"))
+}
+
+$fixtureDirectory = [IO.Path]::GetDirectoryName($outputPath)
+foreach ($fixture in @(
+    @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },
+    @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ScenePassSentinel" },
+    @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" }
+)) {
+    Invoke-ShaderCompilation -Program $fixture `
+        -Destination ([IO.Path]::Combine($fixtureDirectory, "$($fixture.Name).dxbc"))
+}
+Write-Host "Compiled scene programs and shader checks with FXC $fileVersion"
