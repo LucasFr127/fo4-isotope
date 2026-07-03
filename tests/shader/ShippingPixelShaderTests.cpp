@@ -578,15 +578,326 @@ struct ReentrantDraw
     unsigned count{};
     DrawCount nested;
     SceneDrawOutcome outcome{};
+    bool selectionHidden{};
     static void Draw(ID3D11DeviceContext* context, void* argument)
     {
         auto& draw = *static_cast<ReentrantDraw*>(argument);
         ++draw.count;
+        draw.selectionHidden = draw.fixture->renderer.Views(
+            draw.fixture->renderer.CurrentScene()).texture == nullptr;
         draw.outcome = draw.fixture->renderer.Execute(kRenoDxFallout4Shaders[0], draw.fixture->input,
             draw.fixture->destination, {DrawCount::CountOnly, &draw.nested});
         context->Draw(3, 0);
     }
 };
+
+Pixels UniformPixels(Float4 value)
+{
+    Pixels pixels;
+    pixels.fill(value);
+    return pixels;
+}
+
+float TemporalCode(float value)
+{
+    return std::pow(value / (1.0f + value), 1.0f / 2.2f);
+}
+
+struct TemporalResources
+{
+    ComPtr<ID3D11Texture2D> metadata;
+    ComPtr<ID3D11RenderTargetView> metadataTarget;
+    std::array<ComPtr<ID3D11ShaderResourceView>, 4> auxiliary;
+    ComPtr<ID3D11Buffer> constants;
+};
+
+TemporalResources BindTemporal(PixelFixture& fixture, Float4 history, bool dynamic = false)
+{
+    fixture.Bind(dynamic);
+    TemporalResources resources;
+    auto description = SceneDescription();
+    description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    CheckHresult(fixture.gpu.device->CreateTexture2D(&description, nullptr, &resources.metadata), "Temporal metadata");
+    CheckHresult(fixture.gpu.device->CreateRenderTargetView(resources.metadata.Get(), nullptr,
+        &resources.metadataTarget), "Temporal metadata RTV");
+    resources.auxiliary[0] = AuxiliaryTexture(fixture.gpu.device.Get(), UniformPixels(history));
+    resources.auxiliary[1] = AuxiliaryTexture(fixture.gpu.device.Get(), UniformPixels({0, 0, 0, 0}));
+    resources.auxiliary[2] = AuxiliaryTexture(fixture.gpu.device.Get(), UniformPixels({0.5f, 0, 0, 0}));
+    resources.auxiliary[3] = AuxiliaryTexture(fixture.gpu.device.Get(), UniformPixels({0, 0, 0, 0}));
+    const std::array<ID3D11ShaderResourceView*, 5> views{fixture.renderer.Views(fixture.input).shaderResource,
+        resources.auxiliary[0].Get(), resources.auxiliary[1].Get(), resources.auxiliary[2].Get(), resources.auxiliary[3].Get()};
+    fixture.gpu.context->PSSetShaderResources(0, static_cast<UINT>(views.size()), views.data());
+    const std::array<ID3D11SamplerState*, 5> samplers{fixture.point.Get(), fixture.point.Get(),
+        fixture.point.Get(), fixture.point.Get(), fixture.point.Get()};
+    fixture.gpu.context->PSSetSamplers(0, static_cast<UINT>(samplers.size()), samplers.data());
+    const std::array<Float4, 6> values{{{1, 0, 1, 1}, {}, {1, 0, 0, 0},
+        {0.25f, 0.5f, 0, 0}, {0.5f, 0.5f, 0, 1}, {0, 0, 1, 1}}};
+    resources.constants = ConstantBuffer(fixture.gpu.device.Get(), values);
+    auto* buffer = resources.constants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(2, 1, &buffer);
+    const std::array<ID3D11RenderTargetView*, 2> targets{resources.metadataTarget.Get(),
+        fixture.renderer.Views(fixture.destination).renderTarget};
+    fixture.gpu.context->OMSetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), nullptr);
+    return resources;
+}
+
+SceneDrawOutcome DrawPass(PixelFixture& fixture, std::size_t program, bool dynamic = false)
+{
+    DrawCount draw;
+    const auto outcome = fixture.renderer.Execute(kRenoDxFallout4Shaders[program], fixture.input,
+        fixture.destination, {DrawCount::Draw, &draw});
+    FO4HDR_CHECK(draw.count == 1);
+    fixture.CheckRestored(dynamic);
+    return outcome;
+}
+
+void CheckTemporalBindings(PixelFixture& fixture, const TemporalResources& resources)
+{
+    std::array<ID3D11RenderTargetView*, 2> targets{};
+    fixture.gpu.context->OMGetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), nullptr);
+    FO4HDR_CHECK(targets[0] == resources.metadataTarget.Get());
+    FO4HDR_CHECK(targets[1] == fixture.renderer.Views(fixture.destination).renderTarget);
+    for (auto* target : targets) if (target) target->Release();
+    ComPtr<ID3D11ShaderResourceView> history;
+    fixture.gpu.context->PSGetShaderResources(1, 1, &history);
+    FO4HDR_CHECK(history.Get() == resources.auxiliary[0].Get());
+}
+
+void VerifyTemporalUniform(PixelFixture& fixture, std::size_t program, float historyWeight, float historyMotion = 0)
+{
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture,
+        UniformPixels({4, 4, 4, 0.75f}));
+    const auto code = TemporalCode(4);
+    const auto history = program == 5 ? Float4{code, 0, 0, 0} : Float4{code, historyWeight, historyMotion, 0};
+    const auto resources = BindTemporal(fixture, history, program == 6);
+    FO4HDR_CHECK(DrawPass(fixture, program, program == 6) == SceneDrawOutcome::replaced);
+    CheckTemporalBindings(fixture, resources);
+    const auto color = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    for (const auto& pixel : color) CheckPixel(pixel, {4, 4, 4, 1});
+    const auto metadata = ReadScene(fixture.gpu, resources.metadata.Get());
+    const auto motionAgreement = std::max(1.0f - 100.0f * historyMotion, 0.0f);
+    const auto expectedWeight = program == 5 ? 0.0f : 0.95f * historyWeight * motionAgreement;
+    for (const auto& pixel : metadata) CheckPixel(pixel, {code, expectedWeight, 0, 0});
+    FO4HDR_CHECK(color[0].red > 1.0f);
+    FO4HDR_CHECK(std::abs(color[0].red - metadata[0].red) > 1.0f);
+}
+
+void VerifyTemporalHistory(PixelFixture& fixture, float historyLuminance)
+{
+    const Pixels neighborhood{{{0.03125f, 0.03125f, 0.03125f, 1},
+        {0.27734375f, 0.27734375f, 0.27734375f, 1}, {1.625f, 1.625f, 1.625f, 1},
+        {0.27734375f, 0.27734375f, 0.27734375f, 1},
+        {0.03125f, 0.03125f, 0.03125f, 1}, {0.27734375f, 0.27734375f, 0.27734375f, 1},
+        {1.625f, 1.625f, 1.625f, 1}, {0.27734375f, 0.27734375f, 0.27734375f, 1}}};
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, neighborhood);
+    const auto resources = BindTemporal(fixture, {historyLuminance, 0, 0, 0});
+    FO4HDR_CHECK(DrawPass(fixture, 5) == SceneDrawOutcome::replaced);
+    const auto metadata = ReadScene(fixture.gpu, resources.metadata.Get());
+    const auto center = TemporalCode(neighborhood[1].red);
+    // Both histories lie inside the actual low/high neighborhood, so native blend is one half.
+    const auto expected = center + 0.5f * (historyLuminance - center);
+    CheckChannel(metadata[1].red, expected);
+    CheckChannel(metadata[5].red, expected);
+}
+
+SceneTextureHandle AdditionalScene(PixelFixture& fixture)
+{
+    SceneTextureHandle handle;
+    CheckHresult(fixture.renderer.CreateSceneTexture(SceneDescription(), nullptr, handle), "Lineage scene");
+    return handle;
+}
+
+void CheckSelection(PixelFixture& fixture, SceneTextureHandle expected)
+{
+    FO4HDR_CHECK(fixture.renderer.Views(fixture.renderer.CurrentScene()).texture ==
+        fixture.renderer.Views(expected).texture);
+}
+
+void BindGrade(PixelFixture& fixture)
+{
+    fixture.Bind();
+    std::array<ComPtr<ID3D11ShaderResourceView>, 4> luts;
+    std::array<ID3D11ShaderResourceView*, 7> views{};
+    views[0] = fixture.renderer.Views(fixture.input).shaderResource;
+    for (unsigned index = 0; index < luts.size(); ++index)
+    {
+        luts[index] = LutTexture(fixture.gpu.device.Get(), LutInputs(index));
+        views[index + 3] = luts[index].Get();
+    }
+    fixture.gpu.context->PSSetShaderResources(0, static_cast<UINT>(views.size()), views.data());
+    const std::array<ID3D11SamplerState*, 7> samplers{fixture.point.Get(), nullptr, nullptr,
+        fixture.linear.Get(), fixture.linear.Get(), fixture.linear.Get(), fixture.linear.Get()};
+    fixture.gpu.context->PSSetSamplers(0, static_cast<UINT>(samplers.size()), samplers.data());
+    const std::array<Float4, 2> values{{{}, {0.25f, 0.5f, 0.75f, 0.125f}}};
+    const auto constants = ConstantBuffer(fixture.gpu.device.Get(), values);
+    auto* buffer = constants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(2, 1, &buffer);
+}
+
+struct LineageScenes
+{
+    SceneTextureHandle raw;
+    SceneTextureHandle tone;
+    SceneTextureHandle grade;
+    SceneTextureHandle temporal;
+};
+
+void SeedSelection(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    CheckSelection(fixture, {});
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.tone;
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(scenes.raw));
+    VerifyTone(fixture, 0);
+    CheckSelection(fixture, {});
+    fixture.input = scenes.tone;
+    fixture.destination = scenes.grade;
+    BindGrade(fixture);
+    FO4HDR_CHECK(DrawPass(fixture, 4) == SceneDrawOutcome::replaced);
+    CheckSelection(fixture, scenes.grade);
+}
+
+void VerifyTemporalChain(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.grade;
+    fixture.destination = scenes.temporal;
+    const auto resources = BindTemporal(fixture, {0.5f, 0.5f, 0.125f, 0});
+    FO4HDR_CHECK(DrawPass(fixture, 5) == SceneDrawOutcome::replaced);
+    CheckSelection(fixture, scenes.temporal);
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.grade;
+    const auto branch = BindTemporal(fixture, {0.5f, 0.5f, 0.125f, 0});
+    FO4HDR_CHECK(DrawPass(fixture, 6) == SceneDrawOutcome::replaced);
+    CheckSelection(fixture, scenes.temporal);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+    CheckSelection(fixture, {});
+}
+
+void VerifySelectedAliasRejection(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.grade;
+    fixture.destination = scenes.temporal;
+    const auto resources = BindTemporal(fixture, {0.5f, 0.5f, 0.125f, 0});
+    // Both SRVs are legal bindings; the renderer must reject current/history resource identity.
+    auto* alias = fixture.renderer.Views(fixture.input).shaderResource;
+    fixture.gpu.context->PSSetShaderResources(1, 1, &alias);
+    FO4HDR_CHECK(DrawPass(fixture, 5) == SceneDrawOutcome::forwarded);
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
+ComPtr<ID3D11ShaderResourceView> NarrowHistory(PixelFixture& fixture)
+{
+    auto description = SceneDescription();
+    description.Format = DXGI_FORMAT_R32_FLOAT;
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    std::array<float, width * height> values;
+    values.fill(0.5f);
+    const D3D11_SUBRESOURCE_DATA data{values.data(), width * sizeof(float), 0};
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> view;
+    CheckHresult(fixture.gpu.device->CreateTexture2D(&description, &data, &texture), "Narrow history");
+    CheckHresult(fixture.gpu.device->CreateShaderResourceView(texture.Get(), nullptr, &view), "Narrow history SRV");
+    return view;
+}
+
+void VerifySelectedFormatRejection(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.grade;
+    fixture.destination = scenes.temporal;
+    const auto resources = BindTemporal(fixture, {0.5f, 0.5f, 0.125f, 0});
+    const auto narrow = NarrowHistory(fixture);
+    auto* history = narrow.Get();
+    fixture.gpu.context->PSSetShaderResources(1, 1, &history);
+    FO4HDR_CHECK(DrawPass(fixture, 5) == SceneDrawOutcome::forwarded);
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+void VerifyActualWriteInvalidation(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.temporal;
+    fixture.Bind();
+    auto* selectedTarget = fixture.renderer.Views(scenes.grade).renderTarget;
+    fixture.gpu.context->OMSetRenderTargets(1, &selectedTarget, nullptr);
+    DrawCount draw;
+    FO4HDR_CHECK(fixture.renderer.ExecuteObserved(fixture.input, fixture.destination,
+        {DrawCount::Draw, &draw}) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(draw.count == 1);
+    fixture.CheckRestored(false);
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
+struct FailedDraw
+{
+    unsigned count{};
+    static void Draw(ID3D11DeviceContext* context, void* argument)
+    {
+        ++static_cast<FailedDraw*>(argument)->count;
+        context->Draw(3, 0);
+        throw std::runtime_error("Contained draw callback failure");
+    }
+};
+
+void VerifyCallbackFailure(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.grade;
+    fixture.destination = scenes.temporal;
+    BindGrade(fixture);
+    fixture.Bind(true);
+    FailedDraw draw;
+    FO4HDR_CHECK(fixture.renderer.Execute(kRenoDxFallout4Shaders[4], fixture.input,
+        fixture.destination, {FailedDraw::Draw, &draw}) == SceneDrawOutcome::callbackFailed);
+    FO4HDR_CHECK(draw.count == 1);
+    fixture.CheckRestored(true);
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+void VerifyExternalInvalidation(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(scenes.grade));
+    CheckSelection(fixture, {});
+    fixture.input = scenes.tone;
+    fixture.destination = scenes.grade;
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(scenes.tone));
+    BindGrade(fixture);
+    FO4HDR_CHECK(DrawPass(fixture, 4) == SceneDrawOutcome::replaced);
+    CheckSelection(fixture, {});
+    SeedSelection(fixture, scenes);
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
+void VerifyTemporalAndLineage(PixelFixture& fixture)
+{
+    VerifyTemporalUniform(fixture, 5, 0);
+    VerifyTemporalUniform(fixture, 6, 0.5f);
+    VerifyTemporalUniform(fixture, 6, 0);
+    VerifyTemporalUniform(fixture, 6, 0.5f, 0.125f);
+    VerifyTemporalHistory(fixture, 0.3f);
+    VerifyTemporalHistory(fixture, 0.7f);
+    const LineageScenes scenes{fixture.input, fixture.destination,
+        AdditionalScene(fixture), AdditionalScene(fixture)};
+    VerifyTemporalChain(fixture, scenes);
+    VerifySelectedAliasRejection(fixture, scenes);
+    VerifySelectedFormatRejection(fixture, scenes);
+    VerifyActualWriteInvalidation(fixture, scenes);
+    VerifyCallbackFailure(fixture, scenes);
+    VerifyExternalInvalidation(fixture, scenes);
+    SeedSelection(fixture, scenes);
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.tone;
+}
 
 void VerifyInvocationRejection(PixelFixture& fixture)
 {
@@ -607,13 +918,16 @@ void VerifyInvocationRejection(PixelFixture& fixture)
         {ReentrantDraw::Draw, &draw}) == SceneDrawOutcome::forwarded);
     FO4HDR_CHECK(draw.count == 1 && draw.nested.count == 0);
     FO4HDR_CHECK(draw.outcome == SceneDrawOutcome::invalidInvocation);
+    FO4HDR_CHECK(draw.selectionHidden);
     fixture.CheckRestored(false);
+    FO4HDR_CHECK(fixture.renderer.Views(fixture.renderer.CurrentScene()).texture != nullptr);
     FO4HDR_CHECK(fixture.renderer.Retire());
     DrawCount stale;
     FO4HDR_CHECK(fixture.renderer.Execute(kRenoDxFallout4Shaders[0], fixture.input, fixture.destination,
         {DrawCount::CountOnly, &stale}) == SceneDrawOutcome::invalidInvocation);
     FO4HDR_CHECK(stale.count == 0);
     FO4HDR_CHECK(fixture.renderer.Views(fixture.input).texture == nullptr);
+    CheckSelection(fixture, {});
     FO4HDR_CHECK(fixture.renderer.Retire());
 }
 
@@ -626,8 +940,9 @@ void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
     for (std::size_t variant = 0; variant < 4; ++variant) VerifyTone(fixture, variant);
     VerifyLut(fixture);
     VerifyForwarding(fixture);
+    VerifyTemporalAndLineage(fixture);
     VerifyInvocationRejection(fixture);
-    std::cout << "Checked scene factory, five shipping pixel programs and finite-draw state restoration\n";
+    std::cout << "Checked scene factory, seven shipping pixel programs, frame lineage and finite-draw state restoration\n";
 }
 
 }  // namespace fo4hdr::tests::gpu

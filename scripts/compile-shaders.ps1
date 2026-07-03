@@ -45,7 +45,8 @@ Invoke-ShaderCompilation -Program @{
 } -Destination $outputPath
 
 $shaderDirectory = [IO.Path]::Combine($projectRoot, "build/include/fo4hdr-shaders")
-foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "CreativeGradeLut")) {
+foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "CreativeGradeLut",
+    "TemporalAa", "TemporalAa2")) {
     Invoke-ShaderCompilation -Program @{
         Source = "shaders/fallout4/$name.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Symbol = "k$($name)Bytecode"
     } -Destination ([IO.Path]::Combine($shaderDirectory, "$name.hpp"))

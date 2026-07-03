@@ -9,6 +9,8 @@
 #include <fo4hdr-shaders/ToneMapNewA.hpp>
 #include <fo4hdr-shaders/ToneMapNewB.hpp>
 #include <fo4hdr-shaders/CreativeGradeLut.hpp>
+#include <fo4hdr-shaders/TemporalAa.hpp>
+#include <fo4hdr-shaders/TemporalAa2.hpp>
 
 #include <exception>
 #include <utility>
@@ -29,20 +31,22 @@ constexpr std::array<ReplacementBytecode, ScenePassRenderer::replacementProgramC
     {kToneMapBBytecode, sizeof(kToneMapBBytecode)},
     {kToneMapNewABytecode, sizeof(kToneMapNewABytecode)},
     {kToneMapNewBBytecode, sizeof(kToneMapNewBBytecode)},
-    {kCreativeGradeLutBytecode, sizeof(kCreativeGradeLutBytecode)}
+    {kCreativeGradeLutBytecode, sizeof(kCreativeGradeLutBytecode)},
+    {kTemporalAaBytecode, sizeof(kTemporalAaBytecode)},
+    {kTemporalAa2Bytecode, sizeof(kTemporalAa2Bytecode)}
 }};
 
 std::size_t ProgramIndex(RenoDxShaderPass pass) noexcept
 {
-    switch (pass)
+    constexpr std::array supported{
+        RenoDxShaderPass::toneMapA, RenoDxShaderPass::toneMapB,
+        RenoDxShaderPass::toneMapNewA, RenoDxShaderPass::toneMapNewB,
+        RenoDxShaderPass::lut, RenoDxShaderPass::taa, RenoDxShaderPass::taa2};
+    for (std::size_t index = 0; index < supported.size(); ++index)
     {
-    case RenoDxShaderPass::toneMapA: return 0;
-    case RenoDxShaderPass::toneMapB: return 1;
-    case RenoDxShaderPass::toneMapNewA: return 2;
-    case RenoDxShaderPass::toneMapNewB: return 3;
-    case RenoDxShaderPass::lut: return 4;
-    default: return ScenePassRenderer::replacementProgramCount;
+        if (supported[index] == pass) return index;
     }
+    return ScenePassRenderer::replacementProgramCount;
 }
 
 bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
@@ -53,6 +57,118 @@ bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
     if (FAILED(left->QueryInterface(IID_PPV_ARGS(&leftIdentity)))) return false;
     if (FAILED(right->QueryInterface(IID_PPV_ARGS(&rightIdentity)))) return false;
     return leftIdentity && rightIdentity && leftIdentity.Get() == rightIdentity.Get();
+}
+
+bool TemporalPass(RenoDxShaderPass pass) noexcept
+{
+    return pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2;
+}
+
+ComPtr<IUnknown> CanonicalIdentity(IUnknown* object) noexcept
+{
+    ComPtr<IUnknown> identity;
+    if (object == nullptr) return identity;
+    if (FAILED(object->QueryInterface(IID_PPV_ARGS(&identity)))) identity.Reset();
+    return identity;
+}
+
+ComPtr<ID3D11Resource> ViewResource(ID3D11View* view) noexcept
+{
+    ComPtr<ID3D11Resource> resource;
+    if (view != nullptr) view->GetResource(&resource);
+    return resource;
+}
+
+bool CompatibleTextureFootprint(ID3D11View* view, ID3D11Texture2D* color) noexcept
+{
+    const auto resource = ViewResource(view);
+    ComPtr<ID3D11Texture2D> texture;
+    if (!resource || FAILED(resource.As(&texture))) return false;
+    D3D11_TEXTURE2D_DESC candidate{};
+    D3D11_TEXTURE2D_DESC destination{};
+    texture->GetDesc(&candidate);
+    color->GetDesc(&destination);
+    if (candidate.Width != destination.Width || candidate.Height != destination.Height) return false;
+    if (candidate.ArraySize != 1) return false;
+    return candidate.SampleDesc.Count == destination.SampleDesc.Count &&
+        candidate.SampleDesc.Quality == destination.SampleDesc.Quality;
+}
+
+bool Float4TemporalFormat(DXGI_FORMAT format) noexcept
+{
+    return format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
+        format == DXGI_FORMAT_R32G32B32A32_FLOAT;
+}
+
+bool CompatibleMetadataTarget(ID3D11RenderTargetView* view,
+    ID3D11Texture2D* color) noexcept
+{
+    if (view == nullptr) return false;
+    D3D11_RENDER_TARGET_VIEW_DESC viewDescription{};
+    view->GetDesc(&viewDescription);
+    if (!Float4TemporalFormat(viewDescription.Format)) return false;
+    if (viewDescription.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D) return false;
+    if (viewDescription.Texture2D.MipSlice != 0) return false;
+    return CompatibleTextureFootprint(view, color);
+}
+
+bool CompatibleHistoryView(ID3D11ShaderResourceView* view,
+    ID3D11Texture2D* scene) noexcept
+{
+    if (view == nullptr) return false;
+    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
+    view->GetDesc(&viewDescription);
+    if (!Float4TemporalFormat(viewDescription.Format)) return false;
+    if (viewDescription.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
+    if (viewDescription.Texture2D.MostDetailedMip != 0) return false;
+    if (viewDescription.Texture2D.MipLevels != 1) return false;
+    return CompatibleTextureFootprint(view, scene);
+}
+
+std::array<ComPtr<ID3D11ShaderResourceView>, 5> TemporalInputs(
+    ID3D11DeviceContext* context, UINT count) noexcept
+{
+    std::array<ID3D11ShaderResourceView*, 5> raw{};
+    std::array<ComPtr<ID3D11ShaderResourceView>, 5> owned;
+    context->PSGetShaderResources(0, count, raw.data());
+    for (std::size_t index = 0; index < count; ++index) owned[index].Attach(raw[index]);
+    return owned;
+}
+
+bool DistinctTemporalIdentities(const std::array<ComPtr<IUnknown>, 3>& identities) noexcept
+{
+    for (const auto& identity : identities)
+    {
+        if (!identity) return false;
+    }
+    return identities[0].Get() != identities[1].Get() &&
+        identities[0].Get() != identities[2].Get() &&
+        identities[1].Get() != identities[2].Get();
+}
+
+bool InputAvoidsTemporalOutputs(ID3D11ShaderResourceView* input,
+    const std::array<ComPtr<IUnknown>, 3>& identities, bool history) noexcept
+{
+    const auto identity = CanonicalIdentity(ViewResource(input).Get());
+    if (!identity) return false;
+    if (history && identity.Get() == identities[0].Get()) return false;
+    return identity.Get() != identities[1].Get() && identity.Get() != identities[2].Get();
+}
+
+bool InputsAvoidTemporalOutputs(
+    const std::array<ComPtr<ID3D11ShaderResourceView>, 5>& inputs,
+    ID3D11Resource* scene, ID3D11Resource* metadata, ID3D11Resource* color) noexcept
+{
+    const std::array identities{
+        CanonicalIdentity(scene), CanonicalIdentity(metadata), CanonicalIdentity(color)};
+    if (!DistinctTemporalIdentities(identities)) return false;
+    if (!inputs[1]) return false;
+    for (std::size_t index = 0; index < inputs.size(); ++index)
+    {
+        if (!inputs[index]) continue;
+        if (!InputAvoidsTemporalOutputs(inputs[index].Get(), identities, index == 1)) return false;
+    }
+    return true;
 }
 
 bool AssociatedImmediateContext(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
@@ -226,6 +342,8 @@ bool ScenePassRenderer::Retire() noexcept
 {
     if (context_ && !OnOwnerThread()) return false;
     if (invoking_) return false;
+    ClearLineage();
+    frameOpen_ = false;
     lifetime_.Retire();
     // ClearState is permitted only because this context is exclusively caller-owned.
     if (context_) context_->ClearState();
@@ -311,6 +429,134 @@ SceneTextureViews ScenePassRenderer::Views(SceneTextureHandle handle) const noex
     return {scene->texture.Get(), scene->shaderResource.Get(), scene->renderTarget.Get()};
 }
 
+void ScenePassRenderer::ClearLineage() noexcept
+{
+    selectedScene_ = {};
+    for (auto& scene : scenes_) scene.toneProduced = false;
+}
+
+bool ScenePassRenderer::BeginFrame() noexcept
+{
+    if (!Active() || invoking_) return false;
+    ClearLineage();
+    frameOpen_ = true;
+    return true;
+}
+
+bool ScenePassRenderer::EndFrame() noexcept
+{
+    if (!Active() || invoking_) return false;
+    ClearLineage();
+    frameOpen_ = false;
+    return true;
+}
+
+SceneTextureHandle ScenePassRenderer::CurrentScene() const noexcept
+{
+    if (invoking_) return {};
+    if (!frameOpen_) return {};
+    if (Resolve(selectedScene_) == nullptr) return {};
+    return selectedScene_;
+}
+
+void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept
+{
+    scenes_[slot].toneProduced = false;
+    if (selectedScene_.owner_ == this && selectedScene_.slot_ == slot) selectedScene_ = {};
+}
+
+bool ScenePassRenderer::InvalidateScene(SceneTextureHandle handle) noexcept
+{
+    if (!Active() || invoking_) return false;
+    if (Resolve(handle) == nullptr) return false;
+    InvalidateSlot(handle.slot_);
+    return true;
+}
+
+std::uint8_t ScenePassRenderer::WriteMaskForResource(ID3D11Resource* resource) const noexcept
+{
+    constexpr std::uint8_t allScenes = 0xff;
+    const auto identity = CanonicalIdentity(resource);
+    if (!identity) return allScenes;
+    std::uint8_t writes{};
+    for (std::size_t index = 0; index < sceneCount_; ++index)
+    {
+        const auto owned = CanonicalIdentity(scenes_[index].texture.Get());
+        if (!owned) return allScenes;
+        if (identity.Get() == owned.Get()) writes |= static_cast<std::uint8_t>(1u << index);
+    }
+    return writes;
+}
+
+std::uint8_t ScenePassRenderer::BoundWriteMask() const noexcept
+{
+    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> raw{};
+    context_->OMGetRenderTargets(static_cast<UINT>(raw.size()), raw.data(), nullptr);
+    std::uint8_t writes{};
+    for (auto* view : raw)
+    {
+        if (view == nullptr) continue;
+        ComPtr<ID3D11RenderTargetView> owned;
+        owned.Attach(view);
+        writes |= WriteMaskForResource(ViewResource(owned.Get()).Get());
+    }
+    return writes;
+}
+
+void ScenePassRenderer::InvalidateWrites(std::uint8_t writes) noexcept
+{
+    for (std::size_t index = 0; index < sceneCount_; ++index)
+    {
+        if ((writes & (1u << index)) != 0) InvalidateSlot(index);
+    }
+}
+
+ScenePassRenderer::DrawLineage ScenePassRenderer::CaptureLineage(
+    SceneTextureHandle input) const noexcept
+{
+    if (!frameOpen_) return {};
+    const auto* source = Resolve(input);
+    const auto* selected = Resolve(selectedScene_);
+    return {source != nullptr && source == selected,
+        source != nullptr && source->toneProduced, selected != nullptr, BoundWriteMask()};
+}
+
+void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
+    SceneTextureHandle destination, const DrawLineage& lineage) noexcept
+{
+    if (descriptor.group == PipelinePassGroup::toneMapFamily)
+    {
+        scenes_[destination.slot_].toneProduced = true;
+        return;
+    }
+    if (lineage.consumesSelected)
+    {
+        selectedScene_ = destination;
+        return;
+    }
+    if (lineage.selectionExisted) return;
+    if (descriptor.pass == RenoDxShaderPass::lut && lineage.toneInput) selectedScene_ = destination;
+}
+
+void ScenePassRenderer::CompleteLineage(const RenoDxShaderDescriptor* descriptor,
+    SceneTextureHandle destination, SceneDrawOutcome outcome,
+    const DrawLineage& lineage) noexcept
+{
+    if (!frameOpen_) return;
+    InvalidateWrites(lineage.writes);
+    if (outcome == SceneDrawOutcome::callbackFailed)
+    {
+        selectedScene_ = {};
+        return;
+    }
+    if (outcome != SceneDrawOutcome::replaced)
+    {
+        if (lineage.consumesSelected) selectedScene_ = {};
+        return;
+    }
+    PublishLineage(*descriptor, destination, lineage);
+}
+
 const RenoDxShaderDescriptor* ScenePassRenderer::BoundDescriptor() const noexcept
 {
     ComPtr<ID3D11PixelShader> actual;
@@ -341,12 +587,32 @@ ID3D11PixelShader* ScenePassRenderer::QualifiedReplacement(
 bool ScenePassRenderer::BoundSceneViewsMatch(const RenoDxShaderDescriptor& descriptor,
     const SceneTexture& source, const SceneTexture& target) const noexcept
 {
+    if (TemporalPass(descriptor.pass)) return BoundTemporalViewsMatch(descriptor, source, target);
     ComPtr<ID3D11ShaderResourceView> boundInput;
     ComPtr<ID3D11RenderTargetView> boundTarget;
     context_->PSGetShaderResources(descriptor.sceneInputSlot, 1, &boundInput);
     context_->OMGetRenderTargets(1, &boundTarget, nullptr);
     return boundInput.Get() == source.shaderResource.Get() &&
         boundTarget.Get() == target.renderTarget.Get();
+}
+
+bool ScenePassRenderer::BoundTemporalViewsMatch(const RenoDxShaderDescriptor& descriptor,
+    const SceneTexture& source, const SceneTexture& target) const noexcept
+{
+    std::array<ID3D11RenderTargetView*, 2> raw{};
+    context_->OMGetRenderTargets(static_cast<UINT>(raw.size()), raw.data(), nullptr);
+    ComPtr<ID3D11RenderTargetView> metadata;
+    ComPtr<ID3D11RenderTargetView> color;
+    metadata.Attach(raw[0]);
+    color.Attach(raw[1]);
+    if (color.Get() != target.renderTarget.Get()) return false;
+    if (!CompatibleMetadataTarget(metadata.Get(), target.texture.Get())) return false;
+    const auto metadataResource = ViewResource(metadata.Get());
+    const auto inputs = TemporalInputs(context_.Get(), descriptor.pass == RenoDxShaderPass::taa ? 4 : 5);
+    if (inputs[0].Get() != source.shaderResource.Get()) return false;
+    if (!CompatibleHistoryView(inputs[1].Get(), source.texture.Get())) return false;
+    return InputsAvoidTemporalOutputs(inputs, source.texture.Get(),
+        metadataResource.Get(), target.texture.Get());
 }
 
 bool ScenePassRenderer::CanInvoke(FiniteDrawInvocation invocation) const noexcept
@@ -362,6 +628,16 @@ SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descrip
 {
     DrawScope drawScope{invoking_};
     auto* replacement = QualifiedReplacement(descriptor, input, destination);
+    const auto lineage = CaptureLineage(input);
+    const auto outcome = InvokeDraw(replacement, invocation);
+    // Publish only after the borrowed pixel shader and class tuple are restored.
+    CompleteLineage(descriptor, destination, outcome, lineage);
+    return outcome;
+}
+
+SceneDrawOutcome ScenePassRenderer::InvokeDraw(ID3D11PixelShader* replacement,
+    FiniteDrawInvocation invocation) noexcept
+{
     ScopedPixelShader pixelScope{context_.Get(), replacement};
     try
     {

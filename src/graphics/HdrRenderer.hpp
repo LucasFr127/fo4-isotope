@@ -59,7 +59,7 @@ class ScenePassRenderer
 public:
     static constexpr std::size_t sceneTextureCapacity = 8;
     static constexpr std::size_t observedShaderCapacity = 64;
-    static constexpr std::size_t replacementProgramCount = 5;
+    static constexpr std::size_t replacementProgramCount = 7;
 
     ScenePassRenderer() noexcept = default;
     ~ScenePassRenderer() noexcept;
@@ -77,8 +77,17 @@ public:
         const D3D11_SUBRESOURCE_DATA* initialData, SceneTextureHandle& handle) noexcept;
     [[nodiscard]] SceneTextureViews Views(SceneTextureHandle handle) const noexcept;
 
+    [[nodiscard]] bool BeginFrame() noexcept;
+    [[nodiscard]] bool EndFrame() noexcept;
+    // Query at consumption: retained handles remain storage-valid after lineage expires.
+    [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
+    // Report every external write through a borrowed alias before it occurs.
+    [[nodiscard]] bool InvalidateScene(SceneTextureHandle handle) noexcept;
+
     // Direct execution consumes the caller's independently qualified descriptor;
     // it does not establish an original-bytecode match.
+    // Temporal metadata/history require R16G16B16A16_FLOAT or R32G32B32A32_FLOAT
+    // views; the caller separately qualifies their native float4 semantics.
     [[nodiscard]] SceneDrawOutcome Execute(const RenoDxShaderDescriptor& descriptor,
         SceneTextureHandle input, SceneTextureHandle destination,
         FiniteDrawInvocation invocation) noexcept;
@@ -91,12 +100,21 @@ private:
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
+        bool toneProduced{};
     };
 
     struct ObservedShader
     {
         Microsoft::WRL::ComPtr<ID3D11PixelShader> original;
         const RenoDxShaderDescriptor* descriptor{};
+    };
+
+    struct DrawLineage
+    {
+        bool consumesSelected{};
+        bool toneInput{};
+        bool selectionExisted{};
+        std::uint8_t writes{};
     };
 
     [[nodiscard]] bool OnOwnerThread() const noexcept;
@@ -108,6 +126,21 @@ private:
         SceneTexture& prepared) noexcept;
     [[nodiscard]] bool BoundSceneViewsMatch(const RenoDxShaderDescriptor& descriptor,
         const SceneTexture& source, const SceneTexture& target) const noexcept;
+    [[nodiscard]] bool BoundTemporalViewsMatch(const RenoDxShaderDescriptor& descriptor,
+        const SceneTexture& source, const SceneTexture& target) const noexcept;
+    [[nodiscard]] std::uint8_t BoundWriteMask() const noexcept;
+    void ClearLineage() noexcept;
+    void InvalidateSlot(std::size_t slot) noexcept;
+    void InvalidateWrites(std::uint8_t writes) noexcept;
+    [[nodiscard]] std::uint8_t WriteMaskForResource(ID3D11Resource* resource) const noexcept;
+    [[nodiscard]] DrawLineage CaptureLineage(SceneTextureHandle input) const noexcept;
+    void PublishLineage(const RenoDxShaderDescriptor& descriptor,
+        SceneTextureHandle destination, const DrawLineage& lineage) noexcept;
+    void CompleteLineage(const RenoDxShaderDescriptor* descriptor,
+        SceneTextureHandle destination, SceneDrawOutcome outcome,
+        const DrawLineage& lineage) noexcept;
+    [[nodiscard]] SceneDrawOutcome InvokeDraw(ID3D11PixelShader* replacement,
+        FiniteDrawInvocation invocation) noexcept;
     [[nodiscard]] ID3D11PixelShader* QualifiedReplacement(
         const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
         SceneTextureHandle destination) const noexcept;
@@ -127,6 +160,8 @@ private:
     UINT width_{};
     UINT height_{};
     bool invoking_{};
+    SceneTextureHandle selectedScene_;
+    bool frameOpen_{};
 };
 
 }  // namespace fo4hdr
