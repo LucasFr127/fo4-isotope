@@ -18,22 +18,13 @@
 #include <thread>
 
 namespace fo4hdr::tests::gpu {
-namespace {
+namespace detail {
 
-using Microsoft::WRL::ComPtr;
-constexpr UINT width = 4;
-constexpr UINT height = 2;
-constexpr UINT lutSize = 16;
-using Pixels = std::array<Float4, width * height>;
-using HalfPixel = std::array<std::uint16_t, 4>;
-using LutPixels = std::vector<Float4>;
-constexpr Float4 sentinelColor{0.0625f, 0.125f, 0.25f, 0.5f};
-
-D3D11_TEXTURE2D_DESC SceneDescription()
+D3D11_TEXTURE2D_DESC SceneDescription(UINT extentWidth, UINT extentHeight)
 {
     D3D11_TEXTURE2D_DESC description{};
-    description.Width = width;
-    description.Height = height;
+    description.Width = extentWidth;
+    description.Height = extentHeight;
     description.MipLevels = 1;
     description.ArraySize = 1;
     description.Format = DXGI_FORMAT_R11G11B10_FLOAT;
@@ -71,19 +62,23 @@ float DecodeHalf(std::uint16_t value)
     return (value & 32768) != 0 ? -magnitude : magnitude;
 }
 
-void UploadScene(ID3D11DeviceContext* context, ID3D11Texture2D* texture, const Pixels& pixels)
+void UploadScene(ID3D11DeviceContext* context, ID3D11Texture2D* texture, std::span<const Float4> pixels)
 {
-    std::array<HalfPixel, width * height> encoded{};
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    if (pixels.size() != static_cast<std::size_t>(description.Width) * description.Height)
+        throw std::runtime_error("Scene upload extent mismatch");
+    std::vector<HalfPixel> encoded(pixels.size());
     for (std::size_t index = 0; index < pixels.size(); ++index)
     {
         const auto& pixel = pixels[index];
         encoded[index] = {ExactHalf(pixel.red), ExactHalf(pixel.green),
             ExactHalf(pixel.blue), ExactHalf(pixel.alpha)};
     }
-    context->UpdateSubresource(texture, 0, nullptr, encoded.data(), width * sizeof(HalfPixel), 0);
+    context->UpdateSubresource(texture, 0, nullptr, encoded.data(), description.Width * sizeof(HalfPixel), 0);
 }
 
-Pixels ReadScene(const Device& gpu, ID3D11Texture2D* texture)
+std::vector<Float4> ReadScene(const Device& gpu, ID3D11Texture2D* texture)
 {
     D3D11_TEXTURE2D_DESC description{};
     texture->GetDesc(&description);
@@ -92,25 +87,24 @@ Pixels ReadScene(const Device& gpu, ID3D11Texture2D* texture)
     description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     ComPtr<ID3D11Texture2D> staging;
     CheckHresult(gpu.device->CreateTexture2D(&description, nullptr, &staging), "Readback texture");
+    std::vector<Float4> output(static_cast<std::size_t>(description.Width) * description.Height);
     gpu.context->OMSetRenderTargets(0, nullptr, nullptr);
     gpu.context->CopyResource(staging.Get(), texture);
     D3D11_MAPPED_SUBRESOURCE mapped{};
     CheckHresult(gpu.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Readback map");
-    if (!mapped.pData || mapped.RowPitch < width * sizeof(HalfPixel))
+    if (!mapped.pData || mapped.RowPitch < description.Width * sizeof(HalfPixel))
     {
         gpu.context->Unmap(staging.Get(), 0);
         throw std::runtime_error("Invalid scene readback pitch");
     }
-    Pixels output{};
-    for (UINT row = 0; row < height; ++row)
+    for (UINT row = 0; row < description.Height; ++row)
     {
-        std::array<HalfPixel, width> encoded{};
-        std::memcpy(encoded.data(), static_cast<const char*>(mapped.pData) + row * mapped.RowPitch,
-            sizeof(encoded));
-        for (UINT column = 0; column < width; ++column)
+        const auto* data = static_cast<const char*>(mapped.pData) + row * mapped.RowPitch;
+        for (UINT column = 0; column < description.Width; ++column)
         {
-            const auto& pixel = encoded[column];
-            output[row * width + column] = {DecodeHalf(pixel[0]), DecodeHalf(pixel[1]),
+            HalfPixel pixel{};
+            std::memcpy(pixel.data(), data + column * sizeof(HalfPixel), sizeof(pixel));
+            output[row * description.Width + column] = {DecodeHalf(pixel[0]), DecodeHalf(pixel[1]),
                 DecodeHalf(pixel[2]), DecodeHalf(pixel[3])};
         }
     }
@@ -189,87 +183,75 @@ struct DrawCount
     }
 };
 
-struct PixelFixture
+PixelFixture::PixelFixture(const std::filesystem::path& directory,
+    UINT imageWidth, UINT imageHeight) :
+    point(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_POINT)),
+    linear(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_LINEAR)),
+    extentWidth(imageWidth), extentHeight(imageHeight)
 {
-    Device gpu{CreateWarpDevice()};
-    ScenePassRenderer renderer;
-    SceneTextureHandle input;
-    SceneTextureHandle destination;
-    ComPtr<ID3D11VertexShader> vertex;
-    ComPtr<ID3D11PixelShader> plain;
-    ComPtr<ID3D11PixelShader> sentinel;
-    ComPtr<ID3D11ClassLinkage> linkage;
-    ComPtr<ID3D11ClassInstance> instance;
-    ComPtr<ID3D11Buffer> sentinelConstants;
-    ComPtr<ID3D11SamplerState> point{Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_POINT)};
-    ComPtr<ID3D11SamplerState> linear{Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_LINEAR)};
-    ComPtr<ID3D11RasterizerState> rasterizer;
+    if (!renderer.Initialize(gpu.device.Get(), gpu.context.Get(), extentWidth, extentHeight))
+        throw std::runtime_error("Scene renderer initialization failed");
+    const auto scene = SceneDescription(extentWidth, extentHeight);
+    CheckHresult(renderer.CreateSceneTexture(scene, nullptr, input), "Input scene");
+    CheckHresult(renderer.CreateSceneTexture(scene, nullptr, destination), "Output scene");
+    const auto bytecode = ReadShader(directory / "Fullscreen.dxbc");
+    CheckHresult(gpu.device->CreateVertexShader(bytecode.data(), bytecode.size(), nullptr, &vertex),
+        "Fullscreen vertex shader");
+    CheckHresult(gpu.device->CreateClassLinkage(&linkage), "Class linkage");
+    plain = ObservedShader(directory / "ScenePassPlain.dxbc", nullptr);
+    sentinel = ObservedShader(directory / "ScenePassSentinel.dxbc", linkage.Get());
+    CheckHresult(linkage->CreateClassInstance("SentinelColor", 0, 0, 0, 0, &instance),
+        "Sentinel class instance");
+    const std::array color{sentinelColor};
+    sentinelConstants = ConstantBuffer(gpu.device.Get(), color);
+    D3D11_RASTERIZER_DESC description{};
+    description.FillMode = D3D11_FILL_SOLID;
+    description.CullMode = D3D11_CULL_NONE;
+    description.DepthClipEnable = TRUE;
+    CheckHresult(gpu.device->CreateRasterizerState(&description, &rasterizer), "Rasterizer");
+}
 
-    explicit PixelFixture(const std::filesystem::path& directory)
-    {
-        if (!renderer.Initialize(gpu.device.Get(), gpu.context.Get(), width, height))
-            throw std::runtime_error("Scene renderer initialization failed");
-        CheckHresult(renderer.CreateSceneTexture(SceneDescription(), nullptr, input), "Input scene");
-        CheckHresult(renderer.CreateSceneTexture(SceneDescription(), nullptr, destination), "Output scene");
-        const auto bytecode = ReadShader(directory / "Fullscreen.dxbc");
-        CheckHresult(gpu.device->CreateVertexShader(bytecode.data(), bytecode.size(), nullptr, &vertex),
-            "Fullscreen vertex shader");
-        CheckHresult(gpu.device->CreateClassLinkage(&linkage), "Class linkage");
-        plain = ObservedShader(directory / "ScenePassPlain.dxbc", nullptr);
-        sentinel = ObservedShader(directory / "ScenePassSentinel.dxbc", linkage.Get());
-        CheckHresult(linkage->CreateClassInstance("SentinelColor", 0, 0, 0, 0, &instance),
-            "Sentinel class instance");
-        const std::array color{sentinelColor};
-        sentinelConstants = ConstantBuffer(gpu.device.Get(), color);
-        D3D11_RASTERIZER_DESC description{};
-        description.FillMode = D3D11_FILL_SOLID;
-        description.CullMode = D3D11_CULL_NONE;
-        description.DepthClipEnable = TRUE;
-        CheckHresult(gpu.device->CreateRasterizerState(&description, &rasterizer), "Rasterizer");
-    }
+ComPtr<ID3D11PixelShader> PixelFixture::ObservedShader(const std::filesystem::path& path, ID3D11ClassLinkage* classes)
+{
+    const auto bytes = ReadShader(path);
+    const auto bytecode = std::as_bytes(std::span{bytes});
+    if (FindRenoDxFallout4Shader(ComputeRenoDxShaderCrc32(bytecode)))
+        throw std::runtime_error("Project fixture unexpectedly matches catalog");
+    ComPtr<ID3D11PixelShader> shader;
+    CheckHresult(renderer.CreateObservedPixelShader(bytecode, classes, &shader), "Observed fixture shader");
+    return shader;
+}
 
-    ComPtr<ID3D11PixelShader> ObservedShader(const std::filesystem::path& path, ID3D11ClassLinkage* classes)
-    {
-        const auto bytes = ReadShader(path);
-        const auto bytecode = std::as_bytes(std::span{bytes});
-        if (FindRenoDxFallout4Shader(ComputeRenoDxShaderCrc32(bytecode)))
-            throw std::runtime_error("Project fixture unexpectedly matches catalog");
-        ComPtr<ID3D11PixelShader> shader;
-        CheckHresult(renderer.CreateObservedPixelShader(bytecode, classes, &shader), "Observed fixture shader");
-        return shader;
-    }
+void PixelFixture::Bind(bool dynamic)
+{
+    const auto context = gpu.context.Get();
+    context->IASetInputLayout(nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context->VSSetShader(vertex.Get(), nullptr, 0);
+    context->RSSetState(rasterizer.Get());
+    const D3D11_VIEWPORT viewport{0, 0, static_cast<float>(extentWidth), static_cast<float>(extentHeight), 0, 1};
+    context->RSSetViewports(1, &viewport);
+    auto* classes = instance.Get();
+    context->PSSetShader(dynamic ? sentinel.Get() : plain.Get(), dynamic ? &classes : nullptr, dynamic ? 1 : 0);
+    auto* constants = sentinelConstants.Get();
+    context->PSSetConstantBuffers(0, 1, &constants);
+    auto* target = renderer.Views(destination).renderTarget;
+    context->OMSetRenderTargets(1, &target, nullptr);
+}
 
-    void Bind(bool dynamic = false)
-    {
-        const auto context = gpu.context.Get();
-        context->IASetInputLayout(nullptr);
-        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context->VSSetShader(vertex.Get(), nullptr, 0);
-        context->RSSetState(rasterizer.Get());
-        const D3D11_VIEWPORT viewport{0, 0, static_cast<float>(width), static_cast<float>(height), 0, 1};
-        context->RSSetViewports(1, &viewport);
-        auto* classes = instance.Get();
-        context->PSSetShader(dynamic ? sentinel.Get() : plain.Get(), dynamic ? &classes : nullptr, dynamic ? 1 : 0);
-        auto* constants = sentinelConstants.Get();
-        context->PSSetConstantBuffers(0, 1, &constants);
-        auto* target = renderer.Views(destination).renderTarget;
-        context->OMSetRenderTargets(1, &target, nullptr);
-    }
-
-    void CheckRestored(bool dynamic)
-    {
-        ComPtr<ID3D11PixelShader> shader;
-        std::array<ID3D11ClassInstance*, 256> classes{};
-        UINT count = static_cast<UINT>(classes.size());
-        gpu.context->PSGetShader(&shader, classes.data(), &count);
-        FO4HDR_CHECK(shader.Get() == (dynamic ? sentinel.Get() : plain.Get()));
-        FO4HDR_CHECK(count == (dynamic ? 1u : 0u));
-        if (dynamic && count == 1) FO4HDR_CHECK(classes[0] == instance.Get());
-        FO4HDR_CHECK(count <= classes.size());
-        for (UINT index = 0; index < std::min(count, static_cast<UINT>(classes.size())); ++index)
-            if (classes[index]) classes[index]->Release();
-    }
-};
+void PixelFixture::CheckRestored(bool dynamic)
+{
+    ComPtr<ID3D11PixelShader> shader;
+    std::array<ID3D11ClassInstance*, 256> classes{};
+    UINT count = static_cast<UINT>(classes.size());
+    gpu.context->PSGetShader(&shader, classes.data(), &count);
+    FO4HDR_CHECK(shader.Get() == (dynamic ? sentinel.Get() : plain.Get()));
+    FO4HDR_CHECK(count == (dynamic ? 1u : 0u));
+    if (dynamic && count == 1) FO4HDR_CHECK(classes[0] == instance.Get());
+    FO4HDR_CHECK(count <= classes.size());
+    for (UINT index = 0; index < std::min(count, static_cast<UINT>(classes.size())); ++index)
+        if (classes[index]) classes[index]->Release();
+}
 
 Pixels SceneInputs()
 {
@@ -641,7 +623,7 @@ TemporalResources BindTemporal(PixelFixture& fixture, Float4 history, bool dynam
     return resources;
 }
 
-SceneDrawOutcome DrawPass(PixelFixture& fixture, std::size_t program, bool dynamic = false)
+SceneDrawOutcome DrawPass(PixelFixture& fixture, std::size_t program, bool dynamic)
 {
     DrawCount draw;
     const auto outcome = fixture.renderer.Execute(kRenoDxFallout4Shaders[program], fixture.input,
@@ -703,7 +685,8 @@ void VerifyTemporalHistory(PixelFixture& fixture, float historyLuminance)
 SceneTextureHandle AdditionalScene(PixelFixture& fixture)
 {
     SceneTextureHandle handle;
-    CheckHresult(fixture.renderer.CreateSceneTexture(SceneDescription(), nullptr, handle), "Lineage scene");
+    CheckHresult(fixture.renderer.CreateSceneTexture(SceneDescription(fixture.extentWidth,
+        fixture.extentHeight), nullptr, handle), "Lineage scene");
     return handle;
 }
 
@@ -734,13 +717,6 @@ void BindGrade(PixelFixture& fixture)
     fixture.gpu.context->PSSetConstantBuffers(2, 1, &buffer);
 }
 
-struct LineageScenes
-{
-    SceneTextureHandle raw;
-    SceneTextureHandle tone;
-    SceneTextureHandle grade;
-    SceneTextureHandle temporal;
-};
 
 void SeedSelection(PixelFixture& fixture, const LineageScenes& scenes)
 {
@@ -931,18 +907,19 @@ void VerifyInvocationRejection(PixelFixture& fixture)
     FO4HDR_CHECK(fixture.renderer.Retire());
 }
 
-}  // namespace
+}  // namespace detail
 
 void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
 {
-    PixelFixture fixture{fixtureDirectory};
-    VerifyFactory(fixture);
-    for (std::size_t variant = 0; variant < 4; ++variant) VerifyTone(fixture, variant);
-    VerifyLut(fixture);
-    VerifyForwarding(fixture);
-    VerifyTemporalAndLineage(fixture);
-    VerifyInvocationRejection(fixture);
+    detail::PixelFixture fixture{fixtureDirectory};
+    detail::VerifyFactory(fixture);
+    for (std::size_t variant = 0; variant < 4; ++variant) detail::VerifyTone(fixture, variant);
+    detail::VerifyLut(fixture);
+    detail::VerifyForwarding(fixture);
+    detail::VerifyTemporalAndLineage(fixture);
+    detail::VerifyInvocationRejection(fixture);
     std::cout << "Checked scene factory, seven shipping pixel programs, frame lineage and finite-draw state restoration\n";
+    VerifyPresentationPass(fixtureDirectory);
 }
 
 }  // namespace fo4hdr::tests::gpu

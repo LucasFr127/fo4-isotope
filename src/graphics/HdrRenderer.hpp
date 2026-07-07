@@ -70,6 +70,8 @@ public:
         ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept;
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool Active() const noexcept;
+    [[nodiscard]] bool MatchesContext(ID3D11Device* device,
+        ID3D11DeviceContext* immediateContext) const noexcept;
 
     HRESULT CreateObservedPixelShader(std::span<const std::byte> bytecode,
         ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept;

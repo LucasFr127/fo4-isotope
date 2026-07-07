@@ -27,3 +27,11 @@ float4 plainMain(float4 position : SV_POSITION, float2 uv : TEXCOORD0) : SV_Targ
 {
     return float4(0.0625, 0.125, 0.25, 0.5);
 }
+
+RWTexture2D<float4> SentinelOutput : register(u0);
+
+[numthreads(1, 1, 1)]
+void computeMain(uint3 pixel : SV_DispatchThreadID)
+{
+    SentinelOutput[pixel.xy] = selectedColor.Shade();
+}

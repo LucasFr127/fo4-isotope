@@ -52,11 +52,16 @@ foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "Creat
     } -Destination ([IO.Path]::Combine($shaderDirectory, "$name.hpp"))
 }
 
+Invoke-ShaderCompilation -Program @{
+    Source = "shaders/output/PresentPixels.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Symbol = "kPresentPixelsBytecode"
+} -Destination ([IO.Path]::Combine($shaderDirectory, "PresentPixels.hpp"))
+
 $fixtureDirectory = [IO.Path]::GetDirectoryName($outputPath)
 foreach ($fixture in @(
     @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },
     @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ScenePassSentinel" },
-    @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" }
+    @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" },
+    @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "cs_5_0"; Entry = "computeMain"; Name = "ScenePassCompute" }
 )) {
     Invoke-ShaderCompilation -Program $fixture `
         -Destination ([IO.Path]::Combine($fixtureDirectory, "$($fixture.Name).dxbc"))

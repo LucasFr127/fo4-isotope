@@ -66,7 +66,12 @@ $expected = [string[]]@(
     "tests/shader/shaders/ScenePassSentinel.ps.hlsl",
     "shaders/fallout4/TemporalAa.ps.hlsl",
     "shaders/fallout4/TemporalAa2.ps.hlsl",
-    "shaders/fallout4/TemporalIntermediate.hlsli"
+    "shaders/fallout4/TemporalIntermediate.hlsli",
+    "src/graphics/passes/PresentationPass.hpp",
+    "src/graphics/passes/PresentationPass.cpp",
+    "shaders/output/DisplayMath.hlsli",
+    "shaders/output/PresentPixels.cs.hlsl",
+    "tests/shader/PresentationPassTests.cpp"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null

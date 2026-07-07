@@ -338,6 +338,13 @@ bool ScenePassRenderer::Active() const noexcept
     return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
 }
 
+bool ScenePassRenderer::MatchesContext(ID3D11Device* device,
+    ID3D11DeviceContext* immediateContext) const noexcept
+{
+    if (!Active() || invoking_) return false;
+    return SameIdentity(device, device_.Get()) && SameIdentity(immediateContext, context_.Get());
+}
+
 bool ScenePassRenderer::Retire() noexcept
 {
     if (context_ && !OnOwnerThread()) return false;

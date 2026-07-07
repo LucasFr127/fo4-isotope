@@ -115,10 +115,12 @@ target("fo4hdr-shader-tests")
     set_kind("binary")
     set_default(false)
     add_includedirs("include", "src/graphics", "tests/support", "build/include")
-    add_syslinks("d3d11")
+    add_syslinks("d3d11", "dxgi", "user32")
     add_files("src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
+        "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
-        "tests/shader/ShippingPixelShaderTests.cpp", "tests/support/d3d11/GpuHarness.cpp")
+        "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",
+        "tests/support/d3d11/GpuHarness.cpp")
     before_build(function(target)
         local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
         os.vrunv(pwsh, { "-NoProfile", "-File",
