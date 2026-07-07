@@ -114,11 +114,12 @@ struct TerminalImage
 {
     ComPtr<ID3D11Texture2D> texture;
     ComPtr<ID3D11UnorderedAccessView> view;
-    explicit TerminalImage(ID3D11Device* device)
+    explicit TerminalImage(ID3D11Device* device, UINT extentWidth = presentationWidth,
+        UINT bindFlags = D3D11_BIND_UNORDERED_ACCESS)
     {
-        auto description = SceneDescription(presentationWidth, presentationHeight);
+        auto description = SceneDescription(extentWidth, presentationHeight);
         description.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
-        description.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+        description.BindFlags = bindFlags;
         CheckHresult(device->CreateTexture2D(&description, nullptr, &texture), "Terminal R10 texture");
         CheckHresult(device->CreateUnorderedAccessView(texture.Get(), nullptr, &view), "Terminal R10 UAV");
     }
@@ -345,6 +346,52 @@ void InitializePresentation(PresentationPass& pass, PixelFixture& fixture)
     if (!initialized) throw std::runtime_error("Controlled presentation prerequisites unavailable");
 }
 
+void CheckRejectedTerminal(PresentationPass& pass, BorrowedComputeState& state,
+    TerminalImage& terminal, PresentationScope scope)
+{
+    const auto before = ReadTerminal(state.fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(std::any_of(before.begin(), before.end(),
+        [](std::uint32_t pixel) { return (pixel & 0x3fffffffu) != 0; }));
+    FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), scope));
+    state.CheckRestored();
+    FO4HDR_CHECK(ReadTerminal(state.fixture.gpu, terminal.texture.Get()) == before);
+}
+
+void CheckLineageBlack(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+{
+    auto& fixture = state.fixture;
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(fixture.renderer.CurrentScene()));
+    CheckSelection(fixture, {});
+    FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    const auto black = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    for (const auto pixel : black) FO4HDR_CHECK(pixel == 0xc0000000u);
+    FO4HDR_CHECK(pass.Retire());
+    FO4HDR_CHECK(pass.Retire());
+    FO4HDR_CHECK(!pass.Active());
+    FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    const PresentationConfiguration configuration{presentationWidth, presentationHeight,
+        presentationPeakNits, &fixture.renderer};
+    FO4HDR_CHECK(!pass.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    state.CheckRestored();
+    FO4HDR_CHECK(ReadTerminal(fixture.gpu, terminal.texture.Get()) == black);
+}
+
+void VerifyTerminalRejections(PresentationPass& pass, BorrowedComputeState& state,
+    TerminalImage& terminal)
+{
+    TerminalImage wrongExtent{state.fixture.gpu.device.Get(), presentationWidth + 1};
+    TerminalImage shaderInput{state.fixture.gpu.device.Get(), presentationWidth,
+        D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE};
+    const float marker[]{0.5f, 0.25f, 0.75f, 1};
+    state.context->ClearUnorderedAccessViewFloat(wrongExtent.view.Get(), marker);
+    state.context->ClearUnorderedAccessViewFloat(shaderInput.view.Get(), marker);
+    CheckRejectedTerminal(pass, state, terminal, PresentationScope::unavailable);
+    CheckRejectedTerminal(pass, state, wrongExtent, presentationScope);
+    CheckRejectedTerminal(pass, state, shaderInput, presentationScope);
+    CheckLineageBlack(pass, state, terminal);
+}
+
 void VerifyTerminalPresentation(const std::filesystem::path& directory)
 {
     PixelFixture fixture{directory, presentationWidth, presentationHeight};
@@ -364,10 +411,10 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         state.CheckRestored();
         FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
         state.CheckRestored();
+        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        VerifyTerminalRejections(pass, state, terminal);
     }
-    CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
     FO4HDR_CHECK(fixture.renderer.EndFrame());
-    FO4HDR_CHECK(pass.Retire());
     FO4HDR_CHECK(fixture.renderer.Retire());
     std::cout << "Checked odd-extent selected FP16 to terminal R10, linked CS, CB range and UAV counters\n";
 }
@@ -411,7 +458,7 @@ struct PresentationWindow
     }
 };
 
-HRESULT CreateControlledChain(PixelFixture& fixture, HWND window, ComPtr<IDXGISwapChain1>& chain)
+ComPtr<IDXGIFactory2> PresentationFactory(PixelFixture& fixture)
 {
     ComPtr<IDXGIDevice> dxgi;
     CheckHresult(fixture.gpu.device.As(&dxgi), "DXGI device");
@@ -419,6 +466,12 @@ HRESULT CreateControlledChain(PixelFixture& fixture, HWND window, ComPtr<IDXGISw
     CheckHresult(dxgi->GetAdapter(&adapter), "DXGI adapter");
     ComPtr<IDXGIFactory2> factory;
     CheckHresult(adapter->GetParent(IID_PPV_ARGS(&factory)), "DXGI factory2");
+    return factory;
+}
+
+HRESULT CreateControlledChain(PixelFixture& fixture, HWND window, ComPtr<IDXGISwapChain1>& chain)
+{
+    const auto factory = PresentationFactory(fixture);
     DXGI_SWAP_CHAIN_DESC1 description{};
     description.Width = presentationWidth;
     description.Height = presentationHeight;
@@ -431,6 +484,62 @@ HRESULT CreateControlledChain(PixelFixture& fixture, HWND window, ComPtr<IDXGISw
     description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
     return factory->CreateSwapChainForHwnd(fixture.gpu.device.Get(), window, &description,
         nullptr, nullptr, &chain);
+}
+
+HRESULT CreateOriginalSdrChain(PixelFixture& fixture, HWND window, ComPtr<IDXGISwapChain>& chain)
+{
+    const auto factory = PresentationFactory(fixture);
+    DXGI_SWAP_CHAIN_DESC description{};
+    description.BufferDesc.Width = presentationWidth;
+    description.BufferDesc.Height = presentationHeight;
+    description.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.SampleDesc.Count = 1;
+    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    description.BufferCount = 1;
+    description.OutputWindow = window;
+    description.Windowed = TRUE;
+    description.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    return factory->CreateSwapChain(fixture.gpu.device.Get(), &description, &chain);
+}
+
+void ClearOriginalSdr(PixelFixture& fixture, IDXGISwapChain* chain)
+{
+    ComPtr<ID3D11Texture2D> texture;
+    CheckHresult(chain->GetBuffer(0, IID_PPV_ARGS(&texture)), "Original SDR buffer");
+    ComPtr<ID3D11RenderTargetView> target;
+    CheckHresult(fixture.gpu.device->CreateRenderTargetView(texture.Get(), nullptr, &target), "Original SDR view");
+    const float bounded[]{0.125f, 0.25f, 0.5f, 1};
+    fixture.gpu.context->ClearRenderTargetView(target.Get(), bounded);
+    const auto pixels = ReadTerminal(fixture.gpu, texture.Get());
+    FO4HDR_CHECK(std::any_of(pixels.begin(), pixels.end(),
+        [](std::uint32_t pixel) { return (pixel & 0x00ffffffu) != 0; }));
+    for (const auto pixel : pixels) FO4HDR_CHECK((pixel >> 24) == 255);
+}
+
+void ForwardOriginalSdr(PixelFixture& fixture, PresentationPass& pass, HWND window)
+{
+    ComPtr<IDXGISwapChain> chain;
+    CheckHresult(CreateOriginalSdrChain(fixture, window, chain), "Original SDR chain");
+    ClearOriginalSdr(fixture, chain.Get());
+    const auto rejected = pass.PrepareChain(chain.Get());
+    FO4HDR_CHECK(FAILED(rejected));
+    const auto presented = pass.Present(chain.Get(), 0, 0, PresentationScope::unavailable);
+    std::cout << "Original SDR preparation HRESULT=" << static_cast<std::uint32_t>(rejected)
+              << " native Present interval=0 flags=0 HRESULT=" << static_cast<std::uint32_t>(presented) << '\n';
+    FO4HDR_CHECK(SUCCEEDED(presented));
+    std::cout << "Checked caller-authored bounded SDR forwarding; game-frame handoff unverified\n";
+}
+
+void VerifyOriginalSdr(const std::filesystem::path& directory)
+{
+    PresentationWindow window;
+    if (!window.Create()) throw std::runtime_error("Original SDR window unavailable");
+    PixelFixture fixture{directory, presentationWidth, presentationHeight};
+    PresentationPass pass;
+    InitializePresentation(pass, fixture);
+    ForwardOriginalSdr(fixture, pass, window.window);
+    FO4HDR_CHECK(pass.Retire());
+    FO4HDR_CHECK(fixture.renderer.Retire());
 }
 
 void CheckControlledChain(IDXGISwapChain1* chain)
@@ -524,9 +633,24 @@ void ProbeChainColorSpace(IDXGISwapChain1* chain)
               << ((support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0) << '\n';
 }
 
+void CheckIdleTest(PixelFixture& fixture, PresentationPass& pass,
+    IDXGISwapChain1* chain, const LineageScenes& scenes)
+{
+    FO4HDR_CHECK(pass.BeginFrame(presentationScope));
+    SeedPresentation(fixture, scenes);
+    const auto result = pass.Present(chain, 0, DXGI_PRESENT_TEST, presentationScope);
+    std::cout << "Idle native TEST HRESULT=" << static_cast<std::uint32_t>(result) << '\n';
+    FO4HDR_CHECK(SUCCEEDED(result));
+    CheckSelection(fixture, scenes.grade);
+    const auto ordinary = pass.Present(chain, 0, 0, presentationScope);
+    FO4HDR_CHECK(SUCCEEDED(ordinary));
+    CheckSelection(fixture, {});
+}
+
 void VerifyQualifiedFrames(PixelFixture& fixture, PresentationPass& pass, IDXGISwapChain1* chain)
 {
     const LineageScenes scenes{fixture.input, fixture.destination, AdditionalScene(fixture), {}};
+    HRESULT lastPresent = S_OK;
     for (UINT frame = 1; frame <= 2; ++frame)
     {
         FO4HDR_CHECK(pass.BeginFrame(presentationScope));
@@ -538,8 +662,46 @@ void VerifyQualifiedFrames(PixelFixture& fixture, PresentationPass& pass, IDXGIS
                   << static_cast<std::uint32_t>(presented) << '\n';
         FO4HDR_CHECK(SUCCEEDED(presented));
         CheckSelection(fixture, {});
+        lastPresent = presented;
     }
     std::cout << "Checked two sequential controlled frames through the cached logical view\n";
+    if (lastPresent == DXGI_STATUS_OCCLUDED) CheckIdleTest(fixture, pass, chain, scenes);
+    else std::cout << "Idle TEST unexercised: no observed DXGI_STATUS_OCCLUDED\n";
+}
+
+void VerifyChainRetirement(PixelFixture& fixture, PresentationPass& pass,
+    IDXGISwapChain1* chain, const std::filesystem::path& directory)
+{
+    {
+        BorrowedComputeState state{fixture, directory};
+        state.Bind();
+        ComPtr<ID3D11Texture2D> buffer;
+        CheckHresult(chain->GetBuffer(0, IID_PPV_ARGS(&buffer)), "Retirement logical buffer");
+        ComPtr<ID3D11UnorderedAccessView> alias;
+        CheckHresult(fixture.gpu.device->CreateUnorderedAccessView(buffer.Get(), nullptr, &alias),
+            "Retirement logical alias");
+        auto* target = alias.Get();
+        const UINT preserve = UINT(-1);
+        state.context->CSSetUnorderedAccessViews(0, 1, &target, &preserve);
+        {
+            ComPtr<ID3D11UnorderedAccessView> bound;
+            state.context->CSGetUnorderedAccessViews(0, 1, &bound);
+            FO4HDR_CHECK(bound.Get() != nullptr && bound.Get() == alias.Get());
+        }
+        FO4HDR_CHECK(pass.Retire());
+        FO4HDR_CHECK(pass.Retire());
+        FO4HDR_CHECK(!pass.Active());
+        CheckSelection(fixture, {});
+        state.CheckRestored();
+    }
+    const auto invalid = chain->ResizeBuffers(1, presentationWidth, presentationHeight, DXGI_FORMAT_UNKNOWN, 0);
+    std::cout << "Retired invalid count1 ResizeBuffers HRESULT=" << static_cast<std::uint32_t>(invalid) << '\n';
+    FO4HDR_CHECK(FAILED(invalid));
+    const auto resized = chain->ResizeBuffers(2, presentationWidth, presentationHeight, DXGI_FORMAT_UNKNOWN, 0);
+    std::cout << "Retired legal count2 ResizeBuffers HRESULT=" << static_cast<std::uint32_t>(resized) << '\n';
+    CheckHresult(resized, "Retired controlled resize");
+    FO4HDR_CHECK(!pass.Active());
+    FO4HDR_CHECK(!pass.BeginFrame(presentationScope));
 }
 
 void VerifyControlledChain(const std::filesystem::path& directory)
@@ -558,7 +720,10 @@ void VerifyControlledChain(const std::filesystem::path& directory)
     std::cout << "Controlled flip-chain creation HRESULT=" << static_cast<std::uint32_t>(created) << '\n';
     if (FAILED(created))
     {
-        std::cout << "Controlled HDR chain unavailable; offscreen result is independent\n";
+        chain.Reset();
+        fixture.gpu.context->Flush();
+        ForwardOriginalSdr(fixture, pass, window.window);
+        std::cout << "Checked one original-descriptor retry after genuine HDR creation failure\n";
         FO4HDR_CHECK(pass.Retire());
         FO4HDR_CHECK(fixture.renderer.Retire());
         return;
@@ -572,14 +737,20 @@ void VerifyControlledChain(const std::filesystem::path& directory)
     {
         std::cout << "Controlled chain HDR application qualified; physical display unverified\n";
         VerifyQualifiedFrames(fixture, pass, chain.Get());
+        VerifyChainRetirement(fixture, pass, chain.Get(), directory);
+        std::cout << "Original-descriptor HDR-failure retry unexercised: preparation succeeded\n";
     }
     else
     {
-        std::cout << "HDR preparation rejected; R10 candidate forwarding only, SDR creation fallback untested\n";
+        std::cout << "HDR preparation rejected; forwarding R10 candidate before original-descriptor retry\n";
         const auto presented = pass.Present(chain.Get(), 0, 0, PresentationScope::unavailable);
         std::cout << "Controlled native Present interval=0 flags=0 HRESULT="
                   << static_cast<std::uint32_t>(presented) << '\n';
         FO4HDR_CHECK(SUCCEEDED(presented));
+        chain.Reset();
+        fixture.gpu.context->Flush();
+        ForwardOriginalSdr(fixture, pass, window.window);
+        std::cout << "Checked one original-descriptor retry after genuine HDR preparation failure\n";
     }
     FO4HDR_CHECK(pass.Retire());
     FO4HDR_CHECK(fixture.renderer.Retire());
@@ -591,6 +762,7 @@ void VerifyPresentationPass(const std::filesystem::path& fixtureDirectory)
 {
     VerifyTerminalPresentation(fixtureDirectory);
     VerifyControlledChain(fixtureDirectory);
+    VerifyOriginalSdr(fixtureDirectory);
 }
 
 }  // namespace fo4hdr::tests::gpu
