@@ -71,7 +71,14 @@ $expected = [string[]]@(
     "src/graphics/passes/PresentationPass.cpp",
     "shaders/output/DisplayMath.hlsli",
     "shaders/output/PresentPixels.cs.hlsl",
-    "tests/shader/PresentationPassTests.cpp"
+    "tests/shader/PresentationPassTests.cpp",
+    "LICENSES/Apache-2.0.txt",
+    "include/Fallout4HDR/tonemap/Aces2.hpp",
+    "src/tonemap/Aces2.cpp",
+    "src/tonemap/aces2/Aces2ColorAppearance.cpp",
+    "src/tonemap/aces2/Aces2Model.hpp",
+    "src/tonemap/aces2/Aces2Tables.cpp",
+    "tests/unit/tonemap/ToneMappingTests.cpp"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
