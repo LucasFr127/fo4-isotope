@@ -78,7 +78,10 @@ $expected = [string[]]@(
     "src/tonemap/aces2/Aces2ColorAppearance.cpp",
     "src/tonemap/aces2/Aces2Model.hpp",
     "src/tonemap/aces2/Aces2Tables.cpp",
-    "tests/unit/tonemap/ToneMappingTests.cpp"
+    "tests/unit/tonemap/ToneMappingTests.cpp",
+    "LICENSES/BSD-3-Clause.txt",
+    "include/Fallout4HDR/tonemap/Agx.hpp",
+    "src/tonemap/Agx.cpp"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null

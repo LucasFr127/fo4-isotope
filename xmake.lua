@@ -90,7 +90,7 @@ for _, fixture in ipairs({
         add_syslinks("version")
         add_syslinks("d3d11", "user32")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
-            "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
+            "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
             "tests/unit/hooks/HookTests.cpp",
