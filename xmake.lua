@@ -90,6 +90,7 @@ for _, fixture in ipairs({
         add_syslinks("version")
         add_syslinks("d3d11", "user32")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
+            "src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
             "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
@@ -116,9 +117,11 @@ end
 target("fo4hdr-shader-tests")
     set_kind("binary")
     set_default(false)
-    add_includedirs("include", "src/graphics", "tests/support", "build/include")
+    add_includedirs("include", "src/graphics", "tests/support", "tests/unit", "build/include")
     add_syslinks("d3d11", "dxgi", "user32")
-    add_files("src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
+    add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
+        "tests/shader/Gt7ReferenceTests.cpp",
+        "src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",

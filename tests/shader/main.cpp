@@ -2,6 +2,8 @@
 
 #include "d3d11/GpuHarness.hpp"
 #include "ShippingPixelShaderTests.hpp"
+#include "Gt7ReferenceTests.hpp"
+#include "UnitTestSuite.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 
@@ -12,6 +14,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <string_view>
 
 namespace {
 
@@ -69,15 +72,27 @@ double CheckTransfer(const TransferPixels& input, const TransferPixels& output)
     return observedError;
 }
 
+int RunGt7Reference(const std::filesystem::path& shaderPath)
+{
+    fo4hdr::tests::RunGt7Tests();
+    const auto error = fo4hdr::tests::gpu::VerifyGt7Reference(shaderPath);
+    if (fo4hdr::test::failures != 0) return EXIT_FAILURE;
+    std::cout << "PASS GT7 CPU/source and WARP raw-reference; maximum framebuffer error "
+              << error << '\n';
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
 {
     try
     {
+        if (argc == 3 && std::wstring_view{argv[1]} == L"--gt7-reference")
+            return RunGt7Reference(argv[2]);
         if (argc != 2)
         {
-            throw std::runtime_error("Usage: fo4hdr-shader-tests <TransferEvaluation.dxbc>");
+            throw std::runtime_error("Usage: fo4hdr-shader-tests <TransferEvaluation.dxbc> | --gt7-reference <Gt7Evaluation.dxbc>");
         }
         const auto input = TransferInputs();
         const auto output = fo4hdr::tests::gpu::EvaluateTransfer(argv[1], input, displayPeakNits);

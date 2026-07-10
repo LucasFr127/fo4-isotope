@@ -81,7 +81,17 @@ $expected = [string[]]@(
     "tests/unit/tonemap/ToneMappingTests.cpp",
     "LICENSES/BSD-3-Clause.txt",
     "include/Fallout4HDR/tonemap/Agx.hpp",
-    "src/tonemap/Agx.cpp"
+    "src/tonemap/Agx.cpp",
+    "include/Fallout4HDR/tonemap/Gt7.hpp",
+    "src/tonemap/Gt7.cpp",
+    "shaders/tonemap/Gt7.hlsli",
+    "tests/unit/tonemap/Gt7Tests.cpp",
+    "tests/shader/Gt7ReferenceTests.hpp",
+    "tests/shader/Gt7ReferenceTests.cpp",
+    "tests/shader/shaders/Gt7Evaluation.cs.hlsl",
+    "third_party/gt7/upstream/gt7_tone_mapping.cpp",
+    "third_party/gt7/UPSTREAM.lock.json",
+    "scripts/fetch-gt7-reference.ps1"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
