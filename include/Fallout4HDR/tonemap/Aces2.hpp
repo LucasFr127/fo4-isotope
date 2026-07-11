@@ -3,7 +3,22 @@
 
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
+#include <memory>
+
 namespace fo4hdr {
+
+class Aces2Transform;
+struct Aces2TransformDeleter
+{
+    void operator()(const Aces2Transform* transform) const noexcept;
+};
+using Aces2TransformHandle = std::unique_ptr<const Aces2Transform, Aces2TransformDeleter>;
+
+// Retain one immutable peak-specific context across a reference sample loop.
+// Invalid peaks or allocation failure return an empty handle.
+[[nodiscard]] Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept;
+[[nodiscard]] LinearRgb MapAces2ToBt2020Nits(
+    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept;
 
 // Dimensionless scene-linear BT.709/D65 preserves the Academy 0.18 gray anchor.
 // Returns contained absolute display-linear BT.2020 nits, without display encoding.

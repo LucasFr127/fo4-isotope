@@ -18,21 +18,8 @@ constexpr double kContrast = 2.7;
 constexpr double kHdrPurity = 0.5;
 constexpr double kHdrShoulderPower = 2.0;
 
-struct SigmoidSegment
-{
-    double scale;
-    double power;
-};
-
-struct Sigmoid
-{
-    double transitionX;
-    double transitionY;
-    SigmoidSegment toe;
-    SigmoidSegment shoulder;
-    double slope;
-    double intercept;
-};
+using SigmoidSegment = AgxTransform::SigmoidSegment;
+using Sigmoid = AgxTransform::Sigmoid;
 
 struct AgxState
 {
@@ -531,6 +518,27 @@ struct ScaleBlend
 }
 
 }  // namespace
+
+std::optional<AgxTransform> CreateAgxTransform(double displayPeakNits) noexcept
+{
+    if (!IsValidDisplayPeak(displayPeakNits)) return std::nullopt;
+    const auto prepared = PrepareAgx(displayPeakNits);
+    AgxTransform transform;
+    transform.displayPeakNits_ = displayPeakNits;
+    transform.hdrSdrRatio_ = prepared.hdrSdrRatio;
+    transform.darkMaximumExponent_ = prepared.darkMaximumExponent;
+    transform.formationSigmoid_ = prepared.formationSigmoid;
+    transform.darkeningSigmoid_ = prepared.darkeningSigmoid;
+    return transform;
+}
+
+LinearRgb MapAgxToBt2020Nits(
+    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    const AgxState prepared{transform.hdrSdrRatio_, transform.darkMaximumExponent_,
+        transform.formationSigmoid_, transform.darkeningSigmoid_};
+    return ContainDisplayGamut(EvaluateSceneNits(prepared, sceneLinearBt709), transform.displayPeakNits_);
+}
 
 LinearRgb MapAgxToBt2020Nits(
     LinearRgb sceneLinearBt709, double displayPeakNits) noexcept

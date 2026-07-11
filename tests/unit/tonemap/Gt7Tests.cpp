@@ -28,10 +28,9 @@ constexpr std::array<LinearRgb, 12> referenceInputs{{
 constexpr std::array referencePeaks{250.0, 400.0, 430.0, 1000.0,
     2000.0, 4000.0, 10000.0};
 
-std::array<float, 3> OfficialReference(std::array<float, 3> input, double peak)
+std::array<float, 3> OfficialReference(std::array<float, 3> input,
+    const GT7ToneMapping& reference)
 {
-    GT7ToneMapping reference;
-    reference.initializeAsHDR(static_cast<float>(peak));
     std::array<float, 3> output{};
     reference.applyToneMapping(input.data(), output.data());
     return output;
@@ -60,15 +59,16 @@ void CheckSourceRgb(LinearRgb actual, const std::array<float, 3>& expected,
     CheckSourceChannel(static_cast<float>(actual.blue), expected[2], peak);
 }
 
-void CheckSceneReference(LinearRgb scene, double peak)
+void CheckSceneReference(LinearRgb scene, const Gt7Transform& transform,
+    const GT7ToneMapping& reference, double peak)
 {
     const auto rec2020 = ConvertBt709ToBt2020(scene);
     constexpr float sceneScale = 203.0F / 100.0F;
     const auto expected = OfficialReference({
         static_cast<float>(rec2020.red) * sceneScale,
         static_cast<float>(rec2020.green) * sceneScale,
-        static_cast<float>(rec2020.blue) * sceneScale}, peak);
-    const auto actual = MapGt7ToBt2020Nits(scene, peak);
+        static_cast<float>(rec2020.blue) * sceneScale}, reference);
+    const auto actual = MapGt7ToBt2020Nits(transform, scene);
     CheckSourceRgb({actual.red / 100.0, actual.green / 100.0,
         actual.blue / 100.0}, expected, peak);
 }
@@ -77,12 +77,17 @@ void TestOfficialSourceParity()
 {
     for (double peak : referencePeaks)
     {
+        const auto transform = CreateGt7Transform(peak);
+        FO4HDR_CHECK(transform);
+        if (!transform) continue;
+        GT7ToneMapping reference;
+        reference.initializeAsHDR(static_cast<float>(peak));
         for (const auto input : referenceInputs)
         {
             const auto expected = OfficialReference({static_cast<float>(input.red),
-                static_cast<float>(input.green), static_cast<float>(input.blue)}, peak);
-            CheckSourceRgb(MapGt7ReferenceRec2020(input, peak), expected, peak);
-            CheckSceneReference(input, peak);
+                static_cast<float>(input.green), static_cast<float>(input.blue)}, reference);
+            CheckSourceRgb(MapGt7ReferenceRec2020(*transform, input), expected, peak);
+            CheckSceneReference(input, *transform, reference, peak);
         }
     }
     // These zero-red inputs preserve legitimate positive inverse-ICtCp cross-talk.
@@ -97,7 +102,7 @@ void CheckSameRgb(LinearRgb actual, LinearRgb expected)
     FO4HDR_CHECK(actual.blue == expected.blue);
 }
 
-void CheckInputPolicy(double bad, double replacement)
+void CheckInputPolicy(const Gt7Transform& transform, double bad, double replacement)
 {
     for (std::size_t channel = 0; channel < 3; ++channel)
     {
@@ -107,10 +112,12 @@ void CheckInputPolicy(double bad, double replacement)
         expected[channel] = replacement;
         const LinearRgb input{actual[0], actual[1], actual[2]};
         const LinearRgb sanitized{expected[0], expected[1], expected[2]};
-        CheckSameRgb(MapGt7ReferenceRec2020(input, 1000.0),
-            MapGt7ReferenceRec2020(sanitized, 1000.0));
-        CheckSameRgb(MapGt7ToBt2020Nits(input, 1000.0),
-            MapGt7ToBt2020Nits(sanitized, 1000.0));
+        const auto expectedRaw = MapGt7ReferenceRec2020(sanitized, 1000.0);
+        const auto expectedScene = MapGt7ToBt2020Nits(sanitized, 1000.0);
+        CheckSameRgb(MapGt7ReferenceRec2020(input, 1000.0), expectedRaw);
+        CheckSameRgb(MapGt7ReferenceRec2020(transform, input), expectedRaw);
+        CheckSameRgb(MapGt7ToBt2020Nits(input, 1000.0), expectedScene);
+        CheckSameRgb(MapGt7ToBt2020Nits(transform, input), expectedScene);
     }
 }
 
@@ -122,10 +129,43 @@ void TestInputAndPeakPolicy()
     {
         CheckSameRgb(MapGt7ReferenceRec2020({1.0, 1.0, 1.0}, invalid), {});
         CheckSameRgb(MapGt7ToBt2020Nits({1.0, 1.0, 1.0}, invalid), {});
+        FO4HDR_CHECK(!CreateGt7Transform(invalid));
     }
-    for (double value : {nan, -infinity, -1.0}) CheckInputPolicy(value, 0.0);
+    const auto transform = CreateGt7Transform(1000.0);
+    FO4HDR_CHECK(transform);
+    if (!transform) return;
+    for (double value : {nan, -infinity, -1.0}) CheckInputPolicy(*transform, value, 0.0);
     for (double value : {infinity, std::numeric_limits<double>::max(), 65505.0})
-        CheckInputPolicy(value, 65504.0);
+        CheckInputPolicy(*transform, value, 65504.0);
+}
+
+void CheckContextSample(const Gt7Transform& low, const Gt7Transform& high, LinearRgb input)
+{
+    const auto rawLow = MapGt7ReferenceRec2020(input, 400.0);
+    const auto rawHigh = MapGt7ReferenceRec2020(input, 1000.0);
+    const auto sceneLow = MapGt7ToBt2020Nits(input, 400.0);
+    const auto sceneHigh = MapGt7ToBt2020Nits(input, 1000.0);
+    CheckSameRgb(MapGt7ReferenceRec2020(low, input), rawLow);
+    CheckSameRgb(MapGt7ReferenceRec2020(high, input), rawHigh);
+    CheckSameRgb(MapGt7ToBt2020Nits(low, input), sceneLow);
+    CheckSameRgb(MapGt7ToBt2020Nits(high, input), sceneHigh);
+    CheckSameRgb(MapGt7ReferenceRec2020(low, input), rawLow);
+    CheckSameRgb(MapGt7ToBt2020Nits(low, input), sceneLow);
+}
+
+void TestContextReuse()
+{
+    const auto low = CreateGt7Transform(400.0);
+    const auto high = CreateGt7Transform(1000.0);
+    FO4HDR_CHECK(low);
+    FO4HDR_CHECK(high);
+    if (!low) return;
+    if (!high) return;
+    for (const auto input : std::array{referenceInputs[0], referenceInputs[1],
+             referenceInputs[8]})
+        CheckContextSample(*low, *high, input);
+    FO4HDR_CHECK(MapGt7ReferenceRec2020(*high, referenceInputs[1]).red >
+        MapGt7ReferenceRec2020(*low, referenceInputs[1]).red);
 }
 
 }  // namespace
@@ -134,6 +174,7 @@ void RunGt7Tests()
 {
     TestOfficialSourceParity();
     TestInputAndPeakPolicy();
+    TestContextReuse();
 }
 
 }  // namespace fo4hdr::tests

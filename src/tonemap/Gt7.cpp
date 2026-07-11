@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <new>
 
 namespace fo4hdr {
 namespace {
@@ -258,6 +259,46 @@ FloatRgb Gt7ColorVolume::Apply(
 }
 
 }  // namespace
+
+class Gt7Transform
+{
+public:
+    explicit Gt7Transform(double peak) noexcept :
+        volume(Gt7Curve(static_cast<float>(peak) / kReferenceLuminance)), peakNits(peak) {}
+    const Gt7ColorVolume volume;
+    const double peakNits;
+};
+
+void Gt7TransformDeleter::operator()(const Gt7Transform* transform) const noexcept
+{
+    delete transform;
+}
+
+Gt7TransformHandle CreateGt7Transform(double displayPeakNits) noexcept
+{
+    if (!IsValidPeak(displayPeakNits)) return {};
+    return Gt7TransformHandle{new (std::nothrow) Gt7Transform(displayPeakNits)};
+}
+
+LinearRgb MapGt7ReferenceRec2020(
+    const Gt7Transform& transform, LinearRgb framebufferRec2020) noexcept
+{
+    const auto sanitized = SanitizeScene(framebufferRec2020);
+    const FloatRgb input{static_cast<float>(sanitized.red), static_cast<float>(sanitized.green),
+        static_cast<float>(sanitized.blue)};
+    const auto result = ApplyOfficialHdr(input, transform.volume);
+    return {result[0], result[1], result[2]};
+}
+
+LinearRgb MapGt7ToBt2020Nits(
+    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    const auto input = SceneToGt7Framebuffer(SanitizeScene(sceneLinearBt709));
+    const auto mapped = transform.volume.Apply(input);
+    return ContainBt2020Nits({static_cast<double>(mapped[0]) * kReferenceLuminance,
+        static_cast<double>(mapped[1]) * kReferenceLuminance,
+        static_cast<double>(mapped[2]) * kReferenceLuminance}, transform.peakNits);
+}
 
 LinearRgb MapGt7ReferenceRec2020(
     LinearRgb framebufferRec2020, double displayPeakNits) noexcept

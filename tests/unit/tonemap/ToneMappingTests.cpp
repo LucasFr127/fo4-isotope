@@ -78,11 +78,36 @@ void TestAces2ReferenceSamples()
         Reference{2000.0, {0.0, 0.0, 21.33}, {88.756132125854, 0.0, 2000.0}},
         Reference{2000.0, {0.0, 0.0, 21.34}, {106.985712051392, 30.772495269775, 2000.0}}
     };
-    for (const auto& reference : references)
+    for (double peak : {400.0, 1000.0, 2000.0})
     {
-        const auto output = MapAces2ToBt2020Nits(reference.input, reference.peak);
-        CheckSourcePrecision(output, reference.output);
-        CheckContained(output, reference.peak);
+        const auto transform = CreateAces2Transform(peak);
+        FO4HDR_CHECK(transform);
+        if (!transform) continue;
+        for (const auto& reference : references)
+        {
+            if (reference.peak != peak) continue;
+            const auto output = MapAces2ToBt2020Nits(*transform, reference.input);
+            CheckSourcePrecision(output, reference.output);
+            CheckContained(output, reference.peak);
+        }
+    }
+}
+
+void TestAces2ContainedInputs()
+{
+    const double maximum = std::numeric_limits<double>::max();
+    for (double peak : {400.0, 1000.0, 2000.0})
+    {
+        const auto transform = CreateAces2Transform(peak);
+        FO4HDR_CHECK(transform);
+        if (!transform) continue;
+        CheckSameRgb(MapAces2ToBt2020Nits(*transform, {}), {});
+        for (const auto input : std::array{
+                 LinearRgb{0.18, 0.18, 0.18}, LinearRgb{1.0, 0.0, 0.0},
+                 LinearRgb{0.0, 1.0, 0.0}, LinearRgb{0.0, 0.0, 1.0},
+                 LinearRgb{4.0, 16.0, 2.0}, LinearRgb{maximum, maximum, maximum},
+                 LinearRgb{maximum, 0.0, 0.18}})
+            CheckContained(MapAces2ToBt2020Nits(*transform, input), peak);
     }
 }
 
@@ -90,17 +115,9 @@ void TestAces2InputPolicy()
 {
     const double infinity = std::numeric_limits<double>::infinity();
     const double nan = std::numeric_limits<double>::quiet_NaN();
-    const double maximum = std::numeric_limits<double>::max();
-    for (double peak : {400.0, 1000.0, 2000.0})
-    {
-        CheckSameRgb(MapAces2ToBt2020Nits({}, peak), {});
-        for (const auto input : std::array{
-                 LinearRgb{0.18, 0.18, 0.18}, LinearRgb{1.0, 0.0, 0.0},
-                 LinearRgb{0.0, 1.0, 0.0}, LinearRgb{0.0, 0.0, 1.0},
-                 LinearRgb{4.0, 16.0, 2.0}, LinearRgb{maximum, maximum, maximum},
-                 LinearRgb{maximum, 0.0, 0.18}})
-            CheckContained(MapAces2ToBt2020Nits(input, peak), peak);
-    }
+    const auto transform = CreateAces2Transform(1000.0);
+    FO4HDR_CHECK(transform);
+    if (!transform) return;
     for (std::size_t channel = 0; channel < 3; ++channel)
     {
         std::array channels{1.0, 0.25, 4.0};
@@ -112,10 +129,15 @@ void TestAces2InputPolicy()
             channels[channel] = bad;
             CheckSameRgb(MapAces2ToBt2020Nits(
                 {channels[0], channels[1], channels[2]}, 1000.0), expected);
+            CheckSameRgb(MapAces2ToBt2020Nits(*transform,
+                {channels[0], channels[1], channels[2]}), expected);
         }
     }
     for (double peak : {0.0, 399.999, 2000.001, nan, infinity, -infinity})
+    {
         CheckSameRgb(MapAces2ToBt2020Nits({1.0, 0.25, 4.0}, peak), {});
+        FO4HDR_CHECK(!CreateAces2Transform(peak));
+    }
 }
 
 void TestAces2PeakReuse()
@@ -131,18 +153,27 @@ void TestAces2PeakReuse()
         PeakReference{2000.0, {15.746709704399, 15.746742486954, 15.746729075909}}
     };
     constexpr LinearRgb sample{0.18, 0.18, 0.18};
+    const std::array transforms{CreateAces2Transform(400.0),
+        CreateAces2Transform(1000.0), CreateAces2Transform(2000.0)};
+    for (const auto& transform : transforms)
+    {
+        FO4HDR_CHECK(transform);
+        if (!transform) return;
+    }
     std::array<LinearRgb, references.size()> previous{};
     for (std::size_t i = 0; i < references.size(); ++i)
     {
-        previous[i] = MapAces2ToBt2020Nits(sample, references[i].peak);
-        CheckSourcePrecision(previous[i], references[i].expected);
+        previous[i] = MapAces2ToBt2020Nits(*transforms[i], sample);
         CheckSameRgb(MapAces2ToBt2020Nits(sample, references[i].peak), previous[i]);
+        CheckSourcePrecision(previous[i], references[i].expected);
+        CheckSameRgb(MapAces2ToBt2020Nits(*transforms[i], sample), previous[i]);
         CheckSameRgb(MapAces2ToBt2020Nits(sample, 0.0), {});
         CheckSameRgb(MapAces2ToBt2020Nits(sample, references[i].peak), previous[i]);
+        CheckSameRgb(MapAces2ToBt2020Nits(*transforms[i], sample), previous[i]);
     }
     for (std::size_t i = 0; i < references.size(); ++i)
     {
-        const auto output = MapAces2ToBt2020Nits(sample, references[i].peak);
+        const auto output = MapAces2ToBt2020Nits(*transforms[i], sample);
         CheckSourcePrecision(output, references[i].expected);
         CheckSameRgb(output, previous[i]);
     }
@@ -176,12 +207,19 @@ void TestAgxNeutralReferences()
         Reference{1000.0, 0, {36.54000045, 36.54000032, 36.53999992}},
         Reference{1000.0, 2, {192.6212656, 192.6212651, 192.6212637}}
     };
-    for (const auto& reference : references)
+    for (double peak : {418.0, 1000.0})
     {
-        const auto input = 0.18 * std::exp2(reference.stops);
-        const auto output = MapAgxToBt2020Nits({input, input, input}, reference.peak);
-        CheckAgxReference(output, reference.output);
-        CheckContained(output, reference.peak);
+        const auto transform = CreateAgxTransform(peak);
+        FO4HDR_CHECK(transform);
+        if (!transform) continue;
+        for (const auto& reference : references)
+        {
+            if (reference.peak != peak) continue;
+            const auto input = 0.18 * std::exp2(reference.stops);
+            const auto output = MapAgxToBt2020Nits(*transform, {input, input, input});
+            CheckAgxReference(output, reference.output);
+            CheckContained(output, reference.peak);
+        }
     }
 }
 
@@ -195,8 +233,13 @@ void TestAgxContainedInputs()
         LinearRgb{16.0, 2.0, 0.1}, LinearRgb{65504.0, 0.0, 0.0}
     };
     for (double peak : {400.0, 1000.0, 2000.0})
+    {
+        const auto transform = CreateAgxTransform(peak);
+        FO4HDR_CHECK(transform);
+        if (!transform) continue;
         for (const auto input : inputs)
-            CheckContained(MapAgxToBt2020Nits(input, peak), peak);
+            CheckContained(MapAgxToBt2020Nits(*transform, input), peak);
+    }
 }
 
 void TestAgxInputPolicy()
@@ -204,6 +247,9 @@ void TestAgxInputPolicy()
     const double infinity = std::numeric_limits<double>::infinity();
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double maximum = std::numeric_limits<double>::max();
+    const auto transform = CreateAgxTransform(1000.0);
+    FO4HDR_CHECK(transform);
+    if (!transform) return;
     for (std::size_t channel = 0; channel < 3; ++channel)
     {
         std::array channels{1.0, 0.25, 4.0};
@@ -213,6 +259,7 @@ void TestAgxInputPolicy()
         {
             channels[channel] = bad;
             CheckSameRgb(MapAgxToBt2020Nits({channels[0], channels[1], channels[2]}, 1000.0), zeroed);
+            CheckSameRgb(MapAgxToBt2020Nits(*transform, {channels[0], channels[1], channels[2]}), zeroed);
         }
         channels[channel] = 65504.0;
         const auto capped = MapAgxToBt2020Nits({channels[0], channels[1], channels[2]}, 1000.0);
@@ -220,10 +267,36 @@ void TestAgxInputPolicy()
         {
             channels[channel] = high;
             CheckSameRgb(MapAgxToBt2020Nits({channels[0], channels[1], channels[2]}, 1000.0), capped);
+            CheckSameRgb(MapAgxToBt2020Nits(*transform, {channels[0], channels[1], channels[2]}), capped);
         }
     }
     for (double peak : {0.0, 399.0, 2001.0, nan, infinity, -infinity})
+    {
         CheckSameRgb(MapAgxToBt2020Nits({1.0, 0.25, 4.0}, peak), {});
+        FO4HDR_CHECK(!CreateAgxTransform(peak));
+    }
+}
+
+void TestAgxContextReuse()
+{
+    const auto low = CreateAgxTransform(418.0);
+    const auto high = CreateAgxTransform(1000.0);
+    FO4HDR_CHECK(low);
+    FO4HDR_CHECK(high);
+    if (!low) return;
+    if (!high) return;
+    for (const auto input : std::array{LinearRgb{0.18, 0.18, 0.18},
+             LinearRgb{0.72, 0.72, 0.72}, LinearRgb{16.0, 2.0, 0.1}})
+    {
+        const auto expectedLow = MapAgxToBt2020Nits(input, 418.0);
+        const auto expectedHigh = MapAgxToBt2020Nits(input, 1000.0);
+        CheckSameRgb(MapAgxToBt2020Nits(*low, input), expectedLow);
+        CheckSameRgb(MapAgxToBt2020Nits(*high, input), expectedHigh);
+        CheckSameRgb(MapAgxToBt2020Nits(*low, input), expectedLow);
+    }
+    constexpr LinearRgb highlight{0.72, 0.72, 0.72};
+    FO4HDR_CHECK(MapAgxToBt2020Nits(*high, highlight).red >
+        MapAgxToBt2020Nits(*low, highlight).red);
 }
 
 }  // namespace
@@ -231,11 +304,13 @@ void TestAgxInputPolicy()
 void RunToneMappingTests()
 {
     TestAces2ReferenceSamples();
+    TestAces2ContainedInputs();
     TestAces2InputPolicy();
     TestAces2PeakReuse();
     TestAgxNeutralReferences();
     TestAgxContainedInputs();
     TestAgxInputPolicy();
+    TestAgxContextReuse();
 }
 
 }  // namespace fo4hdr::tests

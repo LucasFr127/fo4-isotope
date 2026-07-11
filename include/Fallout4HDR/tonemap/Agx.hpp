@@ -3,7 +3,45 @@
 
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
+#include <optional>
+
 namespace fo4hdr {
+
+class AgxTransform
+{
+public:
+    struct SigmoidSegment
+    {
+        double scale;
+        double power;
+    };
+    struct Sigmoid
+    {
+        double transitionX;
+        double transitionY;
+        SigmoidSegment toe;
+        SigmoidSegment shoulder;
+        double slope;
+        double intercept;
+    };
+
+private:
+    friend std::optional<AgxTransform> CreateAgxTransform(double) noexcept;
+    friend LinearRgb MapAgxToBt2020Nits(const AgxTransform&, LinearRgb) noexcept;
+    AgxTransform() noexcept = default;
+
+    double displayPeakNits_{};
+    double hdrSdrRatio_{};
+    double darkMaximumExponent_{};
+    Sigmoid formationSigmoid_{};
+    Sigmoid darkeningSigmoid_{};
+};
+
+// Small prepared value state avoids allocation and repeated sigmoid formation.
+// Invalid peaks return no context; only complete values are published.
+[[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(double displayPeakNits) noexcept;
+[[nodiscard]] LinearRgb MapAgxToBt2020Nits(
+    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept;
 
 // Scene-linear BT.709/D65 uses the fixed 203-nit scene reference white.
 // Returns contained absolute display-linear BT.2020 nits, without display encoding.

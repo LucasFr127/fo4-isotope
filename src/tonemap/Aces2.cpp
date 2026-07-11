@@ -394,6 +394,32 @@ struct PeakTransform
 
 }  // namespace
 
+class Aces2Transform
+{
+public:
+    explicit Aces2Transform(double peak) noexcept : state(peak) {}
+    const PeakTransform state;
+};
+
+void Aces2TransformDeleter::operator()(const Aces2Transform* transform) const noexcept
+{
+    delete transform;
+}
+
+Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept
+{
+    if (!std::isfinite(displayPeakNits)) return {};
+    if (displayPeakNits < kMinimumDisplayPeakNits || displayPeakNits > kMaximumDisplayPeakNits)
+        return {};
+    return Aces2TransformHandle{new (std::nothrow) Aces2Transform(displayPeakNits)};
+}
+
+LinearRgb MapAces2ToBt2020Nits(
+    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    return EvaluateScene(transform.state, sceneLinearBt709);
+}
+
 LinearRgb MapAces2ToBt2020Nits(LinearRgb sceneLinearBt709, double displayPeakNits) noexcept
 {
     if (!std::isfinite(displayPeakNits)) return {};

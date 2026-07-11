@@ -3,7 +3,24 @@
 
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
+#include <memory>
+
 namespace fo4hdr {
+
+class Gt7Transform;
+struct Gt7TransformDeleter
+{
+    void operator()(const Gt7Transform* transform) const noexcept;
+};
+using Gt7TransformHandle = std::unique_ptr<const Gt7Transform, Gt7TransformDeleter>;
+
+// Retain one immutable peak-specific context across a reference sample loop.
+// Invalid peaks or allocation failure return an empty handle.
+[[nodiscard]] Gt7TransformHandle CreateGt7Transform(double displayPeakNits) noexcept;
+[[nodiscard]] LinearRgb MapGt7ReferenceRec2020(
+    const Gt7Transform& transform, LinearRgb framebufferRec2020) noexcept;
+[[nodiscard]] LinearRgb MapGt7ToBt2020Nits(
+    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept;
 
 // Linear Rec.2020 framebuffer input and output use 1.0 = 100 cd/m².
 // Both scalar interfaces require finite peaks in [250,10000] nits and fix
