@@ -151,11 +151,9 @@ std::vector<std::uint32_t> ReadTerminal(const Device& gpu, ID3D11Texture2D* text
     return pixels;
 }
 
-void CheckTerminalPixel(std::uint32_t packed, const Float4& scene)
+void CheckTerminalNits(std::uint32_t packed, LinearRgb light)
 {
-    const auto primaries = ConvertBt709ToBt2020({scene.red, scene.green, scene.blue});
-    const auto encoded = EncodeSt2084Pq(ContainBt2020Nits({primaries.red * kSceneReferenceWhiteNits,
-        primaries.green * kSceneReferenceWhiteNits, primaries.blue * kSceneReferenceWhiteNits}, presentationPeakNits));
+    const auto encoded = EncodeSt2084Pq(ContainBt2020Nits(light, presentationPeakNits));
     const std::array expected{QuantizeR10Unorm(encoded.red), QuantizeR10Unorm(encoded.green),
         QuantizeR10Unorm(encoded.blue)};
     for (UINT channel = 0; channel < expected.size(); ++channel)
@@ -165,6 +163,13 @@ void CheckTerminalPixel(std::uint32_t packed, const Float4& scene)
         FO4HDR_CHECK(std::abs(actual - static_cast<int>(expected[channel])) <= 1);
     }
     FO4HDR_CHECK((packed >> 30) == 3);
+}
+
+void CheckTerminalPixel(std::uint32_t packed, const Float4& scene)
+{
+    const auto primaries = ConvertBt709ToBt2020({scene.red, scene.green, scene.blue});
+    CheckTerminalNits(packed, {primaries.red * kSceneReferenceWhiteNits,
+        primaries.green * kSceneReferenceWhiteNits, primaries.blue * kSceneReferenceWhiteNits});
 }
 
 void CheckPresentationPixels(const std::vector<Float4>& scene, const std::vector<std::uint32_t>& terminal)
@@ -264,8 +269,8 @@ struct BorrowedComputeState
         const UINT first = 16;
         const UINT count = 16;
         context->CSSetConstantBuffers1(0, 1, &buffer, &first, &count);
-        auto* oldSource = source.Get();
-        context->CSSetShaderResources(0, 1, &oldSource);
+        const std::array<ID3D11ShaderResourceView*, 3> oldSources{source.Get(), source.Get(), source.Get()};
+        context->CSSetShaderResources(0, static_cast<UINT>(oldSources.size()), oldSources.data());
         auto* target = fixture.renderer.Views(fixture.destination).renderTarget;
         auto* om = omCounter.view.Get();
         const UINT omCount = 11;
@@ -297,9 +302,13 @@ struct BorrowedComputeState
         context->CSGetConstantBuffers1(0, 1, &actual, &first, &count);
         FO4HDR_CHECK(actual.Get() == constants.Get());
         FO4HDR_CHECK(first == 16 && count == 16);
-        ComPtr<ID3D11ShaderResourceView> oldSource;
-        context->CSGetShaderResources(0, 1, &oldSource);
-        FO4HDR_CHECK(oldSource.Get() == source.Get());
+        std::array<ID3D11ShaderResourceView*, 3> oldSources{};
+        context->CSGetShaderResources(0, static_cast<UINT>(oldSources.size()), oldSources.data());
+        for (auto* oldSource : oldSources)
+        {
+            FO4HDR_CHECK(oldSource == source.Get());
+            if (oldSource) oldSource->Release();
+        }
         ComPtr<ID3D11Predicate> predicate;
         BOOL value{};
         context->GetPredication(&predicate, &value);
@@ -392,6 +401,111 @@ void VerifyTerminalRejections(PresentationPass& pass, BorrowedComputeState& stat
     CheckLineageBlack(pass, state, terminal);
 }
 
+using CodedLayer = std::array<std::uint8_t, 4>;
+constexpr CodedLayer backdropCodes{16, 32, 48, 64};
+constexpr CodedLayer hudCodes{64, 32, 16, 128};
+
+ComPtr<ID3D11ShaderResourceView> CompletedLayerSource(PixelFixture& fixture, CodedLayer codes)
+{
+    const std::vector<CodedLayer> pixels(presentationWidth * presentationHeight, codes);
+    auto description = SceneDescription(presentationWidth, presentationHeight);
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA data{pixels.data(), presentationWidth * sizeof(CodedLayer), 0};
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> source;
+    CheckHresult(fixture.gpu.device->CreateTexture2D(&description, &data, &texture), "Completed coded layer");
+    CheckHresult(fixture.gpu.device->CreateShaderResourceView(texture.Get(), nullptr, &source), "Completed layer SRV");
+    return source;
+}
+
+Float4 DecodedLayer(CodedLayer codes, bool hud)
+{
+    const auto coverage = codes[3] / 255.0;
+    const auto divisor = hud ? coverage : 1.0;
+    const auto scale = hud ? coverage : 1.0;
+    return {static_cast<float>(DecodeAuthoredSrgb(codes[0] / 255.0 / divisor) * scale),
+        static_cast<float>(DecodeAuthoredSrgb(codes[1] / 255.0 / divisor) * scale),
+        static_cast<float>(DecodeAuthoredSrgb(codes[2] / 255.0 / divisor) * scale),
+        static_cast<float>(coverage)};
+}
+
+Float4 CompositeLayer(const Float4& behind, const Float4& layer)
+{
+    return {layer.red + behind.red * (1 - layer.alpha),
+        layer.green + behind.green * (1 - layer.alpha),
+        layer.blue + behind.blue * (1 - layer.alpha), 1};
+}
+
+void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+{
+    auto& fixture = state.fixture;
+    // The caller supplies completed R8 code contributions and coverage.
+    const auto backdrop = CompletedLayerSource(fixture, backdropCodes);
+    const auto hud = CompletedLayerSource(fixture, hudCodes);
+    const auto scene = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.renderer.CurrentScene()).texture);
+    state.Bind();
+    FO4HDR_CHECK(pass.PrepareLayers(backdrop.Get(), hud.Get(), presentationScope));
+    state.CheckRestored();
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(pixels.size() == scene.size());
+    if (pixels.size() != scene.size()) throw std::runtime_error("Layer composition extent mismatch");
+    const auto decodedBackdrop = DecodedLayer(backdropCodes, false);
+    const auto decodedHud = DecodedLayer(hudCodes, true);
+    for (std::size_t index = 0; index < scene.size(); ++index)
+        CheckTerminalPixel(pixels[index], CompositeLayer(
+            CompositeLayer(scene[index], decodedBackdrop), decodedHud));
+}
+
+Float4 VideoExpected()
+{
+    const auto expanded = ConvertBt709ToBt2020({DecodeAuthoredSrgb(0.75),
+        DecodeAuthoredSrgb(0.5), DecodeAuthoredSrgb(0.25)});
+    return {static_cast<float>(expanded.red), static_cast<float>(expanded.green),
+        static_cast<float>(expanded.blue), 0.5f};
+}
+
+void VerifyVideoPresentation(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+{
+    auto& fixture = state.fixture;
+    const auto originalInput = fixture.input;
+    const auto originalDestination = fixture.destination;
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    const std::vector<Float4> input(presentationWidth * presentationHeight, {0.25f, 0.5f, 0.75f, 0.5f});
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, input);
+    const auto videoConstants = BindPostProcess(fixture);
+    FO4HDR_CHECK(DrawPass(fixture, 8) == SceneDrawOutcome::replaced);
+    CheckBoundInputs(fixture, 0, videoConstants.Get());
+    CheckSelection(fixture, fixture.destination);
+    FO4HDR_CHECK(fixture.renderer.CurrentSceneDomain() == SceneColorDomain::bt2020UiRelative);
+    const auto expected = VideoExpected();
+    const auto video = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    for (const auto& pixel : video) CheckPixel(pixel, expected);
+    fixture.input = fixture.destination;
+    fixture.destination = AdditionalScene(fixture);
+    const auto fxaaConstants = BindPostProcess(fixture);
+    FO4HDR_CHECK(DrawPass(fixture, 7) == SceneDrawOutcome::replaced);
+    CheckBoundInputs(fixture, 0, fxaaConstants.Get());
+    CheckSelection(fixture, fixture.destination);
+    FO4HDR_CHECK(fixture.renderer.CurrentSceneDomain() == SceneColorDomain::bt2020UiRelative);
+    const auto filtered = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    for (const auto& pixel : filtered) CheckPixel(pixel, expected);
+    state.Bind();
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(pixels.size() == filtered.size());
+    if (pixels.size() != filtered.size()) throw std::runtime_error("Video composition extent mismatch");
+    // The final input is the actual FP16 BT.2020 transport, relative to 203 nits.
+    for (std::size_t index = 0; index < filtered.size(); ++index)
+        CheckTerminalNits(pixels[index], {filtered[index].red * kSceneReferenceWhiteNits,
+            filtered[index].green * kSceneReferenceWhiteNits, filtered[index].blue * kSceneReferenceWhiteNits});
+    fixture.input = originalInput;
+    fixture.destination = originalDestination;
+}
+
 void VerifyTerminalPresentation(const std::filesystem::path& directory)
 {
     PixelFixture fixture{directory, presentationWidth, presentationHeight};
@@ -409,6 +523,14 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         BorrowedComputeState state{fixture, directory};
         state.Bind();
         state.CheckRestored();
+        FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+        state.CheckRestored();
+        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        VerifyLayerTransport(pass, state, terminal);
+        VerifyVideoPresentation(pass, state, terminal);
+        FO4HDR_CHECK(fixture.renderer.BeginFrame());
+        SeedPresentation(fixture, scenes);
+        state.Bind();
         FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
         state.CheckRestored();
         CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));

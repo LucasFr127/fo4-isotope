@@ -3,6 +3,8 @@
 #include "PresentationPass.hpp"
 
 #include <fo4hdr-shaders/PresentPixels.hpp>
+#include <fo4hdr-shaders/PrepareBackdrop.hpp>
+#include <fo4hdr-shaders/PrepareHud.hpp>
 
 #include <array>
 #include <cmath>
@@ -18,12 +20,21 @@ constexpr UINT classCapacity = 256;
 constexpr std::array<UINT, outputCapacity> preserveCounters{
     UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1)};
 
+template<class Interface, std::size_t count>
+void ReleaseReferences(const std::array<Interface*, count>& references, UINT captured) noexcept
+{
+    for (UINT index = 0; index < captured; ++index)
+    {
+        if (references[index] != nullptr) references[index]->Release();
+    }
+}
+
 struct PresentConstants
 {
     UINT width;
     UINT height;
     float peak;
-    float reserved;
+    UINT sceneDomain;
 };
 static_assert(sizeof(PresentConstants) == 16);
 
@@ -166,7 +177,7 @@ public:
     {
         context_->CSGetShader(&shader_, classes_.data(), &classCount_);
         context_->CSGetConstantBuffers1(0, 1, &constants_, &firstConstant_, &constantCount_);
-        context_->CSGetShaderResources(0, 1, &input_);
+        context_->CSGetShaderResources(0, static_cast<UINT>(inputs_.size()), inputs_.data());
         context_->GetPredication(&predicate_, &predicateValue_);
     }
 
@@ -174,10 +185,8 @@ public:
     {
         if (mutated_) Restore();
         const auto captured = classCount_ < classCapacity ? classCount_ : classCapacity;
-        for (UINT index = 0; index < captured; ++index)
-        {
-            if (classes_[index] != nullptr) classes_[index]->Release();
-        }
+        ReleaseReferences(classes_, captured);
+        ReleaseReferences(inputs_, static_cast<UINT>(inputs_.size()));
     }
 
     [[nodiscard]] bool Ready() const noexcept
@@ -196,10 +205,11 @@ public:
     }
 
     void Bind(ID3D11ComputeShader* shader, ID3D11Buffer* constants,
-        ID3D11ShaderResourceView* input, ID3D11UnorderedAccessView* target) noexcept
+        const std::array<ID3D11ShaderResourceView*, 3>& inputs,
+        ID3D11UnorderedAccessView* target) noexcept
     {
         PrepareOutputs();
-        context_->CSSetShaderResources(0, 1, &input);
+        context_->CSSetShaderResources(0, static_cast<UINT>(inputs.size()), inputs.data());
         context_->CSSetUnorderedAccessViews(0, 1, &target, preserveCounters.data());
         context_->CSSetConstantBuffers(0, 1, &constants);
         context_->CSSetShader(shader, nullptr, 0);
@@ -211,14 +221,13 @@ public:
 private:
     void Restore() noexcept
     {
-        ID3D11ShaderResourceView* emptyInput{};
+        std::array<ID3D11ShaderResourceView*, 3> emptyInputs{};
         ID3D11UnorderedAccessView* emptyTarget{};
-        context_->CSSetShaderResources(0, 1, &emptyInput);
+        context_->CSSetShaderResources(0, static_cast<UINT>(emptyInputs.size()), emptyInputs.data());
         context_->CSSetUnorderedAccessViews(0, 1, &emptyTarget, preserveCounters.data());
         outputs_.Restore(context_);
-        auto* input = input_.Get();
         auto* constants = constants_.Get();
-        context_->CSSetShaderResources(0, 1, &input);
+        context_->CSSetShaderResources(0, static_cast<UINT>(inputs_.size()), inputs_.data());
         context_->CSSetConstantBuffers1(0, 1, &constants, &firstConstant_, &constantCount_);
         context_->CSSetShader(shader_.Get(), classes_.data(), classCount_);
         context_->SetPredication(predicate_.Get(), predicateValue_);
@@ -228,7 +237,7 @@ private:
     OutputBindings outputs_;
     ComPtr<ID3D11ComputeShader> shader_;
     ComPtr<ID3D11Buffer> constants_;
-    ComPtr<ID3D11ShaderResourceView> input_;
+    std::array<ID3D11ShaderResourceView*, 3> inputs_{};
     ComPtr<ID3D11Predicate> predicate_;
     std::array<ID3D11ClassInstance*, classCapacity> classes_{};
     UINT classCount_{classCapacity};
@@ -260,14 +269,12 @@ bool ValidConfiguration(const PresentationConfiguration& value) noexcept
         value.displayPeakNits <= 10000.0F;
 }
 
-bool TypedStoreSupported(ID3D11Device* device) noexcept
+bool TypedStoreSupported(ID3D11Device* device, DXGI_FORMAT format, UINT required) noexcept
 {
     UINT support{};
-    if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R10G10B10A2_UNORM, &support))) return false;
-    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D |
-        D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW;
+    if (FAILED(device->CheckFormatSupport(format, &support))) return false;
     if ((support & required) != required) return false;
-    D3D11_FEATURE_DATA_FORMAT_SUPPORT2 details{DXGI_FORMAT_R10G10B10A2_UNORM, 0};
+    D3D11_FEATURE_DATA_FORMAT_SUPPORT2 details{format, 0};
     if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2,
             &details, sizeof(details)))) return false;
     return (details.OutFormatSupport2 & D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE) != 0;
@@ -280,14 +287,26 @@ bool PresentationDevice(ID3D11Device* device, ID3D11DeviceContext* context) noex
     D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
     if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS,
             &options, sizeof(options)))) return false;
-    return options.ConstantBufferOffsetting && TypedStoreSupported(device);
+    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D |
+        D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW;
+    return options.ConstantBufferOffsetting &&
+        TypedStoreSupported(device, DXGI_FORMAT_R10G10B10A2_UNORM, required);
 }
 
-HRESULT CreateConstants(ID3D11Device* device, const PresentationConfiguration& configuration,
+bool LayerFormatsSupported(ID3D11Device* device) noexcept
+{
+    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D |
+        D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW | D3D11_FORMAT_SUPPORT_SHADER_LOAD;
+    if (!TypedStoreSupported(device, DXGI_FORMAT_R16G16B16A16_FLOAT, required)) return false;
+    UINT support{};
+    if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R8G8B8A8_UNORM, &support))) return false;
+    constexpr UINT codedRequired = D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_SHADER_LOAD;
+    return (support & codedRequired) == codedRequired;
+}
+
+HRESULT CreateConstants(ID3D11Device* device, const PresentConstants& values,
     ID3D11Buffer** output) noexcept
 {
-    const PresentConstants values{
-        configuration.width, configuration.height, configuration.displayPeakNits, 0.0F};
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = sizeof(values);
     description.Usage = D3D11_USAGE_IMMUTABLE;
@@ -300,7 +319,8 @@ struct PreparedPresentation
 {
     ComPtr<ID3D11DeviceContext1> context;
     ComPtr<ID3D11ComputeShader> shader;
-    ComPtr<ID3D11Buffer> constants;
+    std::array<ComPtr<ID3D11Buffer>, 2> constants;
+    std::array<ComPtr<ID3D11ComputeShader>, 2> layerShaders;
 };
 
 bool ValidInitialization(ID3D11Device* device, ID3D11DeviceContext* context,
@@ -319,15 +339,38 @@ bool PrepareContext(ID3D11Device* device, ID3D11DeviceContext* context,
     return prepared != nullptr;
 }
 
+bool PrepareConstantVariants(ID3D11Device* device,
+    const PresentationConfiguration& configuration, PreparedPresentation& prepared) noexcept
+{
+    for (UINT domain = 0; domain < prepared.constants.size(); ++domain)
+    {
+        const PresentConstants values{
+            configuration.width, configuration.height, configuration.displayPeakNits, domain};
+        if (FAILED(CreateConstants(device, values, &prepared.constants[domain]))) return false;
+        if (!prepared.constants[domain]) return false;
+    }
+    return true;
+}
+
+bool PrepareLayerPrograms(ID3D11Device* device, PreparedPresentation& prepared) noexcept
+{
+    if (FAILED(device->CreateComputeShader(kPrepareBackdropBytecode,
+            sizeof(kPrepareBackdropBytecode), nullptr, &prepared.layerShaders[0]))) return false;
+    if (FAILED(device->CreateComputeShader(kPrepareHudBytecode,
+            sizeof(kPrepareHudBytecode), nullptr, &prepared.layerShaders[1]))) return false;
+    return prepared.layerShaders[0] && prepared.layerShaders[1];
+}
+
 bool PreparePresentation(ID3D11Device* device, ID3D11DeviceContext* context,
     const PresentationConfiguration& configuration, PreparedPresentation& prepared) noexcept
 {
     if (!PrepareContext(device, context, prepared.context)) return false;
+    if (!LayerFormatsSupported(device)) return false;
     if (FAILED(device->CreateComputeShader(kPresentPixelsBytecode,
             sizeof(kPresentPixelsBytecode), nullptr, &prepared.shader))) return false;
     if (!prepared.shader) return false;
-    if (FAILED(CreateConstants(device, configuration, &prepared.constants))) return false;
-    return prepared.constants != nullptr;
+    if (!PrepareConstantVariants(device, configuration, prepared)) return false;
+    return PrepareLayerPrograms(device, prepared);
 }
 
 bool TerminalLayout(const D3D11_TEXTURE2D_DESC& value) noexcept
@@ -378,6 +421,43 @@ bool SelectedTexture(ID3D11Texture2D* scene,
     scene->GetDesc(&description);
     if (description.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) return false;
     return description.Width == configuration.width && description.Height == configuration.height;
+}
+
+bool CodedLayerDescription(const D3D11_TEXTURE2D_DESC& value,
+    const PresentationConfiguration& configuration) noexcept
+{
+    if (value.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
+    if (value.Width != configuration.width || value.Height != configuration.height) return false;
+    if (!TerminalLayout(value)) return false;
+    if (value.Usage != D3D11_USAGE_DEFAULT) return false;
+    if (value.CPUAccessFlags != 0 || value.MiscFlags != 0) return false;
+    return (value.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
+}
+
+bool CodedLayerView(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
+{
+    if (view.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
+    if (view.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
+    return view.Texture2D.MostDetailedMip == 0 && view.Texture2D.MipLevels == 1;
+}
+
+bool CodedLayerSource(ID3D11ShaderResourceView* source, ID3D11Device* device,
+    const PresentationConfiguration& configuration) noexcept
+{
+    if (source == nullptr) return true;
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+    source->GetDesc(&view);
+    if (!CodedLayerView(view)) return false;
+    const auto resource = Resource(source);
+    ComPtr<ID3D11Texture2D> texture;
+    if (!resource || FAILED(resource.As(&texture))) return false;
+    if (!texture) return false;
+    ComPtr<ID3D11Device> actualDevice;
+    texture->GetDevice(&actualDevice);
+    if (!SameObject(actualDevice.Get(), device)) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    return CodedLayerDescription(description, configuration);
 }
 
 bool FlipChainLayout(const DXGI_SWAP_CHAIN_DESC1& value) noexcept
@@ -459,6 +539,28 @@ PresentationPass::~PresentationPass() noexcept
     if (!Retire()) std::terminate();
 }
 
+bool PresentationPass::PrepareLayer(ID3D11Device* device,
+    const PresentationConfiguration& configuration, LinearLayer& prepared) noexcept
+{
+    D3D11_TEXTURE2D_DESC description{};
+    description.Width = configuration.width;
+    description.Height = configuration.height;
+    description.MipLevels = 1;
+    description.ArraySize = 1;
+    description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    description.SampleDesc.Count = 1;
+    description.Usage = D3D11_USAGE_DEFAULT;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    if (FAILED(device->CreateTexture2D(&description, nullptr, &prepared.texture))) return false;
+    if (!prepared.texture) return false;
+    if (FAILED(device->CreateShaderResourceView(prepared.texture.Get(), nullptr, &prepared.source)))
+        return false;
+    if (!prepared.source) return false;
+    if (FAILED(device->CreateUnorderedAccessView(prepared.texture.Get(), nullptr, &prepared.target)))
+        return false;
+    return prepared.target != nullptr;
+}
+
 bool PresentationPass::Initialize(ID3D11Device* device,
     ID3D11DeviceContext* immediateContext, PresentationConfiguration configuration) noexcept
 {
@@ -466,6 +568,11 @@ bool PresentationPass::Initialize(ID3D11Device* device,
     if (!ValidInitialization(device, immediateContext, configuration)) return false;
     PreparedPresentation prepared;
     if (!PreparePresentation(device, immediateContext, configuration, prepared)) return false;
+    std::array<LinearLayer, 2> preparedLayers;
+    for (auto& layer : preparedLayers)
+    {
+        if (!PrepareLayer(device, configuration, layer)) return false;
+    }
     if (!lifetime_.Prepare(2, 4)) return false;
     ownerThread_ = std::this_thread::get_id();
     configuration_ = configuration;
@@ -473,6 +580,8 @@ bool PresentationPass::Initialize(ID3D11Device* device,
     context_ = std::move(prepared.context);
     shader_ = std::move(prepared.shader);
     constants_ = std::move(prepared.constants);
+    layerShaders_ = std::move(prepared.layerShaders);
+    layers_ = std::move(preparedLayers);
     lifetime_.PublishInitial();
     return true;
 }
@@ -555,10 +664,79 @@ bool PresentationPass::QualifiedTarget(ID3D11UnorderedAccessView* terminal,
     return sourceIdentity && targetIdentity && sourceIdentity.Get() != targetIdentity.Get();
 }
 
+bool PresentationPass::QualifiedLayerSource(ID3D11ShaderResourceView* source,
+    ComPtr<IUnknown>& identity) const noexcept
+{
+    if (!CodedLayerSource(source, device_.Get(), configuration_)) return false;
+    if (source == nullptr) return true;
+    identity = Identity(Resource(source).Get());
+    if (!identity) return false;
+    for (const auto& layer : layers_)
+    {
+        const auto owned = Identity(layer.texture.Get());
+        if (!owned || identity.Get() == owned.Get()) return false;
+    }
+    return true;
+}
+
+bool PresentationPass::QualifiedLayerSources(ID3D11ShaderResourceView* backdrop,
+    ID3D11ShaderResourceView* hud) const noexcept
+{
+    std::array<ComPtr<IUnknown>, 2> identities;
+    if (!QualifiedLayerSource(backdrop, identities[0])) return false;
+    if (!QualifiedLayerSource(hud, identities[1])) return false;
+    if (!identities[0] || !identities[1]) return true;
+    return identities[0].Get() != identities[1].Get();
+}
+
+void PresentationPass::ClearLayers() noexcept
+{
+    const float transparent[4]{};
+    for (const auto& layer : layers_)
+        context_->ClearUnorderedAccessViewFloat(layer.target.Get(), transparent);
+}
+
+bool PresentationPass::PrepareLayers(ID3D11ShaderResourceView* backdrop,
+    ID3D11ShaderResourceView* hud, PresentationScope scope) noexcept
+{
+    if (!CanExecute(scope)) return false;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (frame == 0) return false;
+    layerFrame_ = 0;
+    layerFailureFrame_ = frame;
+    if (!QualifiedLayerSources(backdrop, hud)) return false;
+    ExecutionScope executing{executing_};
+    {
+        ScopedComputeState state{context_.Get()};
+        if (!state.Ready()) return false;
+        state.PrepareOutputs();
+        const std::array sources{backdrop, hud};
+        for (std::size_t index = 0; index < sources.size(); ++index)
+        {
+            if (sources[index] == nullptr)
+            {
+                const float transparent[4]{};
+                context_->ClearUnorderedAccessViewFloat(layers_[index].target.Get(), transparent);
+                continue;
+            }
+            const std::array<ID3D11ShaderResourceView*, 3> inputs{sources[index], nullptr, nullptr};
+            state.Bind(layerShaders_[index].Get(), constants_[0].Get(), inputs,
+                layers_[index].target.Get());
+            context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);
+        }
+    }
+    // Both outputs become usable only after borrowed bindings have been restored.
+    layerFrame_ = frame;
+    layerFailureFrame_ = 0;
+    return true;
+}
+
 bool PresentationPass::BeginFrame(PresentationScope scope) noexcept
 {
     if (!CanExecute(scope)) return false;
     framePrepared_ = false;
+    layerFrame_ = 0;
+    layerFailureFrame_ = 0;
     if (!configuration_.scenes->EndFrame()) return false;
     auto* target = CurrentTarget();
     if (target == nullptr) return false;
@@ -576,17 +754,31 @@ bool PresentationPass::ExecuteCurrentScene(ID3D11UnorderedAccessView* terminal,
     const auto selected = configuration_.scenes->CurrentScene();
     const auto source = configuration_.scenes->Views(selected);
     if (!QualifiedTarget(terminal, source.texture)) return false;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (frame != 0 && layerFailureFrame_ == frame) return false;
     ExecutionScope executing{executing_};
-    ScopedComputeState state{context_.Get()};
-    if (!state.Ready()) return false;
     if (source.texture == nullptr)
     {
-        state.PrepareOutputs();
-        const float black[]{0.0F, 0.0F, 0.0F, 1.0F};
-        context_->ClearUnorderedAccessViewFloat(terminal, black);
+        ClearBlack(context_.Get(), terminal);
         return false;
     }
-    state.Bind(shader_.Get(), constants_.Get(), source.shaderResource, terminal);
+    return ComposeSelected(source, terminal);
+}
+
+bool PresentationPass::ComposeSelected(SceneTextureViews source,
+    ID3D11UnorderedAccessView* terminal) noexcept
+{
+    ScopedComputeState state{context_.Get()};
+    if (!state.Ready()) return false;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (layerFrame_ != frame || frame == 0)
+    {
+        state.PrepareOutputs();
+        ClearLayers();
+    }
+    const std::array inputs{source.shaderResource, layers_[0].source.Get(), layers_[1].source.Get()};
+    const auto domain = static_cast<std::size_t>(configuration_.scenes->CurrentSceneDomain());
+    state.Bind(shader_.Get(), constants_[domain].Get(), inputs, terminal);
     context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);
     return true;
 }
@@ -631,7 +823,9 @@ bool PresentationPass::Retire() noexcept
     if (!UnbindChainBuffer()) return false;
     buffer_ = {};
     chain_.Reset();
-    constants_.Reset();
+    constants_ = {};
+    layerShaders_ = {};
+    layers_ = {};
     shader_.Reset();
     context_.Reset();
     device_.Reset();
@@ -648,6 +842,8 @@ bool PresentationPass::CanRetire() const noexcept
 void PresentationPass::CloseFrame() noexcept
 {
     framePrepared_ = false;
+    layerFrame_ = 0;
+    layerFailureFrame_ = 0;
     if (configuration_.scenes != nullptr)
         static_cast<void>(configuration_.scenes->EndFrame());
 }

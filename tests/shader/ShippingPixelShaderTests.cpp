@@ -120,6 +120,11 @@ void CheckChannel(float actual, double expected)
     FO4HDR_CHECK(std::abs(static_cast<double>(actual) - expected) <= tolerance);
 }
 
+double DecodeAuthoredSrgb(double code)
+{
+    return code <= 0.04045 ? code / 12.92 : std::pow((code + 0.055) / 1.055, 2.4);
+}
+
 void CheckPixel(const Float4& actual, const Float4& expected)
 {
     CheckChannel(actual.red, expected.red);
@@ -854,6 +859,32 @@ void VerifyExternalInvalidation(PixelFixture& fixture, const LineageScenes& scen
     FO4HDR_CHECK(fixture.renderer.EndFrame());
 }
 
+ComPtr<ID3D11Buffer> BindPostProcess(PixelFixture& fixture)
+{
+    fixture.Bind();
+    auto* source = fixture.renderer.Views(fixture.input).shaderResource;
+    fixture.gpu.context->PSSetShaderResources(0, 1, &source);
+    auto* sampler = fixture.point.Get();
+    fixture.gpu.context->PSSetSamplers(0, 1, &sampler);
+    const std::array<Float4, 1> values{{{1.0f / fixture.extentWidth, 1.0f / fixture.extentHeight, 0, 0}}};
+    auto constants = ConstantBuffer(fixture.gpu.device.Get(), values);
+    auto* buffer = constants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(2, 1, &buffer);
+    return constants;
+}
+
+void VerifyFxaaUniform(PixelFixture& fixture)
+{
+    const Float4 hdr{2, 4, 1, 0.75f};
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, UniformPixels(hdr));
+    const auto constants = BindPostProcess(fixture);
+    FO4HDR_CHECK(DrawPass(fixture, 7) == SceneDrawOutcome::replaced);
+    CheckBoundInputs(fixture, 0, constants.Get());
+    const auto pixels = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    for (const auto& pixel : pixels) CheckPixel(pixel, hdr);
+    FO4HDR_CHECK(pixels.front().green > 1);
+}
+
 void VerifyTemporalAndLineage(PixelFixture& fixture)
 {
     VerifyTemporalUniform(fixture, 5, 0);
@@ -916,9 +947,10 @@ void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
     for (std::size_t variant = 0; variant < 4; ++variant) detail::VerifyTone(fixture, variant);
     detail::VerifyLut(fixture);
     detail::VerifyForwarding(fixture);
+    detail::VerifyFxaaUniform(fixture);
     detail::VerifyTemporalAndLineage(fixture);
     detail::VerifyInvocationRejection(fixture);
-    std::cout << "Checked scene factory, seven shipping pixel programs, frame lineage and finite-draw state restoration\n";
+    std::cout << "Checked scene factory, nine shipping pixel programs, frame lineage and finite-draw state restoration\n";
     VerifyPresentationPass(fixtureDirectory);
 }
 

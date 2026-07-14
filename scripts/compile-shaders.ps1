@@ -46,7 +46,7 @@ Invoke-ShaderCompilation -Program @{
 
 $shaderDirectory = [IO.Path]::Combine($projectRoot, "build/include/fo4hdr-shaders")
 foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "CreativeGradeLut",
-    "TemporalAa", "TemporalAa2")) {
+    "TemporalAa", "TemporalAa2", "Fxaa", "Video")) {
     Invoke-ShaderCompilation -Program @{
         Source = "shaders/fallout4/$name.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Symbol = "k$($name)Bytecode"
     } -Destination ([IO.Path]::Combine($shaderDirectory, "$name.hpp"))
@@ -55,6 +55,12 @@ foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "Creat
 Invoke-ShaderCompilation -Program @{
     Source = "shaders/output/PresentPixels.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Symbol = "kPresentPixelsBytecode"
 } -Destination ([IO.Path]::Combine($shaderDirectory, "PresentPixels.hpp"))
+
+foreach ($entry in @("PrepareBackdrop", "PrepareHud")) {
+    Invoke-ShaderCompilation -Program @{
+        Source = "shaders/output/PresentPixels.cs.hlsl"; Profile = "cs_5_0"; Entry = $entry; Symbol = "k$($entry)Bytecode"
+    } -Destination ([IO.Path]::Combine($shaderDirectory, "$entry.hpp"))
+}
 
 $fixtureDirectory = [IO.Path]::GetDirectoryName($outputPath)
 foreach ($fixture in @(

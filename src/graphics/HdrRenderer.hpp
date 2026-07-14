@@ -51,6 +51,12 @@ enum class SceneDrawOutcome : std::uint8_t
     callbackFailed
 };
 
+enum class SceneColorDomain : std::uint8_t
+{
+    bt709Scene = 0,
+    bt2020UiRelative = 1
+};
+
 // One exclusively owned immediate context, one initialization thread and one
 // nonrecycled generation. Handles/views expire at Retire or owner destruction;
 // do not retain them across destruction and reconstruction at the same address.
@@ -59,7 +65,7 @@ class ScenePassRenderer
 public:
     static constexpr std::size_t sceneTextureCapacity = 8;
     static constexpr std::size_t observedShaderCapacity = 64;
-    static constexpr std::size_t replacementProgramCount = 7;
+    static constexpr std::size_t replacementProgramCount = 9;
 
     ScenePassRenderer() noexcept = default;
     ~ScenePassRenderer() noexcept;
@@ -83,11 +89,16 @@ public:
     [[nodiscard]] bool EndFrame() noexcept;
     // Query at consumption: retained handles remain storage-valid after lineage expires.
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
+    [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
+    // Zero denotes a closed or unavailable frame; completed layers use this token.
+    [[nodiscard]] std::uint64_t FrameGeneration() const noexcept;
     // Report every external write through a borrowed alias before it occurs.
     [[nodiscard]] bool InvalidateScene(SceneTextureHandle handle) noexcept;
 
     // Direct execution consumes the caller's independently qualified descriptor;
     // it does not establish an original-bytecode match.
+    // FXAA requires the positive-HDR source contract; video requires completed
+    // authored BGR codes, and publishes a separate UI-relative BT.2020 domain.
     // Temporal metadata/history require R16G16B16A16_FLOAT or R32G32B32A32_FLOAT
     // views; the caller separately qualifies their native float4 semantics.
     [[nodiscard]] SceneDrawOutcome Execute(const RenoDxShaderDescriptor& descriptor,
@@ -103,6 +114,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
         bool toneProduced{};
+        SceneColorDomain domain{SceneColorDomain::bt709Scene};
     };
 
     struct ObservedShader
@@ -117,6 +129,7 @@ private:
         bool toneInput{};
         bool selectionExisted{};
         std::uint8_t writes{};
+        SceneColorDomain domain{SceneColorDomain::bt709Scene};
     };
 
     [[nodiscard]] bool OnOwnerThread() const noexcept;
@@ -164,6 +177,7 @@ private:
     bool invoking_{};
     SceneTextureHandle selectedScene_;
     bool frameOpen_{};
+    std::uint64_t frameGeneration_{};
 };
 
 }  // namespace fo4hdr

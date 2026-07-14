@@ -65,6 +65,9 @@ D3D11_TEXTURE2D_DESC SceneDescription(UINT extentWidth = width, UINT extentHeigh
 void UploadScene(ID3D11DeviceContext* context, ID3D11Texture2D* texture, std::span<const Float4> pixels);
 std::vector<Float4> ReadScene(const Device& gpu, ID3D11Texture2D* texture);
 void CheckPixel(const Float4& actual, const Float4& expected);
+double DecodeAuthoredSrgb(double code);
+ComPtr<ID3D11Buffer> BindPostProcess(PixelFixture& fixture);
+void CheckBoundInputs(PixelFixture& fixture, UINT slot, ID3D11Buffer* constants);
 ComPtr<ID3D11Buffer> ConstantBuffer(ID3D11Device* device, std::span<const Float4> values);
 std::array<Float4, 6> ToneConstants();
 std::size_t LutIndex(UINT x, UINT y, UINT z);

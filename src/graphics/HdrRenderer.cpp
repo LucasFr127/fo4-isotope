@@ -11,8 +11,11 @@
 #include <fo4hdr-shaders/CreativeGradeLut.hpp>
 #include <fo4hdr-shaders/TemporalAa.hpp>
 #include <fo4hdr-shaders/TemporalAa2.hpp>
+#include <fo4hdr-shaders/Fxaa.hpp>
+#include <fo4hdr-shaders/Video.hpp>
 
 #include <exception>
+#include <limits>
 #include <utility>
 
 namespace fo4hdr {
@@ -33,7 +36,9 @@ constexpr std::array<ReplacementBytecode, ScenePassRenderer::replacementProgramC
     {kToneMapNewBBytecode, sizeof(kToneMapNewBBytecode)},
     {kCreativeGradeLutBytecode, sizeof(kCreativeGradeLutBytecode)},
     {kTemporalAaBytecode, sizeof(kTemporalAaBytecode)},
-    {kTemporalAa2Bytecode, sizeof(kTemporalAa2Bytecode)}
+    {kTemporalAa2Bytecode, sizeof(kTemporalAa2Bytecode)},
+    {kFxaaBytecode, sizeof(kFxaaBytecode)},
+    {kVideoBytecode, sizeof(kVideoBytecode)}
 }};
 
 std::size_t ProgramIndex(RenoDxShaderPass pass) noexcept
@@ -41,7 +46,8 @@ std::size_t ProgramIndex(RenoDxShaderPass pass) noexcept
     constexpr std::array supported{
         RenoDxShaderPass::toneMapA, RenoDxShaderPass::toneMapB,
         RenoDxShaderPass::toneMapNewA, RenoDxShaderPass::toneMapNewB,
-        RenoDxShaderPass::lut, RenoDxShaderPass::taa, RenoDxShaderPass::taa2};
+        RenoDxShaderPass::lut, RenoDxShaderPass::taa, RenoDxShaderPass::taa2,
+        RenoDxShaderPass::fxaa, RenoDxShaderPass::video};
     for (std::size_t index = 0; index < supported.size(); ++index)
     {
         if (supported[index] == pass) return index;
@@ -62,6 +68,12 @@ bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
 bool TemporalPass(RenoDxShaderPass pass) noexcept
 {
     return pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2;
+}
+
+bool SupportedInputDomain(RenoDxShaderPass pass, SceneColorDomain domain) noexcept
+{
+    if (domain == SceneColorDomain::bt709Scene) return true;
+    return pass == RenoDxShaderPass::fxaa;
 }
 
 ComPtr<IUnknown> CanonicalIdentity(IUnknown* object) noexcept
@@ -446,6 +458,9 @@ bool ScenePassRenderer::BeginFrame() noexcept
 {
     if (!Active() || invoking_) return false;
     ClearLineage();
+    frameOpen_ = false;
+    if (frameGeneration_ == std::numeric_limits<std::uint64_t>::max()) return false;
+    ++frameGeneration_;
     frameOpen_ = true;
     return true;
 }
@@ -466,9 +481,22 @@ SceneTextureHandle ScenePassRenderer::CurrentScene() const noexcept
     return selectedScene_;
 }
 
+SceneColorDomain ScenePassRenderer::CurrentSceneDomain() const noexcept
+{
+    const auto* scene = Resolve(CurrentScene());
+    return scene != nullptr ? scene->domain : SceneColorDomain::bt709Scene;
+}
+
+std::uint64_t ScenePassRenderer::FrameGeneration() const noexcept
+{
+    if (!Active() || invoking_) return 0;
+    return frameOpen_ ? frameGeneration_ : 0;
+}
+
 void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept
 {
     scenes_[slot].toneProduced = false;
+    scenes_[slot].domain = SceneColorDomain::bt709Scene;
     if (selectedScene_.owner_ == this && selectedScene_.slot_ == slot) selectedScene_ = {};
 }
 
@@ -525,7 +553,8 @@ ScenePassRenderer::DrawLineage ScenePassRenderer::CaptureLineage(
     const auto* source = Resolve(input);
     const auto* selected = Resolve(selectedScene_);
     return {source != nullptr && source == selected,
-        source != nullptr && source->toneProduced, selected != nullptr, BoundWriteMask()};
+        source != nullptr && source->toneProduced, selected != nullptr, BoundWriteMask(),
+        source != nullptr ? source->domain : SceneColorDomain::bt709Scene};
 }
 
 void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
@@ -534,15 +563,27 @@ void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
     if (descriptor.group == PipelinePassGroup::toneMapFamily)
     {
         scenes_[destination.slot_].toneProduced = true;
+        scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
+        return;
+    }
+    if (descriptor.pass == RenoDxShaderPass::video)
+    {
+        scenes_[destination.slot_].domain = SceneColorDomain::bt2020UiRelative;
+        selectedScene_ = destination;
         return;
     }
     if (lineage.consumesSelected)
     {
+        scenes_[destination.slot_].domain = lineage.domain;
         selectedScene_ = destination;
         return;
     }
     if (lineage.selectionExisted) return;
-    if (descriptor.pass == RenoDxShaderPass::lut && lineage.toneInput) selectedScene_ = destination;
+    if (descriptor.pass == RenoDxShaderPass::lut && lineage.toneInput)
+    {
+        scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
+        selectedScene_ = destination;
+    }
 }
 
 void ScenePassRenderer::CompleteLineage(const RenoDxShaderDescriptor* descriptor,
@@ -587,6 +628,7 @@ ID3D11PixelShader* ScenePassRenderer::QualifiedReplacement(
     if (source == nullptr) return nullptr;
     if (target == nullptr) return nullptr;
     if (source == target) return nullptr;
+    if (!SupportedInputDomain(descriptor->pass, source->domain)) return nullptr;
     if (!BoundSceneViewsMatch(*descriptor, *source, *target)) return nullptr;
     return replacements_[program].Get();
 }
