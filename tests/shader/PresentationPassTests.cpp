@@ -441,6 +441,7 @@ ComPtr<ID3D11ShaderResourceView> CompletedLayerSource(PixelFixture& fixture, Cod
 Float4 DecodedLayer(CodedLayer codes, bool hud, float uiWhiteNits)
 {
     const auto coverage = codes[3] / 255.0;
+    if (coverage <= 1e-6) return {0, 0, 0, static_cast<float>(coverage)};
     const auto divisor = hud ? coverage : 1.0;
     const auto scale = (hud ? coverage : 1.0) * uiWhiteNits / kSceneReferenceWhiteNits;
     return {static_cast<float>(DecodeAuthoredSrgb(codes[0] / 255.0 / divisor) * scale),
@@ -476,6 +477,224 @@ void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, T
     for (std::size_t index = 0; index < scene.size(); ++index)
         CheckTerminalPixel(pixels[index], CompositeLayer(
             CompositeLayer(scene[index], decodedBackdrop), decodedHud));
+}
+
+struct BlendBinding
+{
+    ID3D11DeviceContext* context;
+    ComPtr<ID3D11BlendState> blend;
+    std::array<float, 4> factors{};
+    UINT mask{};
+
+    explicit BlendBinding(ID3D11DeviceContext* ownedContext) : context(ownedContext)
+    {
+        context->OMGetBlendState(&blend, factors.data(), &mask);
+    }
+    ~BlendBinding() { Restore(); }
+    void Restore() const
+    {
+        context->OMSetBlendState(blend.Get(), factors.data(), mask);
+    }
+    void CheckRestored() const
+    {
+        ComPtr<ID3D11BlendState> actual;
+        std::array<float, 4> actualFactors{};
+        UINT actualMask{};
+        context->OMGetBlendState(&actual, actualFactors.data(), &actualMask);
+        FO4HDR_CHECK(actual.Get() == blend.Get());
+        FO4HDR_CHECK(actualFactors == factors);
+        FO4HDR_CHECK(actualMask == mask);
+    }
+};
+
+ComPtr<ID3D11BlendState> NativeLayerBlend(ID3D11Device* device)
+{
+    D3D11_BLEND_DESC description{};
+    auto& target = description.RenderTarget[0];
+    target.BlendEnable = TRUE;
+    target.SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    target.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    target.BlendOp = D3D11_BLEND_OP_ADD;
+    target.SrcBlendAlpha = D3D11_BLEND_ONE;
+    target.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    ComPtr<ID3D11BlendState> blend;
+    CheckHresult(device->CreateBlendState(&description, &blend), "Native layer blend");
+    return blend;
+}
+
+D3D11_TEXTURE2D_DESC NativeLayerDescription()
+{
+    auto description = SceneDescription(presentationWidth, presentationHeight);
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    return description;
+}
+
+struct NativeLayer
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11RenderTargetView> target;
+    ComPtr<ID3D11ShaderResourceView> source;
+
+    NativeLayer() = default;
+    explicit NativeLayer(ID3D11Device* device,
+        D3D11_TEXTURE2D_DESC description = NativeLayerDescription())
+    {
+        CheckHresult(device->CreateTexture2D(&description, nullptr, &texture), "Native layer texture");
+        CheckHresult(device->CreateRenderTargetView(texture.Get(), nullptr, &target), "Native layer RTV");
+        CheckHresult(device->CreateShaderResourceView(texture.Get(), nullptr, &source), "Native layer SRV");
+    }
+    void Draw(PixelFixture& fixture, Float4 straight, ID3D11BlendState* blend)
+    {
+        BlendBinding borrowed{fixture.gpu.context.Get()};
+        fixture.Bind(true);
+        const std::array color{straight};
+        const auto constants = ConstantBuffer(fixture.gpu.device.Get(), color);
+        auto* buffer = constants.Get();
+        fixture.gpu.context->PSSetConstantBuffers(0, 1, &buffer);
+        auto* output = target.Get();
+        fixture.gpu.context->OMSetRenderTargets(1, &output, nullptr);
+        const float transparent[4]{};
+        fixture.gpu.context->ClearRenderTargetView(output, transparent);
+        fixture.gpu.context->OMSetBlendState(blend, nullptr, 0xffffffffu);
+        fixture.gpu.context->Draw(3, 0);
+        fixture.CheckRestored(true);
+        borrowed.Restore();
+        borrowed.CheckRestored();
+    }
+};
+
+std::vector<CodedLayer> ReadNativeLayer(const Device& gpu, ID3D11Texture2D* texture)
+{
+    if (!texture) return std::vector<CodedLayer>(presentationWidth * presentationHeight);
+    gpu.context->OMSetRenderTargets(0, nullptr, nullptr);
+    // R8 RGBA and terminal R10 each store one packed 32-bit word per pixel.
+    const auto packed = ReadTerminal(gpu, texture);
+    std::vector<CodedLayer> pixels(packed.size());
+    for (std::size_t index = 0; index < packed.size(); ++index)
+        std::memcpy(pixels[index].data(), &packed[index], sizeof(CodedLayer));
+    return pixels;
+}
+
+void CheckNativeLayer(const std::vector<CodedLayer>& pixels, Float4 straight)
+{
+    const std::array<double, 4> channels{straight.red * straight.alpha,
+        straight.green * straight.alpha, straight.blue * straight.alpha, straight.alpha};
+    for (const auto& pixel : pixels)
+    {
+        if (straight.alpha == 0) FO4HDR_CHECK(pixel == CodedLayer{});
+        if (straight.alpha == 1) FO4HDR_CHECK(pixel[3] == 255);
+        for (std::size_t channel = 0; channel < channels.size(); ++channel)
+        {
+            const auto expected = std::lround(channels[channel] * 255.0);
+            // Native blending and UNORM storage may straddle one R8 rounding boundary.
+            FO4HDR_CHECK(std::abs(static_cast<long>(pixel[channel]) - expected) <= 1);
+        }
+    }
+}
+
+struct NativeBlendCase
+{
+    Float4 backdrop;
+    Float4 hud;
+    bool absentHud{};
+};
+
+void VerifyNativeBlendCase(PresentationPass& pass, BorrowedComputeState& state,
+    TerminalImage& terminal, const NativeBlendCase& test)
+{
+    auto& fixture = state.fixture;
+    NativeLayer backdrop{fixture.gpu.device.Get()};
+    NativeLayer hud;
+    const auto blend = NativeLayerBlend(fixture.gpu.device.Get());
+    backdrop.Draw(fixture, test.backdrop, blend.Get());
+    if (!test.absentHud)
+    {
+        hud = NativeLayer{fixture.gpu.device.Get()};
+        hud.Draw(fixture, test.hud, blend.Get());
+    }
+    const auto backdropPixels = ReadNativeLayer(fixture.gpu, backdrop.texture.Get());
+    const auto hudPixels = ReadNativeLayer(fixture.gpu, hud.texture.Get());
+    CheckNativeLayer(backdropPixels, test.backdrop);
+    if (!test.absentHud) CheckNativeLayer(hudPixels, test.hud);
+    const auto scene = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.renderer.CurrentScene()).texture);
+    state.Bind();
+    FO4HDR_CHECK(pass.PrepareLayers(backdrop.source.Get(), hud.source.Get(), presentationScope));
+    state.CheckRestored();
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(pixels.size() == scene.size());
+    if (pixels.size() != scene.size()) throw std::runtime_error("Native composition extent mismatch");
+    for (std::size_t index = 0; index < pixels.size(); ++index)
+    {
+        const auto behind = CompositeLayer(scene[index], DecodedLayer(backdropPixels[index], false,
+            fixture.whites.uiWhiteNits));
+        CheckTerminalPixel(pixels[index], CompositeLayer(behind, DecodedLayer(hudPixels[index], true,
+            fixture.whites.uiWhiteNits)));
+    }
+}
+
+struct LayerInputs
+{
+    ID3D11ShaderResourceView* backdrop{};
+    ID3D11ShaderResourceView* hud{};
+};
+
+void CheckRejectedLayers(PresentationPass& pass, BorrowedComputeState& state,
+    TerminalImage& terminal, LayerInputs inputs)
+{
+    const auto valid = CompletedLayerSource(state.fixture, backdropCodes);
+    state.Bind();
+    FO4HDR_CHECK(pass.PrepareLayers(valid.Get(), nullptr, presentationScope));
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    const auto before = ReadTerminal(state.fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(!pass.PrepareLayers(inputs.backdrop, inputs.hud, presentationScope));
+    FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    FO4HDR_CHECK(ReadTerminal(state.fixture.gpu, terminal.texture.Get()) == before);
+}
+
+void VerifyLayerRejections(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+{
+    auto& fixture = state.fixture;
+    auto description = NativeLayerDescription();
+    description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    NativeLayer wrongFormat{fixture.gpu.device.Get(), description};
+    description = NativeLayerDescription();
+    ++description.Width;
+    NativeLayer wrongExtent{fixture.gpu.device.Get(), description};
+    const auto foreign = CreateWarpDevice();
+    NativeLayer wrongDevice{foreign.device.Get()};
+    const auto alias = CompletedLayerSource(fixture, backdropCodes);
+    const std::array<LayerInputs, 4> rejected{{{wrongFormat.source.Get(), nullptr},
+        {wrongExtent.source.Get(), nullptr}, {wrongDevice.source.Get(), nullptr}, {alias.Get(), alias.Get()}}};
+    for (const auto inputs : rejected) CheckRejectedLayers(pass, state, terminal, inputs);
+    FO4HDR_CHECK(pass.PrepareLayers(alias.Get(), nullptr, presentationScope));
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    const auto before = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    FO4HDR_CHECK(!pass.PrepareLayers(nullptr, nullptr, PresentationScope::unavailable));
+    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    state.CheckRestored();
+    FO4HDR_CHECK(ReadTerminal(fixture.gpu, terminal.texture.Get()) == before);
+}
+
+void VerifyNativeUiComposition(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+{
+    BlendBinding original{state.fixture.gpu.context.Get()};
+    const std::array<float, 4> factors{0.125f, 0.25f, 0.5f, 0.75f};
+    state.fixture.gpu.context->OMSetBlendState(nullptr, factors.data(), 0x12345679u);
+    constexpr std::array<NativeBlendCase, 4> cases{{
+        {{0.25f, 0.5f, 0.75f, 0}, {0.5f, 0.25f, 0.125f, 0}, false},
+        {{0.25f, 0.5f, 0.75f, 0.25f}, {0.5f, 0.25f, 0.125f, 0.5f}, false},
+        {{0.25f, 0.5f, 0.75f, 0.25f}, {0.5f, 0.25f, 0.125f, 1}, false},
+        {{0.25f, 0.5f, 0.75f, 1}, {}, true}}};
+    for (const auto& test : cases) VerifyNativeBlendCase(pass, state, terminal, test);
+    VerifyLayerRejections(pass, state, terminal);
+    original.Restore();
+    original.CheckRestored();
 }
 
 Float4 VideoExpected(LayerWhiteConfiguration whites)
@@ -549,6 +768,7 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         state.CheckRestored();
         CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
         VerifyLayerTransport(pass, state, terminal);
+        VerifyNativeUiComposition(pass, state, terminal);
         VerifyVideoPresentation(pass, state, terminal);
         FO4HDR_CHECK(fixture.renderer.BeginFrame());
         SeedPresentation(fixture, scenes);
