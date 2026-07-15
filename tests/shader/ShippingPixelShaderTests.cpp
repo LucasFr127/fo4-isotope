@@ -189,12 +189,13 @@ struct DrawCount
 };
 
 PixelFixture::PixelFixture(const std::filesystem::path& directory,
-    UINT imageWidth, UINT imageHeight) :
+    UINT imageWidth, UINT imageHeight, LayerWhiteConfiguration layerWhites) :
     point(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_POINT)),
     linear(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_LINEAR)),
-    extentWidth(imageWidth), extentHeight(imageHeight)
+    extentWidth(imageWidth), extentHeight(imageHeight), whites(layerWhites)
 {
-    if (!renderer.Initialize(gpu.device.Get(), gpu.context.Get(), extentWidth, extentHeight))
+    const ScenePassConfiguration configuration{extentWidth, extentHeight, whites};
+    if (!renderer.Initialize(gpu.device.Get(), gpu.context.Get(), configuration))
         throw std::runtime_error("Scene renderer initialization failed");
     const auto scene = SceneDescription(extentWidth, extentHeight);
     CheckHresult(renderer.CreateSceneTexture(scene, nullptr, input), "Input scene");
@@ -490,6 +491,10 @@ void VerifyLut(PixelFixture& fixture)
 
 void VerifyFactory(PixelFixture& fixture)
 {
+    ScenePassRenderer rejected;
+    const ScenePassConfiguration invalidConfiguration{width, height, {99, 203}};
+    FO4HDR_CHECK(!rejected.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), invalidConfiguration));
+    FO4HDR_CHECK(!rejected.Active());
     D3D11_TEXTURE2D_DESC actual{};
     fixture.renderer.Views(fixture.input).texture->GetDesc(&actual);
     FO4HDR_CHECK(actual.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);

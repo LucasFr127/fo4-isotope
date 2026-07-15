@@ -338,6 +338,25 @@ struct BorrowedComputeState
         FO4HDR_CHECK(ReadCounter(fixture.gpu, csCounter.view.Get()) == 7);
     }
 
+    void BindPixelRange()
+    {
+        auto* buffer = constants.Get();
+        const UINT first = 16;
+        const UINT count = 16;
+        context->PSSetConstantBuffers1(0, 1, &buffer, &first, &count);
+    }
+
+    void CheckPixelRange()
+    {
+        ComPtr<ID3D11Buffer> actual;
+        UINT first{};
+        UINT count{};
+        context->PSGetConstantBuffers(0, 1, &actual);
+        context->PSGetConstantBuffers1(0, 1, nullptr, &first, &count);
+        FO4HDR_CHECK(actual.Get() == constants.Get());
+        FO4HDR_CHECK(first == 16 && count == 16);
+    }
+
     void CheckRestored()
     {
         CheckShader();
@@ -349,7 +368,7 @@ struct BorrowedComputeState
 void InitializePresentation(PresentationPass& pass, PixelFixture& fixture)
 {
     const PresentationConfiguration configuration{presentationWidth, presentationHeight,
-        presentationPeakNits, &fixture.renderer};
+        presentationPeakNits, &fixture.renderer, fixture.whites};
     const auto initialized = pass.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration);
     FO4HDR_CHECK(initialized);
     if (!initialized) throw std::runtime_error("Controlled presentation prerequisites unavailable");
@@ -380,7 +399,7 @@ void CheckLineageBlack(PresentationPass& pass, BorrowedComputeState& state, Term
     FO4HDR_CHECK(!pass.Active());
     FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     const PresentationConfiguration configuration{presentationWidth, presentationHeight,
-        presentationPeakNits, &fixture.renderer};
+        presentationPeakNits, &fixture.renderer, fixture.whites};
     FO4HDR_CHECK(!pass.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
     state.CheckRestored();
     FO4HDR_CHECK(ReadTerminal(fixture.gpu, terminal.texture.Get()) == black);
@@ -419,11 +438,11 @@ ComPtr<ID3D11ShaderResourceView> CompletedLayerSource(PixelFixture& fixture, Cod
     return source;
 }
 
-Float4 DecodedLayer(CodedLayer codes, bool hud)
+Float4 DecodedLayer(CodedLayer codes, bool hud, float uiWhiteNits)
 {
     const auto coverage = codes[3] / 255.0;
     const auto divisor = hud ? coverage : 1.0;
-    const auto scale = hud ? coverage : 1.0;
+    const auto scale = (hud ? coverage : 1.0) * uiWhiteNits / kSceneReferenceWhiteNits;
     return {static_cast<float>(DecodeAuthoredSrgb(codes[0] / 255.0 / divisor) * scale),
         static_cast<float>(DecodeAuthoredSrgb(codes[1] / 255.0 / divisor) * scale),
         static_cast<float>(DecodeAuthoredSrgb(codes[2] / 255.0 / divisor) * scale),
@@ -452,19 +471,20 @@ void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, T
     const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == scene.size());
     if (pixels.size() != scene.size()) throw std::runtime_error("Layer composition extent mismatch");
-    const auto decodedBackdrop = DecodedLayer(backdropCodes, false);
-    const auto decodedHud = DecodedLayer(hudCodes, true);
+    const auto decodedBackdrop = DecodedLayer(backdropCodes, false, fixture.whites.uiWhiteNits);
+    const auto decodedHud = DecodedLayer(hudCodes, true, fixture.whites.uiWhiteNits);
     for (std::size_t index = 0; index < scene.size(); ++index)
         CheckTerminalPixel(pixels[index], CompositeLayer(
             CompositeLayer(scene[index], decodedBackdrop), decodedHud));
 }
 
-Float4 VideoExpected()
+Float4 VideoExpected(LayerWhiteConfiguration whites)
 {
     const auto expanded = ConvertBt709ToBt2020({DecodeAuthoredSrgb(0.75),
         DecodeAuthoredSrgb(0.5), DecodeAuthoredSrgb(0.25)});
-    return {static_cast<float>(expanded.red), static_cast<float>(expanded.green),
-        static_cast<float>(expanded.blue), 0.5f};
+    const auto ratio = static_cast<double>(whites.videoWhiteNits) / whites.uiWhiteNits;
+    return {static_cast<float>(expanded.red * ratio), static_cast<float>(expanded.green * ratio),
+        static_cast<float>(expanded.blue * ratio), 0.5f};
 }
 
 void VerifyVideoPresentation(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
@@ -476,11 +496,13 @@ void VerifyVideoPresentation(PresentationPass& pass, BorrowedComputeState& state
     const std::vector<Float4> input(presentationWidth * presentationHeight, {0.25f, 0.5f, 0.75f, 0.5f});
     UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, input);
     const auto videoConstants = BindPostProcess(fixture);
+    state.BindPixelRange();
     FO4HDR_CHECK(DrawPass(fixture, 8) == SceneDrawOutcome::replaced);
+    state.CheckPixelRange();
     CheckBoundInputs(fixture, 0, videoConstants.Get());
     CheckSelection(fixture, fixture.destination);
     FO4HDR_CHECK(fixture.renderer.CurrentSceneDomain() == SceneColorDomain::bt2020UiRelative);
-    const auto expected = VideoExpected();
+    const auto expected = VideoExpected(fixture.whites);
     const auto video = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
     for (const auto& pixel : video) CheckPixel(pixel, expected);
     fixture.input = fixture.destination;
@@ -498,10 +520,10 @@ void VerifyVideoPresentation(PresentationPass& pass, BorrowedComputeState& state
     const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == filtered.size());
     if (pixels.size() != filtered.size()) throw std::runtime_error("Video composition extent mismatch");
-    // The final input is the actual FP16 BT.2020 transport, relative to 203 nits.
+    // The ratio-adjusted FP16 transport is relative to the configured UI white.
     for (std::size_t index = 0; index < filtered.size(); ++index)
-        CheckTerminalNits(pixels[index], {filtered[index].red * kSceneReferenceWhiteNits,
-            filtered[index].green * kSceneReferenceWhiteNits, filtered[index].blue * kSceneReferenceWhiteNits});
+        CheckTerminalNits(pixels[index], {filtered[index].red * fixture.whites.uiWhiteNits,
+            filtered[index].green * fixture.whites.uiWhiteNits, filtered[index].blue * fixture.whites.uiWhiteNits});
     fixture.input = originalInput;
     fixture.destination = originalDestination;
 }
@@ -539,6 +561,32 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
     FO4HDR_CHECK(fixture.renderer.EndFrame());
     FO4HDR_CHECK(fixture.renderer.Retire());
     std::cout << "Checked odd-extent selected FP16 to terminal R10, linked CS, CB range and UAV counters\n";
+}
+
+void VerifyColdWhiteLevels(const std::filesystem::path& directory)
+{
+    constexpr std::array<LayerWhiteConfiguration, 2> configurations{{{100, 300}, {300, 100}}};
+    for (const auto whites : configurations)
+    {
+        PixelFixture fixture{directory, presentationWidth, presentationHeight, whites};
+        const LineageScenes scenes{fixture.input, fixture.destination, AdditionalScene(fixture), {}};
+        PresentationPass pass;
+        InitializePresentation(pass, fixture);
+        FO4HDR_CHECK(fixture.renderer.BeginFrame());
+        SeedPresentation(fixture, scenes);
+        const auto scene = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.renderer.CurrentScene()).texture);
+        TerminalImage terminal{fixture.gpu.device.Get()};
+        BorrowedComputeState state{fixture, directory};
+        state.Bind();
+        FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+        state.CheckRestored();
+        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        VerifyLayerTransport(pass, state, terminal);
+        VerifyVideoPresentation(pass, state, terminal);
+        FO4HDR_CHECK(pass.Retire());
+        FO4HDR_CHECK(fixture.renderer.EndFrame());
+        FO4HDR_CHECK(fixture.renderer.Retire());
+    }
 }
 
 constexpr wchar_t presentationWindowClass[] = L"Fallout4HDRControlledPresentation";
@@ -883,6 +931,7 @@ void VerifyControlledChain(const std::filesystem::path& directory)
 void VerifyPresentationPass(const std::filesystem::path& fixtureDirectory)
 {
     VerifyTerminalPresentation(fixtureDirectory);
+    VerifyColdWhiteLevels(fixtureDirectory);
     VerifyControlledChain(fixtureDirectory);
     VerifyOriginalSdr(fixtureDirectory);
 }

@@ -26,6 +26,7 @@ struct PresentationConfiguration
     UINT height{};
     float displayPeakNits{};
     ScenePassRenderer* scenes{};
+    LayerWhiteConfiguration whites;
 };
 
 // Serialized initialization-thread calls on a genuine exclusively owned context.

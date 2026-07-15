@@ -35,8 +35,10 @@ struct PresentConstants
     UINT height;
     float peak;
     UINT sceneDomain;
+    float uiWhite;
+    std::array<float, 3> reserved{};
 };
-static_assert(sizeof(PresentConstants) == 16);
+static_assert(sizeof(PresentConstants) == 32);
 
 ComPtr<IUnknown> Identity(IUnknown* object) noexcept
 {
@@ -328,6 +330,8 @@ bool ValidInitialization(ID3D11Device* device, ID3D11DeviceContext* context,
 {
     if (device == nullptr || context == nullptr) return false;
     if (!ValidConfiguration(configuration)) return false;
+    if (!configuration.whites.Valid()) return false;
+    if (!configuration.scenes->MatchesLayerWhites(configuration.whites)) return false;
     return configuration.scenes->MatchesContext(device, context);
 }
 
@@ -345,7 +349,8 @@ bool PrepareConstantVariants(ID3D11Device* device,
     for (UINT domain = 0; domain < prepared.constants.size(); ++domain)
     {
         const PresentConstants values{
-            configuration.width, configuration.height, configuration.displayPeakNits, domain};
+            configuration.width, configuration.height, configuration.displayPeakNits,
+            domain, configuration.whites.uiWhiteNits};
         if (FAILED(CreateConstants(device, values, &prepared.constants[domain]))) return false;
         if (!prepared.constants[domain]) return false;
     }

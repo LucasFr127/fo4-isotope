@@ -2,9 +2,10 @@
 #pragma once
 
 #include "RendererLifetime.hpp"
+#include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
 
-#include <d3d11.h>
+#include <d3d11_1.h>
 #include <wrl/client.h>
 
 #include <array>
@@ -16,6 +17,21 @@
 namespace fo4hdr {
 
 class ScenePassRenderer;
+
+struct LayerWhiteConfiguration
+{
+    float uiWhiteNits{static_cast<float>(kSceneReferenceWhiteNits)};
+    float videoWhiteNits{static_cast<float>(kSceneReferenceWhiteNits)};
+
+    [[nodiscard]] bool Valid() const noexcept;
+};
+
+struct ScenePassConfiguration
+{
+    UINT width{};
+    UINT height{};
+    LayerWhiteConfiguration whites;
+};
 
 class SceneTextureHandle
 {
@@ -74,10 +90,13 @@ public:
 
     [[nodiscard]] bool Initialize(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept;
+    [[nodiscard]] bool Initialize(ID3D11Device* device,
+        ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept;
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool Active() const noexcept;
     [[nodiscard]] bool MatchesContext(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext) const noexcept;
+    [[nodiscard]] bool MatchesLayerWhites(LayerWhiteConfiguration whites) const noexcept;
 
     HRESULT CreateObservedPixelShader(std::span<const std::byte> bytecode,
         ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept;
@@ -99,6 +118,8 @@ public:
     // it does not establish an original-bytecode match.
     // FXAA requires the positive-HDR source contract; video requires completed
     // authored BGR codes, and publishes a separate UI-relative BT.2020 domain.
+    // Video's nonnull borrowed b0 range is independently caller-qualified;
+    // preserve the actual reported tuple without inferring legacy whole-buffer windows.
     // Temporal metadata/history require R16G16B16A16_FLOAT or R32G32B32A32_FLOAT
     // views; the caller separately qualifies their native float4 semantics.
     [[nodiscard]] SceneDrawOutcome Execute(const RenoDxShaderDescriptor& descriptor,
@@ -155,7 +176,7 @@ private:
         SceneTextureHandle destination, SceneDrawOutcome outcome,
         const DrawLineage& lineage) noexcept;
     [[nodiscard]] SceneDrawOutcome InvokeDraw(ID3D11PixelShader* replacement,
-        FiniteDrawInvocation invocation) noexcept;
+        FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants) noexcept;
     [[nodiscard]] ID3D11PixelShader* QualifiedReplacement(
         const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
         SceneTextureHandle destination) const noexcept;
@@ -166,7 +187,9 @@ private:
     RendererLifetime lifetime_;
     std::thread::id ownerThread_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
-    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context_;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> videoConstants_;
+    LayerWhiteConfiguration whites_;
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, replacementProgramCount> replacements_;
     std::array<SceneTexture, sceneTextureCapacity> scenes_;
     std::array<ObservedShader, observedShaderCapacity> observed_;

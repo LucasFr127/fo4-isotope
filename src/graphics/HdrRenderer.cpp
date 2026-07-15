@@ -14,6 +14,7 @@
 #include <fo4hdr-shaders/Fxaa.hpp>
 #include <fo4hdr-shaders/Video.hpp>
 
+#include <cmath>
 #include <exception>
 #include <limits>
 #include <utility>
@@ -204,16 +205,47 @@ bool Fp16SceneSupported(ID3D11Device* device) noexcept
 }
 
 bool ValidInitializationArguments(ID3D11Device* device,
-    ID3D11DeviceContext* context, UINT width, UINT height) noexcept
+    ID3D11DeviceContext* context, const ScenePassConfiguration& configuration) noexcept
 {
     if (device == nullptr || context == nullptr) return false;
-    return width != 0 && height != 0;
+    return configuration.width != 0 && configuration.height != 0 && configuration.whites.Valid();
 }
 
 bool CompatibleDevice(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
 {
     if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0) return false;
     return AssociatedImmediateContext(device, context) && Fp16SceneSupported(device);
+}
+
+bool ValidWhite(float value) noexcept
+{
+    if (!std::isfinite(value)) return false;
+    return value >= kMinimumUiPaperWhiteNits && value <= kMaximumUiPaperWhiteNits;
+}
+
+bool PreparePixelContext(ID3D11Device* device, ID3D11DeviceContext* context,
+    ComPtr<ID3D11DeviceContext1>& prepared) noexcept
+{
+    D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
+    if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS,
+            &options, sizeof(options)))) return false;
+    if (!options.ConstantBufferOffsetting) return false;
+    if (FAILED(context->QueryInterface(IID_PPV_ARGS(&prepared)))) return false;
+    return prepared != nullptr;
+}
+
+bool PrepareVideoConstants(ID3D11Device* device, LayerWhiteConfiguration whites,
+    ComPtr<ID3D11Buffer>& prepared) noexcept
+{
+    const std::array<float, 4> values{whites.videoWhiteNits / whites.uiWhiteNits, 0.0F, 0.0F, 0.0F};
+    static_assert(sizeof(values) == 16);
+    D3D11_BUFFER_DESC description{};
+    description.ByteWidth = sizeof(values);
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    const D3D11_SUBRESOURCE_DATA data{values.data(), 0, 0};
+    if (FAILED(device->CreateBuffer(&description, &data, &prepared))) return false;
+    return prepared != nullptr;
 }
 
 bool PreparePrograms(ID3D11Device* device,
@@ -300,6 +332,54 @@ private:
     bool replaced_{};
 };
 
+class ScopedVideoConstants
+{
+public:
+    ScopedVideoConstants(ID3D11DeviceContext1* context, ID3D11Buffer* replacement) noexcept
+        : context_(context), replacement_(replacement)
+    {
+        if (replacement_ == nullptr) return;
+        // The base getter owns the reference; Context1 supplies only the exact window.
+        context_->PSGetConstantBuffers(0, 1, &previous_);
+        context_->PSGetConstantBuffers1(0, 1, nullptr, &firstConstant_, &constantCount_);
+    }
+
+    ~ScopedVideoConstants() noexcept
+    {
+        if (!bound_) return;
+        auto* previous = previous_.Get();
+        context_->PSSetConstantBuffers1(0, 1, &previous, &firstConstant_, &constantCount_);
+    }
+
+    [[nodiscard]] bool Ready() const noexcept
+    {
+        if (replacement_ == nullptr) return true;
+        // Bound empty windows are legal, but cannot be distinguished here from
+        // an unqualified legacy default, so this path leaves that draw unchanged.
+        if (previous_ && constantCount_ == 0) return false;
+        if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
+        return constantCount_ <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT;
+    }
+
+    void Bind() noexcept
+    {
+        if (replacement_ == nullptr) return;
+        context_->PSSetConstantBuffers(0, 1, &replacement_);
+        bound_ = true;
+    }
+
+    ScopedVideoConstants(const ScopedVideoConstants&) = delete;
+    ScopedVideoConstants& operator=(const ScopedVideoConstants&) = delete;
+
+private:
+    ID3D11DeviceContext1* context_;
+    ID3D11Buffer* replacement_;
+    ComPtr<ID3D11Buffer> previous_;
+    UINT firstConstant_{};
+    UINT constantCount_{};
+    bool bound_{};
+};
+
 class DrawScope
 {
 public:
@@ -314,6 +394,11 @@ private:
 
 }  // namespace
 
+bool LayerWhiteConfiguration::Valid() const noexcept
+{
+    return ValidWhite(uiWhiteNits) && ValidWhite(videoWhiteNits);
+}
+
 ScenePassRenderer::~ScenePassRenderer() noexcept
 {
     // Destruction on another thread cannot safely clear the exclusive context.
@@ -323,18 +408,32 @@ ScenePassRenderer::~ScenePassRenderer() noexcept
 bool ScenePassRenderer::Initialize(ID3D11Device* device,
     ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept
 {
+    return Initialize(device, immediateContext, ScenePassConfiguration{width, height, {}});
+}
+
+bool ScenePassRenderer::Initialize(ID3D11Device* device,
+    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
+{
     if (lifetime_.CurrentEpoch() != 0) return false;
-    if (!ValidInitializationArguments(device, immediateContext, width, height)) return false;
+    if (!ValidInitializationArguments(device, immediateContext, configuration))
+        return false;
     if (!CompatibleDevice(device, immediateContext)) return false;
+
+    ComPtr<ID3D11DeviceContext1> preparedContext;
+    if (!PreparePixelContext(device, immediateContext, preparedContext)) return false;
+    ComPtr<ID3D11Buffer> preparedVideoConstants;
+    if (!PrepareVideoConstants(device, configuration.whites, preparedVideoConstants)) return false;
 
     std::array<ComPtr<ID3D11PixelShader>, replacementProgramCount> prepared;
     if (!PreparePrograms(device, prepared)) return false;
     if (!lifetime_.Prepare(2, 4)) return false;
     ownerThread_ = std::this_thread::get_id();
     device_ = device;
-    context_ = immediateContext;
-    width_ = width;
-    height_ = height;
+    context_ = std::move(preparedContext);
+    videoConstants_ = std::move(preparedVideoConstants);
+    whites_ = configuration.whites;
+    width_ = configuration.width;
+    height_ = configuration.height;
     replacements_ = std::move(prepared);
     lifetime_.PublishInitial();
     return true;
@@ -357,6 +456,12 @@ bool ScenePassRenderer::MatchesContext(ID3D11Device* device,
     return SameIdentity(device, device_.Get()) && SameIdentity(immediateContext, context_.Get());
 }
 
+bool ScenePassRenderer::MatchesLayerWhites(LayerWhiteConfiguration whites) const noexcept
+{
+    if (!Active() || invoking_) return false;
+    return whites.uiWhiteNits == whites_.uiWhiteNits && whites.videoWhiteNits == whites_.videoWhiteNits;
+}
+
 bool ScenePassRenderer::Retire() noexcept
 {
     if (context_ && !OnOwnerThread()) return false;
@@ -369,6 +474,7 @@ bool ScenePassRenderer::Retire() noexcept
     for (auto& scene : scenes_) scene = {};
     for (auto& shader : observed_) shader = {};
     for (auto& shader : replacements_) shader.Reset();
+    videoConstants_.Reset();
     context_.Reset();
     device_.Reset();
     sceneCount_ = 0;
@@ -678,16 +784,20 @@ SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descrip
     DrawScope drawScope{invoking_};
     auto* replacement = QualifiedReplacement(descriptor, input, destination);
     const auto lineage = CaptureLineage(input);
-    const auto outcome = InvokeDraw(replacement, invocation);
+    auto* videoConstants = replacement != nullptr && descriptor->pass == RenoDxShaderPass::video
+        ? videoConstants_.Get() : nullptr;
+    const auto outcome = InvokeDraw(replacement, invocation, videoConstants);
     // Publish only after the borrowed pixel shader and class tuple are restored.
     CompleteLineage(descriptor, destination, outcome, lineage);
     return outcome;
 }
 
 SceneDrawOutcome ScenePassRenderer::InvokeDraw(ID3D11PixelShader* replacement,
-    FiniteDrawInvocation invocation) noexcept
+    FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants) noexcept
 {
-    ScopedPixelShader pixelScope{context_.Get(), replacement};
+    ScopedVideoConstants constantsScope{context_.Get(), videoConstants};
+    ScopedPixelShader pixelScope{context_.Get(), constantsScope.Ready() ? replacement : nullptr};
+    if (pixelScope.Replaced()) constantsScope.Bind();
     try
     {
         invocation.draw(context_.Get(), invocation.argument);

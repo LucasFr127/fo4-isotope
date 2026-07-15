@@ -11,6 +11,8 @@ cbuffer PresentFrame : register(b0)
     uint2 FrameSize;
     float DisplayPeakNits;
     uint SceneDomain;
+    float UiWhiteNits;
+    float3 Reserved;
 };
 
 [numthreads(8, 8, 1)]
@@ -31,11 +33,11 @@ void PrepareHud(uint3 pixel : SV_DispatchThreadID)
 void main(uint3 pixel : SV_DispatchThreadID)
 {
     if (any(pixel.xy >= FrameSize)) return;
-    // Domain 0 is BT.709 scene; domain 1 is BT.2020 relative to the fixed 203-nit UI white.
+    // Domain 0 retains the 203-nit scene white; domain 1 is BT.2020 relative to UI white.
     const float3 scene = ScenePixels.Load(int3(pixel.xy, 0)).rgb;
-    float3 light = (SceneDomain == 1u ? scene : Fo4HdrExpandPrimaries(scene)) * 203.0f;
-    light = Fo4HdrBlendLinearLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)));
-    light = Fo4HdrBlendLinearLayer(light, HudPixels.Load(int3(pixel.xy, 0)));
+    float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrExpandPrimaries(scene) * 203.0f;
+    light = Fo4HdrBlendLinearLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
+    light = Fo4HdrBlendLinearLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
     const float3 contained = Fo4HdrBoundLight(light, DisplayPeakNits);
     // Encode only at the terminal UAV; scene and layer storage remain linear FP16.
     PresentTarget[pixel.xy] = float4(Fo4HdrEncodeAbsoluteLight(contained), 1.0f);

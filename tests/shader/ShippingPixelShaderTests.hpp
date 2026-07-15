@@ -44,9 +44,10 @@ struct PixelFixture
     ComPtr<ID3D11RasterizerState> rasterizer;
     UINT extentWidth;
     UINT extentHeight;
+    LayerWhiteConfiguration whites;
 
     explicit PixelFixture(const std::filesystem::path& directory,
-        UINT imageWidth = width, UINT imageHeight = height);
+        UINT imageWidth = width, UINT imageHeight = height, LayerWhiteConfiguration layerWhites = {});
     ComPtr<ID3D11PixelShader> ObservedShader(const std::filesystem::path& path,
         ID3D11ClassLinkage* classes);
     void Bind(bool dynamic = false);
