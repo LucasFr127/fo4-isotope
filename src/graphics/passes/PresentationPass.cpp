@@ -17,6 +17,8 @@ namespace {
 using Microsoft::WRL::ComPtr;
 constexpr UINT outputCapacity = 8;
 constexpr UINT classCapacity = 256;
+constexpr std::array supportedSceneDomains{
+    SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
 constexpr std::array<UINT, outputCapacity> preserveCounters{
     UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1)};
 
@@ -346,13 +348,15 @@ bool PrepareContext(ID3D11Device* device, ID3D11DeviceContext* context,
 bool PrepareConstantVariants(ID3D11Device* device,
     const PresentationConfiguration& configuration, PreparedPresentation& prepared) noexcept
 {
-    for (UINT domain = 0; domain < prepared.constants.size(); ++domain)
+    for (const auto domain : supportedSceneDomains)
     {
+        const auto index = static_cast<std::size_t>(domain);
+        if (index >= prepared.constants.size()) return false;
         const PresentConstants values{
             configuration.width, configuration.height, configuration.displayPeakNits,
-            domain, configuration.whites.uiWhiteNits};
-        if (FAILED(CreateConstants(device, values, &prepared.constants[domain]))) return false;
-        if (!prepared.constants[domain]) return false;
+            static_cast<UINT>(domain), configuration.whites.uiWhiteNits};
+        if (FAILED(CreateConstants(device, values, &prepared.constants[index]))) return false;
+        if (!prepared.constants[index]) return false;
     }
     return true;
 }
@@ -773,6 +777,8 @@ bool PresentationPass::ExecuteCurrentScene(ID3D11UnorderedAccessView* terminal,
 bool PresentationPass::ComposeSelected(SceneTextureViews source,
     ID3D11UnorderedAccessView* terminal) noexcept
 {
+    const auto domain = static_cast<std::size_t>(configuration_.scenes->CurrentSceneDomain());
+    if (domain >= constants_.size()) return false;
     ScopedComputeState state{context_.Get()};
     if (!state.Ready()) return false;
     const auto frame = configuration_.scenes->FrameGeneration();
@@ -782,7 +788,6 @@ bool PresentationPass::ComposeSelected(SceneTextureViews source,
         ClearLayers();
     }
     const std::array inputs{source.shaderResource, layers_[0].source.Get(), layers_[1].source.Get()};
-    const auto domain = static_cast<std::size_t>(configuration_.scenes->CurrentSceneDomain());
     state.Bind(shader_.Get(), constants_[domain].Get(), inputs, terminal);
     context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);
     return true;

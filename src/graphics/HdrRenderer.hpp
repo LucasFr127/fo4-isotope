@@ -69,7 +69,9 @@ enum class SceneDrawOutcome : std::uint8_t
 
 enum class SceneColorDomain : std::uint8_t
 {
+    // Linear BT.709/D65; one scene unit represents 203 nits at presentation.
     bt709Scene = 0,
+    // Linear BT.2020/D65 divided by the shared cold UI white, including video.
     bt2020UiRelative = 1
 };
 

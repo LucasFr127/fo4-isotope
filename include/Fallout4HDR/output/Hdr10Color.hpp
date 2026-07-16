@@ -11,6 +11,7 @@ inline constexpr double kMaximumDisplayPeakNits = 2000.0;
 inline constexpr double kMinimumUiPaperWhiteNits = 100.0;
 inline constexpr double kMaximumUiPaperWhiteNits = 300.0;
 
+// Linear channel values; each consuming API specifies primaries and light units.
 struct LinearRgb
 {
     double red{};
@@ -18,8 +19,8 @@ struct LinearRgb
     double blue{};
 };
 
-// D65 linear-light primary transforms. The CPU inverse is a comparison and
-// validation reference.
+// D65 linear-light primary transforms preserve the input light units.
+// The CPU inverse is a comparison and validation reference.
 [[nodiscard]] LinearRgb ConvertBt709ToBt2020(
     LinearRgb value) noexcept;
 [[nodiscard]] LinearRgb ConvertBt2020ToBt709ForComparison(
