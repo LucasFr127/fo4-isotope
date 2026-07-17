@@ -35,7 +35,7 @@ void main(uint3 pixel : SV_DispatchThreadID)
     if (any(pixel.xy >= FrameSize)) return;
     // Domain 0 retains the 203-nit scene white; domain 1 is BT.2020 relative to UI white.
     const float3 scene = ScenePixels.Load(int3(pixel.xy, 0)).rgb;
-    float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrExpandPrimaries(scene) * 203.0f;
+    float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrBt709ToBt2020Nits(scene, 203.0f);
     light = Fo4HdrBlendLinearLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
     light = Fo4HdrBlendLinearLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
     const float3 contained = Fo4HdrBoundLight(light, DisplayPeakNits);

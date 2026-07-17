@@ -16,6 +16,11 @@ float3 Fo4HdrExpandPrimaries(float3 light)
     return mul(transform, light);
 }
 
+float3 Fo4HdrBt709ToBt2020Nits(float3 linearBt709, float whiteNits)
+{
+    return Fo4HdrExpandPrimaries(linearBt709) * whiteNits;
+}
+
 float3 Fo4HdrBoundLight(float3 light, float ceiling)
 {
     if ((asuint(ceiling) & 0x7fffffffu) >= 0x7f800000u || ceiling <= 0.0f || ceiling > 10000.0f)

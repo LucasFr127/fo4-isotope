@@ -27,7 +27,7 @@ float4 Fo4HdrPrepareAuthoredLayer(float4 coded, bool backdrop)
 float3 Fo4HdrBlendLinearLayer(float3 behind, float4 layer, float uiWhiteNits)
 {
     // Transport is normalized premultiplied BT.709; composition uses FP32 display light.
-    return Fo4HdrExpandPrimaries(layer.rgb) * uiWhiteNits + behind * (1.0f - saturate(layer.a));
+    return Fo4HdrBt709ToBt2020Nits(layer.rgb, uiWhiteNits) + behind * (1.0f - saturate(layer.a));
 }
 
 #endif
