@@ -369,7 +369,7 @@ struct PeakTransform
     OdtParams odt;
 };
 
-[[nodiscard]] LinearRgb EvaluateScene(const PeakTransform& transform, LinearRgb input) noexcept
+[[nodiscard]] LinearRgb EvaluateSceneNits(const PeakTransform& transform, LinearRgb input) noexcept
 {
     Vec3 scene{input.red, input.green, input.blue};
     for (double& channel : scene)
@@ -383,11 +383,18 @@ struct PeakTransform
     const Vec3 aces = Multiply(ap1, transform.ap1ToAp0);
     const Vec3 toneMapped = ToneMapAndCompress(RgbToJMh(aces, transform.odt.input), transform.odt);
     const Vec3 compressed = CompressGamut(toneMapped, transform.odt);
-    Vec3 output = JMhToRgb(compressed, transform.odt.limit);
+    const Vec3 output = JMhToRgb(compressed, transform.odt.limit);
+    return {output[0] * kReferenceLuminance, output[1] * kReferenceLuminance,
+        output[2] * kReferenceLuminance};
+}
+
+[[nodiscard]] LinearRgb EvaluateScene(const PeakTransform& transform, LinearRgb input) noexcept
+{
+    const auto evaluated = EvaluateSceneNits(transform, input);
+    Vec3 output{evaluated.red, evaluated.green, evaluated.blue};
     for (double& channel : output)
     {
-        const double nits = channel * kReferenceLuminance;
-        channel = std::isfinite(nits) ? std::clamp(nits, 0.0, transform.odt.peakLuminance) : 0.0;
+        channel = std::isfinite(channel) ? std::clamp(channel, 0.0, transform.odt.peakLuminance) : 0.0;
     }
     return {output[0], output[1], output[2]};
 }
@@ -412,6 +419,12 @@ Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept
     if (displayPeakNits < kMinimumDisplayPeakNits || displayPeakNits > kMaximumDisplayPeakNits)
         return {};
     return Aces2TransformHandle{new (std::nothrow) Aces2Transform(displayPeakNits)};
+}
+
+LinearRgb EvaluateAces2LutNits(
+    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    return EvaluateSceneNits(transform.state, sceneLinearBt709);
 }
 
 LinearRgb MapAces2ToBt2020Nits(

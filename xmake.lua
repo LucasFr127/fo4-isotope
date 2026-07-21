@@ -93,6 +93,7 @@ for _, fixture in ipairs({
             "src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
             "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
+            "src/tonemap/OperatorLut.cpp", "src/graphics/OperatorLutWorker.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
             "tests/unit/hooks/HookTests.cpp",
             "src/graphics/DeviceCreationHook.cpp",

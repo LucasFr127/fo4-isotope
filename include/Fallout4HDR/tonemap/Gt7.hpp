@@ -17,6 +17,9 @@ using Gt7TransformHandle = std::unique_ptr<const Gt7Transform, Gt7TransformDelet
 // Retain one immutable peak-specific context across a reference sample loop.
 // Invalid peaks or allocation failure return an empty handle.
 [[nodiscard]] Gt7TransformHandle CreateGt7Transform(double displayPeakNits) noexcept;
+// Scene input policy and source-order operator math precede final display containment.
+[[nodiscard]] LinearRgb EvaluateGt7LutNits(
+    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept;
 [[nodiscard]] LinearRgb MapGt7ReferenceRec2020(
     const Gt7Transform& transform, LinearRgb framebufferRec2020) noexcept;
 [[nodiscard]] LinearRgb MapGt7ToBt2020Nits(

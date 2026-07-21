@@ -17,6 +17,9 @@ using Aces2TransformHandle = std::unique_ptr<const Aces2Transform, Aces2Transfor
 // Retain one immutable peak-specific context across a reference sample loop.
 // Invalid peaks or allocation failure return an empty handle.
 [[nodiscard]] Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept;
+// Retains formation and Academy gamut compression, deferring final per-channel containment.
+[[nodiscard]] LinearRgb EvaluateAces2LutNits(
+    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept;
 [[nodiscard]] LinearRgb MapAces2ToBt2020Nits(
     const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept;
 

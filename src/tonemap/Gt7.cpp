@@ -290,14 +290,20 @@ LinearRgb MapGt7ReferenceRec2020(
     return {result[0], result[1], result[2]};
 }
 
-LinearRgb MapGt7ToBt2020Nits(
+LinearRgb EvaluateGt7LutNits(
     const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept
 {
     const auto input = SceneToGt7Framebuffer(SanitizeScene(sceneLinearBt709));
     const auto mapped = transform.volume.Apply(input);
-    return ContainBt2020Nits({static_cast<double>(mapped[0]) * kReferenceLuminance,
+    return {static_cast<double>(mapped[0]) * kReferenceLuminance,
         static_cast<double>(mapped[1]) * kReferenceLuminance,
-        static_cast<double>(mapped[2]) * kReferenceLuminance}, transform.peakNits);
+        static_cast<double>(mapped[2]) * kReferenceLuminance};
+}
+
+LinearRgb MapGt7ToBt2020Nits(
+    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    return ContainBt2020Nits(EvaluateGt7LutNits(transform, sceneLinearBt709), transform.peakNits);
 }
 
 LinearRgb MapGt7ReferenceRec2020(

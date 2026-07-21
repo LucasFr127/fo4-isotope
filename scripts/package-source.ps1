@@ -110,7 +110,11 @@ $files = [string[]]@(
     "tests/shader/shaders/Gt7Evaluation.cs.hlsl",
     "third_party/gt7/upstream/gt7_tone_mapping.cpp",
     "third_party/gt7/UPSTREAM.lock.json",
-    "scripts/fetch-gt7-reference.ps1"
+    "scripts/fetch-gt7-reference.ps1",
+    "include/Fallout4HDR/tonemap/OperatorLut.hpp",
+    "src/tonemap/OperatorLut.cpp",
+    "src/graphics/OperatorLutWorker.hpp",
+    "src/graphics/OperatorLutWorker.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

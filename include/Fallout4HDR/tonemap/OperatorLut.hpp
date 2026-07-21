@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+
+#include <atomic>
+#include <cstdint>
+#include <vector>
+
+namespace fo4hdr {
+
+enum class OperatorLutAlgorithm : std::uint8_t
+{
+    aces2,
+    agX,
+    gt7
+};
+
+// Packed RGBA16F cubic coefficients, x fastest, then y, then z. Input is
+// dimensionless scene-linear BT.709; values are uncontained BT.2020 nits.
+// Signed and above-peak coefficients preserve boundary slopes. Containment
+// belongs after reconstruction, and display encoding is not stored here.
+struct OperatorLutData
+{
+    std::vector<std::uint16_t> rgba16;
+    std::uint32_t edge{};
+    std::uint32_t textureEdge{};
+    double displayPeakNits{};
+    OperatorLutAlgorithm algorithm{OperatorLutAlgorithm::aces2};
+
+    [[nodiscard]] bool IsValid() const noexcept;
+};
+
+struct OperatorLutCancellation
+{
+    // A non-null counter must outlive the synchronous build.
+    const std::atomic<std::uint64_t>* generation{};
+    std::uint64_t expectedGeneration{};
+
+    [[nodiscard]] bool IsCancelled() const noexcept
+    {
+        return generation != nullptr &&
+            generation->load(std::memory_order_acquire) != expectedGeneration;
+    }
+};
+
+// Cold CPU-only preparation. Invalid algorithms/peaks, cancellation, allocation
+// or nonfinite/FP16-overflow coefficients return an invalid empty result.
+[[nodiscard]] OperatorLutData BuildOperatorLut(
+    OperatorLutAlgorithm algorithm,
+    double displayPeakNits,
+    OperatorLutCancellation cancellation = {}) noexcept;
+
+}  // namespace fo4hdr

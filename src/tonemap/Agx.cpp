@@ -532,12 +532,18 @@ std::optional<AgxTransform> CreateAgxTransform(double displayPeakNits) noexcept
     return transform;
 }
 
-LinearRgb MapAgxToBt2020Nits(
+LinearRgb EvaluateAgxLutNits(
     const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
 {
     const AgxState prepared{transform.hdrSdrRatio_, transform.darkMaximumExponent_,
         transform.formationSigmoid_, transform.darkeningSigmoid_};
-    return ContainDisplayGamut(EvaluateSceneNits(prepared, sceneLinearBt709), transform.displayPeakNits_);
+    return EvaluateSceneNits(prepared, sceneLinearBt709);
+}
+
+LinearRgb MapAgxToBt2020Nits(
+    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
+{
+    return ContainDisplayGamut(EvaluateAgxLutNits(transform, sceneLinearBt709), transform.displayPeakNits_);
 }
 
 LinearRgb MapAgxToBt2020Nits(
