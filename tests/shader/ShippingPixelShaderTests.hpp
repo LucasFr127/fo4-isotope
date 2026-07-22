@@ -47,7 +47,8 @@ struct PixelFixture
     LayerWhiteConfiguration whites;
 
     explicit PixelFixture(const std::filesystem::path& directory,
-        UINT imageWidth = width, UINT imageHeight = height, LayerWhiteConfiguration layerWhites = {});
+        UINT imageWidth = width, UINT imageHeight = height, LayerWhiteConfiguration layerWhites = {},
+        const OperatorLutData* operatorLut = nullptr);
     ComPtr<ID3D11PixelShader> ObservedShader(const std::filesystem::path& path,
         ID3D11ClassLinkage* classes);
     void Bind(bool dynamic = false);

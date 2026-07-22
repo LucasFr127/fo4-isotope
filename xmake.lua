@@ -126,7 +126,10 @@ target("fo4hdr-shader-tests")
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",
-        "tests/support/d3d11/GpuHarness.cpp")
+        "tests/support/d3d11/GpuHarness.cpp", "tests/shader/OperatorLutTests.cpp",
+        "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
+        "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
+        "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
     before_build(function(target)
         local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
         os.vrunv(pwsh, { "-NoProfile", "-File",

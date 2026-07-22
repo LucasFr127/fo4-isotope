@@ -7,6 +7,7 @@
 // See THIRD_PARTY_NOTICES.md.
 
 #include "GradeTransfer.hlsli"
+#include "../tonemap/OperatorLut.hlsli"
 
 Texture2D<float4> SceneTexture : register(t0);
 Texture3D<float4> Lut0 : register(t3);
@@ -44,6 +45,9 @@ void main(
     const float4 sceneSample = SceneTexture.Sample(SceneSampler, texcoord);
     // Exposure is already applied; this seam preserves fixed 203-nit scene units.
     const float3 scene = Fo4HdrGradeCleanScene(sceneSample.rgb);
-    const float3 result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene));
+    float3 result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene));
+    [branch]
+    if (OperatorMode != 0u)
+        result = Fo4HdrSampleOperatorLut(result) / OperatorUiWhiteNits;
     output = float4(result, sceneSample.a);
 }

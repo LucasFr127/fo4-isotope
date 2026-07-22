@@ -530,6 +530,22 @@ double DecodeOperatorLutCoordinate(
 
 }  // namespace
 
+std::array<float, 4> OperatorLutShaperParameters(
+    OperatorLutAlgorithm algorithm, double displayPeakNits) noexcept
+{
+    const auto minimum = OperatorLutInputShaperMinimum(algorithm, displayPeakNits);
+    const auto maximum = OperatorLutInputShaperMaximum(algorithm, displayPeakNits);
+    if (!(maximum > minimum)) return {};
+    const auto weight = LogarithmicWeight(algorithm);
+    const auto angleGain = (1.0 - weight) / (maximum - minimum);
+    const auto logGain = weight / (std::log2(kOperatorLutSceneMaximum +
+        OperatorLutInputOffset(algorithm)) + 16.0);
+    return {static_cast<float>(angleGain),
+        static_cast<float>(-minimum * angleGain + 16.0 * logGain),
+        static_cast<float>(ShaperCenter(algorithm, displayPeakNits)),
+        static_cast<float>(logGain)};
+}
+
 bool OperatorLutData::IsValid() const noexcept
 {
     if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits)) return false;

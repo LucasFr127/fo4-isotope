@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "HdrRenderer.hpp"
+#include "OperatorConstants.hpp"
 #include "RenoDxShaderIdentity.hpp"
+#include "d3d11/ScopedD3D11PixelBindings.hpp"
 #include "resources/HdrResourcePolicy.hpp"
+#include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
 #include <fo4hdr-shaders/ToneMapA.hpp>
 #include <fo4hdr-shaders/ToneMapB.hpp>
@@ -71,10 +74,18 @@ bool TemporalPass(RenoDxShaderPass pass) noexcept
     return pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2;
 }
 
-bool SupportedInputDomain(RenoDxShaderPass pass, SceneColorDomain domain) noexcept
+bool OperatorPass(RenoDxShaderPass pass) noexcept
+{
+    return pass == RenoDxShaderPass::lut || TemporalPass(pass);
+}
+
+bool SupportedInputDomain(RenoDxShaderPass pass, SceneColorDomain domain,
+    bool operatorProduced) noexcept
 {
     if (domain == SceneColorDomain::bt709Scene) return true;
-    return pass == RenoDxShaderPass::fxaa;
+    if (domain != SceneColorDomain::bt2020UiRelative) return false;
+    if (pass == RenoDxShaderPass::fxaa) return true;
+    return operatorProduced && TemporalPass(pass);
 }
 
 ComPtr<IUnknown> CanonicalIdentity(IUnknown* object) noexcept
@@ -248,6 +259,113 @@ bool PrepareVideoConstants(ID3D11Device* device, LayerWhiteConfiguration whites,
     return prepared != nullptr;
 }
 
+struct PreparedOperator
+{
+    ComPtr<ID3D11Texture3D> texture;
+    ComPtr<ID3D11ShaderResourceView> source;
+    ComPtr<ID3D11SamplerState> sampler;
+    std::array<ComPtr<ID3D11Buffer>, 2> constants;
+};
+
+bool ValidOperatorTable(const OperatorLutData& table) noexcept
+{
+    if (!table.IsValid()) return false;
+    for (const auto coefficient : table.rgba16)
+    {
+        if ((coefficient & 0x7C00U) == 0x7C00U) return false;
+    }
+    return true;
+}
+
+bool OperatorFormatSupported(ID3D11Device* device) noexcept
+{
+    UINT support{};
+    if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R16G16B16A16_FLOAT, &support))) return false;
+    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE3D | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
+    return (support & required) == required;
+}
+
+bool PrepareOperatorTexture(ID3D11Device* device, const OperatorLutData& table,
+    PreparedOperator& prepared) noexcept
+{
+    if (!OperatorFormatSupported(device)) return false;
+    D3D11_TEXTURE3D_DESC description{};
+    description.Width = description.Height = description.Depth = table.textureEdge;
+    description.MipLevels = 1;
+    description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const UINT rowPitch = table.textureEdge * 8;
+    const D3D11_SUBRESOURCE_DATA data{table.rgba16.data(), rowPitch, rowPitch * table.textureEdge};
+    if (FAILED(device->CreateTexture3D(&description, &data, &prepared.texture))) return false;
+    if (!prepared.texture) return false;
+    if (FAILED(device->CreateShaderResourceView(prepared.texture.Get(), nullptr, &prepared.source))) return false;
+    return prepared.source != nullptr;
+}
+
+bool PrepareOperatorSampler(ID3D11Device* device, PreparedOperator& prepared) noexcept
+{
+    D3D11_SAMPLER_DESC description{};
+    description.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    description.AddressU = description.AddressV = description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    description.MaxLOD = D3D11_FLOAT32_MAX;
+    description.MaxAnisotropy = 1;
+    description.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    if (FAILED(device->CreateSamplerState(&description, &prepared.sampler))) return false;
+    return prepared.sampler != nullptr;
+}
+
+std::uint32_t OperatorMode(OperatorLutAlgorithm algorithm) noexcept
+{
+    switch (algorithm)
+    {
+    case OperatorLutAlgorithm::aces2: return 1;
+    case OperatorLutAlgorithm::agX: return 2;
+    case OperatorLutAlgorithm::gt7: return 3;
+    default: return 0;
+    }
+}
+
+bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration& configuration,
+    PreparedOperator& prepared) noexcept
+{
+    OperatorConstants values{};
+    values.uiWhiteNits = configuration.whites.uiWhiteNits;
+    if (const auto* table = configuration.operatorLut)
+    {
+        values.mode = OperatorMode(table->algorithm);
+        values.displayPeakNits = static_cast<float>(table->displayPeakNits);
+        values.shaper = OperatorLutShaperParameters(table->algorithm, table->displayPeakNits);
+    }
+    constexpr std::array domains{SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
+    for (const auto domain : domains)
+    {
+        const auto index = static_cast<std::size_t>(domain);
+        if (index >= prepared.constants.size()) return false;
+        values.inputDomain = static_cast<std::uint32_t>(domain);
+        D3D11_BUFFER_DESC description{};
+        description.ByteWidth = sizeof(values);
+        description.Usage = D3D11_USAGE_IMMUTABLE;
+        description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        const D3D11_SUBRESOURCE_DATA data{&values, 0, 0};
+        if (FAILED(device->CreateBuffer(&description, &data, &prepared.constants[index]))) return false;
+        if (!prepared.constants[index]) return false;
+    }
+    return true;
+}
+
+bool PrepareOperator(ID3D11Device* device, const ScenePassConfiguration& configuration,
+    PreparedOperator& prepared) noexcept
+{
+    if (const auto* table = configuration.operatorLut)
+    {
+        if (!ValidOperatorTable(*table)) return false;
+        if (!PrepareOperatorTexture(device, *table, prepared)) return false;
+        if (!PrepareOperatorSampler(device, prepared)) return false;
+    }
+    return PrepareOperatorConstants(device, configuration, prepared);
+}
+
 bool PreparePrograms(ID3D11Device* device,
     std::array<ComPtr<ID3D11PixelShader>, ScenePassRenderer::replacementProgramCount>& prepared) noexcept
 {
@@ -259,6 +377,13 @@ bool PreparePrograms(ID3D11Device* device,
         if (FAILED(result) || !prepared[index]) return false;
     }
     return true;
+}
+
+bool PrepareDrawResources(ID3D11Device* device, const ScenePassConfiguration& configuration,
+    ComPtr<ID3D11Buffer>& videoConstants, PreparedOperator& prepared) noexcept
+{
+    if (!PrepareVideoConstants(device, configuration.whites, videoConstants)) return false;
+    return PrepareOperator(device, configuration, prepared);
 }
 
 HRESULT PrepareSceneViews(ID3D11Device* device, ID3D11Texture2D* texture,
@@ -422,7 +547,8 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     ComPtr<ID3D11DeviceContext1> preparedContext;
     if (!PreparePixelContext(device, immediateContext, preparedContext)) return false;
     ComPtr<ID3D11Buffer> preparedVideoConstants;
-    if (!PrepareVideoConstants(device, configuration.whites, preparedVideoConstants)) return false;
+    PreparedOperator preparedOperator;
+    if (!PrepareDrawResources(device, configuration, preparedVideoConstants, preparedOperator)) return false;
 
     std::array<ComPtr<ID3D11PixelShader>, replacementProgramCount> prepared;
     if (!PreparePrograms(device, prepared)) return false;
@@ -431,6 +557,11 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     device_ = device;
     context_ = std::move(preparedContext);
     videoConstants_ = std::move(preparedVideoConstants);
+    operatorTexture_ = std::move(preparedOperator.texture);
+    operatorSource_ = std::move(preparedOperator.source);
+    operatorSampler_ = std::move(preparedOperator.sampler);
+    operatorConstants_ = std::move(preparedOperator.constants);
+    operatorEnabled_ = configuration.operatorLut != nullptr;
     whites_ = configuration.whites;
     width_ = configuration.width;
     height_ = configuration.height;
@@ -475,6 +606,7 @@ bool ScenePassRenderer::Retire() noexcept
     for (auto& shader : observed_) shader = {};
     for (auto& shader : replacements_) shader.Reset();
     videoConstants_.Reset();
+    ResetOperatorResources();
     context_.Reset();
     device_.Reset();
     sceneCount_ = 0;
@@ -602,6 +734,7 @@ std::uint64_t ScenePassRenderer::FrameGeneration() const noexcept
 void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept
 {
     scenes_[slot].toneProduced = false;
+    scenes_[slot].operatorProduced = false;
     scenes_[slot].domain = SceneColorDomain::bt709Scene;
     if (selectedScene_.owner_ == this && selectedScene_.slot_ == slot) selectedScene_ = {};
 }
@@ -660,7 +793,37 @@ ScenePassRenderer::DrawLineage ScenePassRenderer::CaptureLineage(
     const auto* selected = Resolve(selectedScene_);
     return {source != nullptr && source == selected,
         source != nullptr && source->toneProduced, selected != nullptr, BoundWriteMask(),
-        source != nullptr ? source->domain : SceneColorDomain::bt709Scene};
+        source != nullptr ? source->domain : SceneColorDomain::bt709Scene,
+        source != nullptr && source->operatorProduced};
+}
+
+void ScenePassRenderer::ResetOperatorResources() noexcept
+{
+    for (auto& constants : operatorConstants_) constants.Reset();
+    operatorSampler_.Reset();
+    operatorSource_.Reset();
+    operatorTexture_.Reset();
+    operatorEnabled_ = false;
+}
+
+void ScenePassRenderer::PublishOutputDomain(RenoDxShaderPass pass,
+    SceneTextureHandle destination, const DrawLineage& lineage) noexcept
+{
+    auto& target = scenes_[destination.slot_];
+    if (pass == RenoDxShaderPass::video)
+    {
+        target.domain = SceneColorDomain::bt2020UiRelative;
+        target.operatorProduced = false;
+        return;
+    }
+    if (pass == RenoDxShaderPass::lut && operatorEnabled_)
+    {
+        target.domain = SceneColorDomain::bt2020UiRelative;
+        target.operatorProduced = true;
+        return;
+    }
+    target.domain = lineage.domain;
+    target.operatorProduced = lineage.operatorProduced;
 }
 
 void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
@@ -670,24 +833,23 @@ void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
     {
         scenes_[destination.slot_].toneProduced = true;
         scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
+        scenes_[destination.slot_].operatorProduced = false;
         return;
     }
+    PublishOutputDomain(descriptor.pass, destination, lineage);
     if (descriptor.pass == RenoDxShaderPass::video)
     {
-        scenes_[destination.slot_].domain = SceneColorDomain::bt2020UiRelative;
         selectedScene_ = destination;
         return;
     }
     if (lineage.consumesSelected)
     {
-        scenes_[destination.slot_].domain = lineage.domain;
         selectedScene_ = destination;
         return;
     }
     if (lineage.selectionExisted) return;
     if (descriptor.pass == RenoDxShaderPass::lut && lineage.toneInput)
     {
-        scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
         selectedScene_ = destination;
     }
 }
@@ -734,7 +896,7 @@ ID3D11PixelShader* ScenePassRenderer::QualifiedReplacement(
     if (source == nullptr) return nullptr;
     if (target == nullptr) return nullptr;
     if (source == target) return nullptr;
-    if (!SupportedInputDomain(descriptor->pass, source->domain)) return nullptr;
+    if (!SupportedInputDomain(descriptor->pass, source->domain, source->operatorProduced)) return nullptr;
     if (!BoundSceneViewsMatch(*descriptor, *source, *target)) return nullptr;
     return replacements_[program].Get();
 }
@@ -783,21 +945,41 @@ SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descrip
 {
     DrawScope drawScope{invoking_};
     auto* replacement = QualifiedReplacement(descriptor, input, destination);
+    const bool operatorRequired = replacement != nullptr && OperatorPass(descriptor->pass);
+    auto* operatorConstants = operatorRequired
+        ? ConstantsForInput(input) : nullptr;
+    if (operatorRequired && operatorConstants == nullptr)
+        replacement = nullptr;
     const auto lineage = CaptureLineage(input);
     auto* videoConstants = replacement != nullptr && descriptor->pass == RenoDxShaderPass::video
         ? videoConstants_.Get() : nullptr;
-    const auto outcome = InvokeDraw(replacement, invocation, videoConstants);
-    // Publish only after the borrowed pixel shader and class tuple are restored.
+    const auto outcome = InvokeDraw(replacement, invocation, videoConstants, operatorConstants);
+    // Publish only after shader/classes, operator slots and video b0 are restored.
     CompleteLineage(descriptor, destination, outcome, lineage);
     return outcome;
 }
 
+ID3D11Buffer* ScenePassRenderer::ConstantsForInput(SceneTextureHandle input) const noexcept
+{
+    const auto* source = Resolve(input);
+    if (source == nullptr) return nullptr;
+    const auto domain = static_cast<std::size_t>(source->domain);
+    return domain < operatorConstants_.size() ? operatorConstants_[domain].Get() : nullptr;
+}
+
 SceneDrawOutcome ScenePassRenderer::InvokeDraw(ID3D11PixelShader* replacement,
-    FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants) noexcept
+    FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants,
+    ID3D11Buffer* operatorConstants) noexcept
 {
     ScopedVideoConstants constantsScope{context_.Get(), videoConstants};
-    ScopedPixelShader pixelScope{context_.Get(), constantsScope.Ready() ? replacement : nullptr};
-    if (pixelScope.Replaced()) constantsScope.Bind();
+    ScopedD3D11PixelBindings operatorScope{context_.Get(), operatorConstants};
+    ScopedPixelShader pixelScope{context_.Get(),
+        constantsScope.Ready() && operatorScope.Ready() ? replacement : nullptr};
+    if (pixelScope.Replaced())
+    {
+        constantsScope.Bind();
+        operatorScope.Bind(operatorSource_.Get(), operatorSampler_.Get());
+    }
     try
     {
         invocation.draw(context_.Get(), invocation.argument);

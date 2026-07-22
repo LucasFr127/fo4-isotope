@@ -26,12 +26,12 @@ cbuffer cb2 : register(b2) {
 
 float3 convertRenderInput(float3 render)
 {
-  return Fo4HdrEncodeTemporalInput(render);
+  return Fo4HdrEncodeTemporalScene(render);
 }
 
 float3 convertRenderOutput(float3 render)
 {
-  return Fo4HdrDecodeTemporalOutput(render);
+  return Fo4HdrDecodeTemporalScene(render);
 }
 
 void main(float4 v0: SV_POSITION0, float2 v1: TEXCOORD0, out float4 o0: SV_Target0, out float4 o1: SV_Target1) {

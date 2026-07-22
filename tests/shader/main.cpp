@@ -11,10 +11,15 @@
 #include <cmath>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string_view>
+
+namespace fo4hdr::tests::gpu {
+void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
+}
 
 namespace {
 
@@ -98,6 +103,8 @@ int wmain(int argc, wchar_t** argv)
         const auto output = fo4hdr::tests::gpu::EvaluateTransfer(argv[1], input, displayPeakNits);
         const auto error = CheckTransfer(input, output);
         fo4hdr::tests::gpu::VerifyShippingPixelShaders(
+            std::filesystem::path{argv[1]}.parent_path());
+        fo4hdr::tests::gpu::VerifyOperatorLut(
             std::filesystem::path{argv[1]}.parent_path());
         if (fo4hdr::test::failures != 0)
         {

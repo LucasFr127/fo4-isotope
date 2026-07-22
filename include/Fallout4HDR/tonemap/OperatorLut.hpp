@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -41,6 +42,11 @@ struct OperatorLutCancellation
             generation->load(std::memory_order_acquire) != expectedGeneration;
     }
 };
+
+// Ordered GPU constants: angle gain, bias, logarithm center, logarithm gain.
+// Invalid algorithms or peaks return zero constants.
+[[nodiscard]] std::array<float, 4> OperatorLutShaperParameters(
+    OperatorLutAlgorithm algorithm, double displayPeakNits) noexcept;
 
 // Cold CPU-only preparation. Invalid algorithms/peaks, cancellation, allocation
 // or nonfinite/FP16-overflow coefficients return an invalid empty result.

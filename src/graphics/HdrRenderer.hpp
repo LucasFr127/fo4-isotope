@@ -17,6 +17,7 @@
 namespace fo4hdr {
 
 class ScenePassRenderer;
+struct OperatorLutData;
 
 struct LayerWhiteConfiguration
 {
@@ -31,6 +32,8 @@ struct ScenePassConfiguration
     UINT width{};
     UINT height{};
     LayerWhiteConfiguration whites;
+    // Borrowed only during Initialize; a requested invalid table fails initialization.
+    const OperatorLutData* operatorLut{};
 };
 
 class SceneTextureHandle
@@ -120,7 +123,7 @@ public:
     // it does not establish an original-bytecode match.
     // FXAA requires the positive-HDR source contract; video requires completed
     // authored BGR codes, and publishes a separate UI-relative BT.2020 domain.
-    // Video's nonnull borrowed b0 range is independently caller-qualified;
+    // Video b0 and grade/temporal b13 nonnull ranges are independently caller-qualified;
     // preserve the actual reported tuple without inferring legacy whole-buffer windows.
     // Temporal metadata/history require R16G16B16A16_FLOAT or R32G32B32A32_FLOAT
     // views; the caller separately qualifies their native float4 semantics.
@@ -137,6 +140,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
         bool toneProduced{};
+        bool operatorProduced{};
         SceneColorDomain domain{SceneColorDomain::bt709Scene};
     };
 
@@ -153,6 +157,7 @@ private:
         bool selectionExisted{};
         std::uint8_t writes{};
         SceneColorDomain domain{SceneColorDomain::bt709Scene};
+        bool operatorProduced{};
     };
 
     [[nodiscard]] bool OnOwnerThread() const noexcept;
@@ -174,11 +179,16 @@ private:
     [[nodiscard]] DrawLineage CaptureLineage(SceneTextureHandle input) const noexcept;
     void PublishLineage(const RenoDxShaderDescriptor& descriptor,
         SceneTextureHandle destination, const DrawLineage& lineage) noexcept;
+    void PublishOutputDomain(RenoDxShaderPass pass,
+        SceneTextureHandle destination, const DrawLineage& lineage) noexcept;
+    void ResetOperatorResources() noexcept;
     void CompleteLineage(const RenoDxShaderDescriptor* descriptor,
         SceneTextureHandle destination, SceneDrawOutcome outcome,
         const DrawLineage& lineage) noexcept;
     [[nodiscard]] SceneDrawOutcome InvokeDraw(ID3D11PixelShader* replacement,
-        FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants) noexcept;
+        FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants,
+        ID3D11Buffer* operatorConstants) noexcept;
+    [[nodiscard]] ID3D11Buffer* ConstantsForInput(SceneTextureHandle input) const noexcept;
     [[nodiscard]] ID3D11PixelShader* QualifiedReplacement(
         const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
         SceneTextureHandle destination) const noexcept;
@@ -191,6 +201,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> videoConstants_;
+    Microsoft::WRL::ComPtr<ID3D11Texture3D> operatorTexture_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> operatorSource_;
+    Microsoft::WRL::ComPtr<ID3D11SamplerState> operatorSampler_;
+    std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 2> operatorConstants_;
+    bool operatorEnabled_{};
     LayerWhiteConfiguration whites_;
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, replacementProgramCount> replacements_;
     std::array<SceneTexture, sceneTextureCapacity> scenes_;

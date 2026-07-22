@@ -98,7 +98,12 @@ $expected = [string[]]@(
     "include/Fallout4HDR/tonemap/OperatorLut.hpp",
     "src/tonemap/OperatorLut.cpp",
     "src/graphics/OperatorLutWorker.hpp",
-    "src/graphics/OperatorLutWorker.cpp"
+    "src/graphics/OperatorLutWorker.cpp",
+    "src/graphics/OperatorConstants.hpp",
+    "src/graphics/d3d11/ScopedD3D11PixelBindings.hpp",
+    "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
+    "shaders/tonemap/OperatorLut.hlsli",
+    "tests/shader/OperatorLutTests.cpp"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
