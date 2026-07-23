@@ -7,6 +7,8 @@ namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
 void RunToneMappingTests();
+void RunOperatorLutTests();
+void RunHdrOperatorWorkerTests();
 void RunGt7Tests();
 void RunPipelineContractTests();
 void RunPresentationCharacterizationTests();

@@ -119,7 +119,12 @@ $files = [string[]]@(
     "src/graphics/d3d11/ScopedD3D11PixelBindings.hpp",
     "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
     "shaders/tonemap/OperatorLut.hlsli",
-    "tests/shader/OperatorLutTests.cpp"
+    "tests/shader/OperatorLutTests.cpp",
+    "tests/support/reference/OperatorLutTestSupport.hpp",
+    "tests/support/reference/OperatorLutTestSupport.cpp",
+    "tests/unit/tonemap/OperatorLutTests.cpp",
+    "tests/unit/graphics/HdrOperatorWorkerTests.cpp",
+    "tests/shader/shaders/OperatorLut.cs.hlsl"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

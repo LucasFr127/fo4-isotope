@@ -47,6 +47,10 @@ private:
 [[nodiscard]] LinearRgb MapAgxToBt2020Nits(
     const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept;
 
+// Final AgX gamut containment also applies after coefficient reconstruction.
+[[nodiscard]] LinearRgb ApplyAgxDisplayGamut(
+    LinearRgb displayLinearBt2020Nits, double displayPeakNits) noexcept;
+
 // Scene-linear BT.709/D65 uses the fixed 203-nit scene reference white.
 // Returns contained absolute display-linear BT.2020 nits, without display encoding.
 // Fixed AgX response: EV 0, contrast 2.7, HDR purity 0.5 and shoulder power 2.

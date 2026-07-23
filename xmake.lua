@@ -94,6 +94,8 @@ for _, fixture in ipairs({
             "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
             "src/tonemap/OperatorLut.cpp", "src/graphics/OperatorLutWorker.cpp",
+            "tests/support/reference/OperatorLutTestSupport.cpp",
+            "tests/unit/tonemap/OperatorLutTests.cpp", "tests/unit/graphics/HdrOperatorWorkerTests.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
             "tests/unit/hooks/HookTests.cpp",
             "src/graphics/DeviceCreationHook.cpp",
@@ -127,6 +129,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",
         "tests/support/d3d11/GpuHarness.cpp", "tests/shader/OperatorLutTests.cpp",
+        "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")

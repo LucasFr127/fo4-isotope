@@ -15,6 +15,8 @@ int wmain(int argc, wchar_t** argv)
     }
     fo4hdr::tests::RunHdrCoreTests();
     fo4hdr::tests::RunToneMappingTests();
+    fo4hdr::tests::RunOperatorLutTests();
+    fo4hdr::tests::RunHdrOperatorWorkerTests();
     fo4hdr::tests::RunGt7Tests();
     fo4hdr::tests::RunPipelineContractTests();
     fo4hdr::tests::RunHookTests();

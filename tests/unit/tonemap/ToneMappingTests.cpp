@@ -2,17 +2,13 @@
 
 #include "Fallout4HDR/tonemap/Aces2.hpp"
 #include "Fallout4HDR/tonemap/Agx.hpp"
-#include "OperatorLutWorker.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <memory>
-#include <thread>
 
 namespace fo4hdr::tests {
 namespace {
@@ -303,66 +299,6 @@ void TestAgxContextReuse()
         MapAgxToBt2020Nits(*low, highlight).red);
 }
 
-void CheckPackedOperatorTable(const OperatorLutData& data)
-{
-    FO4HDR_CHECK(data.edge == 64);
-    FO4HDR_CHECK(data.textureEdge == data.edge + 2);
-    std::size_t nonzero{};
-    for (std::size_t index = 0; index < data.rgba16.size(); ++index)
-    {
-        const auto packed = data.rgba16[index];
-        FO4HDR_CHECK((packed & 0x7C00U) != 0x7C00U);
-        if (index % 4 == 3) FO4HDR_CHECK(packed == 0x3C00U);
-        else if ((packed & 0x7FFFU) != 0) ++nonzero;
-    }
-    FO4HDR_CHECK(nonzero > 0);
-}
-
-std::unique_ptr<OperatorLutBuildResult> WaitForOperatorTable(OperatorLutWorker& worker)
-{
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{30};
-    while (std::chrono::steady_clock::now() < deadline)
-    {
-        if (auto result = worker.TakeCompleted()) return result;
-        if (worker.TakeFailedGeneration() != 0) return {};
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-    }
-    return {};
-}
-
-OperatorLutRequestStatus SubmitOperatorTable(OperatorLutWorker& worker,
-    const OperatorLutBuildRequest& request)
-{
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
-    do
-    {
-        const auto status = worker.Request(request);
-        if (status != OperatorLutRequestStatus::busy) return status;
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-    } while (std::chrono::steady_clock::now() < deadline);
-    return OperatorLutRequestStatus::busy;
-}
-
-void TestOperatorLutWorker()
-{
-    OperatorLutWorker worker;
-    const auto initialized = worker.Initialize();
-    FO4HDR_CHECK(initialized);
-    if (!initialized) return;
-    constexpr OperatorLutBuildRequest request{OperatorLutAlgorithm::gt7, 1000.0, 1};
-    const auto status = SubmitOperatorTable(worker, request);
-    FO4HDR_CHECK(status == OperatorLutRequestStatus::accepted);
-    if (status != OperatorLutRequestStatus::accepted) return;
-    auto result = WaitForOperatorTable(worker);
-    worker.Cancel(request.requestGeneration);
-    FO4HDR_CHECK(result);
-    if (!result) return;
-    FO4HDR_CHECK(result->request.requestGeneration == request.requestGeneration);
-    const auto matches = PreparedOperatorLutMatches(result->data, request);
-    FO4HDR_CHECK(matches);
-    if (matches) CheckPackedOperatorTable(result->data);
-}
-
 }  // namespace
 
 void RunToneMappingTests()
@@ -375,7 +311,6 @@ void RunToneMappingTests()
     TestAgxContainedInputs();
     TestAgxInputPolicy();
     TestAgxContextReuse();
-    TestOperatorLutWorker();
 }
 
 }  // namespace fo4hdr::tests

@@ -4,12 +4,19 @@
 #include "Fallout4HDR/tonemap/Gt7.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "TestHarness.hpp"
+#include "OperatorConstants.hpp"
+#include "reference/OperatorLutTestSupport.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <span>
+#include <stdexcept>
+#include <tuple>
 #include <vector>
 
 namespace fo4hdr::tests::gpu {
@@ -275,6 +282,197 @@ void VerifyInvalidTable(PixelFixture& fixture, const OperatorLutData& table)
     FO4HDR_CHECK(!rejected.Active());
 }
 
+
+constexpr UINT batchWidth = 4;
+constexpr UINT batchHeight = 4;
+using BatchPixels = std::array<Float4, batchWidth * batchHeight>;
+
+struct BatchDimensions
+{
+    std::uint32_t width{batchWidth};
+    std::uint32_t height{batchHeight};
+    std::array<std::uint32_t, 2> reserved{};
+};
+static_assert(sizeof(BatchDimensions) == 16);
+
+ComPtr<ID3D11Buffer> ImmutableConstants(ID3D11Device& device, const void* data, UINT size)
+{
+    D3D11_BUFFER_DESC description{};
+    description.ByteWidth = size;
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    const D3D11_SUBRESOURCE_DATA initial{data, 0, 0};
+    ComPtr<ID3D11Buffer> result;
+    CheckHresult(device.CreateBuffer(&description, &initial, &result), "Operator batch constants");
+    return result;
+}
+
+BatchPixels SamplingInputs()
+{
+    const auto samples = test::OperatorLutReferenceSamples();
+    static_assert(std::tuple_size_v<decltype(samples)> == batchWidth * batchHeight);
+    BatchPixels result{};
+    for (std::size_t index = 0; index < samples.size(); ++index)
+        result[index] = {static_cast<float>(samples[index].red), static_cast<float>(samples[index].green),
+            static_cast<float>(samples[index].blue), 1};
+    return result;
+}
+
+struct SamplingResources
+{
+    ComPtr<ID3D11Texture2D> input;
+    ComPtr<ID3D11ShaderResourceView> inputView;
+    ComPtr<ID3D11Texture2D> output;
+    ComPtr<ID3D11UnorderedAccessView> outputView;
+    ComPtr<ID3D11Texture2D> staging;
+    ComPtr<ID3D11Buffer> dimensions;
+    ComPtr<ID3D11ComputeShader> shader;
+    ComPtr<ID3D11SamplerState> sampler;
+
+    SamplingResources(ID3D11Device& device, const std::filesystem::path& directory, const BatchPixels& pixels)
+    {
+        auto description = SceneDescription(batchWidth, batchHeight);
+        description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        description.Usage = D3D11_USAGE_IMMUTABLE;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        const D3D11_SUBRESOURCE_DATA data{pixels.data(), batchWidth * sizeof(Float4), 0};
+        CheckHresult(device.CreateTexture2D(&description, &data, &input), "Operator batch input");
+        CheckHresult(device.CreateShaderResourceView(input.Get(), nullptr, &inputView), "Operator batch input SRV");
+        description.Usage = D3D11_USAGE_DEFAULT;
+        description.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+        CheckHresult(device.CreateTexture2D(&description, nullptr, &output), "Operator batch output");
+        CheckHresult(device.CreateUnorderedAccessView(output.Get(), nullptr, &outputView), "Operator batch output UAV");
+        description.Usage = D3D11_USAGE_STAGING;
+        description.BindFlags = 0;
+        description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        CheckHresult(device.CreateTexture2D(&description, nullptr, &staging), "Operator batch staging");
+        const BatchDimensions size;
+        dimensions = ImmutableConstants(device, &size, sizeof(size));
+        const auto bytecode = ReadShader(directory / "OperatorLut.dxbc");
+        CheckHresult(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
+            "Operator batch shader");
+        D3D11_SAMPLER_DESC filter{};
+        filter.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        filter.AddressU = filter.AddressV = filter.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        filter.MaxAnisotropy = 1;
+        filter.ComparisonFunc = D3D11_COMPARISON_NEVER;
+        CheckHresult(device.CreateSamplerState(&filter, &sampler), "Operator batch sampler");
+    }
+};
+
+struct SamplingTable
+{
+    ComPtr<ID3D11Texture3D> texture;
+    ComPtr<ID3D11ShaderResourceView> view;
+    ComPtr<ID3D11Buffer> constants;
+
+    SamplingTable(ID3D11Device& device, const OperatorLutData& table)
+    {
+        D3D11_TEXTURE3D_DESC description{};
+        description.Width = description.Height = description.Depth = table.textureEdge;
+        description.MipLevels = 1;
+        description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        description.Usage = D3D11_USAGE_IMMUTABLE;
+        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        const auto rowPitch = table.textureEdge * 8u;
+        const D3D11_SUBRESOURCE_DATA data{table.rgba16.data(), rowPitch, rowPitch * table.textureEdge};
+        CheckHresult(device.CreateTexture3D(&description, &data, &texture), "Operator coefficient texture");
+        CheckHresult(device.CreateShaderResourceView(texture.Get(), nullptr, &view), "Operator coefficient SRV");
+        const OperatorConstants values{static_cast<std::uint32_t>(table.algorithm) + 1u,
+            static_cast<float>(table.displayPeakNits), uiWhiteNits, 0,
+            OperatorLutShaperParameters(table.algorithm, table.displayPeakNits)};
+        constants = ImmutableConstants(device, &values, sizeof(values));
+    }
+};
+
+void DispatchSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
+{
+    auto* dimensions = resources.dimensions.Get();
+    auto* constants = table.constants.Get();
+    auto* input = resources.inputView.Get();
+    auto* coefficients = table.view.Get();
+    auto* sampler = resources.sampler.Get();
+    auto* output = resources.outputView.Get();
+    context.CSSetShader(resources.shader.Get(), nullptr, 0);
+    context.CSSetConstantBuffers(0, 1, &dimensions);
+    context.CSSetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
+    context.CSSetShaderResources(0, 1, &input);
+    context.CSSetShaderResources(kProductionOperatorLutSlot, 1, &coefficients);
+    context.CSSetSamplers(kProductionOperatorSamplerSlot, 1, &sampler);
+    context.CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+    context.Dispatch(1, batchHeight, 1);
+    // This context is owned by the batch; clear aliases before staging readback.
+    context.ClearState();
+}
+
+BatchPixels ReadSampling(ID3D11DeviceContext& context, const SamplingResources& resources)
+{
+    context.CopyResource(resources.staging.Get(), resources.output.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    CheckHresult(context.Map(resources.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Operator batch map");
+    constexpr auto rowBytes = batchWidth * sizeof(Float4);
+    if (!mapped.pData || mapped.RowPitch < rowBytes)
+    {
+        context.Unmap(resources.staging.Get(), 0);
+        throw std::runtime_error("Invalid operator batch pitch");
+    }
+    BatchPixels result{};
+    const auto* data = static_cast<const std::byte*>(mapped.pData);
+    for (UINT row = 0; row < batchHeight; ++row)
+        std::memcpy(result.data() + row * batchWidth, data + row * mapped.RowPitch, rowBytes);
+    context.Unmap(resources.staging.Get(), 0);
+    return result;
+}
+
+void CheckSamplingChannel(float actual, double expected)
+{
+    // CPU and GPU read the same packed coefficients. This provisional allowance
+    // covers differing sampling arithmetic; it is not a proved hardware bound.
+    const auto tolerance = 0.5 + std::abs(expected) / 1024.0;
+    FO4HDR_CHECK(std::isfinite(actual));
+    FO4HDR_CHECK(actual >= 0);
+    FO4HDR_CHECK(actual <= peakNits);
+    FO4HDR_CHECK(std::abs(static_cast<double>(actual) - expected) <= tolerance);
+}
+
+void CheckSampling(const OperatorLutData& table, const BatchPixels& input, const BatchPixels& output)
+{
+    for (std::size_t index = 0; index < input.size(); ++index)
+    {
+        const auto& source = input[index];
+        const auto expected = test::SampleOperatorLut(table, {source.red, source.green, source.blue});
+        const auto actual = output[index];
+        CheckSamplingChannel(actual.red, expected.red);
+        CheckSamplingChannel(actual.green, expected.green);
+        CheckSamplingChannel(actual.blue, expected.blue);
+        FO4HDR_CHECK(actual.alpha == 1);
+        if (std::max({source.red, source.green, source.blue}) == 0)
+        {
+            FO4HDR_CHECK(actual.red == 0);
+            FO4HDR_CHECK(actual.green == 0);
+            FO4HDR_CHECK(actual.blue == 0);
+        }
+    }
+}
+
+void VerifySamplingBatch(const std::filesystem::path& directory, const OperatorLutData& gt7)
+{
+    const auto device = CreateWarpDevice();
+    const auto inputs = SamplingInputs();
+    const SamplingResources resources(*device.device.Get(), directory, inputs);
+    for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX, OperatorLutAlgorithm::gt7})
+    {
+        const auto generated = algorithm == OperatorLutAlgorithm::gt7 ?
+            OperatorLutData{} : BuildOperatorLut(algorithm, peakNits);
+        const auto& table = algorithm == OperatorLutAlgorithm::gt7 ? gt7 : generated;
+        FO4HDR_CHECK(table.IsValid());
+        if (!table.IsValid()) continue;
+        const SamplingTable uploaded(*device.device.Get(), table);
+        DispatchSampling(*device.context.Get(), resources, uploaded);
+        CheckSampling(table, inputs, ReadSampling(*device.context.Get(), resources));
+    }
+}
+
 }  // namespace
 
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory)
@@ -291,6 +489,7 @@ void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory)
     VerifyDirectGrade(fixture, borrowed, *transform, coloredScene);
     VerifyPublishedGrade(fixture, borrowed, *transform);
     VerifyInvalidTable(fixture, table);
+    VerifySamplingBatch(fixtureDirectory, table);
 }
 
 }  // namespace fo4hdr::tests::gpu

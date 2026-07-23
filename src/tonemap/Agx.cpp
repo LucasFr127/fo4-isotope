@@ -519,6 +519,12 @@ struct ScaleBlend
 
 }  // namespace
 
+LinearRgb ApplyAgxDisplayGamut(
+    LinearRgb displayLinearBt2020Nits, double displayPeakNits) noexcept
+{
+    return ContainDisplayGamut(displayLinearBt2020Nits, displayPeakNits);
+}
+
 std::optional<AgxTransform> CreateAgxTransform(double displayPeakNits) noexcept
 {
     if (!IsValidDisplayPeak(displayPeakNits)) return std::nullopt;
@@ -543,7 +549,8 @@ LinearRgb EvaluateAgxLutNits(
 LinearRgb MapAgxToBt2020Nits(
     const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
 {
-    return ContainDisplayGamut(EvaluateAgxLutNits(transform, sceneLinearBt709), transform.displayPeakNits_);
+    return ApplyAgxDisplayGamut(
+        EvaluateAgxLutNits(transform, sceneLinearBt709), transform.displayPeakNits_);
 }
 
 LinearRgb MapAgxToBt2020Nits(
@@ -551,7 +558,7 @@ LinearRgb MapAgxToBt2020Nits(
 {
     if (!IsValidDisplayPeak(displayPeakNits)) return {};
     const auto transform = PrepareAgx(displayPeakNits);
-    return ContainDisplayGamut(
+    return ApplyAgxDisplayGamut(
         EvaluateSceneNits(transform, sceneLinearBt709), displayPeakNits);
 }
 
