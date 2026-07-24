@@ -108,7 +108,14 @@ $expected = [string[]]@(
     "tests/support/reference/OperatorLutTestSupport.cpp",
     "tests/unit/tonemap/OperatorLutTests.cpp",
     "tests/unit/graphics/HdrOperatorWorkerTests.cpp",
-    "tests/shader/shaders/OperatorLut.cs.hlsl"
+    "tests/shader/shaders/OperatorLut.cs.hlsl",
+    "include/Fallout4HDR/config/PluginConfiguration.hpp",
+    "include/Fallout4HDR/config/SettingsPersistence.hpp",
+    "src/config/PluginConfiguration.cpp",
+    "src/config/SettingsPersistence.cpp",
+    "config/Fallout4HDR.ini",
+    "tests/unit/config/HdrPersistenceTests.cpp",
+    "src/graphics/LiveSettings.hpp"
 )
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null

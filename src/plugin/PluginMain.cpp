@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Fallout4HDR/runtime/RuntimeValidation.hpp"
+#include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "../game/GameStateObserver.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
 
 #include <F4SE/F4SE.h>
 #include <spdlog/spdlog.h>
 
+#include <Windows.h>
+
+#include <array>
+#include <filesystem>
 #include <mutex>
 
 namespace {
@@ -35,6 +40,36 @@ std::once_flag startup;
     }
     const auto executable = fo4hdr::ReadCurrentExecutableVersion();
     return executable && *executable == reported.runtimeVersion;
+}
+
+void ReadStartupSettings()
+{
+    std::array<wchar_t, 32768> path{};
+    const auto length = GetModuleFileNameW(nullptr, path.data(),
+        static_cast<DWORD>(path.size()));
+    if (length == 0 || length >= path.size())
+    {
+        spdlog::error("Cannot resolve the settings path");
+        return;
+    }
+    const std::filesystem::path executable(path.data(), path.data() + length);
+    const auto configuration = fo4hdr::LoadPluginConfiguration(executable.parent_path() /
+        L"Data/F4SE/Plugins/Fallout4HDR.ini");
+    if (configuration.status == fo4hdr::PluginConfigurationStatus::missing)
+    {
+        spdlog::info("HDR settings file is absent; defaults apply");
+        return;
+    }
+    if (configuration.status != fo4hdr::PluginConfigurationStatus::loaded)
+    {
+        spdlog::error("HDR settings could not be loaded: status={}, line={}",
+            static_cast<unsigned>(configuration.status), configuration.line);
+        return;
+    }
+    const auto& settings = configuration.value;
+    spdlog::info("HDR settings: operator={}, peak={}, UI white={}, video white={}",
+        fo4hdr::ToString(settings.algorithm), settings.display.displayPeakNits,
+        settings.display.uiPaperWhiteNits, settings.display.videoWhiteNits);
 }
 
 }  // namespace
@@ -78,6 +113,7 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
             return false;
         }
         std::call_once(startup, [] {
+            ReadStartupSettings();
             spdlog::info("Fallout4HDR 0.1.0 loaded: runtime 1.10.163, F4SE 0.6.23");
         });
         fo4hdr::game::InitializeGameStateObserver(f4se);

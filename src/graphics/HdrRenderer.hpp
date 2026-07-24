@@ -17,6 +17,7 @@
 namespace fo4hdr {
 
 class ScenePassRenderer;
+class PresentationPass;
 struct OperatorLutData;
 
 struct LayerWhiteConfiguration
@@ -127,6 +128,7 @@ public:
     // preserve the actual reported tuple without inferring legacy whole-buffer windows.
     // Temporal metadata/history require R16G16B16A16_FLOAT or R32G32B32A32_FLOAT
     // views; the caller separately qualifies their native float4 semantics.
+    // Operator/peak changes require independently reset or requalified temporal history.
     [[nodiscard]] SceneDrawOutcome Execute(const RenoDxShaderDescriptor& descriptor,
         SceneTextureHandle input, SceneTextureHandle destination,
         FiniteDrawInvocation invocation) noexcept;
@@ -134,6 +136,10 @@ public:
         SceneTextureHandle destination, FiniteDrawInvocation invocation) noexcept;
 
 private:
+    friend class PresentationPass;
+    [[nodiscard]] bool ApplySettings(const OperatorLutData& table,
+        LayerWhiteConfiguration whites) noexcept;
+    void MarkSettingsStale() noexcept;
     struct SceneTexture
     {
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
@@ -141,6 +147,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
         bool toneProduced{};
         bool operatorProduced{};
+        bool settingsStale{};
         SceneColorDomain domain{SceneColorDomain::bt709Scene};
     };
 

@@ -575,6 +575,37 @@ bool ScenePassRenderer::OnOwnerThread() const noexcept
     return ownerThread_ == std::this_thread::get_id();
 }
 
+bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
+    LayerWhiteConfiguration whites) noexcept
+{
+    if (!Active()) return false;
+    if (invoking_ || frameOpen_) return false;
+    if (!whites.Valid()) return false;
+    const ScenePassConfiguration configuration{width_, height_, whites, &table};
+    ComPtr<ID3D11Buffer> preparedVideoConstants;
+    PreparedOperator preparedOperator;
+    if (!PrepareDrawResources(device_.Get(), configuration, preparedVideoConstants, preparedOperator))
+        return false;
+    videoConstants_ = std::move(preparedVideoConstants);
+    operatorTexture_ = std::move(preparedOperator.texture);
+    operatorSource_ = std::move(preparedOperator.source);
+    operatorSampler_ = std::move(preparedOperator.sampler);
+    operatorConstants_ = std::move(preparedOperator.constants);
+    operatorEnabled_ = true;
+    whites_ = whites;
+    MarkSettingsStale();
+    return true;
+}
+
+void ScenePassRenderer::MarkSettingsStale() noexcept
+{
+    ClearLineage();
+    for (auto& scene : scenes_)
+    {
+        if (scene.domain == SceneColorDomain::bt2020UiRelative) scene.settingsStale = true;
+    }
+}
+
 bool ScenePassRenderer::Active() const noexcept
 {
     return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
@@ -735,7 +766,7 @@ void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept
 {
     scenes_[slot].toneProduced = false;
     scenes_[slot].operatorProduced = false;
-    scenes_[slot].domain = SceneColorDomain::bt709Scene;
+    if (!scenes_[slot].settingsStale) scenes_[slot].domain = SceneColorDomain::bt709Scene;
     if (selectedScene_.owner_ == this && selectedScene_.slot_ == slot) selectedScene_ = {};
 }
 
@@ -743,6 +774,7 @@ bool ScenePassRenderer::InvalidateScene(SceneTextureHandle handle) noexcept
 {
     if (!Active() || invoking_) return false;
     if (Resolve(handle) == nullptr) return false;
+    scenes_[handle.slot_].settingsStale = false;
     InvalidateSlot(handle.slot_);
     return true;
 }
@@ -810,6 +842,7 @@ void ScenePassRenderer::PublishOutputDomain(RenoDxShaderPass pass,
     SceneTextureHandle destination, const DrawLineage& lineage) noexcept
 {
     auto& target = scenes_[destination.slot_];
+    target.settingsStale = false;
     if (pass == RenoDxShaderPass::video)
     {
         target.domain = SceneColorDomain::bt2020UiRelative;
@@ -834,6 +867,7 @@ void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
         scenes_[destination.slot_].toneProduced = true;
         scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
         scenes_[destination.slot_].operatorProduced = false;
+        scenes_[destination.slot_].settingsStale = false;
         return;
     }
     PublishOutputDomain(descriptor.pass, destination, lineage);
@@ -894,6 +928,7 @@ ID3D11PixelShader* ScenePassRenderer::QualifiedReplacement(
     const auto* source = Resolve(input);
     const auto* target = Resolve(destination);
     if (source == nullptr) return nullptr;
+    if (source->settingsStale) return nullptr;
     if (target == nullptr) return nullptr;
     if (source == target) return nullptr;
     if (!SupportedInputDomain(descriptor->pass, source->domain, source->operatorProduced)) return nullptr;

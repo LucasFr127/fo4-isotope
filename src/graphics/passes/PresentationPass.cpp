@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PresentationPass.hpp"
+#include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
 #include <fo4hdr-shaders/PresentPixels.hpp>
 #include <fo4hdr-shaders/PrepareBackdrop.hpp>
@@ -600,9 +601,35 @@ bool PresentationPass::OnOwnerThread() const noexcept
     return ownerThread_ == std::this_thread::get_id();
 }
 
+bool PresentationPass::ApplySettings(const OperatorLutData& table,
+    LayerWhiteConfiguration whites, PresentationScope scope) noexcept
+{
+    if (!CanApplySettings(scope)) return false;
+    if (!table.IsValid() || !whites.Valid()) return false;
+    auto configuration = configuration_;
+    configuration.displayPeakNits = static_cast<float>(table.displayPeakNits);
+    configuration.whites = whites;
+    if (!ValidConfiguration(configuration)) return false;
+    PreparedPresentation prepared;
+    if (!PrepareConstantVariants(device_.Get(), configuration, prepared)) return false;
+    if (!configuration_.scenes->ApplySettings(table, whites)) return false;
+    constants_ = std::move(prepared.constants);
+    configuration_ = configuration;
+    layerFrame_ = 0;
+    layerFailureFrame_ = 0;
+    return true;
+}
+
 bool PresentationPass::Active() const noexcept
 {
     return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
+}
+
+bool PresentationPass::CanApplySettings(PresentationScope scope) const noexcept
+{
+    if (!CanExecute(scope)) return false;
+    if (framePrepared_) return false;
+    return configuration_.scenes->FrameGeneration() == 0;
 }
 
 bool PresentationPass::CanExecute(PresentationScope scope) const noexcept

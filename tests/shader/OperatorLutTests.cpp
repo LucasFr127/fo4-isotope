@@ -5,17 +5,23 @@
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "TestHarness.hpp"
 #include "OperatorConstants.hpp"
+#include "LiveSettings.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <memory>
 #include <span>
 #include <stdexcept>
+#include <string>
+#include <system_error>
 #include <tuple>
 #include <vector>
 
@@ -473,6 +479,166 @@ void VerifySamplingBatch(const std::filesystem::path& directory, const OperatorL
     }
 }
 
+
+class LiveConfigurationFile
+{
+public:
+    LiveConfigurationFile()
+    {
+        const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
+        directory_ = std::filesystem::temp_directory_path() /
+            ("Fallout4HDR-live-settings-" + std::to_string(token));
+        if (!std::filesystem::create_directory(directory_))
+            throw std::runtime_error("Cannot create live settings directory");
+    }
+
+    ~LiveConfigurationFile()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory_, ignored);
+    }
+
+    PluginConfigurationResult Load() const
+    {
+        const auto path = directory_ / "settings.ini";
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << "[Output]\nDisplayPeakNits=1000\nUiPaperWhiteNits=100\nVideoWhiteNits=203\n"
+                  "[ToneMapper]\nAlgorithm=GT7\n";
+        output.close();
+        if (!output) throw std::runtime_error("Cannot write live settings input");
+        return LoadPluginConfiguration(path);
+    }
+
+private:
+    std::filesystem::path directory_;
+};
+
+void CheckLiveTuple(const LiveSettingsSnapshot& snapshot, const PluginConfiguration& active,
+    const PluginConfiguration& requested, bool pending)
+{
+    FO4HDR_CHECK(snapshot.available);
+    FO4HDR_CHECK(snapshot.active == active);
+    FO4HDR_CHECK(snapshot.requested == requested);
+    FO4HDR_CHECK(snapshot.pending == pending);
+    FO4HDR_CHECK(snapshot.activeGeneration == (pending ? 1u : 2u));
+    FO4HDR_CHECK(snapshot.requestedGeneration == 2);
+}
+
+void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginConfiguration& initial)
+{
+    auto desired = initial;
+    desired.display.uiPaperWhiteNits = 150;
+    desired.display.videoWhiteNits = 250;
+    FO4HDR_CHECK(live.Request(desired) == LiveSettingsRequestStatus::accepted);
+    auto invalid = desired;
+    invalid.display.displayPeakNits = 299;
+    FO4HDR_CHECK(live.Request(invalid) == LiveSettingsRequestStatus::invalid);
+    CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    FO4HDR_CHECK(!live.CommitAtClosedFrame(PresentationScope::unavailable));
+    CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    FO4HDR_CHECK(fixture.renderer.MatchesLayerWhites({100, 203}));
+    FO4HDR_CHECK(live.Snapshot().error == LiveSettingsError::applyRejected);
+    FO4HDR_CHECK(!live.RequestSave());
+    FO4HDR_CHECK(live.Snapshot().persistence.state == SettingsPersistenceState::unavailable);
+    FO4HDR_CHECK(live.Snapshot().saveRejected);
+    FO4HDR_CHECK(live.CommitAtClosedFrame(PresentationScope::qualifiedExclusive));
+    CheckLiveTuple(live.Snapshot(), desired, desired, false);
+    FO4HDR_CHECK(live.Snapshot().error == LiveSettingsError::none);
+    FO4HDR_CHECK(live.Snapshot().saveRejected);
+    FO4HDR_CHECK(fixture.renderer.MatchesLayerWhites({150, 250}));
+    FO4HDR_CHECK(!fixture.renderer.MatchesLayerWhites({100, 203}));
+}
+
+void ProduceLiveGrade(PixelFixture& fixture, BorrowedOperatorBindings& borrowed,
+    const LineageScenes& scenes)
+{
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.tone;
+    ProduceTone(fixture, borrowed);
+    fixture.input = scenes.tone;
+    fixture.destination = scenes.grade;
+    BindGrade(fixture, borrowed.texture.Get());
+    FO4HDR_CHECK(DrawPass(fixture, 4, true) == SceneDrawOutcome::replaced);
+    borrowed.Check();
+    CheckSelection(fixture, scenes.grade);
+    FO4HDR_CHECK(fixture.renderer.CurrentSceneDomain() == SceneColorDomain::bt2020UiRelative);
+}
+
+void CheckUnchangedPixels(const std::vector<Float4>& actual, const std::vector<Float4>& expected)
+{
+    FO4HDR_CHECK(actual.size() == expected.size());
+    if (actual.size() != expected.size()) return;
+    for (std::size_t index = 0; index < actual.size(); ++index)
+    {
+        FO4HDR_CHECK(actual[index].red == expected[index].red);
+        FO4HDR_CHECK(actual[index].green == expected[index].green);
+        FO4HDR_CHECK(actual[index].blue == expected[index].blue);
+        FO4HDR_CHECK(actual[index].alpha == expected[index].alpha);
+    }
+}
+
+void VerifyLiveRefresh(PixelFixture& fixture, BorrowedOperatorBindings& borrowed,
+    const LineageScenes& scenes, const std::vector<Float4>& before)
+{
+    const auto retained = ReadScene(fixture.gpu, fixture.renderer.Views(scenes.grade).texture);
+    CheckUnchangedPixels(retained, before);
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    fixture.input = scenes.grade;
+    fixture.destination = AdditionalScene(fixture);
+    const auto staleInputs = BindTemporal(fixture, HistoryLuminance(before[0]));
+    FO4HDR_CHECK(DrawPass(fixture, 5, true) == SceneDrawOutcome::forwarded);
+    borrowed.Check();
+    CheckSelection(fixture, {});
+    ProduceLiveGrade(fixture, borrowed, scenes);
+    const auto refreshed = ReadScene(fixture.gpu, fixture.renderer.Views(scenes.grade).texture);
+    // Reuse the actual previous FP16 result: only UI-relative storage changes.
+    for (const auto pixel : refreshed)
+        CheckPixel(pixel, {before[0].red * 100 / 150, before[0].green * 100 / 150,
+            before[0].blue * 100 / 150, 1});
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
+void VerifyLiveSettings(const std::filesystem::path& directory, const OperatorLutData& table)
+{
+    const LiveConfigurationFile input;
+    const auto loaded = input.Load();
+    FO4HDR_CHECK(loaded.status == PluginConfigurationStatus::loaded);
+    if (loaded.status != PluginConfigurationStatus::loaded) return;
+    auto prepared = std::make_unique<OperatorLutBuildResult>();
+    prepared->request = {loaded.value.algorithm, loaded.value.display.displayPeakNits, 1};
+    prepared->data = table;
+    const LayerWhiteConfiguration whites{static_cast<float>(loaded.value.display.uiPaperWhiteNits),
+        static_cast<float>(loaded.value.display.videoWhiteNits)};
+    PixelFixture fixture(directory, width, height, whites, &prepared->data);
+    PresentationPass presentation;
+    const PresentationConfiguration configuration{width, height,
+        static_cast<float>(loaded.value.display.displayPeakNits), &fixture.renderer, whites};
+    FO4HDR_CHECK(presentation.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    OperatorLutWorker worker;
+    SettingsPersistence persistence;
+    LiveSettings live;
+    FO4HDR_CHECK(live.Initialize(loaded.value, prepared, {worker, presentation, persistence},
+        PresentationScope::qualifiedExclusive));
+    FO4HDR_CHECK(!prepared);
+    FO4HDR_CHECK(live.Snapshot().available);
+    FO4HDR_CHECK(live.Snapshot().active == loaded.value);
+    FO4HDR_CHECK(live.Snapshot().activeGeneration == 1);
+    FO4HDR_CHECK(!live.Snapshot().pending);
+    if (!live.Snapshot().available) return;
+    BorrowedOperatorBindings borrowed(fixture);
+    const LineageScenes scenes{fixture.input, fixture.destination, AdditionalScene(fixture), {}};
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    ProduceLiveGrade(fixture, borrowed, scenes);
+    const auto before = ReadScene(fixture.gpu, fixture.renderer.Views(scenes.grade).texture);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+    VerifyLiveChange(live, fixture, loaded.value);
+    borrowed.Check();
+    VerifyLiveRefresh(fixture, borrowed, scenes, before);
+    FO4HDR_CHECK(live.Retire());
+    FO4HDR_CHECK(!live.Snapshot().available);
+    FO4HDR_CHECK(presentation.Retire());
+}
+
 }  // namespace
 
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory)
@@ -490,6 +656,7 @@ void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory)
     VerifyPublishedGrade(fixture, borrowed, *transform);
     VerifyInvalidTable(fixture, table);
     VerifySamplingBatch(fixtureDirectory, table);
+    VerifyLiveSettings(fixtureDirectory, table);
 }
 
 }  // namespace fo4hdr::tests::gpu

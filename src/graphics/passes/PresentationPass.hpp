@@ -44,8 +44,12 @@ public:
 
     [[nodiscard]] bool Initialize(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext, PresentationConfiguration configuration) noexcept;
+    // Closed-frame numeric changes prepare both owners before publishing either tuple.
+    [[nodiscard]] bool ApplySettings(const OperatorLutData& table,
+        LayerWhiteConfiguration whites, PresentationScope scope) noexcept;
     // Supply a fresh caller-owned SDR-baseline candidate before any SetColorSpace1.
-    // Display/configuration changes revoke this qualification; retire before resize.
+    // Numeric LUT/peak/white changes retain the chain. Device, descriptor or display
+    // changes revoke qualification; retire before resize.
     HRESULT PrepareChain(IDXGISwapChain* chain) noexcept;
     [[nodiscard]] bool Active() const noexcept;
     // Cold retirement/destruction requires the exclusive context scope above.
@@ -87,6 +91,7 @@ private:
 
     [[nodiscard]] bool OnOwnerThread() const noexcept;
     [[nodiscard]] bool CanExecute(PresentationScope scope) const noexcept;
+    [[nodiscard]] bool CanApplySettings(PresentationScope scope) const noexcept;
     [[nodiscard]] bool CanPrepareChain() const noexcept;
     [[nodiscard]] bool CanRetire() const noexcept;
     HRESULT PrepareBuffer(IDXGISwapChain3* chain, ChainBuffer& prepared) const noexcept;

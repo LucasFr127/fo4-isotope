@@ -74,7 +74,8 @@ target("Fallout4HDR")
     add_includedirs("include", "src/runtime")
     add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
-        "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp")
+        "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
+        "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp")
     add_syslinks("version")
 target_end()
 
@@ -90,6 +91,8 @@ for _, fixture in ipairs({
         add_syslinks("version")
         add_syslinks("d3d11", "user32")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
+            "src/config/PluginConfiguration.cpp", "src/config/SettingsPersistence.cpp",
+            "tests/unit/config/HdrPersistenceTests.cpp",
             "src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
             "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
@@ -131,6 +134,8 @@ target("fo4hdr-shader-tests")
         "tests/support/d3d11/GpuHarness.cpp", "tests/shader/OperatorLutTests.cpp",
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
+        "src/config/HdrSettings.cpp", "src/config/PluginConfiguration.cpp",
+        "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
     before_build(function(target)
