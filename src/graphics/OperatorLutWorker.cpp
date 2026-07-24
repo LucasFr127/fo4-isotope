@@ -27,7 +27,8 @@ bool ValidRequest(const OperatorLutBuildRequest& request) noexcept
     return request.requestGeneration != 0 && ValidAlgorithm(request.algorithm) &&
         std::isfinite(request.displayPeakNits) &&
         request.displayPeakNits >= kMinimumDisplayPeakNits &&
-        request.displayPeakNits <= kMaximumDisplayPeakNits;
+        request.displayPeakNits <= kMaximumDisplayPeakNits &&
+        ValidateToneMapperParameters(request.algorithm, request.parameters);
 }
 
 std::unique_ptr<OperatorLutBuildResult> BuildResult(
@@ -38,8 +39,9 @@ std::unique_ptr<OperatorLutBuildResult> BuildResult(
         new (std::nothrow) OperatorLutBuildResult{});
     if (!result) return result;
     result->request = request;
+    result->request.parameters = ActiveToneMapperParameters(request.algorithm, request.parameters);
     result->data = BuildOperatorLut(request.algorithm, request.displayPeakNits,
-        {&generation, request.requestGeneration});
+        result->request.parameters, {&generation, request.requestGeneration});
     return result;
 }
 
@@ -49,7 +51,8 @@ bool PreparedOperatorLutMatches(const OperatorLutData& data,
     const OperatorLutBuildRequest& request) noexcept
 {
     return ValidRequest(request) && data.IsValid() &&
-        data.algorithm == request.algorithm && data.displayPeakNits == request.displayPeakNits;
+        data.algorithm == request.algorithm && data.displayPeakNits == request.displayPeakNits &&
+        data.parameters == ActiveToneMapperParameters(request.algorithm, request.parameters);
 }
 
 OperatorLutWorker::~OperatorLutWorker() noexcept
@@ -82,6 +85,7 @@ OperatorLutRequestStatus OperatorLutWorker::Request(
     if (!lock.owns_lock()) return OperatorLutRequestStatus::busy;
     if (request.requestGeneration <= lastGeneration_) return OperatorLutRequestStatus::failed;
     pending_ = request;
+    pending_->parameters = ActiveToneMapperParameters(request.algorithm, request.parameters);
     lastGeneration_ = request.requestGeneration;
     generation_.store(request.requestGeneration, std::memory_order_release);
     wake_.notify_one();

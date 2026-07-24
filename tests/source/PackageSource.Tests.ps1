@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+#requires -Version 7.4.6
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
@@ -115,8 +116,14 @@ $expected = [string[]]@(
     "src/config/SettingsPersistence.cpp",
     "config/Fallout4HDR.ini",
     "tests/unit/config/HdrPersistenceTests.cpp",
-    "src/graphics/LiveSettings.hpp"
+    "src/graphics/LiveSettings.hpp",
+    "src/ui/SettingsPanel.hpp",
+    "src/ui/SettingsPanel.cpp",
+    "tests/shader/SettingsPanelTests.cpp"
 )
+$imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
+    "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
+    "imstb_truetype.h", "LICENSE.txt")
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
 $untracked = [IO.Path]::Combine($root, "lib/commonlibf4/src/PackageSourceUntracked-" + [Guid]::NewGuid() + ".cpp")
@@ -142,7 +149,7 @@ try {
     try {
         $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Read, $true)
         try {
-            $counts = @{ Root = 0; Shared = 0; Spdlog = 0; Project = 0 }
+            $counts = @{ Root = 0; Shared = 0; Spdlog = 0; ImGui = 0; Project = 0 }
             $previous = ""
             foreach ($entry in $zip.Entries) {
                 $name = $entry.FullName
@@ -172,6 +179,13 @@ try {
                         else { [IO.Path]::Combine($root, "lib/spdlog") }
                     $sourcePath = [IO.Path]::Combine($spdlogSource, $name.Substring("lib/spdlog/".Length))
                 }
+                elseif ($name.StartsWith("lib/imgui/", [StringComparison]::Ordinal) -and
+                    $imguiFiles -ccontains $name.Substring("lib/imgui/".Length)) {
+                    ++$counts.ImGui
+                    $imguiSource = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
+                        else { [IO.Path]::Combine($root, "lib/imgui") }
+                    $sourcePath = [IO.Path]::Combine($imguiSource, $name.Substring("lib/imgui/".Length))
+                }
                 else { throw "Unselected source entry: $name" }
 
                 $entryStream = $entry.Open()
@@ -192,13 +206,14 @@ try {
                 finally { $memory.Dispose(); $entryStream.Dispose() }
             }
             if ($counts.Project -ne $expected.Length -or $counts.Root -ne 1584 -or
-                $counts.Shared -ne 110 -or $counts.Spdlog -ne 97) {
+                $counts.Shared -ne 110 -or $counts.Spdlog -ne 97 -or $counts.ImGui -ne 11) {
                 throw "Incomplete exact source closure."
             }
             foreach ($required in @("lib/commonlibf4/include/F4SE/Impl/PCH.h",
                 "lib/commonlibf4/lib/commonlib-shared/src/REX/PCH.h",
                 "lib/commonlibf4/LICENSE", "lib/commonlibf4/lib/commonlib-shared/LICENSE",
-                "lib/commonlibf4/lib/commonlib-shared/EXCEPTIONS", "lib/spdlog/LICENSE")) {
+                "lib/commonlibf4/lib/commonlib-shared/EXCEPTIONS", "lib/spdlog/LICENSE",
+                "lib/imgui/LICENSE.txt")) {
                 if (-not $zip.GetEntry($required)) { throw "Missing build or license input: $required" }
             }
         }

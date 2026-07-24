@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
 #include <optional>
@@ -26,7 +27,8 @@ public:
     };
 
 private:
-    friend std::optional<AgxTransform> CreateAgxTransform(double) noexcept;
+    friend std::optional<AgxTransform> CreateAgxTransform(
+        double, const ToneMapperParameters&) noexcept;
     friend LinearRgb MapAgxToBt2020Nits(const AgxTransform&, LinearRgb) noexcept;
     friend LinearRgb EvaluateAgxLutNits(const AgxTransform&, LinearRgb) noexcept;
     AgxTransform() noexcept = default;
@@ -34,13 +36,15 @@ private:
     double displayPeakNits_{};
     double hdrSdrRatio_{};
     double darkMaximumExponent_{};
+    double hdrPurity_{};
     Sigmoid formationSigmoid_{};
     Sigmoid darkeningSigmoid_{};
 };
 
 // Small prepared value state avoids allocation and repeated sigmoid formation.
-// Invalid peaks return no context; only complete values are published.
-[[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(double displayPeakNits) noexcept;
+// Invalid peaks/selected controls or preparation return no context.
+[[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(
+    double displayPeakNits, const ToneMapperParameters& parameters = {}) noexcept;
 // Raw prepared operator output preserves slopes before display gamut containment.
 [[nodiscard]] LinearRgb EvaluateAgxLutNits(
     const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept;

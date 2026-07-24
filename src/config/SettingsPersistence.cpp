@@ -18,8 +18,13 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 4> kKeys{
-    "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm"};
+constexpr std::array<std::string_view, 11> kKeys{
+    "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
+    "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
+    "ToeStrength", "ShoulderStart", "ColorBlend"};
+constexpr std::array<std::string_view, 11> kSections{
+    "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
+    "GT7", "GT7", "GT7"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -37,11 +42,15 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 4> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 11> OwnedValues(const PluginConfiguration& value)
 {
+    const auto& parameters = value.display.toneMapperParameters;
     return {FormatNumber(value.display.displayPeakNits),
         FormatNumber(value.display.uiPaperWhiteNits), FormatNumber(value.display.videoWhiteNits),
-        std::string(ToString(value.algorithm))};
+        std::string(ToString(value.algorithm)), FormatNumber(parameters.agxMiddleGrayEv),
+        FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
+        FormatNumber(parameters.agxHdrShoulderPower), FormatNumber(parameters.gt7ToeStrength),
+        FormatNumber(parameters.gt7ShoulderStart), FormatNumber(parameters.gt7ColorBlend)};
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -73,6 +82,8 @@ public:
         while (!original.empty()) AppendLine(original);
         AppendMissing("Output", 0, 3);
         AppendMissing("ToneMapper", 3, 4);
+        AppendMissing("AgX", 4, 8);
+        AppendMissing("GT7", 8, 11);
         return std::move(result_);
     }
 
@@ -82,8 +93,7 @@ private:
         const auto found = std::ranges::find(kKeys, key);
         if (found == kKeys.end()) return kKeys.size();
         const auto index = static_cast<std::size_t>(found - kKeys.begin());
-        const auto expected = index == 3 ? "ToneMapper" : "Output";
-        return section_ == expected ? index : kKeys.size();
+        return section_ == kSections[index] ? index : kKeys.size();
     }
 
     void AppendRaw(std::string_view raw)
@@ -129,8 +139,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 4> values_;
-    std::array<bool, 4> seen_{};
+    std::array<std::string, 11> values_;
+    std::array<bool, 11> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

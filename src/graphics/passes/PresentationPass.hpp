@@ -52,6 +52,8 @@ public:
     // changes revoke qualification; retire before resize.
     HRESULT PrepareChain(IDXGISwapChain* chain) noexcept;
     [[nodiscard]] bool Active() const noexcept;
+    // Read-only qualification for closed-frame commits that need no native change.
+    [[nodiscard]] bool CanApplySettings(PresentationScope scope) const noexcept;
     // Cold retirement/destruction requires the exclusive context scope above.
     [[nodiscard]] bool Retire() noexcept;
 
@@ -91,7 +93,6 @@ private:
 
     [[nodiscard]] bool OnOwnerThread() const noexcept;
     [[nodiscard]] bool CanExecute(PresentationScope scope) const noexcept;
-    [[nodiscard]] bool CanApplySettings(PresentationScope scope) const noexcept;
     [[nodiscard]] bool CanPrepareChain() const noexcept;
     [[nodiscard]] bool CanRetire() const noexcept;
     HRESULT PrepareBuffer(IDXGISwapChain3* chain, ChainBuffer& prepared) const noexcept;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
 #include <memory>
@@ -15,8 +16,9 @@ struct Gt7TransformDeleter
 using Gt7TransformHandle = std::unique_ptr<const Gt7Transform, Gt7TransformDeleter>;
 
 // Retain one immutable peak-specific context across a reference sample loop.
-// Invalid peaks or allocation failure return an empty handle.
-[[nodiscard]] Gt7TransformHandle CreateGt7Transform(double displayPeakNits) noexcept;
+// Invalid peaks/selected controls, preparation or allocation return an empty handle.
+[[nodiscard]] Gt7TransformHandle CreateGt7Transform(
+    double displayPeakNits, const ToneMapperParameters& parameters = {}) noexcept;
 // Scene input policy and source-order operator math precede final display containment.
 [[nodiscard]] LinearRgb EvaluateGt7LutNits(
     const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept;

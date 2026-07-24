@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/config/HdrSettings.hpp"
+
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <vector>
 
 namespace fo4hdr {
-
-enum class OperatorLutAlgorithm : std::uint8_t
-{
-    aces2,
-    agX,
-    gt7
-};
 
 // Packed RGBA16F cubic coefficients, x fastest, then y, then z. Input is
 // dimensionless scene-linear BT.709; values are uncontained BT.2020 nits.
@@ -26,6 +21,7 @@ struct OperatorLutData
     std::uint32_t textureEdge{};
     double displayPeakNits{};
     OperatorLutAlgorithm algorithm{OperatorLutAlgorithm::aces2};
+    ToneMapperParameters parameters{};
 
     [[nodiscard]] bool IsValid() const noexcept;
 };
@@ -48,11 +44,17 @@ struct OperatorLutCancellation
 [[nodiscard]] std::array<float, 4> OperatorLutShaperParameters(
     OperatorLutAlgorithm algorithm, double displayPeakNits) noexcept;
 
-// Cold CPU-only preparation. Invalid algorithms/peaks, cancellation, allocation
+// Cold CPU-only preparation. Invalid algorithms/peaks/selected controls, cancellation, allocation
 // or nonfinite/FP16-overflow coefficients return an invalid empty result.
 [[nodiscard]] OperatorLutData BuildOperatorLut(
     OperatorLutAlgorithm algorithm,
     double displayPeakNits,
     OperatorLutCancellation cancellation = {}) noexcept;
+
+[[nodiscard]] OperatorLutData BuildOperatorLut(
+    OperatorLutAlgorithm algorithm,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters,
+    OperatorLutCancellation cancellation) noexcept;
 
 }  // namespace fo4hdr

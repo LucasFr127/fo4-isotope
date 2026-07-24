@@ -3,7 +3,8 @@
 // Upstream: https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp sha256=94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822
 // Fallout4HDR modification: retain the official default ICtCp/HDR algorithm;
 // add finite-input validation and the BT.709/203-nit to Rec.2020/100-nit
-// scene adapter. Toe 1.280, shoulder start 0.444 and color blend 0.6 are fixed.
+// scene adapter. Defaults retain toe 1.280, shoulder start 0.444 and color blend 0.6;
+// prepared contexts accept validated controls.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.
 
 #include "Fallout4HDR/tonemap/Gt7.hpp"
@@ -134,11 +135,11 @@ struct Gt7Curve
     float shoulderC{};
 
     explicit Gt7Curve(
-        float framebufferPeak) noexcept
+        float framebufferPeak, const ToneMapperParameters& parameters = {}) noexcept
         : peakIntensity(framebufferPeak),
           midPoint(0.538F),
-          linearSection(0.444F),
-          toeStrength(1.280F)
+          linearSection(static_cast<float>(parameters.gt7ShoulderStart)),
+          toeStrength(static_cast<float>(parameters.gt7ToeStrength))
     {
         constexpr float alpha = 0.25F;
         const float curvature = (linearSection - 1.0F) / (alpha - 1.0F);
@@ -175,11 +176,11 @@ struct Gt7Curve
 
 struct Gt7ColorVolume
 {
-    explicit Gt7ColorVolume(Gt7Curve preparedCurve) noexcept :
+    explicit Gt7ColorVolume(Gt7Curve preparedCurve, float colorBlend = 0.6F) noexcept :
         curve(preparedCurve),
         targetIntensity(RgbToIctcp({curve.peakIntensity,
             curve.peakIntensity, curve.peakIntensity})[0]),
-        blendRatio(0.6F)
+        blendRatio(colorBlend)
     {}
 
     Gt7Curve curve;
@@ -263,8 +264,9 @@ FloatRgb Gt7ColorVolume::Apply(
 class Gt7Transform
 {
 public:
-    explicit Gt7Transform(double peak) noexcept :
-        volume(Gt7Curve(static_cast<float>(peak) / kReferenceLuminance)), peakNits(peak) {}
+    Gt7Transform(double peak, const ToneMapperParameters& parameters) noexcept :
+        volume(Gt7Curve(static_cast<float>(peak) / kReferenceLuminance, parameters),
+            static_cast<float>(parameters.gt7ColorBlend)), peakNits(peak) {}
     const Gt7ColorVolume volume;
     const double peakNits;
 };
@@ -274,10 +276,20 @@ void Gt7TransformDeleter::operator()(const Gt7Transform* transform) const noexce
     delete transform;
 }
 
-Gt7TransformHandle CreateGt7Transform(double displayPeakNits) noexcept
+Gt7TransformHandle CreateGt7Transform(
+    double displayPeakNits, const ToneMapperParameters& parameters) noexcept
 {
     if (!IsValidPeak(displayPeakNits)) return {};
-    return Gt7TransformHandle{new (std::nothrow) Gt7Transform(displayPeakNits)};
+    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::gt7, parameters)) return {};
+    auto transform = Gt7TransformHandle{
+        new (std::nothrow) Gt7Transform(displayPeakNits, parameters)};
+    if (!transform) return {};
+    const auto& volume = transform->volume;
+    const std::array fields{volume.curve.shoulderA, volume.curve.shoulderB,
+        volume.curve.shoulderC, volume.targetIntensity};
+    if (!std::ranges::all_of(fields, [](float field) { return std::isfinite(field); })) return {};
+    if (volume.targetIntensity <= 0.0F) return {};
+    return transform;
 }
 
 LinearRgb MapGt7ReferenceRec2020(

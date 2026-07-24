@@ -2,7 +2,6 @@
 #pragma once
 
 #include "Fallout4HDR/config/HdrSettings.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
 #include <cstddef>
 #include <cstdint>

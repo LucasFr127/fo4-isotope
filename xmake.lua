@@ -23,6 +23,7 @@ end
 
 local dependency_profile = {
     spdlog_source = os.getenv("FO4HDR_SPDLOG_SOURCE") or "lib/spdlog",
+    imgui_source = os.getenv("FO4HDR_IMGUI_SOURCE") or "lib/imgui",
     commonlib_source = "lib/commonlibf4",
     runtime_count = 3
 }
@@ -41,6 +42,17 @@ target("spdlog")
         path.join(dependency_profile.spdlog_source, "src/file_sinks.cpp"),
         path.join(dependency_profile.spdlog_source, "src/async.cpp"),
         path.join(dependency_profile.spdlog_source, "src/cfg.cpp"))
+target_end()
+
+target("imgui-core")
+    set_kind("static")
+    set_default(false)
+    add_includedirs(dependency_profile.imgui_source, { public = true })
+    add_files(path.join(dependency_profile.imgui_source, "imgui.cpp"),
+        path.join(dependency_profile.imgui_source, "imgui_draw.cpp"),
+        path.join(dependency_profile.imgui_source, "imgui_tables.cpp"),
+        path.join(dependency_profile.imgui_source, "imgui_widgets.cpp"))
+    add_syslinks("user32", "kernel32", "shell32", "imm32", { public = true })
 target_end()
 
 target("commonlib-shared")
@@ -123,7 +135,8 @@ end
 target("fo4hdr-shader-tests")
     set_kind("binary")
     set_default(false)
-    add_includedirs("include", "src/graphics", "tests/support", "tests/unit", "build/include")
+    add_deps("imgui-core")
+    add_includedirs("include", "src/graphics", "src/ui", "tests/support", "tests/unit", "build/include")
     add_syslinks("d3d11", "dxgi", "user32")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
         "tests/shader/Gt7ReferenceTests.cpp",
@@ -135,6 +148,7 @@ target("fo4hdr-shader-tests")
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/config/HdrSettings.cpp", "src/config/PluginConfiguration.cpp",
+        "src/ui/SettingsPanel.cpp", "tests/shader/SettingsPanelTests.cpp",
         "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")

@@ -21,6 +21,10 @@ namespace fo4hdr::tests::gpu {
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
 }
 
+namespace fo4hdr::tests {
+void RunSettingsPanelTests();
+}
+
 namespace {
 
 using fo4hdr::tests::gpu::TransferPixels;
@@ -106,6 +110,7 @@ int wmain(int argc, wchar_t** argv)
             std::filesystem::path{argv[1]}.parent_path());
         fo4hdr::tests::gpu::VerifyOperatorLut(
             std::filesystem::path{argv[1]}.parent_path());
+        fo4hdr::tests::RunSettingsPanelTests();
         if (fo4hdr::test::failures != 0)
         {
             return EXIT_FAILURE;

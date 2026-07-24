@@ -122,13 +122,7 @@ public:
         if (!OnOwnerThread()) return false;
         if (!available_) return false;
         if (!pending_) return false;
-        const auto* candidate = CandidateTable();
-        if (!candidate) return false;
-        if (!presentation_->ApplySettings(candidate->data, Whites(requested_), scope))
-        {
-            error_ = LiveSettingsError::applyRejected;
-            return false;
-        }
+        if (!ApplyRequested(scope)) return false;
         if (readyTable_) activeTable_ = std::move(readyTable_);
         active_ = requested_;
         pending_ = false;
@@ -188,7 +182,9 @@ private:
         const PluginConfiguration& right) noexcept
     {
         if (left.algorithm != right.algorithm) return false;
-        return left.display.displayPeakNits == right.display.displayPeakNits;
+        if (left.display.displayPeakNits != right.display.displayPeakNits) return false;
+        return ActiveToneMapperParameters(left.algorithm, left.display.toneMapperParameters) ==
+            ActiveToneMapperParameters(right.algorithm, right.display.toneMapperParameters);
     }
 
     [[nodiscard]] static LayerWhiteConfiguration Whites(const PluginConfiguration& value) noexcept
@@ -200,7 +196,8 @@ private:
     [[nodiscard]] static OperatorLutBuildRequest BuildRequest(const PluginConfiguration& value,
         std::uint64_t generation) noexcept
     {
-        return {value.algorithm, value.display.displayPeakNits, generation};
+        return {value.algorithm, value.display.displayPeakNits, generation,
+            ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters)};
     }
 
     [[nodiscard]] static bool InitialResultMatches(const PluginConfiguration& value,
@@ -208,6 +205,9 @@ private:
     {
         if (result.request.algorithm != value.algorithm) return false;
         if (result.request.displayPeakNits != value.display.displayPeakNits) return false;
+        if (ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters) !=
+            ActiveToneMapperParameters(result.request.algorithm, result.request.parameters))
+            return false;
         return PreparedOperatorLutMatches(result.data, result.request);
     }
 
@@ -242,6 +242,29 @@ private:
         if (SameOperator(requested_, active_)) return activeTable_.get();
         if (!readyTable_) ReceiveCompleted();
         return readyTable_.get();
+    }
+
+    [[nodiscard]] bool ApplyRequested(PresentationScope scope) noexcept
+    {
+        if (!presentation_->CanApplySettings(scope))
+        {
+            error_ = LiveSettingsError::applyRejected;
+            return false;
+        }
+        // Persisting inactive controls must not upload an identical table or stale scene data.
+        if (SameNativeSettings()) return true;
+        const auto* candidate = CandidateTable();
+        if (!candidate) return false;
+        if (presentation_->ApplySettings(candidate->data, Whites(requested_), scope)) return true;
+        error_ = LiveSettingsError::applyRejected;
+        return false;
+    }
+
+    [[nodiscard]] bool SameNativeSettings() const noexcept
+    {
+        if (!SameOperator(requested_, active_)) return false;
+        if (requested_.display.uiPaperWhiteNits != active_.display.uiPaperWhiteNits) return false;
+        return requested_.display.videoWhiteNits == active_.display.videoWhiteNits;
     }
 
     [[nodiscard]] LiveSettingsRequestStatus RejectedRequest(OperatorLutRequestStatus status) noexcept

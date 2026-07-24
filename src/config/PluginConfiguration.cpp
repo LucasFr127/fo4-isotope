@@ -18,9 +18,12 @@ constexpr std::array<std::string_view, 3> kAlgorithms{"ACES2", "AgX", "GT7"};
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 4> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 11> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
-        {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"}}};
+        {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
+        {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
+        {"AgX", "ShoulderPower"}, {"GT7", "ToeStrength"},
+        {"GT7", "ShoulderStart"}, {"GT7", "ColorBlend"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -61,7 +64,9 @@ public:
                 std::string_view{} : text.substr(newline + 1);
             if (!ParseLine(line)) return result_;
         }
-        if (std::ranges::find(seen_, false) != seen_.end()) return result_;
+        // The original four keys are required; absent new controls use defaults.
+        if (std::find(seen_.begin(), seen_.begin() + 4, false) != seen_.begin() + 4)
+            return result_;
         if (!ValidatePluginConfiguration(result_.value)) return result_;
         result_.status = PluginConfigurationStatus::loaded;
         result_.line = 0;
@@ -74,18 +79,21 @@ private:
         if (seen_[index]) return false;
         seen_[index] = true;
         auto& settings = result_.value.display;
-        switch (index)
+        auto& parameters = settings.toneMapperParameters;
+        if (index == 3)
         {
-        case 0: return ParseNumber(value, settings.displayPeakNits);
-        case 1: return ParseNumber(value, settings.uiPaperWhiteNits);
-        case 2: return ParseNumber(value, settings.videoWhiteNits);
-        default:
             const auto found = std::ranges::find(kAlgorithms, value);
             if (found == kAlgorithms.end()) return false;
             result_.value.algorithm =
                 static_cast<OperatorLutAlgorithm>(found - kAlgorithms.begin());
             return true;
         }
+        const std::array targets{&settings.displayPeakNits, &settings.uiPaperWhiteNits,
+            &settings.videoWhiteNits, static_cast<double*>(nullptr),
+            &parameters.agxMiddleGrayEv, &parameters.agxContrast, &parameters.agxHdrPurity,
+            &parameters.agxHdrShoulderPower, &parameters.gt7ToeStrength,
+            &parameters.gt7ShoulderStart, &parameters.gt7ColorBlend};
+        return ParseNumber(value, *targets[index]);
     }
 
     bool ParseAssignment(std::string_view line) noexcept
@@ -119,7 +127,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 4> seen_{};
+    std::array<bool, 11> seen_{};
 };
 
 }  // namespace
@@ -131,7 +139,8 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits};
     const std::array candidate{other.display.displayPeakNits,
         other.display.uiPaperWhiteNits, other.display.videoWhiteNits};
-    return current == candidate;
+    return current == candidate &&
+        display.toneMapperParameters == other.display.toneMapperParameters;
 }
 
 bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept
@@ -139,6 +148,10 @@ bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept
     if (ValidateHdrSettings(value.display) != HdrSettingsValidationError::none) return false;
     if (value.display.displayPeakNits < 400.0) return false;
     if (value.display.displayPeakNits > 2000.0) return false;
+    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::agX,
+            value.display.toneMapperParameters)) return false;
+    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::gt7,
+            value.display.toneMapperParameters)) return false;
     return !ToString(value.algorithm).empty();
 }
 

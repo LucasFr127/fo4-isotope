@@ -18,6 +18,7 @@ struct OperatorLutBuildRequest
     OperatorLutAlgorithm algorithm{};
     double displayPeakNits{};
     std::uint64_t requestGeneration{};
+    ToneMapperParameters parameters{};
 };
 
 struct OperatorLutBuildResult

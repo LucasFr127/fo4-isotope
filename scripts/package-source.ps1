@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
+#requires -Version 7.4.6
 
-param([string]$Destination, [string]$SpdlogArchive = $env:FO4HDR_SPDLOG_ARCHIVE)
+param([string]$Destination, [string]$SpdlogArchive = $env:FO4HDR_SPDLOG_ARCHIVE,
+    [string]$ImguiArchive = $env:FO4HDR_IMGUI_ARCHIVE)
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.Formats.Tar
 
 $root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, ".."))
 $files = [string[]]@(
@@ -131,7 +134,10 @@ $files = [string[]]@(
     "src/config/SettingsPersistence.cpp",
     "config/Fallout4HDR.ini",
     "tests/unit/config/HdrPersistenceTests.cpp",
-    "src/graphics/LiveSettings.hpp"
+    "src/graphics/LiveSettings.hpp",
+    "src/ui/SettingsPanel.hpp",
+    "src/ui/SettingsPanel.cpp",
+    "tests/shader/SettingsPanelTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {
@@ -157,8 +163,18 @@ if (-not $SpdlogArchive -or
         "3d25808d2fc4db86621a46855800c99ab5734999b61c4cbf9470edf631555397") {
     throw "Supply the exact spdlog v1.16.0 ZIP through -SpdlogArchive or FO4HDR_SPDLOG_ARCHIVE."
 }
+if (-not $ImguiArchive -or
+    (Get-FileHash -LiteralPath $ImguiArchive -Algorithm SHA256).Hash -ine
+        "5e84cdaa6a6041586a0d11a3071b749734a0439d66fdbdad37ae5b27e37d396c") {
+    throw "Supply the exact Dear ImGui v1.92.6-docking TAR.GZ through -ImguiArchive or FO4HDR_IMGUI_ARCHIVE."
+}
 $spdlogSource = if ($env:FO4HDR_SPDLOG_SOURCE) { $env:FO4HDR_SPDLOG_SOURCE }
     else { [IO.Path]::Combine($root, "lib/spdlog") }
+$imguiSource = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
+    else { [IO.Path]::Combine($root, "lib/imgui") }
+$imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
+    "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
+    "imstb_truetype.h", "LICENSE.txt")
 $temporary = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-dependencies-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temporary) | Out-Null
 try {
@@ -243,6 +259,44 @@ try {
             }
         }
         finally { $archive.Dispose() }
+    }
+    finally { $stream.Dispose() }
+    $stream = [IO.File]::OpenRead($ImguiArchive)
+    try {
+        $gzip = [IO.Compression.GZipStream]::new($stream, [IO.Compression.CompressionMode]::Decompress, $true)
+        try {
+            $tar = [Formats.Tar.TarReader]::new($gzip, $true)
+            try {
+                $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                while ($null -ne ($entry = $tar.GetNextEntry())) {
+                    $prefix = "imgui-1.92.6-docking/"
+                    if (-not $entry.Name.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+                    $name = $entry.Name.Substring($prefix.Length)
+                    if ($imguiFiles -cnotcontains $name) { continue }
+                    if ($entry.EntryType -ne [Formats.Tar.TarEntryType]::RegularFile -or
+                        -not $seen.Add($name)) {
+                        throw "Non-regular or duplicate Dear ImGui member: $name"
+                    }
+                    $memory = [IO.MemoryStream]::new()
+                    try {
+                        $entry.DataStream.CopyTo($memory)
+                        $bytes = $memory.ToArray()
+                        $local = [IO.Path]::Combine($imguiSource, $name)
+                        if (-not [IO.File]::Exists($local) -or
+                            ([IO.File]::GetAttributes($local) -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                            [Convert]::ToBase64String($bytes) -cne
+                            [Convert]::ToBase64String([IO.File]::ReadAllBytes($local))) {
+                            throw "Dear ImGui source differs from exact TAR.GZ: $name"
+                        }
+                        $sources.Add("lib/imgui/" + $name, $bytes)
+                    }
+                    finally { $memory.Dispose() }
+                }
+                if ($seen.Count -ne $imguiFiles.Length) { throw "Incomplete Dear ImGui core source." }
+            }
+            finally { $tar.Dispose() }
+        }
+        finally { $gzip.Dispose() }
     }
     finally { $stream.Dispose() }
 }

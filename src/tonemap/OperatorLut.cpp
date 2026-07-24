@@ -102,9 +102,10 @@ struct PreparedOperator
         aces2(algorithm == OperatorLutAlgorithm::aces2 ?
             CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
         agx(algorithm == OperatorLutAlgorithm::agX ?
-            CreateAgxTransform(data.displayPeakNits) : std::optional<AgxTransform>{}),
+            CreateAgxTransform(data.displayPeakNits, data.parameters) :
+            std::optional<AgxTransform>{}),
         gt7(algorithm == OperatorLutAlgorithm::gt7 ?
-            CreateGt7Transform(data.displayPeakNits) : Gt7TransformHandle{})
+            CreateGt7Transform(data.displayPeakNits, data.parameters) : Gt7TransformHandle{})
     {}
 
     OperatorLutAlgorithm algorithm;
@@ -549,6 +550,8 @@ std::array<float, 4> OperatorLutShaperParameters(
 bool OperatorLutData::IsValid() const noexcept
 {
     if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits)) return false;
+    if (!ValidateToneMapperParameters(algorithm, parameters) ||
+        parameters != ActiveToneMapperParameters(algorithm, parameters)) return false;
     if (edge != OperatorLutEdge(algorithm) ||
         textureEdge != edge + kOperatorLutCoefficientPadding) return false;
     constexpr std::size_t channels{4};
@@ -562,11 +565,22 @@ OperatorLutData BuildOperatorLut(
     double displayPeakNits,
     OperatorLutCancellation cancellation) noexcept
 {
+    return BuildOperatorLut(algorithm, displayPeakNits, ToneMapperParameters{}, cancellation);
+}
+
+OperatorLutData BuildOperatorLut(
+    OperatorLutAlgorithm algorithm,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters,
+    OperatorLutCancellation cancellation) noexcept
+{
     if (cancellation.IsCancelled() || !IsValidBuildRequest(algorithm, displayPeakNits)) return {};
+    if (!ValidateToneMapperParameters(algorithm, parameters)) return {};
     OperatorLutData result;
     result.edge = OperatorLutEdge(algorithm);
     result.displayPeakNits = displayPeakNits;
     result.algorithm = algorithm;
+    result.parameters = ActiveToneMapperParameters(algorithm, parameters);
     try
     {
         if (!BakeOperatorLut(result, cancellation)) return {};
