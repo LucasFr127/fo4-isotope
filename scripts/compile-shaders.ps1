@@ -63,6 +63,10 @@ foreach ($entry in @("PrepareBackdrop", "PrepareHud")) {
 }
 
 $fixtureDirectory = [IO.Path]::GetDirectoryName($outputPath)
+Invoke-ShaderCompilation -Program @{
+    Source = "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Symbol = "kDeveloperExposureCaptureBytecode"
+} -Destination ([IO.Path]::Combine($shaderDirectory, "DeveloperExposureCapture.hpp"))
+
 foreach ($fixture in @(
     @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },
     @{ Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "OperatorLut" },

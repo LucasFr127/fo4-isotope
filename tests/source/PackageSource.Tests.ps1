@@ -119,7 +119,12 @@ $expected = [string[]]@(
     "src/graphics/LiveSettings.hpp",
     "src/ui/SettingsPanel.hpp",
     "src/ui/SettingsPanel.cpp",
-    "tests/shader/SettingsPanelTests.cpp"
+    "tests/shader/SettingsPanelTests.cpp",
+    "src/graphics/DeveloperExposureLock.hpp",
+    "src/graphics/resources/DeveloperExposureResources.hpp",
+    "src/graphics/resources/DeveloperExposureResources.cpp",
+    "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl",
+    "tests/shader/DeveloperExposureTests.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

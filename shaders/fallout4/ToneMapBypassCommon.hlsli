@@ -33,6 +33,13 @@ SamplerState s1_s : register(s1);
 SamplerState s2_s : register(s2);
 SamplerState s3_s : register(s3);
 
+Texture2D<float2> Fo4HdrExposureSnapshot : register(t17);
+cbuffer Fo4HdrDeveloperExposureSelector : register(b13)
+{
+    uint Fo4HdrExposureLockEnabled;
+    uint3 Fo4HdrExposureLockReserved;
+}
+
 cbuffer Fallout4ImageSpaceConstants : register(b2)
 {
     float4 cb2[FO4HDR_CB2_COUNT];
@@ -73,9 +80,20 @@ void main(
 
     const float2 bloomUv = FO4HDR_BLOOM_UV;
     const float3 bloom = FO4HDR_BLOOM_TEXTURE;
-    const float measuredExposure = t2.Sample(s2_s, texcoord).x;
+    float measuredExposure = t2.Sample(s2_s, texcoord).x;
     float exposure = cb2[1].z / (0.00100000005f + measuredExposure);
     exposure = clamp(exposure, cb2[1].y, cb2[1].x);
+
+    if (Fo4HdrExposureLockEnabled == 1u)
+    {
+        const float2 captured = Fo4HdrExposureSnapshot.Load(int3(0, 0, 0));
+        const bool finitePair = all((asuint(captured) & 0x7f800000u) != 0x7f800000u);
+        if (finitePair && captured.x > 0.0f && captured.y >= 0.0f)
+        {
+            exposure = captured.x;
+            measuredExposure = captured.y;
+        }
+    }
 
     // Keep linear scene-relative values above one; white remains 203 nits.
     const float3 exposedScene = (scene + bloom) * exposure;

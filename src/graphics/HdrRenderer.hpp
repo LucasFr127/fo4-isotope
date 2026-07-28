@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "DeveloperExposureLock.hpp"
 #include "RendererLifetime.hpp"
+#include "resources/DeveloperExposureResources.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
 
@@ -112,6 +114,13 @@ public:
 
     [[nodiscard]] bool BeginFrame() noexcept;
     [[nodiscard]] bool EndFrame() noexcept;
+    // Controlled diagnostic only: EndFrame alone never qualifies activation.
+    // Save FrameGeneration before close; report eligibility once after that close.
+    // The caller excludes active queries and command-list execution throughout
+    // capture/replay; idle state getters cannot establish their absence.
+    [[nodiscard]] bool CompleteExposureFrame(std::uint64_t savedFrame, bool eligible) noexcept;
+    [[nodiscard]] bool SetExposureLockRequested(bool requested) noexcept;
+    [[nodiscard]] bool ExposureLockActive() const noexcept;
     // Query at consumption: retained handles remain storage-valid after lineage expires.
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
     [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
@@ -167,6 +176,24 @@ private:
         bool operatorProduced{};
     };
 
+    struct DrawReplacement
+    {
+        ID3D11PixelShader* shader{};
+        ID3D11Buffer* videoConstants{};
+        ID3D11Buffer* operatorConstants{};
+        bool tone{};
+        bool capture{};
+        bool replay{};
+    };
+
+    struct DrawResult
+    {
+        SceneDrawOutcome outcome{SceneDrawOutcome::forwarded};
+        bool captured{};
+        bool replayed{};
+        bool exposureFailed{};
+    };
+
     [[nodiscard]] bool OnOwnerThread() const noexcept;
     [[nodiscard]] bool CanInvoke(FiniteDrawInvocation invocation) const noexcept;
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
@@ -192,9 +219,16 @@ private:
     void CompleteLineage(const RenoDxShaderDescriptor* descriptor,
         SceneTextureHandle destination, SceneDrawOutcome outcome,
         const DrawLineage& lineage) noexcept;
-    [[nodiscard]] SceneDrawOutcome InvokeDraw(ID3D11PixelShader* replacement,
-        FiniteDrawInvocation invocation, ID3D11Buffer* videoConstants,
-        ID3D11Buffer* operatorConstants) noexcept;
+    [[nodiscard]] DrawReplacement PrepareDrawReplacement(
+        const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
+        SceneTextureHandle destination) const noexcept;
+    [[nodiscard]] DrawResult InvokeDraw(DrawReplacement replacement,
+        FiniteDrawInvocation invocation) noexcept;
+    void PrepareExposureReplacement(DrawReplacement& replacement,
+        RenoDxShaderPass pass) const noexcept;
+    [[nodiscard]] DrawResult PrepareExposureDraw(const DrawReplacement& replacement) noexcept;
+    void CompleteExposureDraw(const DrawResult& result, bool tone) noexcept;
+    void ResetExposurePolicy() noexcept;
     [[nodiscard]] ID3D11Buffer* ConstantsForInput(SceneTextureHandle input) const noexcept;
     [[nodiscard]] ID3D11PixelShader* QualifiedReplacement(
         const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
@@ -225,6 +259,10 @@ private:
     SceneTextureHandle selectedScene_;
     bool frameOpen_{};
     std::uint64_t frameGeneration_{};
+    DeveloperExposureLock exposureLock_;
+    DeveloperExposureResources exposureResources_;
+    std::uint64_t exposureGeneration_{};
+    std::uint64_t endedExposureFrame_{};
 };
 
 }  // namespace fo4hdr

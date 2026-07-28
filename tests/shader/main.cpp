@@ -19,6 +19,7 @@
 
 namespace fo4hdr::tests::gpu {
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
+void VerifyDeveloperExposure(const std::filesystem::path& fixtureDirectory);
 }
 
 namespace fo4hdr::tests {
@@ -109,6 +110,8 @@ int wmain(int argc, wchar_t** argv)
         fo4hdr::tests::gpu::VerifyShippingPixelShaders(
             std::filesystem::path{argv[1]}.parent_path());
         fo4hdr::tests::gpu::VerifyOperatorLut(
+            std::filesystem::path{argv[1]}.parent_path());
+        fo4hdr::tests::gpu::VerifyDeveloperExposure(
             std::filesystem::path{argv[1]}.parent_path());
         fo4hdr::tests::RunSettingsPanelTests();
         if (fo4hdr::test::failures != 0)

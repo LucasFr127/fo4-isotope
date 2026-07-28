@@ -149,6 +149,8 @@ target("fo4hdr-shader-tests")
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/config/HdrSettings.cpp", "src/config/PluginConfiguration.cpp",
         "src/ui/SettingsPanel.cpp", "tests/shader/SettingsPanelTests.cpp",
+        "src/graphics/resources/DeveloperExposureResources.cpp",
+        "tests/shader/DeveloperExposureTests.cpp",
         "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
