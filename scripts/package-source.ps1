@@ -142,7 +142,13 @@ $files = [string[]]@(
     "src/graphics/resources/DeveloperExposureResources.hpp",
     "src/graphics/resources/DeveloperExposureResources.cpp",
     "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl",
-    "tests/shader/DeveloperExposureTests.cpp"
+    "tests/shader/DeveloperExposureTests.cpp",
+    "scripts/internal/Project.Process.ps1",
+    "scripts/test.ps1",
+    "tests/source/TestProcess.Tests.ps1",
+    "tests/shader/ShaderTestOptions.hpp",
+    "tests/shader/ShaderTestOptions.cpp",
+    "tests/unit/ShaderTestOptionsTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

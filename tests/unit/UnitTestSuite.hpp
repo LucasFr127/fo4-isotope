@@ -17,6 +17,7 @@ void RunDeviceCreationHookTests();
 void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
 void RunHdrSettingsMathTests();
 void RunHdrPersistenceTests();
+void RunShaderTestOptionsTests();
 void RunGameSnapshotStoreTests();
 void RunMenuEventQueueTests();
 void RunRuntimeValidationTests();

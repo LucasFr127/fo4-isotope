@@ -2,6 +2,7 @@
 
 #include "d3d11/GpuHarness.hpp"
 #include "ShippingPixelShaderTests.hpp"
+#include "ShaderTestOptions.hpp"
 #include "Gt7ReferenceTests.hpp"
 #include "UnitTestSuite.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
@@ -15,7 +16,6 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
-#include <string_view>
 
 namespace fo4hdr::tests::gpu {
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
@@ -98,21 +98,23 @@ int wmain(int argc, wchar_t** argv)
 {
     try
     {
-        if (argc == 3 && std::wstring_view{argv[1]} == L"--gt7-reference")
-            return RunGt7Reference(argv[2]);
-        if (argc != 2)
+        const auto options = fo4hdr::tests::gpu::ParseShaderTestOptions(argc, argv);
+        if (options.mode == fo4hdr::tests::gpu::ShaderTestMode::gt7Reference)
+            return RunGt7Reference(std::filesystem::path{options.bytecodePath});
+        if (options.mode == fo4hdr::tests::gpu::ShaderTestMode::invalid)
         {
             throw std::runtime_error("Usage: fo4hdr-shader-tests <TransferEvaluation.dxbc> | --gt7-reference <Gt7Evaluation.dxbc>");
         }
+        const std::filesystem::path shaderPath{options.bytecodePath};
         const auto input = TransferInputs();
-        const auto output = fo4hdr::tests::gpu::EvaluateTransfer(argv[1], input, displayPeakNits);
+        const auto output = fo4hdr::tests::gpu::EvaluateTransfer(shaderPath, input, displayPeakNits);
         const auto error = CheckTransfer(input, output);
         fo4hdr::tests::gpu::VerifyShippingPixelShaders(
-            std::filesystem::path{argv[1]}.parent_path());
+            shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyOperatorLut(
-            std::filesystem::path{argv[1]}.parent_path());
+            shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyDeveloperExposure(
-            std::filesystem::path{argv[1]}.parent_path());
+            shaderPath.parent_path());
         fo4hdr::tests::RunSettingsPanelTests();
         if (fo4hdr::test::failures != 0)
         {
