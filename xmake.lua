@@ -133,10 +133,49 @@ for _, fixture in ipairs({
     target_end()
 end
 
+target("fo4hdr-shaders")
+    set_kind("phony")
+    set_default(false)
+    on_build(function(target)
+        import("core.base.json")
+        import("core.project.depend")
+        local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
+        local script = path.join(os.projectdir(), "scripts/compile-shaders.ps1")
+        local outputdir = path.join(os.projectdir(), target:targetdir())
+        local arguments = { "-NoProfile", "-File", script,
+            "-Output", path.join(outputdir, "TransferEvaluation.dxbc") }
+        local report = os.iorunv(pwsh, table.join(arguments, { "-PrintDependencyInfo" }))
+        local info = json.decode(report)
+        assert(info.compiler and info.compiler.path and info.compiler.version and info.compiler.sha256,
+            "Shader dependency report lacks compiler identity")
+        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 20,
+            "Shader dependency report lacks the current input/output closure")
+        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 20 and info.outputRoot,
+            "Shader dependency report lacks program values")
+        local values = { pwsh, info.compiler.path, info.compiler.version, info.compiler.sha256,
+            info.outputRoot, json.encode(info.flags), json.encode(info.outputs) }
+        for _, program in ipairs(info.programs) do
+            assert(type(program.source) == "string" and type(program.profile) == "string" and
+                type(program.entry) == "string", "Shader dependency report lacks program fields")
+            table.insert(values, program.source)
+            table.insert(values, program.profile)
+            table.insert(values, program.entry)
+            table.insert(values, type(program.symbol) == "string" and program.symbol or "")
+        end
+        depend.on_changed(function()
+            os.vrunv(pwsh, arguments)
+        end, {
+            dependfile = path.join(outputdir, "fo4hdr-shaders.d"),
+            files = table.join({ script, info.compiler.path }, info.inputs, info.outputs),
+            values = values
+        })
+    end)
+target_end()
+
 target("fo4hdr-shader-tests")
     set_kind("binary")
     set_default(false)
-    add_deps("imgui-core")
+    add_deps("imgui-core", "fo4hdr-shaders")
     add_includedirs("include", "src/graphics", "src/ui", "tests/support", "tests/unit", "build/include")
     add_syslinks("d3d11", "dxgi", "user32")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
@@ -156,10 +195,4 @@ target("fo4hdr-shader-tests")
         "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
-    before_build(function(target)
-        local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
-        os.vrunv(pwsh, { "-NoProfile", "-File",
-            path.join(os.projectdir(), "scripts/compile-shaders.ps1"),
-            "-Output", path.join(os.projectdir(), target:targetdir(), "TransferEvaluation.dxbc") })
-    end)
 target_end()
