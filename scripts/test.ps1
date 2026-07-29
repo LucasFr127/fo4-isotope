@@ -52,6 +52,12 @@ function Invoke-SourceChecks {
         else { (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source }
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/PackageSource.Tests.ps1'))
+    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
+        [IO.Path]::Combine($root, 'tests/source/TestProcess.Tests.ps1'))
+    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
+        [IO.Path]::Combine($root, 'tests/source/RuntimePinning.Tests.ps1'),
+        '-FixturePath', [IO.Path]::Combine($build, 'fo4hdr-tests.exe'),
+        '-MismatchFixturePath', [IO.Path]::Combine($build, 'fo4hdr-tests-executable-mismatch.exe'))
 }
 
 function Invoke-RequestedTests {

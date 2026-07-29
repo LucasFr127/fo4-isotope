@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Caller-owned executable observation and local pin",
+  "type": "object",
+  "required": ["schemaVersion", "observedAtUtc", "runtime", "status", "fileVersion", "executable"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "observedAtUtc": { "type": "string", "format": "date-time" },
+    "runtime": { "const": "1.10.163" },
+    "status": { "enum": ["observed", "runtime-pinned-unvalidated"] },
+    "fileVersion": { "const": "1.10.163.0" },
+    "executable": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

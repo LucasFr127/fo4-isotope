@@ -130,7 +130,11 @@ $expected = [string[]]@(
     "tests/source/TestProcess.Tests.ps1",
     "tests/shader/ShaderTestOptions.hpp",
     "tests/shader/ShaderTestOptions.cpp",
-    "tests/unit/ShaderTestOptionsTests.cpp"
+    "tests/unit/ShaderTestOptionsTests.cpp",
+    "scripts/scan-runtime.ps1",
+    "scripts/pin-runtime.ps1",
+    "schemas/observed-runtime.schema.json",
+    "tests/source/RuntimePinning.Tests.ps1"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

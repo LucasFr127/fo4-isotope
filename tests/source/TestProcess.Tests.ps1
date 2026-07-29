@@ -3,8 +3,9 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('success', 'failure', 'skip', 'hang')][string]$Fixture,
-    [string]$PidFile
+    [ValidateSet('success', 'failure', 'skip', 'hang', 'diagnostics')][string]$Fixture,
+    [string]$PidFile,
+    [string]$Message
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,9 +29,14 @@ function Start-HangFixture {
 }
 
 function Invoke-ProcessFixture {
-    param([string]$Fixture, [string]$PowerShell, [string]$PidFile)
+    param([string]$Fixture, [string]$PowerShell, [string]$PidFile, [string]$Message)
 
     switch ($Fixture) {
+        'diagnostics' {
+            [Console]::Out.WriteLine("stdout: $Message")
+            [Console]::Error.WriteLine("stderr: $Message")
+            exit 23
+        }
         'success' { exit 0 }
         'failure' { exit 23 }
         'skip' { exit 77 }
@@ -74,6 +80,62 @@ function Test-ProcessOutcomes {
     }
 }
 
+function Assert-ProcessValue {
+    param($Actual, $Expected, [string]$Message)
+
+    if ($Actual -cne $Expected) { throw $Message }
+}
+
+function Test-ProcessDiagnostics {
+    param([string]$PowerShell, [string]$Root, [string]$ScriptPath)
+
+    $message = 'value with spaces "quoted" tail'
+    $result = Invoke-Fo4HdrTestProcess -FilePath $PowerShell -WorkingDirectory $Root `
+        -Arguments @('-NoProfile', '-NonInteractive', '-File', $ScriptPath,
+            '-Fixture', 'diagnostics', '-Message', $message) -TimeoutSeconds 10 -AllowShaderSkip
+    Assert-ProcessValue $result.category 'exitFailure' 'Diagnostic fixture was classified as success or skip.'
+    Assert-ProcessValue $result.exitCode 23 'Diagnostic fixture did not preserve its nonzero exit.'
+    Assert-ProcessValue $result.cleanup 'waitsCompleted' 'Diagnostic fixture cleanup failed.'
+    Assert-ProcessValue $result.stdout "stdout: $message$([Environment]::NewLine)" 'Spaced stdout argument was not preserved.'
+    Assert-ProcessValue $result.stderr "stderr: $message$([Environment]::NewLine)" 'Spaced stderr argument was not preserved.'
+}
+
+function Test-InvalidProcessFlag {
+    param([string]$PowerShell, [string]$Root, [string]$ScriptPath)
+
+    $result = Invoke-Fo4HdrTestProcess -FilePath $PowerShell -WorkingDirectory $Root `
+        -Arguments @('-NoProfile', '-NonInteractive', '-File', $ScriptPath,
+            '-Fixture', 'success', '-UnknownFixtureFlag') -TimeoutSeconds 10 -AllowShaderSkip
+    Assert-ProcessValue $result.category 'exitFailure' 'Invalid child flag was accepted or classified as a skip.'
+    Assert-ProcessValue $result.cleanup 'waitsCompleted' 'Invalid child flag cleanup failed.'
+    if ($result.exitCode -eq 0) { throw 'Invalid child flag reported a successful exit.' }
+    if ([string]::IsNullOrWhiteSpace($result.stderr)) { throw 'Invalid child flag lost its diagnostic.' }
+}
+
+function Test-InvalidProcessTimeout {
+    param([string]$PowerShell, [string]$Root)
+
+    try {
+        $null = Invoke-Fo4HdrTestProcess -FilePath $PowerShell -WorkingDirectory $Root -TimeoutSeconds 0
+    }
+    catch [Management.Automation.ParameterBindingValidationException] { return }
+    throw 'Invalid timeout was not rejected before process start.'
+}
+
+function Test-ProcessStartFailure {
+    param([string]$Root)
+
+    $missing = [IO.Path]::Combine([IO.Path]::GetTempPath(),
+        'Fallout4HDR-missing-' + [Guid]::NewGuid().ToString('N') + '.exe')
+    $result = Invoke-Fo4HdrTestProcess -FilePath $missing -WorkingDirectory $Root -TimeoutSeconds 10
+    Assert-ProcessValue $result.category 'startFailure' 'Missing executable did not fail at start.'
+    Assert-ProcessValue $result.exitCode $null 'Unstarted process reported an exit code.'
+    Assert-ProcessValue $result.cleanup 'notStarted' 'Unstarted process reported started cleanup.'
+    Assert-ProcessValue $result.stdout '' 'Unstarted process reported stdout.'
+    Assert-ProcessValue $result.stderr '' 'Unstarted process reported stderr.'
+    if ([string]::IsNullOrWhiteSpace($result.detail)) { throw 'Start failure lost its diagnostic.' }
+}
+
 function Test-FixtureStopped {
     param([string]$PidPath)
 
@@ -114,7 +176,7 @@ function Complete-FixtureCleanup {
     }
 }
 $powerShell = (Get-Process -Id $PID).Path
-Invoke-ProcessFixture $Fixture $powerShell $PidFile
+Invoke-ProcessFixture $Fixture $powerShell $PidFile $Message
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . ([IO.Path]::Combine($root, 'scripts/internal/Project.Process.ps1'))
 $pidPath = [IO.Path]::Combine([IO.Path]::GetTempPath(),
@@ -123,7 +185,11 @@ $testFailed = $false
 try {
     Test-ProcessOutcomes $powerShell $root $pidPath $PSCommandPath
     Test-FixtureStopped $pidPath
+    Test-ProcessDiagnostics $powerShell $root $PSCommandPath
+    Test-InvalidProcessFlag $powerShell $root $PSCommandPath
+    Test-InvalidProcessTimeout $powerShell $root
+    Test-ProcessStartFailure $root
 }
 catch { $testFailed = $true; throw }
 finally { Complete-FixtureCleanup $pidPath $testFailed }
-Write-Host 'PASS controlled process success, failure, explicit77, timeout and fixture descendant checks.'
+Write-Host 'PASS controlled process outcomes, descendants, spaced arguments, both streams and rejected inputs.'
