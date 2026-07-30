@@ -744,6 +744,54 @@ void SeedSelection(PixelFixture& fixture, const LineageScenes& scenes)
     CheckSelection(fixture, scenes.grade);
 }
 
+void VerifyUnknownToneOverwrite(PixelFixture& fixture)
+{
+    fixture.Bind(true);
+    ComPtr<ID3D11Buffer> constants;
+    fixture.gpu.context->PSGetConstantBuffers(2, 1, &constants);
+    DrawCount draw;
+    FO4HDR_CHECK(fixture.renderer.ExecuteObserved(fixture.input, fixture.destination,
+        {DrawCount::Draw, &draw}) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(draw.count == 1);
+    fixture.CheckRestored(true);
+    CheckBoundInputs(fixture, 1, constants.Get());
+    // The unknown draw writes the actual tone resource, so its prior producer tag is no longer valid.
+    const auto output = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    for (const auto& pixel : output) CheckPixel(pixel, sentinelColor);
+    CheckSelection(fixture, {});
+}
+
+void VerifyProducerGrade(PixelFixture& fixture, const LineageScenes& scenes, SceneTextureHandle selected)
+{
+    fixture.input = scenes.tone;
+    fixture.destination = scenes.grade;
+    BindGrade(fixture);
+    ComPtr<ID3D11Buffer> constants;
+    fixture.gpu.context->PSGetConstantBuffers(2, 1, &constants);
+    FO4HDR_CHECK(DrawPass(fixture, 4) == SceneDrawOutcome::replaced);
+    CheckBoundInputs(fixture, 0, constants.Get());
+    CheckSelection(fixture, selected);
+}
+
+void VerifyProducerQualification(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.tone;
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(scenes.raw));
+    VerifyTone(fixture, 0);
+    CheckSelection(fixture, {});
+    VerifyUnknownToneOverwrite(fixture);
+    VerifyProducerGrade(fixture, scenes, {});
+    fixture.input = scenes.raw;
+    fixture.destination = scenes.tone;
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(scenes.raw));
+    VerifyTone(fixture, 0);
+    VerifyProducerGrade(fixture, scenes, scenes.grade);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+    CheckSelection(fixture, {});
+}
+
 void VerifyTemporalChain(PixelFixture& fixture, const LineageScenes& scenes)
 {
     SeedSelection(fixture, scenes);
@@ -900,6 +948,7 @@ void VerifyTemporalAndLineage(PixelFixture& fixture)
     VerifyTemporalHistory(fixture, 0.7f);
     const LineageScenes scenes{fixture.input, fixture.destination,
         AdditionalScene(fixture), AdditionalScene(fixture)};
+    VerifyProducerQualification(fixture, scenes);
     VerifyTemporalChain(fixture, scenes);
     VerifySelectedAliasRejection(fixture, scenes);
     VerifySelectedFormatRejection(fixture, scenes);
