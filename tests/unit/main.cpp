@@ -14,6 +14,7 @@ int wmain(int argc, wchar_t** argv)
         return fo4hdr::test::failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     fo4hdr::tests::RunHdrCoreTests();
+    fo4hdr::tests::RunPerformanceTests();
     fo4hdr::tests::RunToneMappingTests();
     fo4hdr::tests::RunOperatorLutTests();
     fo4hdr::tests::RunHdrOperatorWorkerTests();

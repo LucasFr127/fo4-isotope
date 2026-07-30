@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShippingPixelShaderTests.hpp"
+#include "PresentationTiming.hpp"
 #include "passes/PresentationPass.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "RenoDxShaderIdentity.hpp"
@@ -457,7 +458,8 @@ Float4 CompositeLayer(const Float4& behind, const Float4& layer)
         layer.blue + behind.blue * (1 - layer.alpha), 1};
 }
 
-void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
+void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal,
+    bool measureSubmission = false)
 {
     auto& fixture = state.fixture;
     // The caller supplies completed R8 code contributions and coverage.
@@ -467,7 +469,7 @@ void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, T
     state.Bind();
     FO4HDR_CHECK(pass.PrepareLayers(backdrop.Get(), hud.Get(), presentationScope));
     state.CheckRestored();
-    FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+    FO4HDR_CHECK(SubmitPreparedLayers(pass, terminal.view.Get(), measureSubmission));
     state.CheckRestored();
     const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == scene.size());
@@ -764,10 +766,10 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         BorrowedComputeState state{fixture, directory};
         state.Bind();
         state.CheckRestored();
-        FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
+        MeasureEmptyLayerSubmission(pass, terminal.view.Get());
         state.CheckRestored();
         CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
-        VerifyLayerTransport(pass, state, terminal);
+        VerifyLayerTransport(pass, state, terminal, true);
         VerifyNativeUiComposition(pass, state, terminal);
         VerifyVideoPresentation(pass, state, terminal);
         FO4HDR_CHECK(fixture.renderer.BeginFrame());

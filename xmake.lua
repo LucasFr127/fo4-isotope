@@ -103,6 +103,7 @@ for _, fixture in ipairs({
         add_syslinks("version")
         add_syslinks("d3d11", "user32")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
+            "src/output/PerformanceStatistics.cpp",
             "src/config/PluginConfiguration.cpp", "src/config/SettingsPersistence.cpp",
             "tests/unit/config/HdrPersistenceTests.cpp",
             "tests/shader/ShaderTestOptions.cpp", "tests/unit/ShaderTestOptionsTests.cpp",
@@ -123,6 +124,7 @@ for _, fixture in ipairs({
             "src/runtime/RuntimeValidation.cpp",
             "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
             "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
+            "tests/unit/output/PerformanceTests.cpp",
             "tests/unit/output/PipelineContractTests.cpp",
             "tests/unit/game/GameSnapshotStoreTests.cpp",
             "tests/unit/config/HdrSettingsMathTests.cpp",
@@ -181,6 +183,7 @@ target("fo4hdr-shader-tests")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
         "tests/shader/Gt7ReferenceTests.cpp",
         "src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
+        "src/output/PerformanceStatistics.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",

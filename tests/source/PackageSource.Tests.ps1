@@ -134,7 +134,11 @@ $expected = [string[]]@(
     "scripts/scan-runtime.ps1",
     "scripts/pin-runtime.ps1",
     "schemas/observed-runtime.schema.json",
-    "tests/source/RuntimePinning.Tests.ps1"
+    "tests/source/RuntimePinning.Tests.ps1",
+    "include/Fallout4HDR/output/PerformanceStatistics.hpp",
+    "src/output/PerformanceStatistics.cpp",
+    "tests/unit/output/PerformanceTests.cpp",
+    "tests/shader/PresentationTiming.hpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
