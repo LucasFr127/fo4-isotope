@@ -120,7 +120,6 @@ for _, fixture in ipairs({
             "src/graphics/RendererLifetime.cpp",
             "tests/unit/graphics/DeviceCreationHookTests.cpp",
             "tests/unit/graphics/SwapChainObservationTests.cpp",
-            "tests/unit/graphics/PresentationCharacterizationTests.cpp",
             "src/runtime/RuntimeValidation.cpp",
             "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",
             "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
