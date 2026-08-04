@@ -18,12 +18,13 @@ constexpr std::array<std::string_view, 3> kAlgorithms{"ACES2", "AgX", "GT7"};
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 11> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 12> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
         {"AgX", "ShoulderPower"}, {"GT7", "ToeStrength"},
-        {"GT7", "ShoulderStart"}, {"GT7", "ColorBlend"}}};
+        {"GT7", "ShoulderStart"}, {"GT7", "ColorBlend"},
+        {"Effects", "VanillaColorGradingStrength"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -92,7 +93,8 @@ private:
             &settings.videoWhiteNits, static_cast<double*>(nullptr),
             &parameters.agxMiddleGrayEv, &parameters.agxContrast, &parameters.agxHdrPurity,
             &parameters.agxHdrShoulderPower, &parameters.gt7ToeStrength,
-            &parameters.gt7ShoulderStart, &parameters.gt7ColorBlend};
+            &parameters.gt7ShoulderStart, &parameters.gt7ColorBlend,
+            &settings.vanillaColorGradingStrengthPercent};
         return ParseNumber(value, *targets[index]);
     }
 
@@ -127,7 +129,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 11> seen_{};
+    std::array<bool, 12> seen_{};
 };
 
 }  // namespace
@@ -136,9 +138,11 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
 {
     if (algorithm != other.algorithm) return false;
     const std::array current{
-        display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits};
+        display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
+        display.vanillaColorGradingStrengthPercent};
     const std::array candidate{other.display.displayPeakNits,
-        other.display.uiPaperWhiteNits, other.display.videoWhiteNits};
+        other.display.uiPaperWhiteNits, other.display.videoWhiteNits,
+        other.display.vanillaColorGradingStrengthPercent};
     return current == candidate &&
         display.toneMapperParameters == other.display.toneMapperParameters;
 }

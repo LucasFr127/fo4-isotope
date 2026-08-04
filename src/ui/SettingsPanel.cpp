@@ -56,6 +56,13 @@ bool DrawOutput(HdrSettings& settings) noexcept
     return changed;
 }
 
+bool DrawGrade(HdrSettings& settings) noexcept
+{
+    ImGui::SeparatorText("Vanilla color grading");
+    return DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
+        {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
+}
+
 bool DrawControls(ToneMapperParameters& parameters, std::span<const OperatorControl> controls) noexcept
 {
     bool changed{};
@@ -142,9 +149,11 @@ const char* OperatorName(OperatorLutAlgorithm algorithm) noexcept
 
 void DrawConfigurationSummary(const char* label, const PluginConfiguration& value) noexcept
 {
-    ImGui::TextWrapped("%s: %s, peak %.0f nits, UI %.0f nits, video %.0f nits",
+    ImGui::TextWrapped("%s: %s, peak %.0f nits, UI %.0f nits, "
+        "video %.0f nits, grading %.0f%%",
         label, OperatorName(value.algorithm), value.display.displayPeakNits,
-        value.display.uiPaperWhiteNits, value.display.videoWhiteNits);
+        value.display.uiPaperWhiteNits, value.display.videoWhiteNits,
+        value.display.vanillaColorGradingStrengthPercent);
 }
 
 void DrawStatus(const LiveSettingsSnapshot& snapshot) noexcept
@@ -179,6 +188,7 @@ SettingsPanelActions DrawSettingsPanel(PluginConfiguration& editable,
     ImGui::BeginDisabled(!snapshot.available);
     actions.request |= DrawOutput(editable.display);
     actions.request |= DrawOperator(editable);
+    actions.request |= DrawGrade(editable.display);
     if (ImGui::Button("Reset settings"))
     {
         editable = PluginConfiguration{};

@@ -53,6 +53,7 @@ function Get-ShaderPrograms {
         Destination = [IO.Path]::Combine($shaderDirectory, "DeveloperExposureCapture.hpp")
     })
     foreach ($fixture in @(
+        @{ Source = "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "HdrGradeTransfer" },
         @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },
         @{ Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "OperatorLut" },
         @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },

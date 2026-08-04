@@ -38,14 +38,20 @@ float3 Fo4HdrRadialCoordinates(float3 scene)
         1.0f / 2.2f);
 }
 
-float3 Fo4HdrTransferRadialGrade(float3 scene, float3 weightedCodes)
+float3 Fo4HdrTransferRadialGrade(float3 input, float3 weightedCodes, float strength)
 {
+    const float3 scene = Fo4HdrGradeCleanScene(input);
+    const uint magnitude = asuint(strength) & 0x7fffffffu;
+    const float amount = magnitude > 0x7f800000u ? 0.0f : saturate(strength);
+    if (amount <= 0.0f) return scene;
     // Decode the weighted codes once, then restore their common scene scale.
     const float3 decoded = pow(Fo4HdrGradeCleanScene(weightedCodes), 2.2f);
     const float3 restored = decoded / Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
     // Uniform scaling may round one FP32 ULP above the FP16 limit.
-    return min(restored * min(1.0f,
+    const float3 graded = min(restored * min(1.0f,
         65504.0f / max(Fo4HdrLargestGradeChannel(restored), 65504.0f)), 65504.0f);
+    if (amount >= 1.0f) return graded;
+    return lerp(scene, graded, amount);
 }
 
 #endif

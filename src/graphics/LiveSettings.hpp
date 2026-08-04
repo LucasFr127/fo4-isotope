@@ -77,7 +77,8 @@ public:
         if (!InitialResultMatches(initial, *prepared)) return false;
         const auto save = owners.persistence.Snapshot();
         if (save.state == SettingsPersistenceState::busy) return false;
-        if (!owners.presentation.ApplySettings(prepared->data, Whites(initial), scope)) return false;
+        if (!owners.presentation.ApplySettings(
+                prepared->data, Whites(initial), scope, Grade(initial))) return false;
         worker_ = &owners.worker;
         presentation_ = &owners.presentation;
         persistence_ = &owners.persistence;
@@ -193,6 +194,11 @@ private:
             static_cast<float>(value.display.videoWhiteNits)};
     }
 
+    [[nodiscard]] static SceneGradeConfiguration Grade(const PluginConfiguration& value) noexcept
+    {
+        return {static_cast<float>(value.display.vanillaColorGradingStrengthPercent / 100.0)};
+    }
+
     [[nodiscard]] static OperatorLutBuildRequest BuildRequest(const PluginConfiguration& value,
         std::uint64_t generation) noexcept
     {
@@ -255,7 +261,8 @@ private:
         if (SameNativeSettings()) return true;
         const auto* candidate = CandidateTable();
         if (!candidate) return false;
-        if (presentation_->ApplySettings(candidate->data, Whites(requested_), scope)) return true;
+        if (presentation_->ApplySettings(
+                candidate->data, Whites(requested_), scope, Grade(requested_))) return true;
         error_ = LiveSettingsError::applyRejected;
         return false;
     }
@@ -264,7 +271,9 @@ private:
     {
         if (!SameOperator(requested_, active_)) return false;
         if (requested_.display.uiPaperWhiteNits != active_.display.uiPaperWhiteNits) return false;
-        return requested_.display.videoWhiteNits == active_.display.videoWhiteNits;
+        if (requested_.display.videoWhiteNits != active_.display.videoWhiteNits) return false;
+        return requested_.display.vanillaColorGradingStrengthPercent ==
+            active_.display.vanillaColorGradingStrengthPercent;
     }
 
     [[nodiscard]] LiveSettingsRequestStatus RejectedRequest(OperatorLutRequestStatus status) noexcept

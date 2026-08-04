@@ -9,6 +9,8 @@ cbuffer Fallout4OperatorConstants : register(b13)
     float OperatorUiWhiteNits;
     uint OperatorInputDomain;
     float4 OperatorShaper;
+    float VanillaColorGradingStrength;
+    float3 GradePadding;
 }
 
 Texture3D<float4> OperatorLut : register(t7);

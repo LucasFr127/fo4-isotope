@@ -45,7 +45,11 @@ void main(
     const float4 sceneSample = SceneTexture.Sample(SceneSampler, texcoord);
     // Exposure is already applied; this seam preserves fixed 203-nit scene units.
     const float3 scene = Fo4HdrGradeCleanScene(sceneSample.rgb);
-    float3 result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene));
+    float3 result = scene;
+    [branch]
+    if (VanillaColorGradingStrength > 0.0f)
+        result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene),
+            VanillaColorGradingStrength);
     [branch]
     if (OperatorMode != 0u)
         result = Fo4HdrSampleOperatorLut(result) / OperatorUiWhiteNits;

@@ -137,7 +137,9 @@ $expected = [string[]]@(
     "include/Fallout4HDR/output/PerformanceStatistics.hpp",
     "src/output/PerformanceStatistics.cpp",
     "tests/unit/output/PerformanceTests.cpp",
-    "tests/shader/PresentationTiming.hpp"
+    "tests/shader/PresentationTiming.hpp",
+    "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
+    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

@@ -155,7 +155,9 @@ $files = [string[]]@(
     "include/Fallout4HDR/output/PerformanceStatistics.hpp",
     "src/output/PerformanceStatistics.cpp",
     "tests/unit/output/PerformanceTests.cpp",
-    "tests/shader/PresentationTiming.hpp"
+    "tests/shader/PresentationTiming.hpp",
+    "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
+    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

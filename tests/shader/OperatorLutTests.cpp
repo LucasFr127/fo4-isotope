@@ -529,6 +529,7 @@ void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginCon
     auto desired = initial;
     desired.display.uiPaperWhiteNits = 150;
     desired.display.videoWhiteNits = 250;
+    desired.display.vanillaColorGradingStrengthPercent = 50;
     FO4HDR_CHECK(live.Request(desired) == LiveSettingsRequestStatus::accepted);
     auto invalid = desired;
     invalid.display.displayPeakNits = 299;

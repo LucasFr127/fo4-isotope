@@ -46,7 +46,8 @@ public:
         ID3D11DeviceContext* immediateContext, PresentationConfiguration configuration) noexcept;
     // Closed-frame numeric changes prepare both owners before publishing either tuple.
     [[nodiscard]] bool ApplySettings(const OperatorLutData& table,
-        LayerWhiteConfiguration whites, PresentationScope scope) noexcept;
+        LayerWhiteConfiguration whites, PresentationScope scope,
+        SceneGradeConfiguration sceneGrade = {}) noexcept;
     // Supply a fresh caller-owned SDR-baseline candidate before any SetColorSpace1.
     // Numeric LUT/peak/white changes retain the chain. Device, descriptor or display
     // changes revoke qualification; retire before resize.

@@ -72,6 +72,8 @@ ComPtr<ID3D11Buffer> BindPostProcess(PixelFixture& fixture);
 void CheckBoundInputs(PixelFixture& fixture, UINT slot, ID3D11Buffer* constants);
 ComPtr<ID3D11Buffer> ConstantBuffer(ID3D11Device* device, std::span<const Float4> values);
 std::array<Float4, 6> ToneConstants();
+LutPixels LutInputs(unsigned variant);
+Float4 LutExpected(const Float4& scene, const std::array<LutPixels, 4>& textures);
 std::size_t LutIndex(UINT x, UINT y, UINT z);
 ComPtr<ID3D11ShaderResourceView> LutTexture(ID3D11Device* device, const LutPixels& pixels);
 SceneDrawOutcome DrawPass(PixelFixture& fixture, std::size_t program, bool dynamic = false);

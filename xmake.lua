@@ -149,9 +149,9 @@ target("fo4hdr-shaders")
         local info = json.decode(report)
         assert(info.compiler and info.compiler.path and info.compiler.version and info.compiler.sha256,
             "Shader dependency report lacks compiler identity")
-        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 20,
+        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 21,
             "Shader dependency report lacks the current input/output closure")
-        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 20 and info.outputRoot,
+        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 21 and info.outputRoot,
             "Shader dependency report lacks program values")
         local values = { pwsh, info.compiler.path, info.compiler.version, info.compiler.sha256,
             info.outputRoot, json.encode(info.flags), json.encode(info.outputs) }
@@ -187,6 +187,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",
+        "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
         "tests/support/d3d11/GpuHarness.cpp", "tests/shader/OperatorLutTests.cpp",
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",

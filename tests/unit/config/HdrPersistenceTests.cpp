@@ -91,6 +91,7 @@ void CheckParser()
     auto requested = original.value;
     requested.algorithm = OperatorLutAlgorithm::gt7;
     requested.display = {1500.0, 100.0, 300.0};
+    requested.display.vanillaColorGradingStrengthPercent = 50.0;
     const auto rewritten = RewritePluginConfigurationIni(kOriginal, requested);
     const auto parsed = ParsePluginConfiguration(rewritten);
     FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
@@ -118,6 +119,7 @@ void CheckRoundTrip()
     auto requested = loaded.value;
     requested.algorithm = OperatorLutAlgorithm::gt7;
     requested.display = {1500.0, 100.0, 300.0};
+    requested.display.vanillaColorGradingStrengthPercent = 50.0;
     {
         SettingsPersistence persistence;
         FO4HDR_CHECK(persistence.Initialize(path));

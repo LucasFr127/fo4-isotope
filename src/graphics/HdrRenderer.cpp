@@ -225,7 +225,8 @@ bool ValidInitializationArguments(ID3D11Device* device,
     ID3D11DeviceContext* context, const ScenePassConfiguration& configuration) noexcept
 {
     if (device == nullptr || context == nullptr) return false;
-    return configuration.width != 0 && configuration.height != 0 && configuration.whites.Valid();
+    return configuration.width != 0 && configuration.height != 0 &&
+        configuration.whites.Valid() && configuration.sceneGrade.Valid();
 }
 
 bool CompatibleDevice(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
@@ -337,6 +338,7 @@ bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration
 {
     OperatorConstants values{};
     values.uiWhiteNits = configuration.whites.uiWhiteNits;
+    values.vanillaColorGradingStrength = configuration.sceneGrade.vanillaColorGradingStrength;
     if (const auto* table = configuration.operatorLut)
     {
         values.mode = OperatorMode(table->algorithm);
@@ -634,12 +636,13 @@ bool ScenePassRenderer::OnOwnerThread() const noexcept
 }
 
 bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
-    LayerWhiteConfiguration whites) noexcept
+    LayerWhiteConfiguration whites, SceneGradeConfiguration sceneGrade) noexcept
 {
     if (!Active()) return false;
     if (invoking_ || frameOpen_) return false;
     if (!whites.Valid()) return false;
-    const ScenePassConfiguration configuration{width_, height_, whites, &table};
+    if (!sceneGrade.Valid()) return false;
+    const ScenePassConfiguration configuration{width_, height_, whites, &table, sceneGrade};
     ComPtr<ID3D11Buffer> preparedVideoConstants;
     PreparedOperator preparedOperator;
     if (!PrepareDrawResources(device_.Get(), configuration, preparedVideoConstants, preparedOperator))

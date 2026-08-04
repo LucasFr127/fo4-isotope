@@ -18,13 +18,13 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 11> kKeys{
+constexpr std::array<std::string_view, 12> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
-    "ToeStrength", "ShoulderStart", "ColorBlend"};
-constexpr std::array<std::string_view, 11> kSections{
+    "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength"};
+constexpr std::array<std::string_view, 12> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
-    "GT7", "GT7", "GT7"};
+    "GT7", "GT7", "GT7", "Effects"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -42,7 +42,7 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 11> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 12> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
     return {FormatNumber(value.display.displayPeakNits),
@@ -50,7 +50,8 @@ std::array<std::string, 11> OwnedValues(const PluginConfiguration& value)
         std::string(ToString(value.algorithm)), FormatNumber(parameters.agxMiddleGrayEv),
         FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
         FormatNumber(parameters.agxHdrShoulderPower), FormatNumber(parameters.gt7ToeStrength),
-        FormatNumber(parameters.gt7ShoulderStart), FormatNumber(parameters.gt7ColorBlend)};
+        FormatNumber(parameters.gt7ShoulderStart), FormatNumber(parameters.gt7ColorBlend),
+        FormatNumber(value.display.vanillaColorGradingStrengthPercent)};
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -84,6 +85,7 @@ public:
         AppendMissing("ToneMapper", 3, 4);
         AppendMissing("AgX", 4, 8);
         AppendMissing("GT7", 8, 11);
+        AppendMissing("Effects", 11, 12);
         return std::move(result_);
     }
 
@@ -139,8 +141,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 11> values_;
-    std::array<bool, 11> seen_{};
+    std::array<std::string, 12> values_;
+    std::array<bool, 12> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

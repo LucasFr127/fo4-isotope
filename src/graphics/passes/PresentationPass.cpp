@@ -602,17 +602,19 @@ bool PresentationPass::OnOwnerThread() const noexcept
 }
 
 bool PresentationPass::ApplySettings(const OperatorLutData& table,
-    LayerWhiteConfiguration whites, PresentationScope scope) noexcept
+    LayerWhiteConfiguration whites, PresentationScope scope,
+    SceneGradeConfiguration sceneGrade) noexcept
 {
     if (!CanApplySettings(scope)) return false;
     if (!table.IsValid() || !whites.Valid()) return false;
+    if (!sceneGrade.Valid()) return false;
     auto configuration = configuration_;
     configuration.displayPeakNits = static_cast<float>(table.displayPeakNits);
     configuration.whites = whites;
     if (!ValidConfiguration(configuration)) return false;
     PreparedPresentation prepared;
     if (!PrepareConstantVariants(device_.Get(), configuration, prepared)) return false;
-    if (!configuration_.scenes->ApplySettings(table, whites)) return false;
+    if (!configuration_.scenes->ApplySettings(table, whites, sceneGrade)) return false;
     constants_ = std::move(prepared.constants);
     configuration_ = configuration;
     layerFrame_ = 0;

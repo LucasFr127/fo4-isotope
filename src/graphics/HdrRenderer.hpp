@@ -11,6 +11,7 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -30,6 +31,18 @@ struct LayerWhiteConfiguration
     [[nodiscard]] bool Valid() const noexcept;
 };
 
+struct SceneGradeConfiguration
+{
+    // Blend native grade in scene units before the independent operator sample.
+    float vanillaColorGradingStrength{1.0F};
+
+    [[nodiscard]] bool Valid() const noexcept
+    {
+        return std::isfinite(vanillaColorGradingStrength) &&
+            vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F;
+    }
+};
+
 struct ScenePassConfiguration
 {
     UINT width{};
@@ -37,6 +50,7 @@ struct ScenePassConfiguration
     LayerWhiteConfiguration whites;
     // Borrowed only during Initialize; a requested invalid table fails initialization.
     const OperatorLutData* operatorLut{};
+    SceneGradeConfiguration sceneGrade{};
 };
 
 class SceneTextureHandle
@@ -147,7 +161,7 @@ public:
 private:
     friend class PresentationPass;
     [[nodiscard]] bool ApplySettings(const OperatorLutData& table,
-        LayerWhiteConfiguration whites) noexcept;
+        LayerWhiteConfiguration whites, SceneGradeConfiguration sceneGrade = {}) noexcept;
     void MarkSettingsStale() noexcept;
     struct SceneTexture
     {

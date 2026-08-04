@@ -59,6 +59,11 @@ HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noex
     {
         return HdrSettingsValidationError::videoWhiteOutOfRange;
     }
+    if (!InRange(settings.vanillaColorGradingStrengthPercent,
+        kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent))
+    {
+        return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
+    }
     return HdrSettingsValidationError::none;
 }
 

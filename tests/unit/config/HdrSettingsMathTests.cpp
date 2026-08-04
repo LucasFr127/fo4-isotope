@@ -23,7 +23,8 @@ auto SettingBits(const HdrSettings& value)
 {
     return std::array{std::bit_cast<std::uint64_t>(value.displayPeakNits),
         std::bit_cast<std::uint64_t>(value.uiPaperWhiteNits),
-        std::bit_cast<std::uint64_t>(value.videoWhiteNits)};
+        std::bit_cast<std::uint64_t>(value.videoWhiteNits),
+        std::bit_cast<std::uint64_t>(value.vanillaColorGradingStrengthPercent)};
 }
 
 void TestSettingsDefaults()
@@ -32,6 +33,7 @@ void TestSettingsDefaults()
     FO4HDR_CHECK(defaults.displayPeakNits == 1000.0);
     FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
     FO4HDR_CHECK(defaults.videoWhiteNits == 203.0);
+    FO4HDR_CHECK(defaults.vanillaColorGradingStrengthPercent == 100.0);
     FO4HDR_CHECK(fo4hdr::kSceneReferenceWhiteNits == 203.0);
     FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(defaults) == Error::none);
 }
@@ -48,7 +50,8 @@ void TestSettingsRanges()
     constexpr std::array ranges{
         Range{&HdrSettings::displayPeakNits, 400.0, 2000.0, Error::displayPeakOutOfRange},
         Range{&HdrSettings::uiPaperWhiteNits, 100.0, 300.0, Error::uiPaperWhiteOutOfRange},
-        Range{&HdrSettings::videoWhiteNits, 100.0, 300.0, Error::videoWhiteOutOfRange}};
+        Range{&HdrSettings::videoWhiteNits, 100.0, 300.0, Error::videoWhiteOutOfRange},
+        Range{&HdrSettings::vanillaColorGradingStrengthPercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange}};
     const auto infinity = std::numeric_limits<double>::infinity();
     const auto nan = std::numeric_limits<double>::quiet_NaN();
     for (const auto& range : ranges)
@@ -149,7 +152,9 @@ void TestToneMapperPersistence()
     const auto parsed = fo4hdr::ParsePluginConfiguration(original);
     FO4HDR_CHECK(parsed.status == fo4hdr::PluginConfigurationStatus::loaded);
     FO4HDR_CHECK(parsed.value.display.toneMapperParameters == fo4hdr::ToneMapperParameters{});
+    FO4HDR_CHECK(parsed.value.display.vanillaColorGradingStrengthPercent == 100.0);
     auto requested = parsed.value;
+    requested.display.vanillaColorGradingStrengthPercent = 50.0;
     requested.display.toneMapperParameters.agxContrast = 3.0;
     requested.display.toneMapperParameters.gt7ToeStrength = 1.5;
     FO4HDR_CHECK(!(requested == parsed.value));
@@ -158,6 +163,10 @@ void TestToneMapperPersistence()
     FO4HDR_CHECK(restored.status == fo4hdr::PluginConfigurationStatus::loaded);
     FO4HDR_CHECK(restored.value == requested);
     FO4HDR_CHECK(rewritten.find("Keep=unchanged") != std::string::npos);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Effects]\nVanillaColorGradingStrength=101\n").status ==
+        fo4hdr::PluginConfigurationStatus::invalid);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nVanillaColorGradingStrength=50\n").status ==
+        fo4hdr::PluginConfigurationStatus::invalid);
     FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[AgX]\nContrast=2.7\n").status ==
         fo4hdr::PluginConfigurationStatus::invalid);
 }

@@ -7,6 +7,8 @@ namespace fo4hdr {
 
 inline constexpr double kDefaultUiPaperWhiteNits{203.0};
 inline constexpr double kDefaultVideoWhiteNits{203.0};
+inline constexpr double kMinimumVanillaColorGradingPercent{0.0};
+inline constexpr double kMaximumVanillaColorGradingPercent{100.0};
 inline constexpr double kMinimumAgxMiddleGrayEv{-0.25};
 inline constexpr double kMaximumAgxMiddleGrayEv{0.25};
 inline constexpr double kMinimumAgxContrast{2.4};
@@ -71,6 +73,7 @@ struct HdrSettings
     double uiPaperWhiteNits{kDefaultUiPaperWhiteNits};
     double videoWhiteNits{kDefaultVideoWhiteNits};
     ToneMapperParameters toneMapperParameters;
+    double vanillaColorGradingStrengthPercent{100.0};
 };
 
 enum class HdrSettingsValidationError : std::uint8_t
@@ -78,7 +81,8 @@ enum class HdrSettingsValidationError : std::uint8_t
     none,
     displayPeakOutOfRange,
     uiPaperWhiteOutOfRange,
-    videoWhiteOutOfRange
+    videoWhiteOutOfRange,
+    vanillaColorGradingOutOfRange
 };
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(
