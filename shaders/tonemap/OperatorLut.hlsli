@@ -10,7 +10,15 @@ cbuffer Fallout4OperatorConstants : register(b13)
     uint OperatorInputDomain;
     float4 OperatorShaper;
     float VanillaColorGradingStrength;
-    float3 GradePadding;
+    float Fo4HdrContrastSlope;
+    float Fo4HdrBlacksStrength;
+    float Fo4HdrShadowsEv;
+    float Fo4HdrHighlightsEv;
+    float Fo4HdrSaturation;
+    float2 GradePadding;
+    float4 Fo4HdrColorAdaptationRow0;
+    float4 Fo4HdrColorAdaptationRow1;
+    float4 Fo4HdrColorAdaptationRow2;
 }
 
 Texture3D<float4> OperatorLut : register(t7);

@@ -530,10 +530,15 @@ void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginCon
     desired.display.uiPaperWhiteNits = 150;
     desired.display.videoWhiteNits = 250;
     desired.display.vanillaColorGradingStrengthPercent = 50;
+    // The HDR source lies above the shadow mask; this also checks cold tuple reuse.
+    desired.display.shadows = 50;
     FO4HDR_CHECK(live.Request(desired) == LiveSettingsRequestStatus::accepted);
     auto invalid = desired;
     invalid.display.displayPeakNits = 299;
     FO4HDR_CHECK(live.Request(invalid) == LiveSettingsRequestStatus::invalid);
+    auto invalidImage = desired;
+    invalidImage.display.shadows = 101;
+    FO4HDR_CHECK(live.Request(invalidImage) == LiveSettingsRequestStatus::invalid);
     CheckLiveTuple(live.Snapshot(), initial, desired, true);
     FO4HDR_CHECK(!live.CommitAtClosedFrame(PresentationScope::unavailable));
     CheckLiveTuple(live.Snapshot(), initial, desired, true);

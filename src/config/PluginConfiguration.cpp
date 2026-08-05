@@ -18,13 +18,16 @@ constexpr std::array<std::string_view, 3> kAlgorithms{"ACES2", "AgX", "GT7"};
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 12> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 19> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
         {"AgX", "ShoulderPower"}, {"GT7", "ToeStrength"},
         {"GT7", "ShoulderStart"}, {"GT7", "ColorBlend"},
-        {"Effects", "VanillaColorGradingStrength"}}};
+        {"Effects", "VanillaColorGradingStrength"},
+        {"Image", "Contrast"}, {"Image", "Blacks"}, {"Image", "Highlights"},
+        {"Image", "Shadows"}, {"Image", "Saturation"},
+        {"Image", "Temperature"}, {"Image", "Tint"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -94,7 +97,9 @@ private:
             &parameters.agxMiddleGrayEv, &parameters.agxContrast, &parameters.agxHdrPurity,
             &parameters.agxHdrShoulderPower, &parameters.gt7ToeStrength,
             &parameters.gt7ShoulderStart, &parameters.gt7ColorBlend,
-            &settings.vanillaColorGradingStrengthPercent};
+            &settings.vanillaColorGradingStrengthPercent, &settings.contrast, &settings.blacks,
+            &settings.highlights, &settings.shadows, &settings.saturationPercent,
+            &settings.temperature, &settings.tint};
         return ParseNumber(value, *targets[index]);
     }
 
@@ -129,7 +134,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 12> seen_{};
+    std::array<bool, 19> seen_{};
 };
 
 }  // namespace
@@ -139,10 +144,15 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
     if (algorithm != other.algorithm) return false;
     const std::array current{
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
-        display.vanillaColorGradingStrengthPercent};
+        display.vanillaColorGradingStrengthPercent, display.contrast, display.blacks,
+        display.highlights, display.shadows, display.saturationPercent,
+        display.temperature, display.tint};
     const std::array candidate{other.display.displayPeakNits,
         other.display.uiPaperWhiteNits, other.display.videoWhiteNits,
-        other.display.vanillaColorGradingStrengthPercent};
+        other.display.vanillaColorGradingStrengthPercent,
+        other.display.contrast, other.display.blacks, other.display.highlights,
+        other.display.shadows, other.display.saturationPercent,
+        other.display.temperature, other.display.tint};
     return current == candidate &&
         display.toneMapperParameters == other.display.toneMapperParameters;
 }

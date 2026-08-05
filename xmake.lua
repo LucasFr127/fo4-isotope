@@ -188,6 +188,7 @@ target("fo4hdr-shader-tests")
         "tests/shader/ShaderTestOptions.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",
         "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
+        "tests/shader/ImageControlsTests.cpp",
         "tests/support/d3d11/GpuHarness.cpp", "tests/shader/OperatorLutTests.cpp",
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",

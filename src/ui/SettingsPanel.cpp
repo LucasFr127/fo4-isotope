@@ -28,6 +28,13 @@ struct OperatorControl
     SliderRange range;
 };
 
+struct ImageControl
+{
+    const char* label;
+    double HdrSettings::* value;
+    SliderRange range;
+};
+
 bool DrawNumber(const char* label, double& value, SliderRange range) noexcept
 {
     ImGui::TextUnformatted(label);
@@ -53,6 +60,32 @@ bool DrawOutput(HdrSettings& settings) noexcept
     changed |= DrawNumber("Display peak", settings.displayPeakNits, {kMinimumDisplayPeakNits, kMaximumDisplayPeakNits, "%.0f nits"});
     changed |= DrawNumber("Menu and HUD white", settings.uiPaperWhiteNits, {kMinimumUiPaperWhiteNits, kMaximumUiPaperWhiteNits, "%.0f nits"});
     changed |= DrawNumber("Video white", settings.videoWhiteNits, {kMinimumUiPaperWhiteNits, kMaximumUiPaperWhiteNits, "%.0f nits"});
+    return changed;
+}
+
+bool DrawImage(HdrSettings& settings) noexcept
+{
+    ImGui::SeparatorText("Image adjustments");
+    ImGui::PushID("image-controls");
+    const std::array controls{
+        ImageControl{"Contrast", &HdrSettings::contrast,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
+        ImageControl{"Blacks", &HdrSettings::blacks,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
+        ImageControl{"Highlights", &HdrSettings::highlights,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
+        ImageControl{"Shadows", &HdrSettings::shadows,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
+        ImageControl{"Saturation", &HdrSettings::saturationPercent,
+            {kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%"}},
+        ImageControl{"Temperature", &HdrSettings::temperature,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
+        ImageControl{"Tint", &HdrSettings::tint,
+            {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}}};
+    bool changed{};
+    for (const auto& control : controls)
+        changed |= DrawNumber(control.label, settings.*control.value, control.range);
+    ImGui::PopID();
     return changed;
 }
 
@@ -188,6 +221,7 @@ SettingsPanelActions DrawSettingsPanel(PluginConfiguration& editable,
     ImGui::BeginDisabled(!snapshot.available);
     actions.request |= DrawOutput(editable.display);
     actions.request |= DrawOperator(editable);
+    actions.request |= DrawImage(editable.display);
     actions.request |= DrawGrade(editable.display);
     if (ImGui::Button("Reset settings"))
     {

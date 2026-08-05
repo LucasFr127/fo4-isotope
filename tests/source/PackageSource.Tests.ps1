@@ -139,7 +139,8 @@ $expected = [string[]]@(
     "tests/unit/output/PerformanceTests.cpp",
     "tests/shader/PresentationTiming.hpp",
     "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
-    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"
+    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl",
+    "shaders/fallout4/ImageControls.hlsli", "tests/shader/ImageControlsTests.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

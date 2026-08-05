@@ -4,16 +4,19 @@
 #include "DeveloperExposureLock.hpp"
 #include "RendererLifetime.hpp"
 #include "resources/DeveloperExposureResources.hpp"
+#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
 
 #include <d3d11_1.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <thread>
 
@@ -35,11 +38,35 @@ struct SceneGradeConfiguration
 {
     // Blend native grade in scene units before the independent operator sample.
     float vanillaColorGradingStrength{1.0F};
+    HdrSettingsMath imageControls{};
 
     [[nodiscard]] bool Valid() const noexcept
     {
         return std::isfinite(vanillaColorGradingStrength) &&
-            vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F;
+            vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F &&
+            ImageScalarsValid() && MatrixValid();
+    }
+
+private:
+    [[nodiscard]] bool ImageScalarsValid() const noexcept
+    {
+        const std::array<std::array<double, 3>, 5> ranges{{
+            {imageControls.contrastSlope, 0.5, 2.0},
+            {imageControls.blacksStrength, -0.75, 0.75},
+            {imageControls.highlightsEv, -2.0, 2.0},
+            {imageControls.shadowsEv, -2.0, 2.0},
+            {imageControls.saturationScale, 0.0, 2.0}}};
+        return std::all_of(ranges.begin(), ranges.end(), [](const auto& range) {
+            return std::isfinite(range[0]) && range[0] >= range[1] && range[0] <= range[2];
+        });
+    }
+
+    [[nodiscard]] bool MatrixValid() const noexcept
+    {
+        const auto& matrix = imageControls.colorBalanceBt709;
+        return std::all_of(matrix.begin(), matrix.end(), [](double value) {
+            return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
+        });
     }
 };
 

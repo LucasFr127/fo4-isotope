@@ -189,12 +189,13 @@ struct DrawCount
 };
 
 PixelFixture::PixelFixture(const std::filesystem::path& directory,
-    UINT imageWidth, UINT imageHeight, LayerWhiteConfiguration layerWhites, const OperatorLutData* operatorLut) :
+    UINT imageWidth, UINT imageHeight, LayerWhiteConfiguration layerWhites, const OperatorLutData* operatorLut,
+    SceneGradeConfiguration sceneGrade) :
     point(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_POINT)),
     linear(Sampler(gpu.device.Get(), D3D11_FILTER_MIN_MAG_MIP_LINEAR)),
     extentWidth(imageWidth), extentHeight(imageHeight), whites(layerWhites)
 {
-    const ScenePassConfiguration configuration{extentWidth, extentHeight, whites, operatorLut};
+    const ScenePassConfiguration configuration{extentWidth, extentHeight, whites, operatorLut, sceneGrade};
     if (!renderer.Initialize(gpu.device.Get(), gpu.context.Get(), configuration))
         throw std::runtime_error("Scene renderer initialization failed");
     const auto scene = SceneDescription(extentWidth, extentHeight);

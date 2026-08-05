@@ -18,13 +18,15 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 12> kKeys{
+constexpr std::array<std::string_view, 19> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
-    "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength"};
-constexpr std::array<std::string_view, 12> kSections{
+    "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
+    "Contrast", "Blacks", "Highlights", "Shadows", "Saturation", "Temperature", "Tint"};
+constexpr std::array<std::string_view, 19> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
-    "GT7", "GT7", "GT7", "Effects"};
+    "GT7", "GT7", "GT7", "Effects",
+    "Image", "Image", "Image", "Image", "Image", "Image", "Image"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -42,7 +44,7 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 12> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 19> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
     return {FormatNumber(value.display.displayPeakNits),
@@ -51,7 +53,11 @@ std::array<std::string, 12> OwnedValues(const PluginConfiguration& value)
         FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
         FormatNumber(parameters.agxHdrShoulderPower), FormatNumber(parameters.gt7ToeStrength),
         FormatNumber(parameters.gt7ShoulderStart), FormatNumber(parameters.gt7ColorBlend),
-        FormatNumber(value.display.vanillaColorGradingStrengthPercent)};
+        FormatNumber(value.display.vanillaColorGradingStrengthPercent),
+        FormatNumber(value.display.contrast), FormatNumber(value.display.blacks),
+        FormatNumber(value.display.highlights), FormatNumber(value.display.shadows),
+        FormatNumber(value.display.saturationPercent), FormatNumber(value.display.temperature),
+        FormatNumber(value.display.tint)};
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -86,16 +92,16 @@ public:
         AppendMissing("AgX", 4, 8);
         AppendMissing("GT7", 8, 11);
         AppendMissing("Effects", 11, 12);
+        AppendMissing("Image", 12, 19);
         return std::move(result_);
     }
 
 private:
     std::size_t OwnedIndex(std::string_view key) const noexcept
     {
-        const auto found = std::ranges::find(kKeys, key);
-        if (found == kKeys.end()) return kKeys.size();
-        const auto index = static_cast<std::size_t>(found - kKeys.begin());
-        return section_ == kSections[index] ? index : kKeys.size();
+        for (std::size_t index = 0; index < kKeys.size(); ++index)
+            if (section_ == kSections[index] && key == kKeys[index]) return index;
+        return kKeys.size();
     }
 
     void AppendRaw(std::string_view raw)
@@ -141,8 +147,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 12> values_;
-    std::array<bool, 12> seen_{};
+    std::array<std::string, 19> values_;
+    std::array<bool, 19> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

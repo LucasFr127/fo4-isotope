@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace fo4hdr {
 
 inline constexpr double kDefaultUiPaperWhiteNits{203.0};
 inline constexpr double kDefaultVideoWhiteNits{203.0};
+inline constexpr double kMinimumImageAdjustment{-100.0};
+inline constexpr double kMaximumImageAdjustment{100.0};
+inline constexpr double kMinimumSaturationPercent{0.0};
+inline constexpr double kMaximumSaturationPercent{200.0};
 inline constexpr double kMinimumVanillaColorGradingPercent{0.0};
 inline constexpr double kMaximumVanillaColorGradingPercent{100.0};
 inline constexpr double kMinimumAgxMiddleGrayEv{-0.25};
@@ -74,6 +79,13 @@ struct HdrSettings
     double videoWhiteNits{kDefaultVideoWhiteNits};
     ToneMapperParameters toneMapperParameters;
     double vanillaColorGradingStrengthPercent{100.0};
+    double contrast{};
+    double blacks{};
+    double highlights{};
+    double shadows{};
+    double saturationPercent{100.0};
+    double temperature{};
+    double tint{};
 };
 
 enum class HdrSettingsValidationError : std::uint8_t
@@ -82,10 +94,31 @@ enum class HdrSettingsValidationError : std::uint8_t
     displayPeakOutOfRange,
     uiPaperWhiteOutOfRange,
     videoWhiteOutOfRange,
-    vanillaColorGradingOutOfRange
+    vanillaColorGradingOutOfRange,
+    contrastOutOfRange,
+    blacksOutOfRange,
+    highlightsOutOfRange,
+    shadowsOutOfRange,
+    saturationOutOfRange,
+    temperatureOutOfRange,
+    tintOutOfRange
 };
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(
     const HdrSettings& settings) noexcept;
+
+struct HdrSettingsMath
+{
+    double contrastSlope{1.0};
+    double blacksStrength{};
+    double highlightsEv{};
+    double shadowsEv{};
+    double saturationScale{1.0};
+    // Row-major linear BT.709 transform; neutral temperature/tint is exact identity.
+    std::array<double, 9> colorBalanceBt709{
+        1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+};
+
+[[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(const HdrSettings& settings) noexcept;
 
 }  // namespace fo4hdr

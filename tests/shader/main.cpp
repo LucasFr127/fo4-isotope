@@ -18,6 +18,7 @@
 #include <stdexcept>
 
 namespace fo4hdr::tests::gpu {
+void VerifyImageControls(const std::filesystem::path& directory);
 void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory);
 void VerifyHdrGradeTransfer(const std::filesystem::path& shaderPath);
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
@@ -113,6 +114,7 @@ int wmain(int argc, wchar_t** argv)
         const auto error = CheckTransfer(input, output);
         fo4hdr::tests::gpu::VerifyShippingPixelShaders(
             shaderPath.parent_path());
+        fo4hdr::tests::gpu::VerifyImageControls(shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyCreativeGradeLut(shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyHdrGradeTransfer(shaderPath.parent_path() / "HdrGradeTransfer.dxbc");
         fo4hdr::tests::gpu::VerifyOperatorLut(

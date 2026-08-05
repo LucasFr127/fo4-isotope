@@ -6,6 +6,7 @@
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "Fallout4HDR/config/SettingsPersistence.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -196,7 +197,8 @@ private:
 
     [[nodiscard]] static SceneGradeConfiguration Grade(const PluginConfiguration& value) noexcept
     {
-        return {static_cast<float>(value.display.vanillaColorGradingStrengthPercent / 100.0)};
+        return {static_cast<float>(value.display.vanillaColorGradingStrengthPercent / 100.0),
+            DeriveHdrSettingsMath(value.display)};
     }
 
     [[nodiscard]] static OperatorLutBuildRequest BuildRequest(const PluginConfiguration& value,
@@ -272,8 +274,15 @@ private:
         if (!SameOperator(requested_, active_)) return false;
         if (requested_.display.uiPaperWhiteNits != active_.display.uiPaperWhiteNits) return false;
         if (requested_.display.videoWhiteNits != active_.display.videoWhiteNits) return false;
-        return requested_.display.vanillaColorGradingStrengthPercent ==
-            active_.display.vanillaColorGradingStrengthPercent;
+        const auto& requested = requested_.display;
+        const auto& active = active_.display;
+        const std::array requestedImage{requested.vanillaColorGradingStrengthPercent,
+            requested.contrast, requested.blacks, requested.highlights, requested.shadows,
+            requested.saturationPercent, requested.temperature, requested.tint};
+        const std::array activeImage{active.vanillaColorGradingStrengthPercent,
+            active.contrast, active.blacks, active.highlights, active.shadows,
+            active.saturationPercent, active.temperature, active.tint};
+        return requestedImage == activeImage;
     }
 
     [[nodiscard]] LiveSettingsRequestStatus RejectedRequest(OperatorLutRequestStatus status) noexcept

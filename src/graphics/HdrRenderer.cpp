@@ -333,13 +333,13 @@ std::uint32_t OperatorMode(OperatorLutAlgorithm algorithm) noexcept
     }
 }
 
-bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration& configuration,
+bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration& config,
     PreparedOperator& prepared) noexcept
 {
     OperatorConstants values{};
-    values.uiWhiteNits = configuration.whites.uiWhiteNits;
-    values.vanillaColorGradingStrength = configuration.sceneGrade.vanillaColorGradingStrength;
-    if (const auto* table = configuration.operatorLut)
+    values.uiWhiteNits = config.whites.uiWhiteNits;
+    values.SetGrade(config.sceneGrade.vanillaColorGradingStrength, config.sceneGrade.imageControls);
+    if (const auto* table = config.operatorLut)
     {
         values.mode = OperatorMode(table->algorithm);
         values.displayPeakNits = static_cast<float>(table->displayPeakNits);

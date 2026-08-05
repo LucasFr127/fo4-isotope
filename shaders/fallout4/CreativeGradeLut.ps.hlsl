@@ -8,6 +8,7 @@
 
 #include "GradeTransfer.hlsli"
 #include "../tonemap/OperatorLut.hlsli"
+#include "ImageControls.hlsli"
 
 Texture2D<float4> SceneTexture : register(t0);
 Texture3D<float4> Lut0 : register(t3);
@@ -50,6 +51,7 @@ void main(
     if (VanillaColorGradingStrength > 0.0f)
         result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene),
             VanillaColorGradingStrength);
+    result = Fo4HdrApplyImageControls(result);
     [branch]
     if (OperatorMode != 0u)
         result = Fo4HdrSampleOperatorLut(result) / OperatorUiWhiteNits;

@@ -157,7 +157,8 @@ $files = [string[]]@(
     "tests/unit/output/PerformanceTests.cpp",
     "tests/shader/PresentationTiming.hpp",
     "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
-    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"
+    "tests/shader/shaders/HdrGradeTransfer.cs.hlsl",
+    "shaders/fallout4/ImageControls.hlsli", "tests/shader/ImageControlsTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {
