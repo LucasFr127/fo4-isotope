@@ -230,6 +230,20 @@ void TestAdjustedImageMath()
     for (const auto value : math.colorBalanceBt709) FO4HDR_CHECK(std::isfinite(value));
 }
 
+void TestColorBalanceAnchor()
+{
+    HdrSettings settings;
+    settings.temperature = 20;
+    settings.tint = -30;
+    const auto actual = fo4hdr::DeriveHdrSettingsMath(settings).colorBalanceBt709;
+    constexpr std::array<double, 9> expected{
+        1.0212627931544651, 0.027566926935249494, 0.0064129259361357938,
+        -0.0012828855962777597, 0.99650280298776606, 0.0026329634878390767,
+        -0.0031038820888138231, -0.011582569944983787, 0.87324218699067924};
+    for (std::size_t index = 0; index < actual.size(); ++index)
+        FO4HDR_CHECK(fo4hdr::test::Approx(actual[index], expected[index], 1.0e-12));
+}
+
 }  // namespace
 
 namespace fo4hdr::tests {
@@ -244,6 +258,7 @@ void RunHdrSettingsMathTests()
     TestToneMapperPersistence();
     TestNeutralImageMath();
     TestAdjustedImageMath();
+    TestColorBalanceAnchor();
 }
 
 }  // namespace fo4hdr::tests

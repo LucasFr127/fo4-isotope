@@ -171,6 +171,22 @@ void VerifyImageCase(const std::filesystem::path& directory, const HdrSettings& 
     if (!neutral) FO4HDR_CHECK(changed);
 }
 
+void VerifyControlInteractions(const std::filesystem::path& directory)
+{
+    HdrSettings settings;
+    settings.contrast = 50;
+    settings.blacks = -50;
+    settings.highlights = -50;
+    settings.shadows = 50;
+    settings.saturationPercent = 150;
+    settings.temperature = 20;
+    settings.tint = -30;
+    VerifyImageCase(directory, settings, false);
+    settings = {};
+    settings.saturationPercent = 200;
+    VerifyImageCase(directory, settings, false);
+}
+
 void CheckInvalidColdTuple(const std::filesystem::path& directory)
 {
     PixelFixture fixture(directory);
@@ -195,6 +211,7 @@ void VerifyImageControls(const std::filesystem::path& fixtureDirectory)
         VerifyImageCase(fixtureDirectory, settings, false);
     }
     CheckInvalidColdTuple(fixtureDirectory);
+    VerifyControlInteractions(fixtureDirectory);
 }
 
 }  // namespace fo4hdr::tests::gpu

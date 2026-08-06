@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace fo4hdr::tests::gpu {
 namespace {
@@ -70,6 +71,19 @@ void CheckTransferPixel(Float4 actual, Float4 input, double strength)
     }
 }
 
+void VerifyStrengthPolicy(const std::filesystem::path& shaderPath, const TransferPixels& input)
+{
+    struct StrengthCase { float supplied; double normalized; };
+    const std::array cases{StrengthCase{-1, 0}, StrengthCase{2, 1},
+        StrengthCase{std::numeric_limits<float>::quiet_NaN(), 0}};
+    for (const auto sample : cases)
+    {
+        const auto output = EvaluateTransfer(shaderPath, input, sample.supplied);
+        for (std::size_t index = 0; index < output.size(); ++index)
+            CheckTransferPixel(output[index], input[index], sample.normalized);
+    }
+}
+
 }  // namespace
 
 void VerifyHdrGradeTransfer(const std::filesystem::path& shaderPath)
@@ -81,6 +95,7 @@ void VerifyHdrGradeTransfer(const std::filesystem::path& shaderPath)
         for (std::size_t index = 0; index < output.size(); ++index)
             CheckTransferPixel(output[index], input[index], strength);
     }
+    VerifyStrengthPolicy(shaderPath, input);
 }
 
 }  // namespace fo4hdr::tests::gpu
