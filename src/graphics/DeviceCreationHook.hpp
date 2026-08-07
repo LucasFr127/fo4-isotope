@@ -7,6 +7,27 @@
 
 namespace fo4hdr {
 
+struct CreatedDeviceBinding
+{
+    ID3D11Device* device{};
+    ID3D11DeviceContext* context{};
+    IDXGISwapChain* swapChain{};
+    HRESULT result{};
+    UINT flags{};
+};
+
+using CreatedDeviceObserver = bool (*)(const CreatedDeviceBinding& binding);
+using CreationDisabledObserver = void (*)() noexcept;
+
+struct DeviceCreationCallbacks
+{
+    DeviceCreationObserver facts{};
+    CreatedDeviceObserver created{};
+    CreationDisabledObserver disabled{};
+};
+
+// Returned interfaces are borrowed during delivery; a receiver owns any retained references.
+[[nodiscard]] bool PrepareDeviceCreationObserver(DeviceCreationCallbacks callbacks) noexcept;
 // Configuration, predecessor code and observer state remain alive until process exit.
 [[nodiscard]] bool PrepareDeviceCreationObserver(DeviceCreationObserver observer) noexcept;
 [[nodiscard]] bool PublishD3dNext(void* next) noexcept;

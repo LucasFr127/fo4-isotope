@@ -4,6 +4,7 @@
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "../game/GameStateObserver.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
+#include "../graphics/GameDeviceGeneration.hpp"
 
 #include <F4SE/F4SE.h>
 #include <spdlog/spdlog.h>
@@ -11,6 +12,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <mutex>
 
@@ -19,6 +21,7 @@ namespace {
 constexpr char pluginName[] = "Fallout4HDR";
 constexpr REL::Version pluginVersion{0, 1, 0, 0};
 std::once_flag startup;
+std::atomic<bool> graphicsInstallationAttempted{};
 
 [[nodiscard]] fo4hdr::RuntimeVersion PlainVersion(const REL::Version& version) noexcept
 {
@@ -72,6 +75,21 @@ void ReadStartupSettings()
         settings.display.uiPaperWhiteNits, settings.display.videoWhiteNits);
 }
 
+void InstallStartupGraphics() noexcept
+{
+    // A failed protected write can leave the callback reachable; never reject this
+    // resident module after attempting installation merely because diagnostics fail.
+    graphicsInstallationAttempted.store(true, std::memory_order_release);
+    const auto graphics = fo4hdr::InitializeGameDeviceGeneration();
+    try
+    {
+        spdlog::info("Graphics device observation installation: status={}",
+            static_cast<unsigned>(graphics));
+    }
+    catch (...)
+    {}
+}
+
 }  // namespace
 
 F4SE_PLUGIN_VERSION = []() constexpr {
@@ -115,12 +133,13 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
         std::call_once(startup, [] {
             ReadStartupSettings();
             spdlog::info("Fallout4HDR 0.1.0 loaded: runtime 1.10.163, F4SE 0.6.23");
+            InstallStartupGraphics();
         });
         fo4hdr::game::InitializeGameStateObserver(f4se);
         return true;
     }
     catch (...)
     {
-        return false;
+        return graphicsInstallationAttempted.load(std::memory_order_acquire);
     }
 }

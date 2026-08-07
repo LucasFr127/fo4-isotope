@@ -87,7 +87,10 @@ target("Fallout4HDR")
     add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
-        "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp")
+        "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp",
+        "src/graphics/GameDeviceGeneration.cpp", "src/graphics/DeviceCreationHook.cpp",
+        "src/graphics/SwapChainObservation.cpp", "src/graphics/RendererLifetime.cpp",
+        "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp")
     add_syslinks("version")
 target_end()
 
