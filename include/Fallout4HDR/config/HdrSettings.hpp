@@ -8,6 +8,10 @@ namespace fo4hdr {
 
 inline constexpr double kDefaultUiPaperWhiteNits{203.0};
 inline constexpr double kDefaultVideoWhiteNits{203.0};
+inline constexpr double kMinimumSceneExposureEv{-4.0};
+inline constexpr double kMaximumSceneExposureEv{4.0};
+inline constexpr double kMinimumBloomStrengthPercent{0.0};
+inline constexpr double kMaximumBloomStrengthPercent{200.0};
 inline constexpr double kMinimumImageAdjustment{-100.0};
 inline constexpr double kMaximumImageAdjustment{100.0};
 inline constexpr double kMinimumSaturationPercent{0.0};
@@ -86,6 +90,8 @@ struct HdrSettings
     double saturationPercent{100.0};
     double temperature{};
     double tint{};
+    double exposureEv{};
+    double bloomStrengthPercent{100.0};
 };
 
 enum class HdrSettingsValidationError : std::uint8_t
@@ -101,7 +107,9 @@ enum class HdrSettingsValidationError : std::uint8_t
     shadowsOutOfRange,
     saturationOutOfRange,
     temperatureOutOfRange,
-    tintOutOfRange
+    tintOutOfRange,
+    exposureOutOfRange,
+    bloomStrengthOutOfRange
 };
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(
@@ -117,6 +125,8 @@ struct HdrSettingsMath
     // Row-major linear BT.709 transform; neutral temperature/tint is exact identity.
     std::array<double, 9> colorBalanceBt709{
         1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+    double sceneExposureMultiplier{1.0};
+    double bloomMultiplier{1.0};
 };
 
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(const HdrSettings& settings) noexcept;

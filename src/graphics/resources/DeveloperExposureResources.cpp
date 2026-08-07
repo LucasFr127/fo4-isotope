@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "DeveloperExposureResources.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <utility>
 
@@ -13,19 +15,31 @@ using Microsoft::WRL::ComPtr;
 struct ExposureSelector
 {
     UINT enabled{};
-    std::array<UINT, 3> reserved{};
+    float sceneExposure{1.0F};
+    float bloom{1.0F};
+    UINT reserved{};
 };
 static_assert(sizeof(ExposureSelector) == 16);
+static_assert(offsetof(ExposureSelector, sceneExposure) == 4);
+static_assert(offsetof(ExposureSelector, bloom) == 8);
 
-bool CreateSelector(ID3D11Device* device, UINT enabled, ID3D11Buffer** buffer) noexcept
+bool CreateSelector(ID3D11Device* device, const ExposureSelector& selector, ID3D11Buffer** buffer) noexcept
 {
-    const ExposureSelector selector{enabled};
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = sizeof(selector);
     description.Usage = D3D11_USAGE_IMMUTABLE;
     description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     const D3D11_SUBRESOURCE_DATA initial{&selector};
     return SUCCEEDED(device->CreateBuffer(&description, &initial, buffer));
+}
+
+bool ControlsValid(float sceneExposure, float bloom) noexcept
+{
+    const std::array<std::array<float, 3>, 2> ranges{{
+        {sceneExposure, 0.0625F, 16.0F}, {bloom, 0.0F, 2.0F}}};
+    return std::all_of(ranges.begin(), ranges.end(), [](const auto& range) {
+        return std::isfinite(range[0]) && range[0] >= range[1] && range[0] <= range[2];
+    });
 }
 
 bool CaptureFormatSupported(ID3D11Device* device) noexcept
@@ -228,7 +242,6 @@ struct CaptureBundle
     ComPtr<ID3D11ShaderResourceView> source;
     ComPtr<ID3D11UnorderedAccessView> target;
     ComPtr<ID3D11ComputeShader> shader;
-    ComPtr<ID3D11Buffer> enabled;
 };
 
 bool CreateCaptureBundle(ID3D11Device* device, std::span<const std::byte> bytecode,
@@ -241,7 +254,7 @@ bool CreateCaptureBundle(ID3D11Device* device, std::span<const std::byte> byteco
         return false;
     if (FAILED(device->CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &bundle.shader)))
         return false;
-    return CreateSelector(device, 1, &bundle.enabled);
+    return true;
 }
 
 bool CapturePreparationSupported(ID3D11Device* device, std::span<const std::byte> bytecode) noexcept
@@ -272,11 +285,10 @@ bool CaptureComputeIdle(ID3D11DeviceContext1* context, ExposureInputs& inputs) n
 }  // namespace
 
 bool DeveloperExposureResources::Prepare(ID3D11Device* device,
-    std::span<const std::byte> captureBytecode) noexcept
+    std::span<const std::byte> captureBytecode, float sceneExposure, float bloom) noexcept
 {
     Reset();
-    if (device == nullptr) return false;
-    if (!CreateSelector(device, 0, &selectors_[0])) return false;
+    if (!SetControls(device, sceneExposure, bloom)) return false;
     if (!CapturePreparationSupported(device, captureBytecode)) return true;
     CaptureBundle bundle;
     if (!CreateCaptureBundle(device, captureBytecode, bundle)) return true;
@@ -285,7 +297,21 @@ bool DeveloperExposureResources::Prepare(ID3D11Device* device,
     source_ = std::move(bundle.source);
     target_ = std::move(bundle.target);
     shader_ = std::move(bundle.shader);
-    selectors_[1] = std::move(bundle.enabled);
+    return true;
+}
+
+bool DeveloperExposureResources::SetControls(ID3D11Device* device, float sceneExposure, float bloom) noexcept
+{
+    if (device == nullptr) return false;
+    if (device_ && device_.Get() != device) return false;
+    if (!ControlsValid(sceneExposure, bloom)) return false;
+    std::array<ComPtr<ID3D11Buffer>, 2> prepared;
+    for (UINT enabled = 0; enabled < prepared.size(); ++enabled)
+    {
+        const ExposureSelector values{enabled, sceneExposure, bloom};
+        if (!CreateSelector(device, values, &prepared[enabled])) return false;
+    }
+    selectors_ = std::move(prepared);
     return true;
 }
 

@@ -284,7 +284,7 @@ std::array<Float4, 6> ToneConstants()
         {0.5f, 0.75f, 1.25f, 0.25f}, {1, 0.5f, 0.5f, 1}, {0.125f, 0.25f, 0.5f, 0.25f}}};
 }
 
-Float4 ToneExpected(std::size_t variant, std::size_t index)
+Float4 ToneExpected(std::size_t variant, std::size_t index, const HdrSettingsMath& controls = {})
 {
     const auto scene = SceneInputs()[index];
     if (index == 2 || index == 6) return {scene.red, scene.green, scene.blue, 1};
@@ -295,8 +295,9 @@ Float4 ToneExpected(std::size_t variant, std::size_t index)
     const auto bloom = BloomInputs()[bloomRow * width + bloomColumn];
     const auto measured = ExposureInputs()[index].red;
     const auto exposure = std::clamp(1.25 / (0.00100000005 + measured), 0.25, 4.0);
-    const std::array color{(scene.red + bloom.red) * exposure,
-        (scene.green + bloom.green) * exposure, (scene.blue + bloom.blue) * exposure};
+    const std::array color{(scene.red + bloom.red * controls.bloomMultiplier) * exposure,
+        (scene.green + bloom.green * controls.bloomMultiplier) * exposure,
+        (scene.blue + bloom.blue * controls.bloomMultiplier) * exposure};
     const auto luminance = color[0] * 0.212500006 + color[1] * 0.715399981 + color[2] * 0.0720999986;
     const std::array shape{0.5, 0.75, 1.25};
     const std::array affine{0.125, 0.25, 0.5};
@@ -307,7 +308,7 @@ Float4 ToneExpected(std::size_t variant, std::size_t index)
         filtered += 0.25 * (luminance * shape[channel] - filtered);
         filtered = 0.5 * (1.5 * filtered - measured) + measured;
         if (variant == 1 || variant == 3) filtered += 0.25 * (affine[channel] - filtered);
-        result[channel] = static_cast<float>(filtered);
+        result[channel] = static_cast<float>(filtered * controls.sceneExposureMultiplier);
     }
     return {result[0], result[1], result[2], 1};
 }
@@ -325,7 +326,36 @@ void CheckBoundInputs(PixelFixture& fixture, UINT slot, ID3D11Buffer* constants)
     FO4HDR_CHECK(buffer.Get() == constants);
 }
 
-void VerifyTone(PixelFixture& fixture, std::size_t variant)
+ComPtr<ID3D11Buffer> BindToneControlWindow(PixelFixture& fixture)
+{
+    std::array<Float4, 32> values{};
+    values[16] = {9, 8, 7, 6};
+    auto buffer = ConstantBuffer(fixture.gpu.device.Get(), values);
+    ComPtr<ID3D11DeviceContext1> context;
+    CheckHresult(fixture.gpu.context.As(&context), "Tone controls Context1");
+    auto* bound = buffer.Get();
+    const UINT first = 16;
+    const UINT count = 16;
+    context->PSSetConstantBuffers1(13, 1, &bound, &first, &count);
+    return buffer;
+}
+
+void CheckToneControlWindow(PixelFixture& fixture, ID3D11Buffer* expected)
+{
+    ComPtr<ID3D11DeviceContext1> context;
+    CheckHresult(fixture.gpu.context.As(&context), "Tone controls Context1");
+    ComPtr<ID3D11Buffer> buffer;
+    UINT first{};
+    UINT count{};
+    context->PSGetConstantBuffers(13, 1, &buffer);
+    context->PSGetConstantBuffers1(13, 1, nullptr, &first, &count);
+    FO4HDR_CHECK(buffer.Get() == expected);
+    FO4HDR_CHECK(first == 16);
+    FO4HDR_CHECK(count == 16);
+}
+
+void VerifyTone(PixelFixture& fixture, std::size_t variant,
+    const HdrSettingsMath& controls = {}, ID3D11Buffer* borrowed = nullptr)
 {
     const auto dynamic = variant == 0;
     fixture.Bind(dynamic);
@@ -353,9 +383,29 @@ void VerifyTone(PixelFixture& fixture, std::size_t variant)
     FO4HDR_CHECK(draw.count == 1);
     fixture.CheckRestored(dynamic);
     CheckBoundInputs(fixture, descriptor.sceneInputSlot, constants.Get());
+    if (borrowed) CheckToneControlWindow(fixture, borrowed);
     const auto output = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
-    for (std::size_t index = 0; index < output.size(); ++index) CheckPixel(output[index], ToneExpected(variant, index));
+    for (std::size_t index = 0; index < output.size(); ++index)
+        CheckPixel(output[index], ToneExpected(variant, index, controls));
     FO4HDR_CHECK(output[0].red > 1.0f);
+}
+
+void VerifyToneControls(const std::filesystem::path& directory)
+{
+    HdrSettings settings;
+    settings.exposureEv = 1;
+    settings.bloomStrengthPercent = 50;
+    const auto controls = DeriveHdrSettingsMath(settings);
+    PixelFixture fixture(directory, width, height, {}, nullptr, {1, controls});
+    const auto borrowed = BindToneControlWindow(fixture);
+    for (std::size_t variant = 0; variant < 4; ++variant)
+        VerifyTone(fixture, variant, controls, borrowed.Get());
+    ScenePassConfiguration invalid{width, height};
+    invalid.sceneGrade.imageControls = controls;
+    invalid.sceneGrade.imageControls.sceneExposureMultiplier = 0;
+    FO4HDR_CHECK(!invalid.sceneGrade.Valid());
+    ScenePassRenderer rejected;
+    FO4HDR_CHECK(!rejected.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), invalid));
 }
 
 std::size_t LutIndex(UINT x, UINT y, UINT z)
@@ -1000,6 +1050,7 @@ void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
     detail::PixelFixture fixture{fixtureDirectory};
     detail::VerifyFactory(fixture);
     for (std::size_t variant = 0; variant < 4; ++variant) detail::VerifyTone(fixture, variant);
+    detail::VerifyToneControls(fixtureDirectory);
     detail::VerifyLut(fixture);
     detail::VerifyForwarding(fixture);
     detail::VerifyFxaaUniform(fixture);

@@ -278,10 +278,12 @@ private:
         const auto& active = active_.display;
         const std::array requestedImage{requested.vanillaColorGradingStrengthPercent,
             requested.contrast, requested.blacks, requested.highlights, requested.shadows,
-            requested.saturationPercent, requested.temperature, requested.tint};
+            requested.saturationPercent, requested.temperature, requested.tint,
+            requested.exposureEv, requested.bloomStrengthPercent};
         const std::array activeImage{active.vanillaColorGradingStrengthPercent,
             active.contrast, active.blacks, active.highlights, active.shadows,
-            active.saturationPercent, active.temperature, active.tint};
+            active.saturationPercent, active.temperature, active.tint,
+            active.exposureEv, active.bloomStrengthPercent};
         return requestedImage == activeImage;
     }
 

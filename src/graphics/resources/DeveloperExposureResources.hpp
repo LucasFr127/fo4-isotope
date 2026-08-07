@@ -19,7 +19,10 @@ public:
     // capture failure retains that selector; Ready reports the complete bundle,
     // restricted to FL11_0 with checked constant-buffer offsetting support.
     [[nodiscard]] bool Prepare(ID3D11Device* device,
-        std::span<const std::byte> captureBytecode) noexcept;
+        std::span<const std::byte> captureBytecode,
+        float sceneExposure = 1.0F, float bloom = 1.0F) noexcept;
+    // Cold, closed-frame update: publish both selector variants together or keep both.
+    [[nodiscard]] bool SetControls(ID3D11Device* device, float sceneExposure, float bloom) noexcept;
     // Full retirement only. Policy invalidation must retain the disabled selector.
     void Reset() noexcept;
     [[nodiscard]] bool Ready() const noexcept;

@@ -37,7 +37,9 @@ Texture2D<float2> Fo4HdrExposureSnapshot : register(t17);
 cbuffer Fo4HdrDeveloperExposureSelector : register(b13)
 {
     uint Fo4HdrExposureLockEnabled;
-    uint3 Fo4HdrExposureLockReserved;
+    float Fo4HdrSceneExposureMultiplier;
+    float Fo4HdrBloomStrength;
+    uint Fo4HdrExposureLockReserved;
 }
 
 cbuffer Fallout4ImageSpaceConstants : register(b2)
@@ -96,8 +98,9 @@ void main(
     }
 
     // Keep linear scene-relative values above one; white remains 203 nits.
-    const float3 exposedScene = (scene + bloom) * exposure;
-    float3 targetColor = Fo4HdrApplySceneFilter(exposedScene, measuredExposure);
+    const float3 exposedScene = (scene + bloom * Fo4HdrBloomStrength) * exposure;
+    float3 targetColor = Fo4HdrApplySceneFilter(exposedScene, measuredExposure) *
+        Fo4HdrSceneExposureMultiplier;
     // A common scale contains finite affine results to FP16 without hue clipping.
     const float maxTargetChannel = max(abs(targetColor.r),
         max(abs(targetColor.g), abs(targetColor.b)));

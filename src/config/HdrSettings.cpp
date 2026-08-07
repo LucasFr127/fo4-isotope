@@ -152,6 +152,10 @@ HdrSettingsValidationError ValidateImageSettings(const HdrSettings& settings) no
             HdrSettingsValidationError::temperatureOutOfRange},
         {&HdrSettings::tint, kMinimumImageAdjustment, kMaximumImageAdjustment,
             HdrSettingsValidationError::tintOutOfRange},
+        {&HdrSettings::exposureEv, kMinimumSceneExposureEv, kMaximumSceneExposureEv,
+            HdrSettingsValidationError::exposureOutOfRange},
+        {&HdrSettings::bloomStrengthPercent, kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent,
+            HdrSettingsValidationError::bloomStrengthOutOfRange},
     };
     for (const auto& rule : rules)
         if (!InRange(settings.*rule.member, rule.minimum, rule.maximum)) return rule.error;
@@ -222,6 +226,8 @@ HdrSettingsMath DeriveHdrSettingsMath(const HdrSettings& settings) noexcept
     result.shadowsEv = settings.shadows / 100.0 * 2.0;
     result.saturationScale = settings.saturationPercent / 100.0;
     result.colorBalanceBt709 = BuildColorBalanceMatrix(settings.temperature, settings.tint);
+    result.sceneExposureMultiplier = std::exp2(settings.exposureEv);
+    result.bloomMultiplier = settings.bloomStrengthPercent / 100.0;
     return result;
 }
 

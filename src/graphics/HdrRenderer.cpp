@@ -376,7 +376,7 @@ bool PrepareOperator(ID3D11Device* device, const ScenePassConfiguration& configu
 
 bool PrepareReplacementResources(ID3D11Device* device,
     std::array<ComPtr<ID3D11PixelShader>, ScenePassRenderer::replacementProgramCount>& prepared,
-    DeveloperExposureResources& exposure) noexcept
+    DeveloperExposureResources& exposure, const HdrSettingsMath& controls) noexcept
 {
     for (std::size_t index = 0; index < programs.size(); ++index)
     {
@@ -385,7 +385,8 @@ bool PrepareReplacementResources(ID3D11Device* device,
             program.data, program.size, nullptr, &prepared[index]);
         if (FAILED(result) || !prepared[index]) return false;
     }
-    return exposure.Prepare(device, std::as_bytes(std::span{kDeveloperExposureCaptureBytecode}));
+    return exposure.Prepare(device, std::as_bytes(std::span{kDeveloperExposureCaptureBytecode}),
+        static_cast<float>(controls.sceneExposureMultiplier), static_cast<float>(controls.bloomMultiplier));
 }
 
 bool PrepareDrawResources(ID3D11Device* device, const ScenePassConfiguration& configuration,
@@ -609,7 +610,8 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
 
     std::array<ComPtr<ID3D11PixelShader>, replacementProgramCount> prepared;
     DeveloperExposureResources preparedExposure;
-    if (!PrepareReplacementResources(device, prepared, preparedExposure)) return false;
+    if (!PrepareReplacementResources(device, prepared, preparedExposure,
+            configuration.sceneGrade.imageControls)) return false;
     if (!lifetime_.Prepare(2, 4)) return false;
     ownerThread_ = std::this_thread::get_id();
     device_ = device;
@@ -630,11 +632,6 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     return true;
 }
 
-bool ScenePassRenderer::OnOwnerThread() const noexcept
-{
-    return ownerThread_ == std::this_thread::get_id();
-}
-
 bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
     LayerWhiteConfiguration whites, SceneGradeConfiguration sceneGrade) noexcept
 {
@@ -647,6 +644,9 @@ bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
     PreparedOperator preparedOperator;
     if (!PrepareDrawResources(device_.Get(), configuration, preparedVideoConstants, preparedOperator))
         return false;
+    if (!exposureResources_.SetControls(device_.Get(),
+            static_cast<float>(sceneGrade.imageControls.sceneExposureMultiplier),
+            static_cast<float>(sceneGrade.imageControls.bloomMultiplier))) return false;
     videoConstants_ = std::move(preparedVideoConstants);
     operatorTexture_ = std::move(preparedOperator.texture);
     operatorSource_ = std::move(preparedOperator.source);
@@ -668,22 +668,11 @@ void ScenePassRenderer::MarkSettingsStale() noexcept
     }
 }
 
-bool ScenePassRenderer::Active() const noexcept
-{
-    return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
-}
-
 bool ScenePassRenderer::MatchesContext(ID3D11Device* device,
     ID3D11DeviceContext* immediateContext) const noexcept
 {
     if (!Active() || invoking_) return false;
     return SameIdentity(device, device_.Get()) && SameIdentity(immediateContext, context_.Get());
-}
-
-bool ScenePassRenderer::MatchesLayerWhites(LayerWhiteConfiguration whites) const noexcept
-{
-    if (!Active() || invoking_) return false;
-    return whites.uiWhiteNits == whites_.uiWhiteNits && whites.videoWhiteNits == whites_.videoWhiteNits;
 }
 
 bool ScenePassRenderer::Retire() noexcept

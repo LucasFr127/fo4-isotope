@@ -68,6 +68,8 @@ bool DrawImage(HdrSettings& settings) noexcept
     ImGui::SeparatorText("Image adjustments");
     ImGui::PushID("image-controls");
     const std::array controls{
+        ImageControl{"Exposure", &HdrSettings::exposureEv,
+            {kMinimumSceneExposureEv, kMaximumSceneExposureEv, "%+.2f EV"}},
         ImageControl{"Contrast", &HdrSettings::contrast,
             {kMinimumImageAdjustment, kMaximumImageAdjustment, "%.0f"}},
         ImageControl{"Blacks", &HdrSettings::blacks,
@@ -91,9 +93,12 @@ bool DrawImage(HdrSettings& settings) noexcept
 
 bool DrawGrade(HdrSettings& settings) noexcept
 {
-    ImGui::SeparatorText("Vanilla color grading");
-    return DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
+    ImGui::SeparatorText("Scene effects");
+    bool changed = DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
+    changed |= DrawNumber("Bloom strength", settings.bloomStrengthPercent,
+        {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent, "%.0f%%"});
+    return changed;
 }
 
 bool DrawControls(ToneMapperParameters& parameters, std::span<const OperatorControl> controls) noexcept

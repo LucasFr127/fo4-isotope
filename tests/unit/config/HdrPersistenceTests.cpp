@@ -92,6 +92,8 @@ void CheckParser()
     requested.algorithm = OperatorLutAlgorithm::gt7;
     requested.display = {1500.0, 100.0, 300.0};
     requested.display.vanillaColorGradingStrengthPercent = 50.0;
+    requested.display.exposureEv = 1;
+    requested.display.bloomStrengthPercent = 50;
     requested.display.contrast = 25;
     requested.display.blacks = -20;
     requested.display.highlights = 30;
@@ -127,6 +129,8 @@ void CheckRoundTrip()
     requested.algorithm = OperatorLutAlgorithm::gt7;
     requested.display = {1500.0, 100.0, 300.0};
     requested.display.vanillaColorGradingStrengthPercent = 50.0;
+    requested.display.exposureEv = 1;
+    requested.display.bloomStrengthPercent = 50;
     requested.display.contrast = 25;
     requested.display.blacks = -20;
     requested.display.highlights = 30;

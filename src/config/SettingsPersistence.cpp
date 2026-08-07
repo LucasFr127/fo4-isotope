@@ -18,15 +18,17 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 19> kKeys{
+constexpr std::array<std::string_view, 21> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
     "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
-    "Contrast", "Blacks", "Highlights", "Shadows", "Saturation", "Temperature", "Tint"};
-constexpr std::array<std::string_view, 19> kSections{
+    "Contrast", "Blacks", "Highlights", "Shadows", "Saturation", "Temperature", "Tint",
+    "Exposure", "BloomStrength"};
+constexpr std::array<std::string_view, 21> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
     "GT7", "GT7", "GT7", "Effects",
-    "Image", "Image", "Image", "Image", "Image", "Image", "Image"};
+    "Image", "Image", "Image", "Image", "Image", "Image", "Image",
+    "Image", "Effects"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -44,7 +46,7 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 19> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 21> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
     return {FormatNumber(value.display.displayPeakNits),
@@ -57,7 +59,8 @@ std::array<std::string, 19> OwnedValues(const PluginConfiguration& value)
         FormatNumber(value.display.contrast), FormatNumber(value.display.blacks),
         FormatNumber(value.display.highlights), FormatNumber(value.display.shadows),
         FormatNumber(value.display.saturationPercent), FormatNumber(value.display.temperature),
-        FormatNumber(value.display.tint)};
+        FormatNumber(value.display.tint), FormatNumber(value.display.exposureEv),
+        FormatNumber(value.display.bloomStrengthPercent)};
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -87,12 +90,12 @@ public:
         }
         newline_ = original.find("\r\n") == std::string_view::npos ? "\n" : "\r\n";
         while (!original.empty()) AppendLine(original);
-        AppendMissing("Output", 0, 3);
-        AppendMissing("ToneMapper", 3, 4);
-        AppendMissing("AgX", 4, 8);
-        AppendMissing("GT7", 8, 11);
-        AppendMissing("Effects", 11, 12);
-        AppendMissing("Image", 12, 19);
+        AppendMissing("Output");
+        AppendMissing("ToneMapper");
+        AppendMissing("AgX");
+        AppendMissing("GT7");
+        AppendMissing("Effects");
+        AppendMissing("Image");
         return std::move(result_);
     }
 
@@ -136,19 +139,26 @@ private:
         original.remove_prefix(newline + 1);
     }
 
-    void AppendMissing(std::string_view section, std::size_t begin, std::size_t end)
+    bool IsMissing(std::string_view section, std::size_t index) const noexcept
     {
-        const auto missing = std::ranges::find(seen_.begin() + begin, seen_.begin() + end, false);
-        if (missing == seen_.begin() + end) return;
+        return kSections[index] == section && !seen_[index];
+    }
+
+    void AppendMissing(std::string_view section)
+    {
+        bool missing{};
+        for (std::size_t index = 0; index < kKeys.size(); ++index)
+            missing |= IsMissing(section, index);
+        if (!missing) return;
         if (!result_.empty() && result_.back() != '\n') result_.append(newline_);
         result_.append("[").append(section).append("]").append(newline_);
-        for (auto index = begin; index < end; ++index)
-            if (!seen_[index])
+        for (std::size_t index = 0; index < kKeys.size(); ++index)
+            if (IsMissing(section, index))
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 19> values_;
-    std::array<bool, 19> seen_{};
+    std::array<std::string, 21> values_;
+    std::array<bool, 21> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

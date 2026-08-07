@@ -50,12 +50,14 @@ struct SceneGradeConfiguration
 private:
     [[nodiscard]] bool ImageScalarsValid() const noexcept
     {
-        const std::array<std::array<double, 3>, 5> ranges{{
+        const std::array<std::array<double, 3>, 7> ranges{{
             {imageControls.contrastSlope, 0.5, 2.0},
             {imageControls.blacksStrength, -0.75, 0.75},
             {imageControls.highlightsEv, -2.0, 2.0},
             {imageControls.shadowsEv, -2.0, 2.0},
-            {imageControls.saturationScale, 0.0, 2.0}}};
+            {imageControls.saturationScale, 0.0, 2.0},
+            {imageControls.sceneExposureMultiplier, 0.0625, 16.0},
+            {imageControls.bloomMultiplier, 0.0, 2.0}}};
         return std::all_of(ranges.begin(), ranges.end(), [](const auto& range) {
             return std::isfinite(range[0]) && range[0] >= range[1] && range[0] <= range[2];
         });
@@ -142,10 +144,17 @@ public:
     [[nodiscard]] bool Initialize(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept;
     [[nodiscard]] bool Retire() noexcept;
-    [[nodiscard]] bool Active() const noexcept;
+    [[nodiscard]] bool Active() const noexcept
+    {
+        return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
+    }
     [[nodiscard]] bool MatchesContext(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext) const noexcept;
-    [[nodiscard]] bool MatchesLayerWhites(LayerWhiteConfiguration whites) const noexcept;
+    [[nodiscard]] bool MatchesLayerWhites(LayerWhiteConfiguration whites) const noexcept
+    {
+        if (!Active() || invoking_) return false;
+        return whites.uiWhiteNits == whites_.uiWhiteNits && whites.videoWhiteNits == whites_.videoWhiteNits;
+    }
 
     HRESULT CreateObservedPixelShader(std::span<const std::byte> bytecode,
         ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept;
@@ -235,7 +244,10 @@ private:
         bool exposureFailed{};
     };
 
-    [[nodiscard]] bool OnOwnerThread() const noexcept;
+    [[nodiscard]] bool OnOwnerThread() const noexcept
+    {
+        return ownerThread_ == std::this_thread::get_id();
+    }
     [[nodiscard]] bool CanInvoke(FiniteDrawInvocation invocation) const noexcept;
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
