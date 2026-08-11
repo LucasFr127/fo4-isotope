@@ -2,7 +2,7 @@
 
 #include "GameDeviceGeneration.hpp"
 #include "DeviceCreationHook.hpp"
-#include "hooks/ContextHooks.hpp"
+#include "hooks/DeviceHooks.hpp"
 
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
 #include "Fallout4HDR/hooks/PeIat.hpp"
@@ -41,7 +41,7 @@ struct RetainedBinding
     IDXGISwapChain* chain{};
     DWORD thread{};
     std::uint64_t lastGeneration{};
-    ContextQueryPreparation queryPreparation{ContextQueryPreparation::invalidContext};
+    NativeRoutingStatus routing{NativeRoutingStatus::unqualified};
 
     void ReleaseOwned() noexcept
     {
@@ -64,7 +64,6 @@ struct RetainedBinding
 // Raw owned references deliberately have no shutdown destructor. Ambiguous callback
 // ownership revokes publication but retains at most this one binding until process exit.
 RetainedBinding binding;
-ContextQueryObserver queryObserver;
 PointerHookOwnership importOwner;
 std::atomic_flag initialization = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> publication{};
@@ -134,11 +133,20 @@ bool RevokeForReplacement(DWORD thread) noexcept
     return publication.compare_exchange_strong(observed, 0, std::memory_order_acq_rel);
 }
 
+bool PrepareNativeRouting(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
+{
+    binding.routing = NativeRoutingInstaller::Install(created, generation, expectedExport);
+    if (binding.routing == NativeRoutingStatus::installed) return true;
+    if (NativeRoutingInstaller::Retire()) return true;
+    DisableBinding();
+    return false;
+}
+
 bool ObserveDevice(const CreatedDeviceBinding& created) noexcept
 {
     const auto thread = GetCurrentThreadId();
     if (!RevokeForReplacement(thread)) return false;
-    if (!queryObserver.Retire())
+    if (!NativeRoutingInstaller::Retire())
     {
         DisableBinding();
         return false;
@@ -153,14 +161,13 @@ bool ObserveDevice(const CreatedDeviceBinding& created) noexcept
         return false;
     }
     const auto generation = ++binding.lastGeneration;
-    binding.queryPreparation = queryObserver.Prepare(candidate.context.Get(), generation);
-    if (binding.queryPreparation == ContextQueryPreparation::invalidContext) return true;
-    // This token publishes device identity only; unobserved query coverage stays passive.
+    if (!PrepareNativeRouting(created, generation)) return false;
+    // Identity remains publishable when native slot qualification refuses routing.
     binding.Retain(candidate);
     std::uint64_t expected{};
     if (!publication.compare_exchange_strong(expected, generation, std::memory_order_release))
     {
-        if (!queryObserver.Retire())
+        if (!NativeRoutingInstaller::Retire())
         {
             DisableBinding();
             return false;

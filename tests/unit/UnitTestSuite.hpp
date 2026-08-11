@@ -13,6 +13,7 @@ void RunHdrOperatorWorkerTests();
 void RunGt7Tests();
 void RunPipelineContractTests();
 void RunHookTests();
+void RunNativeImageSlotsTests();
 void RunDeviceCreationHookTests();
 void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
 void RunHdrSettingsMathTests();

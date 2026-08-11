@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ContextHooks.hpp"
+#include "HookRecords.hpp"
 #include "../HdrRenderer.hpp"
 
 #include <d3d11_1.h>
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <type_traits>
 
 namespace fo4hdr {
 namespace {
@@ -108,6 +110,21 @@ bool QualifiedContext(ID3D11DeviceContext* context) noexcept
 }
 
 }  // namespace
+
+bool ContextQueryObserver::CompleteFreshCoverage(ID3D11DeviceContext* context,
+    std::uint64_t generation) noexcept
+{
+    if (context != context_ || generation != generation_) return false;
+    if (ownerThread_ != std::this_thread::get_id()) return false;
+    if (lostCoverage_.load(std::memory_order_acquire)) return false;
+    if (observing_.test(std::memory_order_acquire)) return false;
+    if (queries_.executionDepth != 0) return false;
+    if (!std::all_of(queries_.active.begin(), queries_.active.end(),
+            [](const void* key) { return key == nullptr; })) return false;
+    // Only the installer can reach this after its complete pre-escape transaction.
+    queries_.unknown = false;
+    return queries_.CanDispatch();
+}
 
 ContextQueryPreparation ContextQueryObserver::Prepare(ID3D11DeviceContext* context,
     std::uint64_t generation, ContextQueryPredecessors next, ScenePassRenderer* renderer) noexcept
@@ -222,5 +239,213 @@ void ContextQueryObserver::ExecuteCommandList(ID3D11DeviceContext* context,
     if (!completed) lostCoverage_.store(true, std::memory_order_release);
     if (observing) FinishCommandList(entered, completed, restoreState);
 }
+
+namespace {
+
+bool EnterRouting(ContextHookRecord& context) noexcept
+{
+    if (GetCurrentThreadId() != context.thread) { RevokeNativeRouting(); return false; }
+    if (context.internalWork) return false;
+    if (context.busy.test_and_set(std::memory_order_acquire)) { RevokeNativeRouting(); return false; }
+    if (NativeRoutingOwned()) return true;
+    RevokeNativeRouting();
+    context.busy.clear(std::memory_order_release);
+    return false;
+}
+
+}  // namespace
+
+NativeRoutingScope::NativeRoutingScope(IUnknown* object) noexcept
+{
+    auto* context = g_contextHooks.load(std::memory_order_acquire);
+    const auto* device = g_deviceHooks.load(std::memory_order_acquire);
+    if (context == nullptr || device == nullptr) return;
+    if (object != context->owned && object != device->owned) return;
+    if (!context->admitted.load(std::memory_order_acquire)) return;
+    if (!EnterRouting(*context)) return;
+    record_ = context;
+}
+
+NativeRoutingScope::~NativeRoutingScope() noexcept
+{
+    if (record_ != nullptr) record_->busy.clear(std::memory_order_release);
+}
+
+namespace {
+
+class InternalRoutingWork
+{
+public:
+    explicit InternalRoutingWork(ContextHookRecord& record) noexcept : record_(record)
+    {
+        record_.internalWork = true;
+    }
+    ~InternalRoutingWork() noexcept { record_.internalWork = false; }
+    InternalRoutingWork(const InternalRoutingWork&) = delete;
+    InternalRoutingWork& operator=(const InternalRoutingWork&) = delete;
+
+private:
+    ContextHookRecord& record_;
+};
+
+class NativeCallbackWork
+{
+public:
+    explicit NativeCallbackWork(ContextHookRecord* record) noexcept : record_(record)
+    {
+        if (record_ == nullptr) return;
+        previous_ = record_->internalWork;
+        record_->internalWork = false;
+    }
+    ~NativeCallbackWork() noexcept
+    {
+        if (record_ != nullptr) record_->internalWork = previous_;
+    }
+    NativeCallbackWork(const NativeCallbackWork&) = delete;
+    NativeCallbackWork& operator=(const NativeCallbackWork&) = delete;
+
+private:
+    ContextHookRecord* record_{};
+    bool previous_{};
+};
+
+template <class Call, class... Arguments>
+void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... arguments) noexcept
+{
+    if (CallCaptured(next, context, arguments...)) return;
+    const auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record != nullptr && context == record->owned) RevokeNativeRouting();
+}
+
+void ObserveFiniteDraw(ContextHookRecord* record, FiniteDrawInvocation invocation) noexcept
+{
+    if (record == nullptr) return;
+    if (!record->queries.CanDispatch()) return;
+    const InternalRoutingWork internal{*record};
+    // Invalid scene handles preserve the native draw until actual storage is admitted.
+    const auto result = record->renderer.ExecuteObserved({}, {}, invocation);
+    if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
+}
+
+template <class Call>
+void InvokeFiniteDraw(Call& draw, bool admitted) noexcept
+{
+    try { draw(); }
+    catch (...) { if (admitted) RevokeNativeRouting(); }
+}
+
+template <auto Next, class... Arguments>
+void ForwardFiniteDraw(ID3D11DeviceContext* context, Arguments... arguments) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const auto next = record->*Next;
+    NativeRoutingScope scope{context};
+    bool invoked{};
+    auto draw = [&]() {
+        const NativeCallbackWork native{scope.Record()};
+        invoked = true;
+        next(context, arguments...);
+    };
+    const FiniteDrawInvocation invocation{
+        [](ID3D11DeviceContext*, void* payload) { (*static_cast<decltype(draw)*>(payload))(); }, &draw};
+    ObserveFiniteDraw(scope.Record(), invocation);
+    if (!invoked) InvokeFiniteDraw(draw, scope.Record() != nullptr);
+}
+
+}  // namespace
+
+void STDMETHODCALLTYPE HookBegin(ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    if (auto* admitted = scope.Record()) admitted->queries.Begin(context, asynchronous);
+    else ForwardContext(record->nextBegin, context, asynchronous);
+}
+
+void STDMETHODCALLTYPE HookEnd(ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    if (auto* admitted = scope.Record()) admitted->queries.End(context, asynchronous);
+    else ForwardContext(record->nextEnd, context, asynchronous);
+}
+
+void STDMETHODCALLTYPE HookExecuteCommandList(ID3D11DeviceContext* context,
+    ID3D11CommandList* commands, BOOL restoreState) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    if (auto* admitted = scope.Record()) admitted->queries.ExecuteCommandList(context, commands, restoreState);
+    else ForwardContext(record->nextExecuteCommandList, context, commands, restoreState);
+}
+
+void STDMETHODCALLTYPE HookPsSetShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
+    ID3D11ClassInstance* const* classes, UINT classCount) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    // The draw consumer rechecks the actual shader and class tuple; retain no duplicate cache.
+    ForwardContext(record->nextPsSetShader, context, shader, classes, classCount);
+}
+
+void STDMETHODCALLTYPE HookOmSetRenderTargets(ID3D11DeviceContext* context, UINT count,
+    ID3D11RenderTargetView* const* targets, ID3D11DepthStencilView* depth) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    ForwardContext(record->nextOmSetRenderTargets, context, count, targets, depth);
+}
+
+void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* context, UINT count,
+    ID3D11RenderTargetView* const* targets, ID3D11DepthStencilView* depth, UINT firstUav, UINT uavCount,
+    ID3D11UnorderedAccessView* const* uavs, const UINT* initialCounts) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return;
+    const NativeRoutingScope scope{context};
+    ForwardContext(record->nextOmSetRenderTargetsAndUavs, context, count, targets, depth,
+        firstUav, uavCount, uavs, initialCounts);
+}
+
+void STDMETHODCALLTYPE HookDraw(ID3D11DeviceContext* context, UINT vertices, UINT start) noexcept
+{
+    ForwardFiniteDraw<&ContextHookRecord::nextDraw>(context, vertices, start);
+}
+
+void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext* context, UINT indices, UINT start,
+    INT baseVertex) noexcept
+{
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexed>(context, indices, start, baseVertex);
+}
+
+void STDMETHODCALLTYPE HookDrawInstanced(ID3D11DeviceContext* context, UINT vertices, UINT instances,
+    UINT start, UINT firstInstance) noexcept
+{
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawInstanced>(context, vertices, instances, start, firstInstance);
+}
+
+void STDMETHODCALLTYPE HookDrawIndexedInstanced(ID3D11DeviceContext* context, UINT indices,
+    UINT instances, UINT start, INT baseVertex, UINT firstInstance) noexcept
+{
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexedInstanced>(context, indices, instances,
+        start, baseVertex, firstInstance);
+}
+
+static_assert(std::is_convertible_v<decltype(&HookBegin), ContextQueryCall>);
+static_assert(std::is_convertible_v<decltype(&HookEnd), ContextQueryCall>);
+static_assert(std::is_convertible_v<decltype(&HookExecuteCommandList), ContextCommandListCall>);
+static_assert(std::is_convertible_v<decltype(&HookPsSetShader), PsSetShader>);
+static_assert(std::is_convertible_v<decltype(&HookOmSetRenderTargets), OmSetRenderTargets>);
+static_assert(std::is_convertible_v<decltype(&HookOmSetRenderTargetsAndUavs), OmSetRenderTargetsAndUavs>);
+static_assert(std::is_convertible_v<decltype(&HookDraw), Draw>);
+static_assert(std::is_convertible_v<decltype(&HookDrawIndexed), DrawIndexed>);
+static_assert(std::is_convertible_v<decltype(&HookDrawInstanced), DrawInstanced>);
+static_assert(std::is_convertible_v<decltype(&HookDrawIndexedInstanced), DrawIndexedInstanced>);
 
 }  // namespace fo4hdr

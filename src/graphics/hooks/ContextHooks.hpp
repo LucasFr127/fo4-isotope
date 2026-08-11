@@ -15,6 +15,7 @@
 namespace fo4hdr {
 
 class ScenePassRenderer;
+class NativeRoutingInstaller;
 
 using ContextQueryCall = void (STDMETHODCALLTYPE*)(
     ID3D11DeviceContext*, ID3D11Asynchronous*);
@@ -46,6 +47,7 @@ public:
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool CanDispatch() const noexcept;
     [[nodiscard]] const ContextQuerySafety& Queries() const noexcept { return queries_; }
+    void RevokeCoverage() noexcept { lostCoverage_.store(true, std::memory_order_release); }
 
     // Predecessors are immutable for the prepared generation. These adapters do
     // no vtable mutation; callers supply captured SDK calls, never virtual reentry.
@@ -55,6 +57,9 @@ public:
         ID3D11CommandList* commands, BOOL restoreState) noexcept;
 
 private:
+    friend class NativeRoutingInstaller;
+    [[nodiscard]] bool CompleteFreshCoverage(ID3D11DeviceContext* context,
+        std::uint64_t generation) noexcept;
     [[nodiscard]] bool Enter(ID3D11DeviceContext* context) noexcept;
     void ObserveBegin(ID3D11Asynchronous* asynchronous) noexcept;
     void ObserveEnd(ID3D11Asynchronous* asynchronous) noexcept;
@@ -69,5 +74,20 @@ private:
     std::atomic<bool> lostCoverage_{};
     std::atomic_flag observing_ = ATOMIC_FLAG_INIT;
 };
+
+void STDMETHODCALLTYPE HookBegin(ID3D11DeviceContext*, ID3D11Asynchronous*) noexcept;
+void STDMETHODCALLTYPE HookEnd(ID3D11DeviceContext*, ID3D11Asynchronous*) noexcept;
+void STDMETHODCALLTYPE HookExecuteCommandList(ID3D11DeviceContext*, ID3D11CommandList*, BOOL) noexcept;
+void STDMETHODCALLTYPE HookPsSetShader(ID3D11DeviceContext*, ID3D11PixelShader*,
+    ID3D11ClassInstance* const*, UINT) noexcept;
+void STDMETHODCALLTYPE HookOmSetRenderTargets(ID3D11DeviceContext*, UINT,
+    ID3D11RenderTargetView* const*, ID3D11DepthStencilView*) noexcept;
+void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext*, UINT,
+    ID3D11RenderTargetView* const*, ID3D11DepthStencilView*, UINT, UINT,
+    ID3D11UnorderedAccessView* const*, const UINT*) noexcept;
+void STDMETHODCALLTYPE HookDraw(ID3D11DeviceContext*, UINT, UINT) noexcept;
+void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext*, UINT, UINT, INT) noexcept;
+void STDMETHODCALLTYPE HookDrawInstanced(ID3D11DeviceContext*, UINT, UINT, UINT, UINT) noexcept;
+void STDMETHODCALLTYPE HookDrawIndexedInstanced(ID3D11DeviceContext*, UINT, UINT, UINT, INT, UINT) noexcept;
 
 }  // namespace fo4hdr

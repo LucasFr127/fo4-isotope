@@ -103,7 +103,8 @@ target("Fallout4HDR")
         "src/tonemap/aces2/Aces2ColorAppearance.cpp",
         "src/tonemap/aces2/Aces2Tables.cpp",
         "src/graphics/d3d11/ContextQuerySafety.cpp",
-        "src/graphics/hooks/ContextHooks.cpp")
+        "src/graphics/hooks/ContextHooks.cpp",
+        "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp")
     add_syslinks("version")
 target_end()
 
@@ -131,6 +132,8 @@ for _, fixture in ipairs({
             "tests/unit/tonemap/OperatorLutTests.cpp", "tests/unit/graphics/HdrOperatorWorkerTests.cpp",
             "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp",
             "tests/unit/hooks/HookTests.cpp",
+            "src/graphics/hooks/NativeImageSlots.cpp",
+            "tests/unit/hooks/NativeImageSlotsTests.cpp",
             "src/graphics/DeviceCreationHook.cpp",
             "src/graphics/SwapChainObservation.cpp",
             "src/graphics/RendererLifetime.cpp",
@@ -201,6 +204,8 @@ target("fo4hdr-shader-tests")
         "src/graphics/ScenePassRegistration.cpp",
         "src/graphics/d3d11/ContextQuerySafety.cpp",
         "src/graphics/hooks/ContextHooks.cpp", "tests/shader/NativeRoutingTests.cpp",
+        "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
+        "src/hooks/HookOwnership.cpp",
         "src/output/PerformanceStatistics.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
