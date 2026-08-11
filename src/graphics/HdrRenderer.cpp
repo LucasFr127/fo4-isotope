@@ -4,7 +4,6 @@
 #include "OperatorConstants.hpp"
 #include "RenoDxShaderIdentity.hpp"
 #include "d3d11/ScopedD3D11PixelBindings.hpp"
-#include "resources/HdrResourcePolicy.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
 #include <fo4hdr-shaders/ToneMapA.hpp>
@@ -61,16 +60,6 @@ std::size_t ProgramIndex(RenoDxShaderPass pass) noexcept
     return ScenePassRenderer::replacementProgramCount;
 }
 
-bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
-{
-    if (left == nullptr || right == nullptr) return false;
-    ComPtr<IUnknown> leftIdentity;
-    ComPtr<IUnknown> rightIdentity;
-    if (FAILED(left->QueryInterface(IID_PPV_ARGS(&leftIdentity)))) return false;
-    if (FAILED(right->QueryInterface(IID_PPV_ARGS(&rightIdentity)))) return false;
-    return leftIdentity && rightIdentity && leftIdentity.Get() == rightIdentity.Get();
-}
-
 bool TemporalPass(RenoDxShaderPass pass) noexcept
 {
     return pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2;
@@ -100,6 +89,13 @@ ComPtr<IUnknown> CanonicalIdentity(IUnknown* object) noexcept
     if (object == nullptr) return identity;
     if (FAILED(object->QueryInterface(IID_PPV_ARGS(&identity)))) identity.Reset();
     return identity;
+}
+
+bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
+{
+    const auto leftIdentity = CanonicalIdentity(left);
+    const auto rightIdentity = CanonicalIdentity(right);
+    return leftIdentity && leftIdentity.Get() == rightIdentity.Get();
 }
 
 ComPtr<ID3D11Resource> ViewResource(ID3D11View* view) noexcept
@@ -396,33 +392,12 @@ bool PrepareDrawResources(ID3D11Device* device, const ScenePassConfiguration& co
     return PrepareOperator(device, configuration, prepared);
 }
 
-HRESULT PrepareSceneViews(ID3D11Device* device, ID3D11Texture2D* texture,
-    ComPtr<ID3D11ShaderResourceView>& shaderResource,
-    ComPtr<ID3D11RenderTargetView>& renderTarget) noexcept
-{
-    auto result = device->CreateShaderResourceView(texture, nullptr, &shaderResource);
-    if (FAILED(result)) return result;
-    if (!shaderResource) return E_FAIL;
-    result = device->CreateRenderTargetView(texture, nullptr, &renderTarget);
-    if (FAILED(result)) return result;
-    return renderTarget ? S_OK : E_FAIL;
-}
-
 std::size_t CanonicalProgramIndex(const RenoDxShaderDescriptor* descriptor) noexcept
 {
     if (descriptor == nullptr) return ScenePassRenderer::replacementProgramCount;
     if (FindRenoDxFallout4Shader(descriptor->crc32) != descriptor)
         return ScenePassRenderer::replacementProgramCount;
     return ProgramIndex(descriptor->pass);
-}
-
-bool SupportedSceneLayout(const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    if (description.MipLevels != 1 || description.ArraySize != 1) return false;
-    if (description.SampleDesc.Count != 1 || description.SampleDesc.Quality != 0) return false;
-    if (description.Usage != D3D11_USAGE_DEFAULT || description.CPUAccessFlags != 0) return false;
-    if (description.MiscFlags != 0) return false;
-    return description.BindFlags == (D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET);
 }
 
 // Class-instance tuples support 256 entries; the SDK interface limit is separate.
@@ -584,14 +559,8 @@ bool LayerWhiteConfiguration::Valid() const noexcept
 
 ScenePassRenderer::~ScenePassRenderer() noexcept
 {
-    // Destruction on another thread cannot safely clear the exclusive context.
+    // Destruction cannot retire a renderer from outside its qualified owner thread.
     if (!Retire()) std::terminate();
-}
-
-bool ScenePassRenderer::Initialize(ID3D11Device* device,
-    ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept
-{
-    return Initialize(device, immediateContext, ScenePassConfiguration{width, height, {}});
 }
 
 bool ScenePassRenderer::Initialize(ID3D11Device* device,
@@ -684,8 +653,8 @@ bool ScenePassRenderer::Retire() noexcept
     ResetExposurePolicy();
     exposureGeneration_ = 0;
     lifetime_.Retire();
-    // ClearState is permitted only because this context is exclusively caller-owned.
-    if (context_) context_->ClearState();
+    // Scoped draw bindings already restored; only the exclusive fixture owns all state.
+    ClearExclusiveState();
     exposureResources_.Reset();
     for (auto& scene : scenes_) scene = {};
     for (auto& shader : observed_) shader = {};
@@ -696,64 +665,8 @@ bool ScenePassRenderer::Retire() noexcept
     device_.Reset();
     sceneCount_ = 0;
     observedCount_ = 0;
+    borrowedContext_ = false;
     return true;
-}
-
-HRESULT ScenePassRenderer::CreateObservedPixelShader(std::span<const std::byte> bytecode,
-    ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept
-{
-    if (!Active() || invoking_) return E_UNEXPECTED;
-    const auto result = device_->CreatePixelShader(
-        bytecode.data(), bytecode.size(), linkage, shader);
-    // Validation-only S_FALSE/null outputs are not created shader associations.
-    if (FAILED(result)) return result;
-    if (shader == nullptr) return result;
-    if (*shader == nullptr) return result;
-    const auto* descriptor = FindRenoDxFallout4Shader(ComputeRenoDxShaderCrc32(bytecode));
-    if (descriptor == nullptr || observedCount_ == observed_.size()) return result;
-    observed_[observedCount_++] = {*shader, descriptor};
-    return result;
-}
-
-HRESULT ScenePassRenderer::CreateSceneTexture(const D3D11_TEXTURE2D_DESC& original,
-    const D3D11_SUBRESOURCE_DATA* initialData, SceneTextureHandle& handle) noexcept
-{
-    handle = {};
-    if (!Active() || invoking_) return E_UNEXPECTED;
-    if (initialData != nullptr) return E_INVALIDARG;
-    if (!PromotableScene(original)) return E_INVALIDARG;
-    if (sceneCount_ == scenes_.size()) return E_OUTOFMEMORY;
-    SceneTexture prepared;
-    const auto result = PrepareSceneTexture(original, prepared);
-    if (FAILED(result)) return result;
-    const auto slot = sceneCount_++;
-    scenes_[slot] = std::move(prepared);
-    handle.owner_ = this;
-    handle.epoch_ = lifetime_.CurrentEpoch();
-    handle.slot_ = slot;
-    return S_OK;
-}
-
-bool ScenePassRenderer::PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept
-{
-    if (!SupportedSceneLayout(original)) return false;
-    const SceneResourceDescription description{
-        original.Format == DXGI_FORMAT_R11G11B10_FLOAT
-            ? SceneResourceFormat::r11g11b10Float : SceneResourceFormat::other,
-        original.Width, original.Height};
-    return ShouldPromoteSceneResourceToFp16(description, width_, height_);
-}
-
-HRESULT ScenePassRenderer::PrepareSceneTexture(const D3D11_TEXTURE2D_DESC& original,
-    SceneTexture& prepared) noexcept
-{
-    auto promoted = original;
-    promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    const auto result = device_->CreateTexture2D(&promoted, nullptr, &prepared.texture);
-    if (FAILED(result)) return result;
-    if (!prepared.texture) return E_FAIL;
-    return PrepareSceneViews(device_.Get(), prepared.texture.Get(),
-        prepared.shaderResource, prepared.renderTarget);
 }
 
 const ScenePassRenderer::SceneTexture* ScenePassRenderer::Resolve(
@@ -859,12 +772,6 @@ SceneColorDomain ScenePassRenderer::CurrentSceneDomain() const noexcept
 {
     const auto* scene = Resolve(CurrentScene());
     return scene != nullptr ? scene->domain : SceneColorDomain::bt709Scene;
-}
-
-std::uint64_t ScenePassRenderer::FrameGeneration() const noexcept
-{
-    if (!Active() || invoking_) return 0;
-    return frameOpen_ ? frameGeneration_ : 0;
 }
 
 void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept

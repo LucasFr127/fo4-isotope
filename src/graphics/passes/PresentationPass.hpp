@@ -76,6 +76,9 @@ public:
     // presentation clears black but does not compose; unavailable scope cannot clear.
     HRESULT Present(IDXGISwapChain* chain, UINT interval, UINT flags,
         PresentationScope scope) noexcept;
+    // Borrowed state is restored before the caller invokes its captured native next.
+    void PrepareNativePresent(IDXGISwapChain* chain, UINT flags, PresentationScope scope) noexcept;
+    void CompleteNativePresent(IDXGISwapChain* chain, HRESULT nativeResult) noexcept;
 
 private:
     struct ChainBuffer

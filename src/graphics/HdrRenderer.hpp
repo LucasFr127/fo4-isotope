@@ -124,7 +124,7 @@ enum class SceneColorDomain : std::uint8_t
     bt2020UiRelative = 1
 };
 
-// One exclusively owned immediate context, one initialization thread and one
+// One qualified immediate context, one initialization thread and one
 // nonrecycled generation. Handles/views expire at Retire or owner destruction;
 // do not retain them across destruction and reconstruction at the same address.
 class ScenePassRenderer
@@ -140,9 +140,22 @@ public:
     ScenePassRenderer& operator=(const ScenePassRenderer&) = delete;
 
     [[nodiscard]] bool Initialize(ID3D11Device* device,
-        ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept;
+        ID3D11DeviceContext* immediateContext, UINT width, UINT height) noexcept
+    {
+        return Initialize(device, immediateContext, ScenePassConfiguration{width, height, {}});
+    }
     [[nodiscard]] bool Initialize(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept;
+    // Caller excludes queries, command lists and concurrent/reentrant mutation.
+    // Temporary draw bindings restore before return; borrowed retirement preserves
+    // foreign context state. Caller-held scene views expire with this owner.
+    [[nodiscard]] bool InitializeBorrowed(ID3D11Device* device,
+        ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
+    {
+        if (!Initialize(device, immediateContext, configuration)) return false;
+        borrowedContext_ = true;
+        return true;
+    }
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool Active() const noexcept
     {
@@ -158,8 +171,14 @@ public:
 
     HRESULT CreateObservedPixelShader(std::span<const std::byte> bytecode,
         ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept;
+    // Bytecode is the successful native creation input for this same-device shader.
+    [[nodiscard]] bool ObserveCreatedPixelShader(std::span<const std::byte> bytecode,
+        ID3D11PixelShader* shader) noexcept;
     HRESULT CreateSceneTexture(const D3D11_TEXTURE2D_DESC& original,
         const D3D11_SUBRESOURCE_DATA* initialData, SceneTextureHandle& handle) noexcept;
+    // Cold caller supplies qualified scene storage; footprint alone proves no semantics.
+    HRESULT AdoptSceneTexture(const D3D11_TEXTURE2D_DESC& original,
+        ID3D11Texture2D* texture, SceneTextureHandle& handle) noexcept;
     [[nodiscard]] SceneTextureViews Views(SceneTextureHandle handle) const noexcept;
 
     [[nodiscard]] bool BeginFrame() noexcept;
@@ -175,7 +194,11 @@ public:
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
     [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
     // Zero denotes a closed or unavailable frame; completed layers use this token.
-    [[nodiscard]] std::uint64_t FrameGeneration() const noexcept;
+    [[nodiscard]] std::uint64_t FrameGeneration() const noexcept
+    {
+        if (!Active() || invoking_) return 0;
+        return frameOpen_ ? frameGeneration_ : 0;
+    }
     // Report every external write through a borrowed alias before it occurs.
     [[nodiscard]] bool InvalidateScene(SceneTextureHandle handle) noexcept;
 
@@ -196,6 +219,16 @@ public:
 
 private:
     friend class PresentationPass;
+    [[nodiscard]] HRESULT SceneRegistrationStatus(const D3D11_TEXTURE2D_DESC& original,
+        const D3D11_SUBRESOURCE_DATA* initialData = nullptr) const noexcept;
+    [[nodiscard]] bool CanObserveShader(ID3D11PixelShader* shader) const noexcept
+    {
+        return Active() && !invoking_ && shader != nullptr;
+    }
+    void ClearExclusiveState() noexcept
+    {
+        if (context_ && !borrowedContext_) context_->ClearState();
+    }
     [[nodiscard]] bool ApplySettings(const OperatorLutData& table,
         LayerWhiteConfiguration whites, SceneGradeConfiguration sceneGrade = {}) noexcept;
     void MarkSettingsStale() noexcept;
@@ -252,8 +285,8 @@ private:
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
     [[nodiscard]] bool PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept;
-    HRESULT PrepareSceneTexture(const D3D11_TEXTURE2D_DESC& original,
-        SceneTexture& prepared) noexcept;
+    [[nodiscard]] bool QualifiedSceneTexture(const D3D11_TEXTURE2D_DESC& original,
+        ID3D11Texture2D* texture) const noexcept;
     [[nodiscard]] bool BoundSceneViewsMatch(const RenoDxShaderDescriptor& descriptor,
         const SceneTexture& source, const SceneTexture& target) const noexcept;
     [[nodiscard]] bool BoundTemporalViewsMatch(const RenoDxShaderDescriptor& descriptor,
@@ -309,6 +342,7 @@ private:
     UINT width_{};
     UINT height_{};
     bool invoking_{};
+    bool borrowedContext_{};
     SceneTextureHandle selectedScene_;
     bool frameOpen_{};
     std::uint64_t frameGeneration_{};

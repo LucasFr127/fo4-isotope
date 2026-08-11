@@ -82,8 +82,8 @@ target_end()
 
 target("Fallout4HDR")
     set_kind("shared")
-    add_deps("commonlibf4")
-    add_includedirs("include", "src/runtime")
+    add_deps("commonlibf4", "fo4hdr-shaders")
+    add_includedirs("include", "src/runtime", "src/graphics", "build/include")
     add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
@@ -91,6 +91,19 @@ target("Fallout4HDR")
         "src/graphics/GameDeviceGeneration.cpp", "src/graphics/DeviceCreationHook.cpp",
         "src/graphics/SwapChainObservation.cpp", "src/graphics/RendererLifetime.cpp",
         "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp")
+    add_files("src/graphics/HdrRenderer.cpp",
+        "src/graphics/ScenePassRegistration.cpp",
+        "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
+        "src/graphics/resources/DeveloperExposureResources.cpp",
+        "src/output/Hdr10Color.cpp",
+        "src/tonemap/OperatorLut.cpp",
+        "src/tonemap/Gt7.cpp",
+        "src/tonemap/Agx.cpp",
+        "src/tonemap/Aces2.cpp",
+        "src/tonemap/aces2/Aces2ColorAppearance.cpp",
+        "src/tonemap/aces2/Aces2Tables.cpp",
+        "src/graphics/d3d11/ContextQuerySafety.cpp",
+        "src/graphics/hooks/ContextHooks.cpp")
     add_syslinks("version")
 target_end()
 
@@ -185,6 +198,9 @@ target("fo4hdr-shader-tests")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
         "tests/shader/Gt7ReferenceTests.cpp",
         "src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
+        "src/graphics/ScenePassRegistration.cpp",
+        "src/graphics/d3d11/ContextQuerySafety.cpp",
+        "src/graphics/hooks/ContextHooks.cpp", "tests/shader/NativeRoutingTests.cpp",
         "src/output/PerformanceStatistics.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",

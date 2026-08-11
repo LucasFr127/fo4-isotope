@@ -1049,6 +1049,7 @@ void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
 {
     detail::PixelFixture fixture{fixtureDirectory};
     detail::VerifyFactory(fixture);
+    VerifyNativeRouting(fixture, fixtureDirectory);
     for (std::size_t variant = 0; variant < 4; ++variant) detail::VerifyTone(fixture, variant);
     detail::VerifyToneControls(fixtureDirectory);
     detail::VerifyLut(fixture);

@@ -837,6 +837,16 @@ HRESULT PresentationPass::Present(IDXGISwapChain* chain, UINT interval, UINT fla
     PresentationScope scope) noexcept
 {
     if (chain == nullptr) return E_INVALIDARG;
+    PrepareNativePresent(chain, flags, scope);
+    const auto result = chain->Present(interval, flags);
+    CompleteNativePresent(chain, result);
+    return result;
+}
+
+void PresentationPass::PrepareNativePresent(IDXGISwapChain* chain, UINT flags,
+    PresentationScope scope) noexcept
+{
+    if (chain == nullptr) return;
     const bool owned = Active() && !executing_ && SameChain(chain);
     const bool test = (flags & DXGI_PRESENT_TEST) != 0;
     if (owned && !test)
@@ -844,14 +854,17 @@ HRESULT PresentationPass::Present(IDXGISwapChain* chain, UINT interval, UINT fla
         ComposeChain(scope);
         CloseFrame();
     }
-    // Transient state and references are gone before native Present changes bindings.
-    const auto result = chain->Present(interval, flags);
-    if (owned && DeviceLost(result))
+}
+
+void PresentationPass::CompleteNativePresent(IDXGISwapChain* chain, HRESULT nativeResult) noexcept
+{
+    if (chain == nullptr) return;
+    const bool owned = Active() && !executing_ && SameChain(chain);
+    if (owned && DeviceLost(nativeResult))
     {
         lifetime_.Retire();
         CloseFrame();
     }
-    return result;
 }
 
 bool PresentationPass::Retire() noexcept
