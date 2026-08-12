@@ -989,6 +989,40 @@ void VerifyFxaaUniform(PixelFixture& fixture)
     FO4HDR_CHECK(pixels.front().green > 1);
 }
 
+void VerifyOriginalContinuation(PixelFixture& fixture, const LineageScenes& scenes)
+{
+    SeedSelection(fixture, scenes);
+    const auto domain = fixture.renderer.CurrentSceneDomain();
+    fixture.input = scenes.grade;
+    fixture.destination = scenes.temporal;
+    fixture.Bind(true);
+    auto* source = fixture.renderer.Views(fixture.input).shaderResource;
+    fixture.gpu.context->PSSetShaderResources(0, 1, &source);
+    const Float4 hdr{2, 4, 1, 0.375f};
+    const auto constants = ConstantBuffer(fixture.gpu.device.Get(), std::array{hdr});
+    auto* buffer = constants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(0, 1, &buffer);
+    // The fixture supplies the descriptor; the sentinel is not an upstream shader identity.
+    DrawCount auxiliary;
+    FO4HDR_CHECK(fixture.renderer.Execute(kRenoDxFallout4Shaders[9], fixture.input,
+        fixture.destination, {DrawCount::Draw, &auxiliary}) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(auxiliary.count == 1);
+    CheckSelection(fixture, scenes.grade);
+    DrawCount finalPass;
+    FO4HDR_CHECK(fixture.renderer.Execute(kRenoDxFallout4Shaders[14], fixture.input,
+        fixture.destination, {DrawCount::Draw, &finalPass}) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(finalPass.count == 1);
+    CheckSelection(fixture, scenes.temporal);
+    FO4HDR_CHECK(fixture.renderer.CurrentSceneDomain() == domain);
+    fixture.CheckRestored(true);
+    ComPtr<ID3D11ShaderResourceView> retained;
+    fixture.gpu.context->PSGetShaderResources(0, 1, &retained);
+    FO4HDR_CHECK(retained.Get() == source);
+    const auto pixels = ReadScene(fixture.gpu, fixture.renderer.Views(scenes.temporal).texture);
+    for (const auto& pixel : pixels) CheckPixel(pixel, hdr);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
 void VerifyTemporalAndLineage(PixelFixture& fixture)
 {
     VerifyTemporalUniform(fixture, 5, 0);
@@ -1006,6 +1040,7 @@ void VerifyTemporalAndLineage(PixelFixture& fixture)
     VerifyActualWriteInvalidation(fixture, scenes);
     VerifyCallbackFailure(fixture, scenes);
     VerifyExternalInvalidation(fixture, scenes);
+    VerifyOriginalContinuation(fixture, scenes);
     SeedSelection(fixture, scenes);
     fixture.input = scenes.raw;
     fixture.destination = scenes.tone;

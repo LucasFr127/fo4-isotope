@@ -249,6 +249,8 @@ private:
         const RenoDxShaderDescriptor* descriptor{};
     };
 
+    enum class OriginalContinuation { none, retain, advance };
+
     struct DrawLineage
     {
         bool consumesSelected{};
@@ -257,6 +259,7 @@ private:
         std::uint8_t writes{};
         SceneColorDomain domain{SceneColorDomain::bt709Scene};
         bool operatorProduced{};
+        OriginalContinuation original{};
     };
 
     struct DrawReplacement
@@ -297,6 +300,11 @@ private:
     void InvalidateWrites(std::uint8_t writes) noexcept;
     [[nodiscard]] std::uint8_t WriteMaskForResource(ID3D11Resource* resource) const noexcept;
     [[nodiscard]] DrawLineage CaptureLineage(SceneTextureHandle input) const noexcept;
+    [[nodiscard]] const SceneTexture* SelectedBoundInput(
+        const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input) const noexcept;
+    [[nodiscard]] OriginalContinuation QualifyOriginalContinuation(
+        const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
+        SceneTextureHandle destination) const noexcept;
     void PublishLineage(const RenoDxShaderDescriptor& descriptor,
         SceneTextureHandle destination, const DrawLineage& lineage) noexcept;
     void PublishOutputDomain(RenoDxShaderPass pass,

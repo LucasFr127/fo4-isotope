@@ -400,6 +400,20 @@ std::size_t CanonicalProgramIndex(const RenoDxShaderDescriptor* descriptor) noex
     return ProgramIndex(descriptor->pass);
 }
 
+bool OriginalSceneEffect(RenoDxShaderPass pass) noexcept
+{
+    constexpr std::array supported{RenoDxShaderPass::fxaa, RenoDxShaderPass::dofBlender,
+        RenoDxShaderPass::gameDof, RenoDxShaderPass::vignette};
+    return std::find(supported.begin(), supported.end(), pass) != supported.end();
+}
+
+bool OriginalAuxiliaryEffect(RenoDxShaderPass pass) noexcept
+{
+    constexpr std::array supported{RenoDxShaderPass::dofAuxiliary1,
+        RenoDxShaderPass::dofAuxiliary2, RenoDxShaderPass::dofAuxiliary3};
+    return std::find(supported.begin(), supported.end(), pass) != supported.end();
+}
+
 // Class-instance tuples support 256 entries; the SDK interface limit is separate.
 constexpr UINT pixelClassInstanceCapacity = 256;
 
@@ -841,6 +855,34 @@ ScenePassRenderer::DrawLineage ScenePassRenderer::CaptureLineage(
         source != nullptr && source->operatorProduced};
 }
 
+const ScenePassRenderer::SceneTexture* ScenePassRenderer::SelectedBoundInput(
+    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input) const noexcept
+{
+    if (descriptor == nullptr) return nullptr;
+    if (FindRenoDxFallout4Shader(descriptor->crc32) != descriptor) return nullptr;
+    const auto* source = Resolve(input);
+    if (source == nullptr || source != Resolve(selectedScene_)) return nullptr;
+    if (source->settingsStale) return nullptr;
+    ComPtr<ID3D11ShaderResourceView> bound;
+    context_->PSGetShaderResources(descriptor->sceneInputSlot, 1, &bound);
+    return bound.Get() == source->shaderResource.Get() ? source : nullptr;
+}
+
+ScenePassRenderer::OriginalContinuation ScenePassRenderer::QualifyOriginalContinuation(
+    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
+    SceneTextureHandle destination) const noexcept
+{
+    const auto* source = SelectedBoundInput(descriptor, input);
+    if (source == nullptr) return OriginalContinuation::none;
+    // Auxiliary storage never becomes the completed scene. Actual writes still revoke aliases.
+    if (OriginalAuxiliaryEffect(descriptor->pass)) return OriginalContinuation::retain;
+    const auto* target = Resolve(destination);
+    if (target == nullptr || target == source) return OriginalContinuation::none;
+    if (!OriginalSceneEffect(descriptor->pass)) return OriginalContinuation::none;
+    return BoundSceneViewsMatch(*descriptor, *source, *target)
+        ? OriginalContinuation::advance : OriginalContinuation::none;
+}
+
 void ScenePassRenderer::ResetOperatorResources() noexcept
 {
     for (auto& constants : operatorConstants_) constants.Reset();
@@ -913,7 +955,10 @@ void ScenePassRenderer::CompleteLineage(const RenoDxShaderDescriptor* descriptor
     }
     if (outcome != SceneDrawOutcome::replaced)
     {
-        if (lineage.consumesSelected) selectedScene_ = {};
+        if (lineage.original == OriginalContinuation::advance)
+            PublishLineage(*descriptor, destination, lineage);
+        else if (lineage.original == OriginalContinuation::none && lineage.consumesSelected)
+            selectedScene_ = {};
         return;
     }
     PublishLineage(*descriptor, destination, lineage);
@@ -992,7 +1037,8 @@ SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descrip
 {
     DrawScope drawScope{invoking_};
     const auto replacement = PrepareDrawReplacement(descriptor, input, destination);
-    const auto lineage = CaptureLineage(input);
+    auto lineage = CaptureLineage(input);
+    lineage.original = QualifyOriginalContinuation(descriptor, input, destination);
     const auto result = InvokeDraw(replacement, invocation);
     // Publish only after shader/classes, exposure/operator slots and video b0 are restored.
     CompleteExposureDraw(result, replacement.tone);
