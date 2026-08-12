@@ -6,6 +6,7 @@
 #include <fo4hdr-shaders/PresentPixels.hpp>
 #include <fo4hdr-shaders/PrepareBackdrop.hpp>
 #include <fo4hdr-shaders/PrepareHud.hpp>
+#include <fo4hdr-shaders/CopySdrCodes.hpp>
 
 #include <array>
 #include <cmath>
@@ -324,6 +325,7 @@ struct PreparedPresentation
 {
     ComPtr<ID3D11DeviceContext1> context;
     ComPtr<ID3D11ComputeShader> shader;
+    ComPtr<ID3D11ComputeShader> sdrShader;
     std::array<ComPtr<ID3D11Buffer>, 2> constants;
     std::array<ComPtr<ID3D11ComputeShader>, 2> layerShaders;
 };
@@ -368,7 +370,9 @@ bool PrepareLayerPrograms(ID3D11Device* device, PreparedPresentation& prepared) 
             sizeof(kPrepareBackdropBytecode), nullptr, &prepared.layerShaders[0]))) return false;
     if (FAILED(device->CreateComputeShader(kPrepareHudBytecode,
             sizeof(kPrepareHudBytecode), nullptr, &prepared.layerShaders[1]))) return false;
-    return prepared.layerShaders[0] && prepared.layerShaders[1];
+    if (FAILED(device->CreateComputeShader(kCopySdrCodesBytecode,
+            sizeof(kCopySdrCodesBytecode), nullptr, &prepared.sdrShader))) return false;
+    return prepared.layerShaders[0] && prepared.layerShaders[1] && prepared.sdrShader;
 }
 
 bool PreparePresentation(ID3D11Device* device, ID3D11DeviceContext* context,
@@ -517,10 +521,11 @@ HRESULT CheckedChain(IDXGISwapChain* chain, ID3D11Device* device,
     return ChainDeviceQualification(candidate.Get(), device);
 }
 
-HRESULT ApplyHdrColorSpace(IDXGISwapChain3* chain) noexcept
+HRESULT ApplyColorSpace(IDXGISwapChain3* chain, bool hdr) noexcept
 {
     UINT support{};
-    constexpr auto colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+    const auto colorSpace = hdr ? DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
+                                : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     const auto result = chain->CheckColorSpaceSupport(colorSpace, &support);
     if (FAILED(result)) return result;
     if ((support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) == 0) return DXGI_ERROR_UNSUPPORTED;
@@ -583,12 +588,16 @@ bool PresentationPass::Initialize(ID3D11Device* device,
     {
         if (!PrepareLayer(device, configuration, layer)) return false;
     }
+    LinearLayer preparedSdr;
+    if (!PrepareLayer(device, configuration, preparedSdr)) return false;
     if (!lifetime_.Prepare(2, 4)) return false;
     ownerThread_ = std::this_thread::get_id();
     configuration_ = configuration;
     device_ = device;
     context_ = std::move(prepared.context);
     shader_ = std::move(prepared.shader);
+    sdrShader_ = std::move(prepared.sdrShader);
+    sdrProxy_ = std::move(preparedSdr);
     constants_ = std::move(prepared.constants);
     layerShaders_ = std::move(prepared.layerShaders);
     layers_ = std::move(preparedLayers);
@@ -650,10 +659,11 @@ HRESULT PresentationPass::PrepareChain(IDXGISwapChain* chain) noexcept
     ChainBuffer prepared;
     result = PrepareBuffer(candidate.Get(), prepared);
     if (FAILED(result)) return result;
-    result = ApplyHdrColorSpace(candidate.Get());
+    result = ApplyColorSpace(candidate.Get(), true);
     if (FAILED(result)) return result;
     buffer_ = std::move(prepared);
     chain_ = std::move(candidate);
+    hdrColorSpace_ = true;
     return S_OK;
 }
 
@@ -769,10 +779,38 @@ bool PresentationPass::PrepareLayers(ID3D11ShaderResourceView* backdrop,
     return true;
 }
 
+bool PresentationPass::CopySdrCodes(ID3D11ShaderResourceView* source,
+    ID3D11UnorderedAccessView* target) noexcept
+{
+    ScopedComputeState state{context_.Get()};
+    if (!state.Ready()) return false;
+    const std::array<ID3D11ShaderResourceView*, 3> inputs{source, nullptr, nullptr};
+    state.Bind(sdrShader_.Get(), constants_[0].Get(), inputs, target);
+    context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);
+    return true;
+}
+
+bool PresentationPass::PrepareSdrHandoff(ID3D11ShaderResourceView* completedAuthoredCodes,
+    PresentationScope scope) noexcept
+{
+    if (!CanExecute(scope)) return false;
+    sdrFrame_ = 0;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (!framePrepared_ || frame == 0) return false;
+    if (completedAuthoredCodes == nullptr) return false;
+    if (!CodedLayerSource(completedAuthoredCodes, device_.Get(), configuration_)) return false;
+    ExecutionScope executing{executing_};
+    if (!CopySdrCodes(completedAuthoredCodes, sdrProxy_.target.Get())) return false;
+    // The private code-domain image is published only after borrowed state is restored.
+    sdrFrame_ = frame;
+    return true;
+}
+
 bool PresentationPass::BeginFrame(PresentationScope scope) noexcept
 {
     if (!CanExecute(scope)) return false;
     framePrepared_ = false;
+    sdrFrame_ = 0;
     layerFrame_ = 0;
     layerFailureFrame_ = 0;
     if (!configuration_.scenes->EndFrame()) return false;
@@ -822,15 +860,40 @@ bool PresentationPass::ComposeSelected(SceneTextureViews source,
     return true;
 }
 
+bool PresentationPass::ComposeHdrChain(ID3D11UnorderedAccessView* target,
+    PresentationScope scope) noexcept
+{
+    if (!framePrepared_) return false;
+    if (!SetHdrColorSpace(true)) return false;
+    return ExecuteCurrentScene(target, scope);
+}
+
+bool PresentationPass::ComposeSdrChain(ID3D11UnorderedAccessView* target) noexcept
+{
+    if (!framePrepared_) return false;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (frame == 0 || sdrFrame_ != frame) return false;
+    if (!SetHdrColorSpace(false)) return false;
+    return CopySdrCodes(sdrProxy_.source.Get(), target);
+}
+
 void PresentationPass::ComposeChain(PresentationScope scope) noexcept
 {
     if (!CanExecute(scope)) return;
     auto* target = CurrentTarget();
     if (target == nullptr) return;
-    if (framePrepared_)
-        static_cast<void>(ExecuteCurrentScene(target, scope));
-    else
-        ClearBlack(context_.Get(), target);
+    if (ComposeHdrChain(target, scope)) return;
+    ExecutionScope executing{executing_};
+    if (!ComposeSdrChain(target)) ClearBlack(context_.Get(), target);
+}
+
+bool PresentationPass::SetHdrColorSpace(bool hdr) noexcept
+{
+    if (!chain_) return false;
+    if (hdr == hdrColorSpace_) return true;
+    if (FAILED(ApplyColorSpace(chain_.Get(), hdr))) return false;
+    hdrColorSpace_ = hdr;
+    return true;
 }
 
 HRESULT PresentationPass::Present(IDXGISwapChain* chain, UINT interval, UINT flags,
@@ -879,6 +942,9 @@ bool PresentationPass::Retire() noexcept
     layerShaders_ = {};
     layers_ = {};
     shader_.Reset();
+    sdrShader_.Reset();
+    sdrProxy_ = {};
+    hdrColorSpace_ = false;
     context_.Reset();
     device_.Reset();
     configuration_ = {};
@@ -894,6 +960,7 @@ bool PresentationPass::CanRetire() const noexcept
 void PresentationPass::CloseFrame() noexcept
 {
     framePrepared_ = false;
+    sdrFrame_ = 0;
     layerFrame_ = 0;
     layerFailureFrame_ = 0;
     if (configuration_.scenes != nullptr)

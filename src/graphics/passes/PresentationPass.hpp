@@ -71,6 +71,11 @@ public:
     // or the next producer frame, so failure cannot silently discard required UI.
     [[nodiscard]] bool PrepareLayers(ID3D11ShaderResourceView* backdrop,
         ID3D11ShaderResourceView* hud, PresentationScope scope) noexcept;
+    // Caller qualifies a completed authored SDR frame, independently of texture format.
+    // Copies matching R8_UNORM codes into private FP16 storage for this open frame;
+    // no caller view is retained. Intercepted pixels need separate semantic proof.
+    [[nodiscard]] bool PrepareSdrHandoff(ID3D11ShaderResourceView* completedAuthoredCodes,
+        PresentationScope scope) noexcept;
     // Nonfatal TEST leaves the frame open; device removal/reset revokes publication.
     // Without a successful BeginFrame, qualified
     // presentation clears black but does not compose; unavailable scope cannot clear.
@@ -107,6 +112,12 @@ private:
     [[nodiscard]] bool QualifiedTarget(ID3D11UnorderedAccessView* terminal,
         ID3D11Texture2D* scene) const noexcept;
     void ComposeChain(PresentationScope scope) noexcept;
+    [[nodiscard]] bool ComposeHdrChain(ID3D11UnorderedAccessView* target,
+        PresentationScope scope) noexcept;
+    [[nodiscard]] bool ComposeSdrChain(ID3D11UnorderedAccessView* target) noexcept;
+    [[nodiscard]] bool SetHdrColorSpace(bool hdr) noexcept;
+    [[nodiscard]] bool CopySdrCodes(ID3D11ShaderResourceView* source,
+        ID3D11UnorderedAccessView* target) noexcept;
     [[nodiscard]] bool QualifiedLayerSources(ID3D11ShaderResourceView* backdrop,
         ID3D11ShaderResourceView* hud) const noexcept;
     [[nodiscard]] bool QualifiedLayerSource(ID3D11ShaderResourceView* source,
@@ -126,6 +137,10 @@ private:
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 2> constants_;
     std::array<Microsoft::WRL::ComPtr<ID3D11ComputeShader>, 2> layerShaders_;
     std::array<LinearLayer, 2> layers_;
+    LinearLayer sdrProxy_;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> sdrShader_;
+    std::uint64_t sdrFrame_{};
+    bool hdrColorSpace_{};
     std::uint64_t layerFrame_{};
     std::uint64_t layerFailureFrame_{};
     Microsoft::WRL::ComPtr<IDXGISwapChain3> chain_;

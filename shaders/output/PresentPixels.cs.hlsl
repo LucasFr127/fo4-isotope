@@ -30,6 +30,14 @@ void PrepareHud(uint3 pixel : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void CopySdrCodes(uint3 pixel : SV_DispatchThreadID)
+{
+    if (any(pixel.xy >= FrameSize)) return;
+    // Preserve authored display codes through the handoff; no linearization or PQ.
+    PresentTarget[pixel.xy] = float4(saturate(ScenePixels.Load(int3(pixel.xy, 0)).rgb), 1.0f);
+}
+
+[numthreads(8, 8, 1)]
 void main(uint3 pixel : SV_DispatchThreadID)
 {
     if (any(pixel.xy >= FrameSize)) return;

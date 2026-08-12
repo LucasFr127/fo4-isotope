@@ -971,60 +971,6 @@ void CheckLogicalBuffer(PixelFixture& fixture, IDXGISwapChain1* chain)
     std::cout << "Controlled logical backbuffer=0; pre-Present black verified; post-Present pixels unverified\n";
 }
 
-void ReportProbeView(UINT index, ID3D11UnorderedAccessView* view)
-{
-    D3D11_UNORDERED_ACCESS_VIEW_DESC unordered{};
-    view->GetDesc(&unordered);
-    std::cout << "Chain probe buffer=" << index << " UAV format=" << unordered.Format
-              << " dimension=" << unordered.ViewDimension;
-    if (unordered.ViewDimension == D3D11_UAV_DIMENSION_TEXTURE2D)
-        std::cout << " mip=" << unordered.Texture2D.MipSlice;
-    else if (unordered.ViewDimension == D3D11_UAV_DIMENSION_TEXTURE2DARRAY)
-        std::cout << " mip=" << unordered.Texture2DArray.MipSlice;
-    else std::cout << " mip=not-texture2d";
-    std::cout << '\n';
-}
-
-void ProbeChainBuffers(ID3D11Device* device, IDXGISwapChain1* chain)
-{
-    for (UINT index = 0; index < 2; ++index)
-    {
-        ComPtr<ID3D11Texture2D> buffer;
-        const auto acquired = chain->GetBuffer(index, IID_PPV_ARGS(&buffer));
-        std::cout << "Chain probe buffer=" << index << " GetBuffer HRESULT="
-                  << static_cast<std::uint32_t>(acquired) << " nonnull=" << (buffer.Get() != nullptr) << '\n';
-        if (FAILED(acquired) || !buffer) continue;
-        D3D11_TEXTURE2D_DESC description{};
-        buffer->GetDesc(&description);
-        std::cout << "Chain probe buffer=" << index << " width=" << description.Width
-                  << " height=" << description.Height << " format=" << description.Format
-                  << " mips=" << description.MipLevels << " array=" << description.ArraySize
-                  << " samples=" << description.SampleDesc.Count << " quality=" << description.SampleDesc.Quality
-                  << " usage=" << description.Usage << " bind=" << description.BindFlags
-                  << " cpu=" << description.CPUAccessFlags << " misc=" << description.MiscFlags << '\n';
-        ComPtr<ID3D11UnorderedAccessView> view;
-        const auto created = device->CreateUnorderedAccessView(buffer.Get(), nullptr, &view);
-        std::cout << "Chain probe buffer=" << index << " CreateUAV HRESULT="
-                  << static_cast<std::uint32_t>(created) << " nonnull=" << (view.Get() != nullptr) << '\n';
-        if (FAILED(created) || !view) continue;
-        ReportProbeView(index, view.Get());
-    }
-}
-
-void ProbeChainColorSpace(IDXGISwapChain1* chain)
-{
-    ComPtr<IDXGISwapChain3> indexed;
-    const auto queried = chain->QueryInterface(IID_PPV_ARGS(&indexed));
-    std::cout << "Chain probe QueryInterface3 HRESULT=" << static_cast<std::uint32_t>(queried)
-              << " nonnull=" << (indexed.Get() != nullptr) << '\n';
-    if (FAILED(queried) || !indexed) return;
-    UINT support{};
-    const auto checked = indexed->CheckColorSpaceSupport(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, &support);
-    std::cout << "Chain probe CheckColorSpaceSupport HRESULT=" << static_cast<std::uint32_t>(checked)
-              << " support=" << support << " PRESENT="
-              << ((support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0) << '\n';
-}
-
 void CheckIdleTest(PixelFixture& fixture, PresentationPass& pass,
     IDXGISwapChain1* chain, const LineageScenes& scenes)
 {
@@ -1059,6 +1005,49 @@ void VerifyQualifiedFrames(PixelFixture& fixture, PresentationPass& pass, IDXGIS
     std::cout << "Checked two sequential controlled frames through the cached logical view\n";
     if (lastPresent == DXGI_STATUS_OCCLUDED) CheckIdleTest(fixture, pass, chain, scenes);
     else std::cout << "Idle TEST unexercised: no observed DXGI_STATUS_OCCLUDED\n";
+}
+
+void CheckSdrCodes(const std::vector<std::uint32_t>& pixels, CodedLayer codes)
+{
+    FO4HDR_CHECK(pixels.size() == presentationWidth * presentationHeight);
+    for (const auto pixel : pixels)
+    {
+        for (UINT channel = 0; channel < 3; ++channel)
+        {
+            const auto expected = std::lround(codes[channel] * 1023.0 / 255.0);
+            const auto actual = static_cast<long>((pixel >> (channel * 10)) & 1023);
+            // The FP16 code transport may straddle one terminal rounding boundary.
+            FO4HDR_CHECK(std::abs(actual - expected) <= 1);
+        }
+        FO4HDR_CHECK((pixel >> 30) == 3);
+    }
+}
+
+void VerifySdrHandoff(PixelFixture& fixture, PresentationPass& pass,
+    IDXGISwapChain1* chain, const std::filesystem::path& directory)
+{
+    constexpr CodedLayer codes{64, 128, 192, 255};
+    const auto authored = CompletedLayerSource(fixture, codes);
+    BorrowedComputeState state{fixture, directory};
+    FO4HDR_CHECK(!pass.PrepareSdrHandoff(authored.Get(), presentationScope));
+    FO4HDR_CHECK(pass.BeginFrame(presentationScope));
+    state.Bind();
+    FO4HDR_CHECK(!pass.PrepareSdrHandoff(fixture.renderer.Views(fixture.input).shaderResource,
+        presentationScope));
+    FO4HDR_CHECK(pass.PrepareSdrHandoff(authored.Get(), presentationScope));
+    state.CheckRestored();
+    ComPtr<ID3D11Texture2D> buffer;
+    CheckHresult(chain->GetBuffer(0, IID_PPV_ARGS(&buffer)), "SDR handoff buffer");
+    pass.PrepareNativePresent(chain, 0, presentationScope);
+    state.CheckRestored();
+    CheckSdrCodes(ReadTerminal(fixture.gpu, buffer.Get()), codes);
+    const auto result = chain->Present(0, 0);
+    pass.CompleteNativePresent(chain, result);
+    CheckHresult(result, "SDR handoff Present");
+    FO4HDR_CHECK(pass.BeginFrame(presentationScope));
+    pass.PrepareNativePresent(chain, 0, presentationScope);
+    state.CheckRestored();
+    CheckSdrCodes(ReadTerminal(fixture.gpu, buffer.Get()), {});
 }
 
 void VerifyChainRetirement(PixelFixture& fixture, PresentationPass& pass,
@@ -1121,13 +1110,12 @@ void VerifyControlledChain(const std::filesystem::path& directory)
         return;
     }
     CheckControlledChain(chain.Get());
-    ProbeChainBuffers(fixture.gpu.device.Get(), chain.Get());
-    ProbeChainColorSpace(chain.Get());
     const auto prepared = pass.PrepareChain(chain.Get());
     std::cout << "Controlled HDR preparation HRESULT=" << static_cast<std::uint32_t>(prepared) << '\n';
     if (SUCCEEDED(prepared))
     {
         std::cout << "Controlled chain HDR application qualified; physical display unverified\n";
+        VerifySdrHandoff(fixture, pass, chain.Get(), directory);
         VerifyQualifiedFrames(fixture, pass, chain.Get());
         VerifyChainRetirement(fixture, pass, chain.Get(), directory);
         std::cout << "Original-descriptor HDR-failure retry unexercised: preparation succeeded\n";
