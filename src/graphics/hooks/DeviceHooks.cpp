@@ -3,8 +3,10 @@
 #include "DeviceHooks.hpp"
 #include "HookRecords.hpp"
 #include "NativeImageSlots.hpp"
+#include "SwapChainHooks.hpp"
 
 #include <d3d11_4.h>
+#include <dxgi1_6.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -12,20 +14,24 @@
 #include <cstring>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <type_traits>
 
 namespace fo4hdr {
 
 std::atomic<DeviceHookRecord*> g_deviceHooks{};
 std::atomic<ContextHookRecord*> g_contextHooks{};
+std::atomic<SwapChainHookRecord*> g_swapChainHooks{};
 
 namespace {
 
 using Microsoft::WRL::ComPtr;
 constexpr std::array<std::size_t, 5> deviceSlots{5, 7, 8, 9, 15};
 constexpr std::array<std::size_t, 10> contextSlots{9, 12, 13, 20, 21, 27, 28, 33, 34, 58};
+constexpr std::array<std::size_t, 2> chainSlots{8, 13};
 constexpr std::size_t maximumFileBytes = 64 * 1024 * 1024;
 DeviceHookRecord residentDevice;
+SwapChainHookRecord residentChain;
 alignas(ContextHookRecord) std::array<std::byte, sizeof(ContextHookRecord)> residentContextStorage;
 std::atomic_flag residentClaim = ATOMIC_FLAG_INIT;
 
@@ -89,15 +95,16 @@ bool DataSlot(void** slot, HMODULE module) noexcept
     return std::find(readable.begin(), readable.end(), page.Protect & 0xFF) != readable.end();
 }
 
-bool SystemD3dPath(HMODULE module, std::array<wchar_t, 32768>& path) noexcept
+bool SystemImagePath(HMODULE module, std::wstring_view filename,
+    std::array<wchar_t, 32768>& path) noexcept
 {
     const auto loaded = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
     if (loaded == 0 || loaded >= path.size()) return false;
     std::array<wchar_t, 32768> expected{};
     const auto directory = GetSystemDirectoryW(expected.data(), static_cast<UINT>(expected.size()));
-    constexpr wchar_t suffix[] = L"\\d3d11.dll";
-    if (directory == 0 || directory + std::size(suffix) > expected.size()) return false;
-    std::copy(std::begin(suffix), std::end(suffix), expected.begin() + directory);
+    if (directory == 0 || directory + filename.size() + 2 > expected.size()) return false;
+    expected[directory] = L'\\';
+    std::copy(filename.begin(), filename.end(), expected.begin() + directory + 1);
     return CompareStringOrdinal(path.data(), -1, expected.data(), -1, TRUE) == CSTR_EQUAL;
 }
 
@@ -137,17 +144,25 @@ public:
         if (module_ == nullptr) return false;
         if (creationNext != reinterpret_cast<void*>(GetProcAddress(module_, "D3D11CreateDeviceAndSwapChain")))
             return false;
-        if (!PrepareImage()) return false;
+        if (!PrepareImage(L"d3d11.dll")) return false;
         if (!ImageRange(creationNext, 1, module_)) return false;
         if (!IsExecutableHookTarget(creationNext)) return false;
         if (!PinCode(creationNext, module_)) return false;
         return PinCode(reinterpret_cast<void*>(&HookBegin));
     }
 
-    bool PrepareImage() noexcept
+    bool PrepareChain() noexcept
+    {
+        module_ = GetModuleHandleW(L"dxgi.dll");
+        if (module_ == nullptr) return false;
+        if (!PrepareImage(L"dxgi.dll")) return false;
+        return PinCode(reinterpret_cast<void*>(module_), module_);
+    }
+
+    bool PrepareImage(std::wstring_view filename) noexcept
     {
         std::array<wchar_t, 32768> path{};
-        if (!SystemD3dPath(module_, path)) return false;
+        if (!SystemImagePath(module_, filename, path)) return false;
         if (!file_.Open(path.data())) return false;
         if (!disk_.Parse(file_.Bytes())) return false;
         return LoadedHeaderMatches(module_, disk_);
@@ -195,6 +210,16 @@ bool AdmittedAliases(const CreatedDeviceBinding& created) noexcept
         ID3D11Device4, ID3D11Device5>(created.device) &&
         SameSdkAliases<ID3D11DeviceContext1, ID3D11DeviceContext2,
             ID3D11DeviceContext3, ID3D11DeviceContext4>(created.context);
+}
+
+bool AdmittedChain(const CreatedDeviceBinding& created, DXGI_SWAP_CHAIN_DESC& description) noexcept
+{
+    if (created.swapChain == nullptr) return false;
+    if (!SameSdkAliases<IDXGISwapChain1, IDXGISwapChain2, IDXGISwapChain3,
+            IDXGISwapChain4>(created.swapChain)) return false;
+    if (FAILED(created.swapChain->GetDesc(&description))) return false;
+    return IsWindow(description.OutputWindow) && description.BufferDesc.Width != 0 &&
+        description.BufferDesc.Height != 0;
 }
 
 template <std::size_t Count>
@@ -246,6 +271,13 @@ bool PublishContextOriginal(void* next) noexcept
     return next == reinterpret_cast<void*>(record->*Next);
 }
 
+template <auto Next>
+bool PublishChainOriginal(void* next) noexcept
+{
+    const auto* record = g_swapChainHooks.load(std::memory_order_acquire);
+    return next == reinterpret_cast<void*>(record->*Next);
+}
+
 struct SlotPatch
 {
     std::size_t index;
@@ -270,6 +302,9 @@ const std::array contextPatches{
     SlotPatch{33, reinterpret_cast<void*>(&HookOmSetRenderTargets), PublishContextOriginal<&ContextHookRecord::nextOmSetRenderTargets>},
     SlotPatch{34, reinterpret_cast<void*>(&HookOmSetRenderTargetsAndUavs), PublishContextOriginal<&ContextHookRecord::nextOmSetRenderTargetsAndUavs>},
     SlotPatch{58, reinterpret_cast<void*>(&HookExecuteCommandList), PublishContextOriginal<&ContextHookRecord::nextExecuteCommandList>}};
+const std::array chainPatches{
+    SlotPatch{8, reinterpret_cast<void*>(&HookPresent), PublishChainOriginal<&SwapChainHookRecord::nextPresent>},
+    SlotPatch{13, reinterpret_cast<void*>(&HookResizeBuffers), PublishChainOriginal<&SwapChainHookRecord::nextResize>}};
 
 template <class Record, std::size_t Count>
 bool InstallSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
@@ -317,10 +352,22 @@ HRESULT NativeResult(Call next, Arguments... arguments) noexcept
 struct NativeBindingPreparation
 {
     NativeSlotProof proof;
+    NativeSlotProof chainProof;
     void** deviceTable{};
     void** contextTable{};
+    void** chainTable{};
     std::array<void*, 5> deviceOriginals{};
     std::array<void*, 10> contextOriginals{};
+    std::array<void*, 2> chainOriginals{};
+    DXGI_SWAP_CHAIN_DESC description{};
+
+    bool PrepareChain(const CreatedDeviceBinding& created) noexcept
+    {
+        if (!AdmittedChain(created, description)) return false;
+        if (!chainProof.PrepareChain()) return false;
+        chainTable = *reinterpret_cast<void***>(created.swapChain);
+        return CaptureOriginals(chainProof, chainTable, chainSlots, chainOriginals);
+    }
 
     bool Prepare(const CreatedDeviceBinding& created, void* creationNext) noexcept
     {
@@ -329,7 +376,8 @@ struct NativeBindingPreparation
         deviceTable = *reinterpret_cast<void***>(created.device);
         contextTable = *reinterpret_cast<void***>(created.context);
         if (!CaptureOriginals(proof, deviceTable, deviceSlots, deviceOriginals)) return false;
-        return CaptureOriginals(proof, contextTable, contextSlots, contextOriginals);
+        if (!CaptureOriginals(proof, contextTable, contextSlots, contextOriginals)) return false;
+        return PrepareChain(created);
     }
 
     ContextHookRecord* Publish(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
@@ -339,6 +387,10 @@ struct NativeBindingPreparation
         context->table = contextTable;
         context->generation = generation;
         context->thread = GetCurrentThreadId();
+        residentChain.table = chainTable;
+        residentChain.nextPresent = reinterpret_cast<SwapChainPresent>(chainOriginals[0]);
+        residentChain.nextResize = reinterpret_cast<SwapChainResize>(chainOriginals[1]);
+        residentChain.description = description;
         PublishDeviceNexts(deviceOriginals);
         PublishContextNexts(*context, contextOriginals);
         if (!PrepareRenderer(*context, created))
@@ -349,10 +401,13 @@ struct NativeBindingPreparation
         // Reachable wrappers retain these objects even after generation retirement.
         created.device->AddRef();
         created.context->AddRef();
+        created.swapChain->AddRef();
         residentDevice.owned = created.device;
         context->owned = created.context;
+        residentChain.owned = created.swapChain;
         g_deviceHooks.store(&residentDevice, std::memory_order_release);
         g_contextHooks.store(context, std::memory_order_release);
+        g_swapChainHooks.store(&residentChain, std::memory_order_release);
         return context;
     }
 };
@@ -360,7 +415,8 @@ struct NativeBindingPreparation
 bool InstallNativeSlots(ContextHookRecord& context) noexcept
 {
     if (!InstallSlots(residentDevice, devicePatches)) return false;
-    return InstallSlots(context, contextPatches);
+    if (!InstallSlots(context, contextPatches)) return false;
+    return InstallSlots(residentChain, chainPatches);
 }
 
 bool ValidCreation(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
@@ -378,12 +434,18 @@ bool NativeRoutingOwned() noexcept
     if (*reinterpret_cast<void***>(device->owned) != device->table) return false;
     if (*reinterpret_cast<void***>(context->owned) != context->table) return false;
     const auto owned = [](auto& slot) { return slot.Health() == HookOwnershipState::owned; };
-    return std::all_of(device->owners.begin(), device->owners.end(), owned) &&
+    return NativeChainOwned() && std::all_of(device->owners.begin(), device->owners.end(), owned) &&
         std::all_of(context->owners.begin(), context->owners.end(), owned);
 }
 
 void RevokeNativeRouting() noexcept
 {
+    auto* chain = g_swapChainHooks.load(std::memory_order_acquire);
+    if (chain != nullptr)
+    {
+        chain->admitted.store(false, std::memory_order_release);
+        chain->resourcesReady.store(false, std::memory_order_release);
+    }
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
     record->admitted.store(false, std::memory_order_release);
@@ -397,6 +459,8 @@ bool NativeRoutingInstaller::CompleteCoverage() noexcept
     if (record->busy.test(std::memory_order_acquire)) return false;
     if (!record->queries.CompleteFreshCoverage(record->owned, record->generation)) return false;
     record->admitted.store(true, std::memory_order_release);
+    residentChain.resourcesReady.store(true, std::memory_order_release);
+    residentChain.admitted.store(true, std::memory_order_release);
     return true;
 }
 
@@ -415,6 +479,7 @@ NativeRoutingStatus NativeRoutingInstaller::Install(const CreatedDeviceBinding& 
     if (InstallNativeSlots(*context) && CompleteCoverage())
         return NativeRoutingStatus::installed;
     RevokeNativeRouting();
+    RollbackSlots(residentChain, chainPatches);
     RollbackSlots(*context, contextPatches);
     RollbackSlots(residentDevice, devicePatches);
     return NativeRoutingStatus::installationFailed;
@@ -427,6 +492,7 @@ bool NativeRoutingInstaller::Retire() noexcept
     RevokeNativeRouting();
     if (GetCurrentThreadId() != record->thread) return false;
     if (record->busy.test(std::memory_order_acquire)) return false;
+    if (residentChain.busy.test(std::memory_order_acquire)) return false;
     if (!record->queries.Retire()) return false;
     return record->renderer.Retire();
 }

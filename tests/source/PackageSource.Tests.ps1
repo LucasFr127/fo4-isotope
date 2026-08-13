@@ -32,6 +32,8 @@ $expected = [string[]]@(
     "src/graphics/hooks/ContextHooks.cpp",
     "src/graphics/hooks/DeviceHooks.hpp",
     "src/graphics/hooks/DeviceHooks.cpp",
+    "src/graphics/hooks/SwapChainHooks.hpp",
+    "src/graphics/hooks/SwapChainHooks.cpp",
     "src/graphics/hooks/HookRecords.hpp",
     "src/graphics/hooks/NativeImageSlots.hpp",
     "src/graphics/hooks/NativeImageSlots.cpp",

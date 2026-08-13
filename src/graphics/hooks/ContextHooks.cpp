@@ -309,6 +309,13 @@ private:
     bool previous_{};
 };
 
+ContextHookRecord* OwnedQueryContext(ContextHookRecord& record,
+    ID3D11DeviceContext* context) noexcept
+{
+    if (context != record.owned) return nullptr;
+    return GetCurrentThreadId() == record.thread ? &record : nullptr;
+}
+
 template <class Call, class... Arguments>
 void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... arguments) noexcept
 {
@@ -359,6 +366,7 @@ void STDMETHODCALLTYPE HookBegin(ID3D11DeviceContext* context, ID3D11Asynchronou
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
+    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
     const NativeRoutingScope scope{context};
     if (auto* admitted = scope.Record()) admitted->queries.Begin(context, asynchronous);
     else ForwardContext(record->nextBegin, context, asynchronous);
@@ -368,6 +376,7 @@ void STDMETHODCALLTYPE HookEnd(ID3D11DeviceContext* context, ID3D11Asynchronous*
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
+    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
     const NativeRoutingScope scope{context};
     if (auto* admitted = scope.Record()) admitted->queries.End(context, asynchronous);
     else ForwardContext(record->nextEnd, context, asynchronous);
@@ -378,6 +387,7 @@ void STDMETHODCALLTYPE HookExecuteCommandList(ID3D11DeviceContext* context,
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
+    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
     const NativeRoutingScope scope{context};
     if (auto* admitted = scope.Record()) admitted->queries.ExecuteCommandList(context, commands, restoreState);
     else ForwardContext(record->nextExecuteCommandList, context, commands, restoreState);

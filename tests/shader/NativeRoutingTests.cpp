@@ -3,6 +3,7 @@
 #include "ShippingPixelShaderTests.hpp"
 #include "passes/PresentationPass.hpp"
 #include "hooks/ContextHooks.hpp"
+#include "hooks/SwapChainHooks.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>
@@ -165,6 +166,47 @@ void VerifyCapturedPresentBoundary()
     FO4HDR_CHECK(probe.interval == 2 && probe.flags == DXGI_PRESENT_TEST);
 }
 
+void VerifyNativeFrameLifecycle(PixelFixture& fixture)
+{
+    ScenePassRenderer borrowed;
+    const ScenePassConfiguration configuration{width, height, fixture.whites};
+    FO4HDR_CHECK(borrowed.InitializeBorrowed(fixture.gpu.device.Get(),
+        fixture.gpu.context.Get(), configuration));
+    SceneTextureHandle oldScene;
+    CheckHresult(borrowed.CreateSceneTexture(SceneDescription(), nullptr, oldScene), "Resize scene fixture");
+    FO4HDR_CHECK(borrowed.BeginFrame());
+    const auto firstFrame = borrowed.FrameGeneration();
+    FO4HDR_CHECK(CloseNativePresentFrame(borrowed, DXGI_PRESENT_TEST));
+    FO4HDR_CHECK(OpenNativePresentFrame(borrowed, DXGI_PRESENT_TEST, S_OK));
+    FO4HDR_CHECK(borrowed.FrameGeneration() == firstFrame);
+    PresentationPass inactive;
+    CapturedPresentProbe probe{inactive};
+    auto* chain = reinterpret_cast<IDXGISwapChain*>(&probe);
+    FO4HDR_CHECK(CloseNativePresentFrame(borrowed, DXGI_PRESENT_DO_NOT_WAIT));
+    FO4HDR_CHECK(borrowed.FrameGeneration() == 0);
+    const auto result = CapturedPresentProbe::Native(chain, 3, DXGI_PRESENT_DO_NOT_WAIT);
+    FO4HDR_CHECK(OpenNativePresentFrame(borrowed, DXGI_PRESENT_DO_NOT_WAIT, result));
+    FO4HDR_CHECK(probe.natives == 1 && probe.interval == 3 && probe.flags == DXGI_PRESENT_DO_NOT_WAIT);
+    FO4HDR_CHECK(borrowed.FrameGeneration() > firstFrame);
+    FO4HDR_CHECK(borrowed.RetireForResize());
+    FO4HDR_CHECK(borrowed.RetireForResize());
+    FO4HDR_CHECK(borrowed.Views(oldScene).texture == nullptr);
+    auto invalid = configuration;
+    invalid.width = 0;
+    FO4HDR_CHECK(!borrowed.ReinitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), invalid));
+    FO4HDR_CHECK(!borrowed.Active() && borrowed.FrameGeneration() == 0);
+    FO4HDR_CHECK(borrowed.ReinitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    SceneTextureHandle freshScene;
+    CheckHresult(borrowed.CreateSceneTexture(SceneDescription(), nullptr, freshScene), "Fresh resize scene fixture");
+    FO4HDR_CHECK(borrowed.Views(freshScene).texture != nullptr);
+    FO4HDR_CHECK(borrowed.Views(oldScene).texture == nullptr);
+    FO4HDR_CHECK(borrowed.FrameGeneration() == 0);
+    FO4HDR_CHECK(OpenNativePresentFrame(borrowed, 0, S_OK));
+    FO4HDR_CHECK(borrowed.FrameGeneration() > firstFrame);
+    FO4HDR_CHECK(borrowed.Retire());
+    FO4HDR_CHECK(!borrowed.ReinitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+}
+
 }  // namespace
 
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory)
@@ -172,6 +214,7 @@ void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::p
     VerifyBorrowedRouting(fixture, directory);
     VerifyQueryAdapters(fixture);
     VerifyCapturedPresentBoundary();
+    VerifyNativeFrameLifecycle(fixture);
 }
 
 }  // namespace fo4hdr::tests::gpu

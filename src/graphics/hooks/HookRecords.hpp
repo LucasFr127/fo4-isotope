@@ -32,6 +32,8 @@ using OmSetRenderTargets = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT,
 using OmSetRenderTargetsAndUavs = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT,
     ID3D11RenderTargetView* const*, ID3D11DepthStencilView*, UINT, UINT,
     ID3D11UnorderedAccessView* const*, const UINT*);
+using SwapChainPresent = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
+using SwapChainResize = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 
 // Published once before mutation and retained for process lifetime, including
 // rollback failure. Native predecessors are immutable and table-specific.
@@ -71,10 +73,25 @@ struct ContextHookRecord
     bool internalWork{};
 };
 
+struct SwapChainHookRecord
+{
+    IDXGISwapChain* owned{};
+    void** table{};
+    SwapChainPresent nextPresent{};
+    SwapChainResize nextResize{};
+    std::array<PointerHookOwnership, 2> owners;
+    DXGI_SWAP_CHAIN_DESC description{};
+    std::atomic<bool> admitted{};
+    std::atomic<bool> resourcesReady{};
+    std::atomic_flag busy = ATOMIC_FLAG_INIT;
+};
+
 extern std::atomic<DeviceHookRecord*> g_deviceHooks;
 extern std::atomic<ContextHookRecord*> g_contextHooks;
+extern std::atomic<SwapChainHookRecord*> g_swapChainHooks;
 
 [[nodiscard]] bool NativeRoutingOwned() noexcept;
+[[nodiscard]] bool NativeChainOwned() noexcept;
 void RevokeNativeRouting() noexcept;
 
 // Only the admitted owner thread reads internalWork or the renderer. Other

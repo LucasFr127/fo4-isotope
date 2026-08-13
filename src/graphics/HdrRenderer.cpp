@@ -581,6 +581,16 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
 {
     if (lifetime_.CurrentEpoch() != 0) return false;
+    if (!PrepareResources(device, immediateContext, configuration)) return false;
+    if (!lifetime_.Prepare(2, RendererLifetime::terminalEpoch)) return false;
+    lifetime_.PublishInitial();
+    exposureGeneration_ = lifetime_.CurrentEpoch();
+    return true;
+}
+
+bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
+    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
+{
     if (!ValidInitializationArguments(device, immediateContext, configuration))
         return false;
     if (!CompatibleDevice(device, immediateContext)) return false;
@@ -595,7 +605,6 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     DeveloperExposureResources preparedExposure;
     if (!PrepareReplacementResources(device, prepared, preparedExposure,
             configuration.sceneGrade.imageControls)) return false;
-    if (!lifetime_.Prepare(2, 4)) return false;
     ownerThread_ = std::this_thread::get_id();
     device_ = device;
     context_ = std::move(preparedContext);
@@ -610,8 +619,6 @@ bool ScenePassRenderer::Initialize(ID3D11Device* device,
     height_ = configuration.height;
     replacements_ = std::move(prepared);
     exposureResources_ = std::move(preparedExposure);
-    lifetime_.PublishInitial();
-    exposureGeneration_ = lifetime_.CurrentEpoch();
     return true;
 }
 
@@ -658,29 +665,65 @@ bool ScenePassRenderer::MatchesContext(ID3D11Device* device,
     return SameIdentity(device, device_.Get()) && SameIdentity(immediateContext, context_.Get());
 }
 
+bool ScenePassRenderer::CanResizeBorrowed() const noexcept
+{
+    if (!OnOwnerThread() || invoking_) return false;
+    if (!borrowedContext_) return false;
+    const auto epoch = lifetime_.CurrentEpoch();
+    return epoch != 0 && epoch != RendererLifetime::terminalEpoch;
+}
+
+bool ScenePassRenderer::RetireForResize() noexcept
+{
+    if (!CanResizeBorrowed()) return false;
+    const auto epoch = lifetime_.CurrentEpoch();
+    if ((epoch & 1) == 0) return true;
+    const auto transition = lifetime_.BeginResize(epoch);
+    ReleaseResources();
+    return transition != RendererLifetime::terminalEpoch;
+}
+
+bool ScenePassRenderer::ReinitializeBorrowed(ID3D11Device* device,
+    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
+{
+    if (!CanResizeBorrowed()) return false;
+    const auto transition = lifetime_.CurrentEpoch();
+    if ((transition & 1) != 0) return false;
+    if (!SameIdentity(device, device_.Get()) || !SameIdentity(immediateContext, context_.Get())) return false;
+    if (!PrepareResources(device, immediateContext, configuration)) return false;
+    lifetime_.CompleteResize(transition);
+    exposureGeneration_ = lifetime_.CurrentEpoch();
+    return Active();
+}
+
 bool ScenePassRenderer::Retire() noexcept
 {
     if (context_ && !OnOwnerThread()) return false;
     if (invoking_) return false;
+    lifetime_.Retire();
+    // Scoped draw bindings already restored; only the exclusive fixture owns all state.
+    ClearExclusiveState();
+    ReleaseResources();
+    context_.Reset();
+    device_.Reset();
+    borrowedContext_ = false;
+    return true;
+}
+
+void ScenePassRenderer::ReleaseResources() noexcept
+{
     ClearLineage();
     frameOpen_ = false;
     ResetExposurePolicy();
     exposureGeneration_ = 0;
-    lifetime_.Retire();
-    // Scoped draw bindings already restored; only the exclusive fixture owns all state.
-    ClearExclusiveState();
     exposureResources_.Reset();
     for (auto& scene : scenes_) scene = {};
     for (auto& shader : observed_) shader = {};
     for (auto& shader : replacements_) shader.Reset();
     videoConstants_.Reset();
     ResetOperatorResources();
-    context_.Reset();
-    device_.Reset();
     sceneCount_ = 0;
     observedCount_ = 0;
-    borrowedContext_ = false;
-    return true;
 }
 
 const ScenePassRenderer::SceneTexture* ScenePassRenderer::Resolve(

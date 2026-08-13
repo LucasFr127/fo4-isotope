@@ -104,7 +104,8 @@ target("Fallout4HDR")
         "src/tonemap/aces2/Aces2Tables.cpp",
         "src/graphics/d3d11/ContextQuerySafety.cpp",
         "src/graphics/hooks/ContextHooks.cpp",
-        "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp")
+        "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
+        "src/graphics/hooks/SwapChainHooks.cpp")
     add_syslinks("version")
 target_end()
 
@@ -205,6 +206,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/d3d11/ContextQuerySafety.cpp",
         "src/graphics/hooks/ContextHooks.cpp", "tests/shader/NativeRoutingTests.cpp",
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
+        "src/graphics/hooks/SwapChainHooks.cpp",
         "src/hooks/HookOwnership.cpp",
         "src/output/PerformanceStatistics.cpp",
         "src/graphics/passes/PresentationPass.cpp",

@@ -156,10 +156,16 @@ public:
         borrowedContext_ = true;
         return true;
     }
+    // Cold owner-thread resize first retires all owned resource views. A successful
+    // native resize may rebuild this same borrowed context under a newer epoch;
+    // failure stays unavailable. Permanent Retire cannot be restarted.
+    [[nodiscard]] bool RetireForResize() noexcept;
+    [[nodiscard]] bool ReinitializeBorrowed(ID3D11Device* device,
+        ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept;
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool Active() const noexcept
     {
-        return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
+        return OnOwnerThread() && (lifetime_.CurrentEpoch() & 1) != 0;
     }
     [[nodiscard]] bool MatchesContext(ID3D11Device* device,
         ID3D11DeviceContext* immediateContext) const noexcept;
@@ -284,6 +290,10 @@ private:
     {
         return ownerThread_ == std::this_thread::get_id();
     }
+    [[nodiscard]] bool PrepareResources(ID3D11Device* device,
+        ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept;
+    void ReleaseResources() noexcept;
+    [[nodiscard]] bool CanResizeBorrowed() const noexcept;
     [[nodiscard]] bool CanInvoke(FiniteDrawInvocation invocation) const noexcept;
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
