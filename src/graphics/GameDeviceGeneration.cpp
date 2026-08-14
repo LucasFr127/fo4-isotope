@@ -6,6 +6,7 @@
 
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
 #include "Fallout4HDR/hooks/PeIat.hpp"
+#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #include <Windows.h>
 #include <wrl/client.h>
@@ -71,6 +72,7 @@ void* expectedExport{};
 
 void DisableBinding() noexcept
 {
+    RevokeSettingsInputHost();
     static_cast<void>(publication.exchange(disabledToken, std::memory_order_acq_rel));
 }
 
@@ -123,6 +125,7 @@ bool CaptureCandidate(const CreatedDeviceBinding& created, DeviceCandidate& cand
 
 bool RevokeForReplacement(DWORD thread) noexcept
 {
+    RevokeSettingsInputHost();
     if (binding.thread != 0 && binding.thread != thread)
     {
         DisableBinding();
@@ -140,6 +143,16 @@ bool PrepareNativeRouting(const CreatedDeviceBinding& created, std::uint64_t gen
     if (NativeRoutingInstaller::Retire()) return true;
     DisableBinding();
     return false;
+}
+
+void PublishBoundInputWindow(std::uint64_t generation) noexcept
+{
+    if (binding.chain == nullptr) return;
+    DXGI_SWAP_CHAIN_DESC description{};
+    if (FAILED(binding.chain->GetDesc(&description))) return;
+    (void)PublishSettingsInputHost(description.OutputWindow, generation);
+    (void)TryActivateSettingsInputHostOnCurrentThread();
+    if (publication.load(std::memory_order_acquire) != generation) RevokeSettingsInputHost();
 }
 
 bool ObserveDevice(const CreatedDeviceBinding& created) noexcept
@@ -175,6 +188,7 @@ bool ObserveDevice(const CreatedDeviceBinding& created) noexcept
         binding.ReleaseOwned();
         return false;
     }
+    PublishBoundInputWindow(generation);
     return true;
 }
 

@@ -82,4 +82,20 @@ private:
     bool toggleArmed_{};
 };
 
+// One process-resident HWND/generation. Publish on the cold renderer owner;
+// activation verifies and runs on the HWND owner. Retirement is passive and
+// never resets a queue from another thread or restores a foreign subclass.
+// Activation requires cooperative exclusive subclass installation: no foreign
+// concurrent WNDPROC mutation. A mismatched exchange revokes admission; keeping
+// its captured forwarding chain resident remains the interfering owner's duty.
+[[nodiscard]] bool PublishSettingsInputHost(HWND window, std::uint64_t generation) noexcept;
+[[nodiscard]] bool TryActivateSettingsInputHostOnCurrentThread() noexcept;
+[[nodiscard]] HdrSettingsInput* SettingsInputForGeneration(std::uint64_t generation) noexcept;
+// A real consumer opts in only after readiness; every readiness transition and
+// revocation requires input/render callbacks and captured gestures quiescent.
+// Without opt-in every native message, including F10, continues through the
+// captured predecessor.
+[[nodiscard]] bool SetSettingsInputHostConsumerReady(std::uint64_t generation, bool ready) noexcept;
+void RevokeSettingsInputHost() noexcept;
+
 }  // namespace fo4hdr

@@ -2,6 +2,7 @@
 
 #include "GameStateObserver.hpp"
 #include "GameSnapshotStore.hpp"
+#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #include <F4SE/F4SE.h>
 #include <Windows.h>
@@ -110,6 +111,22 @@ void ScheduleCollectedRequest(std::uint64_t resourceGeneration)
     return type < events.size() ? events[type] : Event::None;
 }
 
+void ActivateSettingsInputAtLifecycle(fo4hdr::GameLifecycleEvent event, bool succeeded) noexcept
+{
+    if (!succeeded) return;
+    using Event = fo4hdr::GameLifecycleEvent;
+    constexpr std::array opportunities{Event::InputLoaded, Event::NewGame,
+        Event::GameLoaded, Event::GameDataReady};
+    for (const auto opportunity : opportunities)
+    {
+        if (event == opportunity)
+        {
+            (void)fo4hdr::TryActivateSettingsInputHostOnCurrentThread();
+            return;
+        }
+    }
+}
+
 void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexcept
 {
     try
@@ -126,6 +143,7 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
         {
             return;
         }
+        ActivateSettingsInputAtLifecycle(event, *outcome);
         std::uint64_t resourceGeneration{};
         snapshotStore.Update([event, succeeded = *outcome, &resourceGeneration](
             fo4hdr::GameHdrSnapshot& snapshot) noexcept {

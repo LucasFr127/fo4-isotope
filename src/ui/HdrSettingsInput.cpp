@@ -336,4 +336,155 @@ HdrSettingsInputSnapshot HdrSettingsInput::Drain(std::span<HdrSettingsInputMessa
     return snapshot;
 }
 
+namespace {
+
+enum class HostState { empty, preparing, requested, installing, installed, retired };
+
+struct SettingsInputHost
+{
+    std::atomic<HostState> state{HostState::empty};
+    std::atomic<WNDPROC> next{};
+    std::atomic<bool> consumerReady{};
+    HWND window{};
+    DWORD windowThread{};
+    DWORD consumerThread{};
+    std::uint64_t generation{};
+    HdrSettingsInput input;
+};
+
+// No shutdown unhook or queue reset: reachable callback/record code is pinned.
+SettingsInputHost inputHost;
+
+LRESULT CALLBACK SettingsHostWindowProcedure(HWND window, UINT message,
+    WPARAM key, LPARAM details) noexcept;
+
+bool PinProcedure(WNDPROC procedure) noexcept
+{
+    HMODULE module{};
+    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+        reinterpret_cast<LPCWSTR>(procedure), &module) != 0 && module != nullptr;
+}
+
+bool NativeWindow(HWND window, DWORD& thread) noexcept
+{
+    if (!window || !IsWindow(window)) return false;
+    DWORD process{};
+    thread = GetWindowThreadProcessId(window, &process);
+    return thread != 0 && process == GetCurrentProcessId();
+}
+
+bool HostMessage(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
+{
+    if (inputHost.state.load(std::memory_order_acquire) != HostState::installed) return false;
+    if (window != inputHost.window) return false;
+    const auto consumed = inputHost.input.Observe(window, message, key, details);
+    return consumed && inputHost.consumerReady.load(std::memory_order_acquire);
+}
+
+LRESULT ForwardHostMessage(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
+{
+    const auto next = inputHost.next.load(std::memory_order_acquire);
+    if (!next || next == SettingsHostWindowProcedure)
+        return DefWindowProcW(window, message, key, details);
+    try { return CallWindowProcW(next, window, message, key, details); }
+    catch (...) { return 0; }
+}
+
+LRESULT CALLBACK SettingsHostWindowProcedure(HWND window, UINT message,
+    WPARAM key, LPARAM details) noexcept
+{
+    const auto consumed = HostMessage(window, message, key, details);
+    if (message == WM_NCDESTROY) RevokeSettingsInputHost();
+    if (!consumed) return ForwardHostMessage(window, message, key, details);
+    return message == WM_UNICHAR || message == WM_XBUTTONDOWN ||
+        message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK ? TRUE : 0;
+}
+
+bool PrepareHostProcedure(WNDPROC& expected) noexcept
+{
+    expected = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(inputHost.window, GWLP_WNDPROC));
+    if (!expected || expected == SettingsHostWindowProcedure) return false;
+    if (!PinProcedure(expected) || !PinProcedure(SettingsHostWindowProcedure)) return false;
+    return inputHost.input.Initialize(inputHost.window, inputHost.consumerThread);
+}
+
+bool InstallHostProcedure() noexcept
+{
+    WNDPROC expected{};
+    if (!PrepareHostProcedure(expected)) return false;
+    // Passive forwarding exists before the HWND-owner subclass exchange.
+    inputHost.next.store(expected, std::memory_order_release);
+    SetLastError(ERROR_SUCCESS);
+    const auto old = SetWindowLongPtrW(inputHost.window, GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(SettingsHostWindowProcedure));
+    if (old == 0 && GetLastError() != ERROR_SUCCESS) return false;
+    const auto captured = reinterpret_cast<WNDPROC>(old);
+    if (!captured || captured == SettingsHostWindowProcedure) return false;
+    inputHost.next.store(captured, std::memory_order_release);
+    // Direct subclass exchange is not compare-and-swap. Interference revokes
+    // admission without overwriting the returned native forwarding chain.
+    return captured == expected;
+}
+
+}  // namespace
+
+bool PublishSettingsInputHost(HWND window, std::uint64_t generation) noexcept
+{
+    if (generation == 0) return false;
+    DWORD thread{};
+    if (!NativeWindow(window, thread)) return false;
+    auto expected = HostState::empty;
+    if (!inputHost.state.compare_exchange_strong(expected, HostState::preparing,
+            std::memory_order_acq_rel)) return false;
+    inputHost.window = window;
+    inputHost.windowThread = thread;
+    inputHost.consumerThread = GetCurrentThreadId();
+    inputHost.generation = generation;
+    expected = HostState::preparing;
+    return inputHost.state.compare_exchange_strong(expected, HostState::requested,
+        std::memory_order_release);
+}
+
+bool TryActivateSettingsInputHostOnCurrentThread() noexcept
+{
+    if (inputHost.state.load(std::memory_order_acquire) != HostState::requested) return false;
+    DWORD thread{};
+    if (!NativeWindow(inputHost.window, thread) || thread != GetCurrentThreadId()) return false;
+    if (thread != inputHost.windowThread) return false;
+    auto expected = HostState::requested;
+    if (!inputHost.state.compare_exchange_strong(expected, HostState::installing,
+            std::memory_order_acq_rel)) return false;
+    if (!InstallHostProcedure())
+    {
+        RevokeSettingsInputHost();
+        return false;
+    }
+    expected = HostState::installing;
+    return inputHost.state.compare_exchange_strong(expected, HostState::installed,
+        std::memory_order_release);
+}
+
+HdrSettingsInput* SettingsInputForGeneration(std::uint64_t generation) noexcept
+{
+    if (inputHost.state.load(std::memory_order_acquire) != HostState::installed) return nullptr;
+    if (inputHost.generation != generation || inputHost.consumerThread != GetCurrentThreadId()) return nullptr;
+    return &inputHost.input;
+}
+
+bool SetSettingsInputHostConsumerReady(std::uint64_t generation, bool ready) noexcept
+{
+    auto* input = SettingsInputForGeneration(generation);
+    if (!input) return false;
+    if (!ready) input->SetCapture(false, false, false);
+    inputHost.consumerReady.store(ready, std::memory_order_release);
+    return true;
+}
+
+void RevokeSettingsInputHost() noexcept
+{
+    if (inputHost.state.load(std::memory_order_acquire) == HostState::empty) return;
+    inputHost.consumerReady.store(false, std::memory_order_release);
+    inputHost.state.store(HostState::retired, std::memory_order_release);
+}
+
 }  // namespace fo4hdr
