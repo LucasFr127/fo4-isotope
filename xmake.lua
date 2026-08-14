@@ -51,8 +51,11 @@ target("imgui-core")
     add_files(path.join(dependency_profile.imgui_source, "imgui.cpp"),
         path.join(dependency_profile.imgui_source, "imgui_draw.cpp"),
         path.join(dependency_profile.imgui_source, "imgui_tables.cpp"),
-        path.join(dependency_profile.imgui_source, "imgui_widgets.cpp"))
-    add_syslinks("user32", "kernel32", "shell32", "imm32", { public = true })
+        path.join(dependency_profile.imgui_source, "imgui_widgets.cpp"),
+        path.join(dependency_profile.imgui_source, "backends/imgui_impl_dx11.cpp"),
+        path.join(dependency_profile.imgui_source, "backends/imgui_impl_win32.cpp"))
+    add_syslinks("user32", "kernel32", "shell32", "imm32", "d3d11", "d3dcompiler",
+        "gdi32", "dwmapi", { public = true })
 target_end()
 
 target("commonlib-shared")
@@ -82,8 +85,8 @@ target_end()
 
 target("Fallout4HDR")
     set_kind("shared")
-    add_deps("commonlibf4", "fo4hdr-shaders")
-    add_includedirs("include", "src/runtime", "src/graphics", "build/include")
+    add_deps("commonlibf4", "imgui-core", "fo4hdr-shaders")
+    add_includedirs("include", "src/runtime", "src/graphics", "src/ui", "build/include")
     add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
@@ -106,6 +109,9 @@ target("Fallout4HDR")
         "src/graphics/hooks/ContextHooks.cpp",
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
         "src/graphics/hooks/SwapChainHooks.cpp")
+    add_files("src/ui/SettingsPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
+        "src/graphics/passes/PresentationPass.cpp", "src/graphics/OperatorLutWorker.cpp",
+        "src/config/SettingsPersistence.cpp")
     add_syslinks("version")
 target_end()
 
@@ -219,7 +225,8 @@ target("fo4hdr-shader-tests")
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/config/HdrSettings.cpp", "src/config/PluginConfiguration.cpp",
-        "src/ui/SettingsPanel.cpp", "tests/shader/SettingsPanelTests.cpp",
+        "src/ui/SettingsPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
+        "tests/shader/SettingsPanelTests.cpp",
         "src/graphics/resources/DeveloperExposureResources.cpp",
         "tests/shader/DeveloperExposureTests.cpp",
         "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",

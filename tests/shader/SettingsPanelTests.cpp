@@ -2,9 +2,15 @@
 
 #include "SettingsPanel.hpp"
 #include "LiveSettings.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "ShippingPixelShaderTests.hpp"
 #include "TestHarness.hpp"
 
 #include <imgui.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
 
 namespace fo4hdr::tests {
 namespace {
@@ -91,17 +97,125 @@ void RenderSettingsFrame(OperatorLutAlgorithm algorithm, LiveSettings& live)
     FO4HDR_CHECK(editable == before);
 }
 
+thread_local HdrSettingsInput* ownedInput{};
+
+LRESULT CALLBACK SettingsTestWindowProcedure(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
+{
+    if (ownedInput && ownedInput->Observe(window, message, key, details))
+        return message == WM_UNICHAR || message == WM_XBUTTONDOWN || message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK ? TRUE : 0;
+    return DefWindowProcW(window, message, key, details);
+}
+
+class OwnedSettingsWindow
+{
+public:
+    OwnedSettingsWindow()
+    {
+        WNDCLASSW description{};
+        description.lpfnWndProc = SettingsTestWindowProcedure;
+        description.hInstance = GetModuleHandleW(nullptr);
+        description.lpszClassName = L"Fallout4HDR.SettingsBackendTest";
+        atom_ = RegisterClassW(&description);
+        FO4HDR_CHECK(atom_ != 0);
+        if (!atom_) return;
+        window_ = CreateWindowExW(0, description.lpszClassName, L"HDR settings test",
+            WS_OVERLAPPEDWINDOW, 0, 0, 680, 1040, nullptr, nullptr, description.hInstance, nullptr);
+        FO4HDR_CHECK(window_ != nullptr);
+        if (!window_) return;
+        FO4HDR_CHECK(input.Initialize(window_));
+        ownedInput = &input;
+    }
+
+    ~OwnedSettingsWindow()
+    {
+        ownedInput = nullptr;
+        (void)input.Stop();
+        if (window_) (void)DestroyWindow(window_);
+        if (atom_) (void)UnregisterClassW(L"Fallout4HDR.SettingsBackendTest", GetModuleHandleW(nullptr));
+    }
+
+    HWND Window() const noexcept { return window_; }
+    HdrSettingsInput input;
+private:
+    HWND window_{};
+    ATOM atom_{};
+};
+
+void CheckOverlayPixels(const gpu::Device& device, const SettingsWindowOverlay& overlay)
+{
+    FO4HDR_CHECK(overlay.source != nullptr);
+    if (!overlay.source) return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    overlay.source->GetResource(&resource);
+    gpu::CheckHresult(resource.As(&texture), "Settings overlay texture");
+    const auto pixels = gpu::detail::ReadScene(device, texture.Get());
+    bool contribution{};
+    for (const auto& pixel : pixels)
+    {
+        FO4HDR_CHECK(std::isfinite(pixel.alpha) && pixel.alpha >= 0 && pixel.alpha <= 1);
+        FO4HDR_CHECK(std::isfinite(pixel.red) && pixel.red >= 0);
+        FO4HDR_CHECK(std::isfinite(pixel.green) && pixel.green >= 0);
+        FO4HDR_CHECK(std::isfinite(pixel.blue) && pixel.blue >= 0);
+        contribution |= pixel.alpha > 0;
+    }
+    FO4HDR_CHECK(contribution);
+}
+
+void CheckCapturedText(HdrSettingsInput& input, HWND window)
+{
+    constexpr LPARAM scan = 0x1E << 16;
+    input.SetCapture(true, true, false);
+    FO4HDR_CHECK(input.Observe(window, WM_KEYDOWN, 'A', scan));
+    FO4HDR_CHECK(input.Observe(window, WM_CHAR, 'A', scan));
+    input.SetCapture(false, false, false);
+    FO4HDR_CHECK(input.Observe(window, WM_KEYUP, 'A', scan | (1ULL << 31)));
+    std::array<HdrSettingsInputMessage, HdrSettingsInput::capacity> messages;
+    const auto snapshot = input.Drain(messages);
+    FO4HDR_CHECK(snapshot.messages == 3);
+    FO4HDR_CHECK(messages[1].message == WM_CHAR && messages[1].key == 'A');
+}
+void RenderOwnedBackend()
+{
+    OwnedSettingsWindow window;
+    if (!window.Window()) return;
+    CheckCapturedText(window.input, window.Window());
+    RECT client{};
+    FO4HDR_CHECK(GetClientRect(window.Window(), &client));
+    const auto device = gpu::CreateWarpDevice();
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context;
+    gpu::CheckHresult(device.context.As(&context), "Settings Context1");
+    LiveSettings live;
+    SettingsWindow settings;
+    const SettingsWindowConfiguration configuration{window.Window(),
+        static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), &window.input, &live};
+    FO4HDR_CHECK(settings.Initialize(device.device.Get(), context.Get(), configuration));
+    (void)SendMessageW(window.Window(), WM_SETFOCUS, 0, 0);
+    (void)SendMessageW(window.Window(), WM_KEYDOWN, VK_F10, 0);
+    (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, 1ULL << 31);
+    const auto overlay = settings.Draw(1, SettingsWindowScope::qualifiedExclusive);
+    FO4HDR_CHECK(overlay.frame == 1);
+    CheckOverlayPixels(device, overlay);
+    FO4HDR_CHECK(settings.Draw(1, SettingsWindowScope::qualifiedExclusive).source == overlay.source);
+    (void)SendMessageW(window.Window(), WM_KILLFOCUS, 0, 0);
+    FO4HDR_CHECK(settings.Draw(2, SettingsWindowScope::qualifiedExclusive).source == nullptr);
+    FO4HDR_CHECK(settings.Retire());
+}
+
 }  // namespace
 
 void RunSettingsPanelTests()
 {
-    const SettingsFrameContext context;
-    LiveSettings live;
-    for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX,
-             OperatorLutAlgorithm::gt7})
-        RenderSettingsFrame(algorithm, live);
-    // The caller dispatches panel intent through the real unavailable owner.
-    DispatchPanelActions({true, true}, live, PluginConfiguration{});
+    {
+        const SettingsFrameContext context;
+        LiveSettings live;
+        for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX,
+                 OperatorLutAlgorithm::gt7})
+            RenderSettingsFrame(algorithm, live);
+        // The caller dispatches panel intent through the real unavailable owner.
+        DispatchPanelActions({true, true}, live, PluginConfiguration{});
+    }
+    RenderOwnedBackend();
 }
 
 }  // namespace fo4hdr::tests

@@ -150,6 +150,10 @@ $files = [string[]]@(
     "config/Fallout4HDR.ini",
     "tests/unit/config/HdrPersistenceTests.cpp",
     "src/graphics/LiveSettings.hpp",
+    "include/Fallout4HDR/ui/HdrSettingsInput.hpp",
+    "include/Fallout4HDR/ui/SettingsWindow.hpp",
+    "src/ui/HdrSettingsInput.cpp",
+    "src/ui/SettingsWindow.cpp",
     "src/ui/SettingsPanel.hpp",
     "src/ui/SettingsPanel.cpp",
     "tests/shader/SettingsPanelTests.cpp",
@@ -211,7 +215,8 @@ $imguiSource = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
     else { [IO.Path]::Combine($root, "lib/imgui") }
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
-    "imstb_truetype.h", "LICENSE.txt")
+    "imstb_truetype.h", "LICENSE.txt", "backends/imgui_impl_dx11.cpp",
+    "backends/imgui_impl_dx11.h", "backends/imgui_impl_win32.cpp", "backends/imgui_impl_win32.h")
 $temporary = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-dependencies-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temporary) | Out-Null
 try {
@@ -329,7 +334,7 @@ try {
                     }
                     finally { $memory.Dispose() }
                 }
-                if ($seen.Count -ne $imguiFiles.Length) { throw "Incomplete Dear ImGui core source." }
+                if ($seen.Count -ne $imguiFiles.Length) { throw "Incomplete Dear ImGui core/backend source." }
             }
             finally { $tar.Dispose() }
         }

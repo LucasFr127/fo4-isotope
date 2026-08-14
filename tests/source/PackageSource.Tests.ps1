@@ -132,6 +132,10 @@ $expected = [string[]]@(
     "config/Fallout4HDR.ini",
     "tests/unit/config/HdrPersistenceTests.cpp",
     "src/graphics/LiveSettings.hpp",
+    "include/Fallout4HDR/ui/HdrSettingsInput.hpp",
+    "include/Fallout4HDR/ui/SettingsWindow.hpp",
+    "src/ui/HdrSettingsInput.cpp",
+    "src/ui/SettingsWindow.cpp",
     "src/ui/SettingsPanel.hpp",
     "src/ui/SettingsPanel.cpp",
     "tests/shader/SettingsPanelTests.cpp",
@@ -160,7 +164,8 @@ $expected = [string[]]@(
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
-    "imstb_truetype.h", "LICENSE.txt")
+    "imstb_truetype.h", "LICENSE.txt", "backends/imgui_impl_dx11.cpp",
+    "backends/imgui_impl_dx11.h", "backends/imgui_impl_win32.cpp", "backends/imgui_impl_win32.h")
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
 $untracked = [IO.Path]::Combine($root, "lib/commonlibf4/src/PackageSourceUntracked-" + [Guid]::NewGuid() + ".cpp")
@@ -243,7 +248,7 @@ try {
                 finally { $memory.Dispose(); $entryStream.Dispose() }
             }
             if ($counts.Project -ne $expected.Length -or $counts.Root -ne 1584 -or
-                $counts.Shared -ne 110 -or $counts.Spdlog -ne 97 -or $counts.ImGui -ne 11) {
+                $counts.Shared -ne 110 -or $counts.Spdlog -ne 97 -or $counts.ImGui -ne 15) {
                 throw "Incomplete exact source closure."
             }
             foreach ($required in @("lib/commonlibf4/include/F4SE/Impl/PCH.h",

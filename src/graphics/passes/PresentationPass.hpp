@@ -14,6 +14,9 @@
 
 namespace fo4hdr {
 
+class SettingsWindow;
+struct SettingsWindowOverlay;
+
 enum class PresentationScope
 {
     unavailable,
@@ -27,6 +30,8 @@ struct PresentationConfiguration
     float displayPeakNits{};
     ScenePassRenderer* scenes{};
     LayerWhiteConfiguration whites;
+    // Borrowed settings owner uses this same context/thread and outlives this consumer.
+    SettingsWindow* settingsWindow{};
 };
 
 // Serialized initialization-thread calls on a genuine exclusively owned context.
@@ -111,6 +116,10 @@ private:
     [[nodiscard]] ID3D11UnorderedAccessView* CurrentTarget() const noexcept;
     [[nodiscard]] bool QualifiedTarget(ID3D11UnorderedAccessView* terminal,
         ID3D11Texture2D* scene) const noexcept;
+    [[nodiscard]] bool QualifiedSettingsSource(ID3D11ShaderResourceView* source,
+        ID3D11UnorderedAccessView* terminal) const noexcept;
+    [[nodiscard]] bool ReadSettingsOverlay(std::uint64_t frame,
+        ID3D11UnorderedAccessView* terminal, SettingsWindowOverlay& overlay) noexcept;
     void ComposeChain(PresentationScope scope) noexcept;
     [[nodiscard]] bool ComposeHdrChain(ID3D11UnorderedAccessView* target,
         PresentationScope scope) noexcept;
@@ -134,7 +143,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader_;
-    std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 2> constants_;
+    std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 4> constants_;
     std::array<Microsoft::WRL::ComPtr<ID3D11ComputeShader>, 2> layerShaders_;
     std::array<LinearLayer, 2> layers_;
     LinearLayer sdrProxy_;

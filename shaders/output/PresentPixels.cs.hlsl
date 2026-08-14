@@ -4,6 +4,7 @@
 Texture2D<float4> ScenePixels : register(t0);
 Texture2D<float4> BackdropPixels : register(t1);
 Texture2D<float4> HudPixels : register(t2);
+Texture2D<float4> SettingsPixels : register(t3);
 RWTexture2D<float4> PresentTarget : register(u0);
 
 cbuffer PresentFrame : register(b0)
@@ -12,7 +13,8 @@ cbuffer PresentFrame : register(b0)
     float DisplayPeakNits;
     uint SceneDomain;
     float UiWhiteNits;
-    float3 Reserved;
+    uint SettingsPresent;
+    uint2 Reserved;
 };
 
 [numthreads(8, 8, 1)]
@@ -46,7 +48,12 @@ void main(uint3 pixel : SV_DispatchThreadID)
     float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrBt709ToBt2020Nits(scene, 203.0f);
     light = Fo4HdrBlendLinearLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
     light = Fo4HdrBlendLinearLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
+    if (SettingsPresent != 0u)
+    {
+        const float4 settings = Fo4HdrPrepareAuthoredLayer(SettingsPixels.Load(int3(pixel.xy, 0)), false);
+        light = Fo4HdrBlendLinearLayer(light, settings, UiWhiteNits);
+    }
     const float3 contained = Fo4HdrBoundLight(light, DisplayPeakNits);
-    // Encode only at the terminal UAV; scene and layer storage remain linear FP16.
+    // Encode only at the terminal UAV, after all contributions are linear light.
     PresentTarget[pixel.xy] = float4(Fo4HdrEncodeAbsoluteLight(contained), 1.0f);
 }
