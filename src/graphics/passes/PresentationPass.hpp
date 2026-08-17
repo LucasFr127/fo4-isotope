@@ -16,6 +16,7 @@ namespace fo4hdr {
 
 class SettingsWindow;
 struct SettingsWindowOverlay;
+class CompletedNativeUiLayers;
 
 enum class PresentationScope
 {
@@ -76,6 +77,10 @@ public:
     // or the next producer frame, so failure cannot silently discard required UI.
     [[nodiscard]] bool PrepareLayers(ID3D11ShaderResourceView* backdrop,
         ID3D11ShaderResourceView* hud, PresentationScope scope) noexcept;
+    // Only a completed capture packet admits FP16 authored backdrop codes.
+    // Its owner/frame qualification remains live through this guarded preparation.
+    [[nodiscard]] bool PrepareNativeLayers(const CompletedNativeUiLayers& layers,
+        PresentationScope scope) noexcept;
     // Caller qualifies a completed authored SDR frame, independently of texture format.
     // Copies matching R8_UNORM codes into private FP16 storage for this open frame;
     // no caller view is retained. Intercepted pixels need separate semantic proof.
@@ -128,9 +133,11 @@ private:
     [[nodiscard]] bool CopySdrCodes(ID3D11ShaderResourceView* source,
         ID3D11UnorderedAccessView* target) noexcept;
     [[nodiscard]] bool QualifiedLayerSources(ID3D11ShaderResourceView* backdrop,
-        ID3D11ShaderResourceView* hud) const noexcept;
+        ID3D11ShaderResourceView* hud, DXGI_FORMAT backdropFormat) const noexcept;
     [[nodiscard]] bool QualifiedLayerSource(ID3D11ShaderResourceView* source,
-        Microsoft::WRL::ComPtr<IUnknown>& identity) const noexcept;
+        Microsoft::WRL::ComPtr<IUnknown>& identity, DXGI_FORMAT format) const noexcept;
+    [[nodiscard]] bool PrepareLayerSources(ID3D11ShaderResourceView* backdrop,
+        ID3D11ShaderResourceView* hud, PresentationScope scope, DXGI_FORMAT backdropFormat) noexcept;
     [[nodiscard]] static bool PrepareLayer(ID3D11Device* device,
         const PresentationConfiguration& configuration, LinearLayer& prepared) noexcept;
     void ClearLayers() noexcept;

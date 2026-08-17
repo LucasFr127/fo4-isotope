@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PresentationPass.hpp"
+#include "ObservedDraw.hpp"
 
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
@@ -461,32 +462,33 @@ bool SelectedTexture(ID3D11Texture2D* scene,
 }
 
 bool CodedLayerDescription(const D3D11_TEXTURE2D_DESC& value,
-    const PresentationConfiguration& configuration) noexcept
+    const PresentationConfiguration& configuration, DXGI_FORMAT format) noexcept
 {
-    if (value.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
+    if (value.Format != format) return false;
     if (!DefaultLayerStorage(value, configuration)) return false;
     return (value.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
 }
 
-bool CodedLayerView(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
+bool CodedLayerView(const D3D11_SHADER_RESOURCE_VIEW_DESC& view, DXGI_FORMAT format) noexcept
 {
-    if (view.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
+    if (view.Format != format) return false;
     if (view.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
     return view.Texture2D.MostDetailedMip == 0 && view.Texture2D.MipLevels == 1;
 }
 
 bool CodedLayerSource(ID3D11ShaderResourceView* source, ID3D11Device* device,
-    const PresentationConfiguration& configuration) noexcept
+    const PresentationConfiguration& configuration,
+    DXGI_FORMAT format = DXGI_FORMAT_R8G8B8A8_UNORM) noexcept
 {
     if (source == nullptr) return true;
     D3D11_SHADER_RESOURCE_VIEW_DESC view{};
     source->GetDesc(&view);
-    if (!CodedLayerView(view)) return false;
+    if (!CodedLayerView(view, format)) return false;
     const auto texture = DeviceTexture(source, device);
     if (!texture) return false;
     D3D11_TEXTURE2D_DESC description{};
     texture->GetDesc(&description);
-    return CodedLayerDescription(description, configuration);
+    return CodedLayerDescription(description, configuration, format);
 }
 
 bool SettingsViewLayout(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
@@ -771,9 +773,9 @@ bool PresentationPass::ReadSettingsOverlay(std::uint64_t frame,
 }
 
 bool PresentationPass::QualifiedLayerSource(ID3D11ShaderResourceView* source,
-    ComPtr<IUnknown>& identity) const noexcept
+    ComPtr<IUnknown>& identity, DXGI_FORMAT format) const noexcept
 {
-    if (!CodedLayerSource(source, device_.Get(), configuration_)) return false;
+    if (!CodedLayerSource(source, device_.Get(), configuration_, format)) return false;
     if (source == nullptr) return true;
     identity = Identity(Resource(source).Get());
     if (!identity) return false;
@@ -786,11 +788,11 @@ bool PresentationPass::QualifiedLayerSource(ID3D11ShaderResourceView* source,
 }
 
 bool PresentationPass::QualifiedLayerSources(ID3D11ShaderResourceView* backdrop,
-    ID3D11ShaderResourceView* hud) const noexcept
+    ID3D11ShaderResourceView* hud, DXGI_FORMAT backdropFormat) const noexcept
 {
     std::array<ComPtr<IUnknown>, 2> identities;
-    if (!QualifiedLayerSource(backdrop, identities[0])) return false;
-    if (!QualifiedLayerSource(hud, identities[1])) return false;
+    if (!QualifiedLayerSource(backdrop, identities[0], backdropFormat)) return false;
+    if (!QualifiedLayerSource(hud, identities[1], DXGI_FORMAT_R8G8B8A8_UNORM)) return false;
     if (!identities[0] || !identities[1]) return true;
     return identities[0].Get() != identities[1].Get();
 }
@@ -805,12 +807,32 @@ void PresentationPass::ClearLayers() noexcept
 bool PresentationPass::PrepareLayers(ID3D11ShaderResourceView* backdrop,
     ID3D11ShaderResourceView* hud, PresentationScope scope) noexcept
 {
+    return PrepareLayerSources(backdrop, hud, scope, DXGI_FORMAT_R8G8B8A8_UNORM);
+}
+
+bool PresentationPass::PrepareNativeLayers(const CompletedNativeUiLayers& layers,
+    PresentationScope scope) noexcept
+{
+    if (!CanExecute(scope)) return false;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (!layers.ReadyFor(frame, configuration_.scenes))
+    {
+        layerFrame_ = 0;
+        layerFailureFrame_ = frame;
+        return false;
+    }
+    return PrepareLayerSources(layers.Backdrop(), layers.Hud(), scope, DXGI_FORMAT_R16G16B16A16_FLOAT);
+}
+
+bool PresentationPass::PrepareLayerSources(ID3D11ShaderResourceView* backdrop,
+    ID3D11ShaderResourceView* hud, PresentationScope scope, DXGI_FORMAT backdropFormat) noexcept
+{
     if (!CanExecute(scope)) return false;
     const auto frame = configuration_.scenes->FrameGeneration();
     if (frame == 0) return false;
     layerFrame_ = 0;
     layerFailureFrame_ = frame;
-    if (!QualifiedLayerSources(backdrop, hud)) return false;
+    if (!QualifiedLayerSources(backdrop, hud, backdropFormat)) return false;
     ExecutionScope executing{executing_};
     {
         ScopedComputeState state{context_.Get()};

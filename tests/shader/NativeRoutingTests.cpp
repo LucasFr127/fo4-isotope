@@ -2,13 +2,17 @@
 
 #include "ShippingPixelShaderTests.hpp"
 #include "passes/PresentationPass.hpp"
+#include "passes/ObservedDraw.hpp"
 #include "hooks/ContextHooks.hpp"
 #include "hooks/SwapChainHooks.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <type_traits>
+#include <vector>
 
 namespace fo4hdr::tests::gpu {
 namespace {
@@ -207,6 +211,241 @@ void VerifyNativeFrameLifecycle(PixelFixture& fixture)
     FO4HDR_CHECK(!borrowed.ReinitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
 }
 
+struct UiCaptureImage
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11RenderTargetView> target;
+    ComPtr<ID3D11ShaderResourceView> source;
+    ComPtr<ID3D11UnorderedAccessView> terminal;
+
+    UiCaptureImage(ID3D11Device* device, DXGI_FORMAT format, UINT binding)
+    {
+        auto description = SceneDescription();
+        description.Format = format;
+        description.BindFlags = binding;
+        CheckHresult(device->CreateTexture2D(&description, nullptr, &texture), "UI capture image");
+        if ((binding & D3D11_BIND_RENDER_TARGET) != 0)
+            CheckHresult(device->CreateRenderTargetView(texture.Get(), nullptr, &target), "UI capture target");
+        if ((binding & D3D11_BIND_SHADER_RESOURCE) != 0)
+            CheckHresult(device->CreateShaderResourceView(texture.Get(), nullptr, &source), "UI capture source");
+        if ((binding & D3D11_BIND_UNORDERED_ACCESS) != 0)
+            CheckHresult(device->CreateUnorderedAccessView(texture.Get(), nullptr, &terminal), "UI capture terminal");
+    }
+};
+
+struct UiCaptureDrawProbe
+{
+    UINT calls{};
+    static void Invoke(ID3D11DeviceContext* context, void* argument)
+    {
+        ++static_cast<UiCaptureDrawProbe*>(argument)->calls;
+        context->DrawIndexed(6, 0, 0);
+    }
+    static void SeedScene(ID3D11DeviceContext* context, void*) { context->Draw(3, 0); }
+};
+
+ComPtr<ID3D11Buffer> UiCaptureIndices(ID3D11Device* device)
+{
+    // One fullscreen triangle and one degenerate triangle exercise six indices.
+    constexpr std::array<UINT, 6> indices{0, 1, 2, 0, 0, 0};
+    D3D11_BUFFER_DESC description{};
+    description.ByteWidth = sizeof(indices);
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    const D3D11_SUBRESOURCE_DATA data{indices.data(), 0, 0};
+    ComPtr<ID3D11Buffer> buffer;
+    CheckHresult(device->CreateBuffer(&description, &data, &buffer), "UI capture indices");
+    return buffer;
+}
+
+void SeedUiCaptureScene(PixelFixture& fixture, ScenePassRenderer& scenes,
+    const std::array<SceneTextureHandle, 3>& handles)
+{
+    fixture.Bind();
+    FO4HDR_CHECK(scenes.BeginFrame());
+    const std::vector<Float4> pixels(width * height, {1, 1, 1, 1});
+    UploadScene(fixture.gpu.context.Get(), scenes.Views(handles[0]).texture, pixels);
+    const auto raw = scenes.Views(handles[0]).shaderResource;
+    const std::array<ID3D11ShaderResourceView*, 4> toneSources{nullptr, raw, raw, nullptr};
+    fixture.gpu.context->PSSetShaderResources(0, static_cast<UINT>(toneSources.size()), toneSources.data());
+    const std::array<ID3D11SamplerState*, 4> samplers{
+        fixture.point.Get(), fixture.point.Get(), fixture.point.Get(), fixture.point.Get()};
+    fixture.gpu.context->PSSetSamplers(0, static_cast<UINT>(samplers.size()), samplers.data());
+    const auto values = ToneConstants();
+    const auto toneConstants = ConstantBuffer(fixture.gpu.device.Get(), std::span{values}.first(5));
+    auto* constants = toneConstants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(2, 1, &constants);
+    const FiniteDrawInvocation draw{UiCaptureDrawProbe::SeedScene, nullptr};
+    FO4HDR_CHECK(scenes.Execute(kRenoDxFallout4Shaders[0], handles[0], handles[1], draw) == SceneDrawOutcome::replaced);
+    const auto lut = LutTexture(fixture.gpu.device.Get(), LutInputs(0));
+    const std::array<ID3D11ShaderResourceView*, 7> gradeSources{
+        scenes.Views(handles[1]).shaderResource, nullptr, nullptr, lut.Get(), lut.Get(), lut.Get(), lut.Get()};
+    fixture.gpu.context->PSSetShaderResources(0, static_cast<UINT>(gradeSources.size()), gradeSources.data());
+    const std::array<ID3D11SamplerState*, 7> gradeSamplers{
+        fixture.point.Get(), nullptr, nullptr, fixture.linear.Get(), fixture.linear.Get(), fixture.linear.Get(), fixture.linear.Get()};
+    fixture.gpu.context->PSSetSamplers(0, static_cast<UINT>(gradeSamplers.size()), gradeSamplers.data());
+    const std::array<Float4, 2> gradeValues{{{}, {1, 0, 0, 0}}};
+    const auto gradeConstants = ConstantBuffer(fixture.gpu.device.Get(), gradeValues);
+    constants = gradeConstants.Get();
+    fixture.gpu.context->PSSetConstantBuffers(2, 1, &constants);
+    FO4HDR_CHECK(scenes.Execute(kRenoDxFallout4Shaders[4], handles[1], handles[2], draw) == SceneDrawOutcome::replaced);
+    FO4HDR_CHECK(scenes.Views(scenes.CurrentScene()).texture == scenes.Views(handles[2]).texture);
+}
+
+struct UiCaptureBinding
+{
+    ID3D11DeviceContext* context;
+    ComPtr<ID3D11BlendState> blend;
+    std::array<float, 4> factors{};
+    UINT mask{};
+
+    explicit UiCaptureBinding(ID3D11DeviceContext* value) : context(value)
+    {
+        context->OMGetBlendState(&blend, factors.data(), &mask);
+    }
+    void Check(ID3D11RenderTargetView* target) const
+    {
+        ComPtr<ID3D11RenderTargetView> actualTarget;
+        ComPtr<ID3D11DepthStencilView> depth;
+        context->OMGetRenderTargets(1, &actualTarget, &depth);
+        FO4HDR_CHECK(actualTarget.Get() == target && !depth);
+        ComPtr<ID3D11BlendState> actualBlend;
+        std::array<float, 4> actualFactors{};
+        UINT actualMask{};
+        context->OMGetBlendState(&actualBlend, actualFactors.data(), &actualMask);
+        FO4HDR_CHECK(actualBlend.Get() == blend.Get());
+        FO4HDR_CHECK(actualFactors == factors && actualMask == mask);
+    }
+};
+
+using UiAliasWriter = void (*)(ID3D11DeviceContext*, ID3D11ShaderResourceView*);
+using UiAliasReader = void (*)(ID3D11DeviceContext*, ID3D11ShaderResourceView**);
+constexpr std::array<UiAliasWriter, 6> uiAliasWriters{
+    [](auto* context, auto* source) { context->VSSetShaderResources(11, 1, &source); },
+    [](auto* context, auto* source) { context->HSSetShaderResources(11, 1, &source); },
+    [](auto* context, auto* source) { context->DSSetShaderResources(11, 1, &source); },
+    [](auto* context, auto* source) { context->GSSetShaderResources(11, 1, &source); },
+    [](auto* context, auto* source) { context->PSSetShaderResources(11, 1, &source); },
+    [](auto* context, auto* source) { context->CSSetShaderResources(11, 1, &source); }};
+constexpr std::array<UiAliasReader, 6> uiAliasReaders{
+    [](auto* context, auto** source) { context->VSGetShaderResources(11, 1, source); },
+    [](auto* context, auto** source) { context->HSGetShaderResources(11, 1, source); },
+    [](auto* context, auto** source) { context->DSGetShaderResources(11, 1, source); },
+    [](auto* context, auto** source) { context->GSGetShaderResources(11, 1, source); },
+    [](auto* context, auto** source) { context->PSGetShaderResources(11, 1, source); },
+    [](auto* context, auto** source) { context->CSGetShaderResources(11, 1, source); }};
+
+ComPtr<ID3D11Texture2D> UiCaptureTexture(ID3D11ShaderResourceView* source)
+{
+    ComPtr<ID3D11Resource> resource;
+    source->GetResource(&resource);
+    ComPtr<ID3D11Texture2D> texture;
+    CheckHresult(resource.As(&texture), "Completed UI capture image");
+    return texture;
+}
+
+void CheckUiCaptureSources(PixelFixture& fixture, const CompletedNativeUiLayers& layers)
+{
+    const auto backdrop = ReadScene(fixture.gpu, UiCaptureTexture(layers.Backdrop()).Get());
+    for (const auto& pixel : backdrop) CheckPixel(pixel, {0.03125f, 0.0625f, 0.125f, 0.5f});
+    const auto hud = UiCaptureTexture(layers.Hud());
+    ComPtr<ID3D11Texture2D> readback;
+    auto description = SceneDescription();
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.Usage = D3D11_USAGE_STAGING;
+    description.BindFlags = 0;
+    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    CheckHresult(fixture.gpu.device->CreateTexture2D(&description, nullptr, &readback), "HUD readback");
+    fixture.gpu.context->CopyResource(readback.Get(), hud.Get());
+    D3D11_MAPPED_SUBRESOURCE mapping{};
+    CheckHresult(fixture.gpu.context->Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapping), "HUD map");
+    const auto* pixel = static_cast<const std::uint8_t*>(mapping.pData);
+    constexpr std::array<int, 4> expected{8, 16, 32, 128};
+    for (std::size_t channel = 0; channel < expected.size(); ++channel)
+        FO4HDR_CHECK(std::abs(int(pixel[channel]) - expected[channel]) <= 1);
+    fixture.gpu.context->Unmap(readback.Get(), 0);
+}
+
+void CheckUiAliasRestoration(NativeUiCapture& capture, PixelFixture& fixture,
+    const CompletedNativeUiLayers& layers, std::uint64_t frame)
+{
+    for (const auto write : uiAliasWriters) write(fixture.gpu.context.Get(), layers.Hud());
+    UiCaptureDrawProbe probe;
+    FO4HDR_CHECK(capture.ExecuteQualified({frame, NativeUiShaderRole::hudComposite,
+        fixture.plain.Get(), NativeUiDrawKind::indexedSix}, {UiCaptureDrawProbe::Invoke, &probe}) == SceneDrawOutcome::replaced);
+    FO4HDR_CHECK(probe.calls == 1);
+    for (const auto read : uiAliasReaders)
+    {
+        ComPtr<ID3D11ShaderResourceView> actual;
+        read(fixture.gpu.context.Get(), &actual);
+        FO4HDR_CHECK(actual.Get() == layers.Hud());
+    }
+    for (const auto write : uiAliasWriters) write(fixture.gpu.context.Get(), nullptr);
+}
+
+void VerifyQualifiedUiCapture(PixelFixture& fixture)
+{
+    ScenePassRenderer scenes;
+    const ScenePassConfiguration configuration{width, height, fixture.whites};
+    FO4HDR_CHECK(scenes.InitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    std::array<SceneTextureHandle, 3> handles;
+    for (auto& handle : handles)
+        CheckHresult(scenes.CreateSceneTexture(SceneDescription(), nullptr, handle), "UI selected scene");
+    SeedUiCaptureScene(fixture, scenes, handles);
+    NativeUiCapture capture;
+    FO4HDR_CHECK(capture.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    constexpr UINT transportBindings = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    UiCaptureImage logical{fixture.gpu.device.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, transportBindings};
+    UiCaptureImage source{fixture.gpu.device.Get(), DXGI_FORMAT_R8G8B8A8_UNORM, transportBindings};
+    const float transparent[4]{};
+    fixture.gpu.context->ClearRenderTargetView(logical.target.Get(), transparent);
+    fixture.gpu.context->ClearRenderTargetView(source.target.Get(), transparent);
+    const auto indices = UiCaptureIndices(fixture.gpu.device.Get());
+    fixture.Bind();
+    auto* target = logical.target.Get();
+    auto* input = source.source.Get();
+    fixture.gpu.context->OMSetRenderTargets(1, &target, nullptr);
+    fixture.gpu.context->PSSetShaderResources(0, 1, &input);
+    fixture.gpu.context->IASetIndexBuffer(indices.Get(), DXGI_FORMAT_R32_UINT, 0);
+    const auto frame = scenes.FrameGeneration();
+    capture.AdvanceFrame(frame);
+    FO4HDR_CHECK(capture.Status() == NativeUiFrameStatus::targetUnqualified);
+    FO4HDR_CHECK(capture.BeginFrame({frame, target, &scenes}, NativeUiCaptureScope::qualifiedExclusive));
+    UiCaptureBinding binding{fixture.gpu.context.Get()};
+    UiCaptureDrawProbe probe;
+    for (const auto role : {NativeUiShaderRole::gammaBackdrop, NativeUiShaderRole::hudComposite})
+    {
+        FO4HDR_CHECK(capture.ExecuteQualified({frame, role, fixture.plain.Get(), NativeUiDrawKind::indexedSix},
+            {UiCaptureDrawProbe::Invoke, &probe}) == SceneDrawOutcome::replaced);
+        binding.Check(target);
+        fixture.CheckRestored(false);
+    }
+    FO4HDR_CHECK(probe.calls == 2);
+    const auto layers = capture.CompletedLayers();
+    FO4HDR_CHECK(layers.ReadyFor(frame, &scenes));
+    CheckUiCaptureSources(fixture, layers);
+    fixture.gpu.context->OMSetRenderTargets(1, &target, nullptr);
+    CheckUiAliasRestoration(capture, fixture, layers, frame);
+    PresentationPass presentation;
+    FO4HDR_CHECK(presentation.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(),
+        {width, height, 400, &scenes, fixture.whites}));
+    UiCaptureImage terminal{fixture.gpu.device.Get(), DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_UNORDERED_ACCESS};
+    FO4HDR_CHECK(presentation.PrepareNativeLayers(layers, PresentationScope::qualifiedExclusive));
+    FO4HDR_CHECK(presentation.ExecuteCurrentScene(terminal.terminal.Get(), PresentationScope::qualifiedExclusive));
+    input = layers.Backdrop();
+    fixture.gpu.context->PSSetShaderResources(0, 1, &input);
+    FO4HDR_CHECK(capture.ExecuteQualified({frame, NativeUiShaderRole::hudComposite,
+        fixture.plain.Get(), NativeUiDrawKind::indexedSix}, {UiCaptureDrawProbe::Invoke, &probe}) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(probe.calls == 2 && capture.Status() == NativeUiFrameStatus::failed);
+    FO4HDR_CHECK(!presentation.PrepareNativeLayers(layers, PresentationScope::qualifiedExclusive));
+    FO4HDR_CHECK(!presentation.ExecuteCurrentScene(terminal.terminal.Get(), PresentationScope::qualifiedExclusive));
+    FO4HDR_CHECK(presentation.Retire());
+    FO4HDR_CHECK(capture.Retire());
+    FO4HDR_CHECK(!layers.ReadyFor(frame, &scenes));
+    FO4HDR_CHECK(scenes.Retire());
+    fixture.gpu.context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R32_UINT, 0);
+}
+
 }  // namespace
 
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory)
@@ -215,6 +454,7 @@ void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::p
     VerifyQueryAdapters(fixture);
     VerifyCapturedPresentBoundary();
     VerifyNativeFrameLifecycle(fixture);
+    VerifyQualifiedUiCapture(fixture);
 }
 
 }  // namespace fo4hdr::tests::gpu

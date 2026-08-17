@@ -337,6 +337,8 @@ bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& crea
     if (FAILED(created.swapChain->GetDesc(&description))) return false;
     const ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height, {}};
     if (!record.renderer.InitializeBorrowed(created.device, created.context, configuration)) return false;
+    // UI preparation has its own unavailable state; it cannot qualify a presentation target.
+    static_cast<void>(record.uiCapture.Initialize(created.device, created.context, configuration));
     const ContextQueryPredecessors next{record.nextBegin, record.nextEnd, record.nextExecuteCommandList};
     return record.queries.Prepare(created.context, record.generation, next, &record.renderer) ==
         ContextQueryPreparation::coverageUnobserved;
@@ -395,6 +397,7 @@ struct NativeBindingPreparation
         PublishContextNexts(*context, contextOriginals);
         if (!PrepareRenderer(*context, created))
         {
+            static_cast<void>(context->uiCapture.Retire());
             static_cast<void>(context->renderer.Retire());
             return nullptr;
         }
@@ -494,6 +497,7 @@ bool NativeRoutingInstaller::Retire() noexcept
     if (record->busy.test(std::memory_order_acquire)) return false;
     if (residentChain.busy.test(std::memory_order_acquire)) return false;
     if (!record->queries.Retire()) return false;
+    if (!record->uiCapture.Retire()) return false;
     return record->renderer.Retire();
 }
 
@@ -508,8 +512,12 @@ HRESULT STDMETHODCALLTYPE HookCreatePixelShader(ID3D11Device* device, const void
     if (auto* admitted = scope.Record(); admitted != nullptr)
     {
         if (result == S_OK && shader != nullptr)
+        {
             static_cast<void>(admitted->renderer.ObserveCreatedPixelShader(
                 {static_cast<const std::byte*>(bytecode), bytecodeLength}, *shader));
+            static_cast<void>(admitted->uiCapture.ObserveCreatedPixelShader(
+                {static_cast<const std::byte*>(bytecode), bytecodeLength}, *shader));
+        }
     }
     return result;
 }

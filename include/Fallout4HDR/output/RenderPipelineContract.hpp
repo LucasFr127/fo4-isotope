@@ -7,6 +7,33 @@
 
 namespace fo4hdr {
 
+enum class NativeUiShaderRole : std::uint8_t
+{
+    unknown,
+    hudComposite,
+    gammaBackdrop
+};
+
+struct NativeUiShaderFact
+{
+    NativeUiShaderRole role{};
+    std::array<std::uint32_t, 4> dxbcHash{};
+};
+
+// Exact Fallout 4 1.10.163 pixel-shader identities. HUD input is straight sRGB
+// R8 RGBA at presentation extent; backdrop is SDR code contribution plus coverage.
+inline constexpr std::array<NativeUiShaderFact, 2> kNativeUiShaders{{
+    {NativeUiShaderRole::hudComposite, {0x525eaea9u, 0xaf037d1bu, 0x3ca0d381u, 0x8531a8b3u}},
+    {NativeUiShaderRole::gammaBackdrop, {0xb939134cu, 0xc0f28bacu, 0x1a7e28c1u, 0xf4aff2feu}}}};
+
+[[nodiscard]] constexpr NativeUiShaderRole FindNativeUiShaderRole(
+    const std::array<std::uint32_t, 4>& dxbcHash) noexcept
+{
+    for (const auto& fact : kNativeUiShaders)
+        if (fact.dxbcHash == dxbcHash) return fact.role;
+    return NativeUiShaderRole::unknown;
+}
+
 enum class RenoDxShaderPass : std::uint8_t
 {
     toneMapA,

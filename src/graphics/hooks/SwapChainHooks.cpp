@@ -98,6 +98,7 @@ bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
+    if ((flags & DXGI_PRESENT_TEST) == 0) admitted->uiCapture.CloseFrame();
     if (!admitted->queries.CanDispatch())
     {
         if ((flags & DXGI_PRESENT_TEST) == 0) static_cast<void>(admitted->renderer.EndFrame());
@@ -115,6 +116,8 @@ void CompletePresent(SwapChainHookRecord& chain, UINT flags, HRESULT result) noe
     if (admitted == nullptr) return;
     if (!admitted->queries.CanDispatch()) return;
     if (!OpenNativePresentFrame(admitted->renderer, flags, result)) RevokeNativeRouting();
+    else if ((flags & DXGI_PRESENT_TEST) == 0 && SUCCEEDED(result))
+        admitted->uiCapture.AdvanceFrame(admitted->renderer.FrameGeneration());
 }
 
 bool PrepareResize(SwapChainHookRecord& chain) noexcept
@@ -124,6 +127,7 @@ bool PrepareResize(SwapChainHookRecord& chain) noexcept
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
+    if (!admitted->uiCapture.Retire()) return false;
     return admitted->renderer.RetireForResize();
 }
 
@@ -132,6 +136,7 @@ bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
 {
     const ChainResourcePreparation preparation{context};
     if (!context.renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
+    static_cast<void>(context.uiCapture.Initialize(device, context.owned, configuration));
     if (!context.admitted.load(std::memory_order_acquire)) return false;
     if (!NativeRoutingOwned()) return false;
     return context.queries.CanDispatch();

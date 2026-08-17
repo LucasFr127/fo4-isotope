@@ -104,6 +104,8 @@ $files = [string[]]@(
     "shaders/fallout4/Fxaa.ps.hlsl",
     "shaders/fallout4/Video.ps.hlsl",
     "src/graphics/passes/PresentationPass.hpp",
+    "src/graphics/passes/ObservedDraw.hpp",
+    "src/graphics/passes/ObservedDraw.cpp",
     "src/graphics/passes/PresentationPass.cpp",
     "shaders/output/DisplayMath.hlsli",
     "shaders/output/SceneLayers.hlsli",

@@ -324,11 +324,17 @@ void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... argume
     if (record != nullptr && context == record->owned) RevokeNativeRouting();
 }
 
-void ObserveFiniteDraw(ContextHookRecord* record, FiniteDrawInvocation invocation) noexcept
+void ObserveFiniteDraw(ContextHookRecord* record, NativeUiDrawKind kind,
+    FiniteDrawInvocation invocation) noexcept
 {
     if (record == nullptr) return;
     if (!record->queries.CanDispatch()) return;
     const InternalRoutingWork internal{*record};
+    const auto captured = record->uiCapture.ExecuteObserved(record->renderer.FrameGeneration(), kind, invocation);
+    if (!NativeRoutingOwned()) RevokeNativeRouting();
+    if (!record->queries.CanDispatch()) { record->uiCapture.CloseFrame(); return; }
+    if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return; }
+    if (captured == SceneDrawOutcome::replaced) return;
     // Invalid scene handles preserve the native draw until actual storage is admitted.
     const auto result = record->renderer.ExecuteObserved({}, {}, invocation);
     if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
@@ -342,7 +348,7 @@ void InvokeFiniteDraw(Call& draw, bool admitted) noexcept
 }
 
 template <auto Next, class... Arguments>
-void ForwardFiniteDraw(ID3D11DeviceContext* context, Arguments... arguments) noexcept
+void ForwardFiniteDraw(ID3D11DeviceContext* context, NativeUiDrawKind kind, Arguments... arguments) noexcept
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
@@ -356,7 +362,7 @@ void ForwardFiniteDraw(ID3D11DeviceContext* context, Arguments... arguments) noe
     };
     const FiniteDrawInvocation invocation{
         [](ID3D11DeviceContext*, void* payload) { (*static_cast<decltype(draw)*>(payload))(); }, &draw};
-    ObserveFiniteDraw(scope.Record(), invocation);
+    ObserveFiniteDraw(scope.Record(), kind, invocation);
     if (!invoked) InvokeFiniteDraw(draw, scope.Record() != nullptr);
 }
 
@@ -425,25 +431,27 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* contex
 
 void STDMETHODCALLTYPE HookDraw(ID3D11DeviceContext* context, UINT vertices, UINT start) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDraw>(context, vertices, start);
+    ForwardFiniteDraw<&ContextHookRecord::nextDraw>(context, NativeUiDrawKind::finite, vertices, start);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext* context, UINT indices, UINT start,
     INT baseVertex) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexed>(context, indices, start, baseVertex);
+    const auto kind = indices == 6 ? NativeUiDrawKind::indexedSix : NativeUiDrawKind::finite;
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexed>(context, kind, indices, start, baseVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawInstanced(ID3D11DeviceContext* context, UINT vertices, UINT instances,
     UINT start, UINT firstInstance) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawInstanced>(context, vertices, instances, start, firstInstance);
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawInstanced>(context, NativeUiDrawKind::finite,
+        vertices, instances, start, firstInstance);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexedInstanced(ID3D11DeviceContext* context, UINT indices,
     UINT instances, UINT start, INT baseVertex, UINT firstInstance) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexedInstanced>(context, indices, instances,
+    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexedInstanced>(context, NativeUiDrawKind::finite, indices, instances,
         start, baseVertex, firstInstance);
 }
 

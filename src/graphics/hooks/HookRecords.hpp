@@ -3,6 +3,7 @@
 
 #include "ContextHooks.hpp"
 #include "../HdrRenderer.hpp"
+#include "../passes/ObservedDraw.hpp"
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
 
 #include <array>
@@ -68,6 +69,7 @@ struct ContextHookRecord
     std::array<PointerHookOwnership, 10> owners;
     ContextQueryObserver queries;
     ScenePassRenderer renderer;
+    NativeUiCapture uiCapture;
     std::atomic<bool> admitted{};
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
     bool internalWork{};

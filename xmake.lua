@@ -110,6 +110,7 @@ target("Fallout4HDR")
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
         "src/graphics/hooks/SwapChainHooks.cpp")
     add_files("src/ui/SettingsPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
+        "src/graphics/passes/ObservedDraw.cpp",
         "src/graphics/passes/PresentationPass.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/config/SettingsPersistence.cpp")
     add_syslinks("version")
@@ -215,6 +216,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/hooks/SwapChainHooks.cpp",
         "src/hooks/HookOwnership.cpp",
         "src/output/PerformanceStatistics.cpp",
+        "src/graphics/passes/ObservedDraw.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",
