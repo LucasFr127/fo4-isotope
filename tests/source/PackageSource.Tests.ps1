@@ -78,6 +78,8 @@ $expected = [string[]]@(
     "src/graphics/resources/HdrResourcePolicy.hpp",
     "tests/shader/ShippingPixelShaderTests.hpp",
     "tests/shader/ShippingPixelShaderTests.cpp",
+    "tests/shader/ArmorCompositionCharacterization.cpp",
+    "tests/shader/shaders/ArmorCharacterization.ps.hlsl",
     "tests/shader/shaders/Fullscreen.vs.hlsl",
     "tests/shader/shaders/ScenePassSentinel.ps.hlsl",
     "shaders/fallout4/TemporalAa.ps.hlsl",
