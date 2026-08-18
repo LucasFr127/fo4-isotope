@@ -56,7 +56,6 @@ function Get-ShaderPrograms {
         @{ Source = "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "HdrGradeTransfer" },
         @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },
         @{ Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "OperatorLut" },
-        @{ Source = "tests/shader/shaders/ArmorCharacterization.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ArmorCharacterization" },
         @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },
         @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ScenePassSentinel" },
         @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" },
