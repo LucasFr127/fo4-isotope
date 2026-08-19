@@ -18,6 +18,7 @@
 #include <stdexcept>
 
 namespace fo4hdr::tests::gpu {
+void VerifyArmorEncodedComposition(const std::filesystem::path& directory);
 void VerifyImageControls(const std::filesystem::path& directory);
 void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory);
 void VerifyHdrGradeTransfer(const std::filesystem::path& shaderPath);
@@ -115,6 +116,7 @@ int wmain(int argc, wchar_t** argv)
         fo4hdr::tests::gpu::VerifyShippingPixelShaders(
             shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyImageControls(shaderPath.parent_path());
+        fo4hdr::tests::gpu::VerifyArmorEncodedComposition(shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyCreativeGradeLut(shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyHdrGradeTransfer(shaderPath.parent_path() / "HdrGradeTransfer.dxbc");
         fo4hdr::tests::gpu::VerifyOperatorLut(

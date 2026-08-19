@@ -52,10 +52,16 @@ function Get-ShaderPrograms {
         Symbol = "kDeveloperExposureCaptureBytecode"
         Destination = [IO.Path]::Combine($shaderDirectory, "DeveloperExposureCapture.hpp")
     })
+    $programs.Add(@{
+        Source = "shaders/armor/EncodedComposition.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
+        Symbol = "kArmorEncodedCompositionBytecode"
+        Destination = [IO.Path]::Combine($shaderDirectory, "ArmorEncodedComposition.hpp")
+    })
     foreach ($fixture in @(
         @{ Source = "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "HdrGradeTransfer" },
         @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },
         @{ Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "OperatorLut" },
+        @{ Source = "tests/shader/shaders/ArmorEncodedSource.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ArmorEncodedSource" },
         @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },
         @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ScenePassSentinel" },
         @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" },
