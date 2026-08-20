@@ -109,6 +109,40 @@ struct ArmorFixture
         gpu.context->Draw(3, 0);
     }
 
+    void VerifyColoredBlend(ArmorEncodedToken token)
+    {
+        constexpr std::array<float, 4> input{-0.25f, 0.5f, 1.25f, 0.375f};
+        gpu.context->ClearRenderTargetView(renderTarget.Get(), input.data());
+        token.serial = 2;
+        FO4HDR_CHECK(composition.Begin(token));
+        CheckTarget();
+        Draw();
+        FO4HDR_CHECK(composition.End(token));
+        CheckTarget();
+        // Signed gamma raises the common code factor to 2.2; the linear
+        // primary conversions preserve that RGB scale, below the completed peak.
+        const auto scale = std::pow(0.5, 2.2);
+        const Float4 expected{float(input[0] * scale), float(input[1] * scale),
+            float(input[2] * scale), input[3]};
+        for (const auto& value : ReadScene(gpu, texture.Get())) CheckPixel(value, expected);
+    }
+
+    void VerifyLifecycle(ArmorEncodedToken token)
+    {
+        token.serial = 3;
+        auto stale = token;
+        ++stale.resourceGeneration;
+        FO4HDR_CHECK(!composition.Begin(stale));
+        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::linearBt2020UiRelative);
+        FO4HDR_CHECK(composition.Begin(token));
+        FO4HDR_CHECK(!composition.End(stale));
+        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::unknown);
+        FO4HDR_CHECK(composition.Retire());
+        FO4HDR_CHECK(!composition.Begin(token));
+        FO4HDR_CHECK(!composition.End(token));
+        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::unknown);
+    }
+
     void Verify()
     {
         const ArmorEncodedConfiguration configuration{renderTarget.Get(), target.Get(),
@@ -130,7 +164,8 @@ struct ArmorFixture
             CheckPixel(value, {float(expected), float(expected), float(expected), 0.375f});
             FO4HDR_CHECK(value.alpha == 0.375f);
         }
-        FO4HDR_CHECK(composition.Retire());
+        VerifyColoredBlend(token);
+        VerifyLifecycle(token);
     }
 };
 
