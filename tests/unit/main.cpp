@@ -20,6 +20,7 @@ int wmain(int argc, wchar_t** argv)
     fo4hdr::tests::RunHdrSettingsMathTests();
     fo4hdr::tests::RunHdrPersistenceTests();
     fo4hdr::tests::RunShaderTestOptionsTests();
+    fo4hdr::tests::RunDirectCallPatchTests();
     fo4hdr::tests::RunGameSnapshotStoreTests();
     fo4hdr::tests::RunMenuEventQueueTests();
     fo4hdr::tests::RunRuntimeValidationTests();

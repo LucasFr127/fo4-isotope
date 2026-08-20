@@ -261,7 +261,7 @@ void CheckVersionData(const PluginVersionData& data)
     FO4HDR_CHECK(std::ranges::equal(data.pluginName, expectedName));
     FO4HDR_CHECK(std::ranges::all_of(data.author, [](char value) { return value == 0; }));
     FO4HDR_CHECK(data.addressIndependence == 0);
-    FO4HDR_CHECK(data.structureIndependence == 1);
+    FO4HDR_CHECK(data.structureIndependence == 0);
     FO4HDR_CHECK(data.compatibleVersions[0] == supportedF4se.runtimeVersion);
     FO4HDR_CHECK(std::ranges::all_of(std::span{data.compatibleVersions}.subspan(1),
         [](std::uint32_t value) { return value == 0; }));

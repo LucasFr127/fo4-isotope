@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShippingPixelShaderTests.hpp"
-#include "passes/ArmorEncodedComposition.hpp"
+#include "passes/ArmorCompositionPass.hpp"
 #include "TestHarness.hpp"
 
 #include <array>
@@ -14,6 +14,7 @@ namespace {
 using namespace detail;
 constexpr UINT armorWidth = 13;
 constexpr UINT armorHeight = 3;
+struct AbortedSubmission {};
 
 bool TypedArmorSupported(ID3D11Device* device)
 {
@@ -36,7 +37,13 @@ struct ArmorFixture
     ComPtr<ID3D11Buffer> source;
     ComPtr<ID3D11BlendState> blend;
     ComPtr<ID3D11RasterizerState> rasterizer;
-    ArmorEncodedComposition composition;
+    ArmorCompositionPass composition;
+    ArmorCompositionFrame frame;
+
+    ~ArmorFixture() { SetArmorUiBoundary(nullptr); }
+
+    static ArmorCompositionFrame CurrentFrame(void* state) noexcept
+    { return static_cast<ArmorFixture*>(state)->frame; }
 
     void PrepareTarget()
     {
@@ -109,15 +116,19 @@ struct ArmorFixture
         gpu.context->Draw(3, 0);
     }
 
-    void VerifyColoredBlend(ArmorEncodedToken token)
+    void VerifyColoredBlend()
     {
         constexpr std::array<float, 4> input{-0.25f, 0.5f, 1.25f, 0.375f};
         gpu.context->ClearRenderTargetView(renderTarget.Get(), input.data());
-        token.serial = 2;
-        FO4HDR_CHECK(composition.Begin(token));
-        CheckTarget();
-        Draw();
-        FO4HDR_CHECK(composition.End(token));
+        SetArmorUiBoundary(&composition.Boundary());
+        {
+            ArmorUiScope scope({ArmorUiOwner::powerArmor, ::GetCurrentThreadId(), 0, true, true});
+            FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::encodedBt709);
+            CheckTarget();
+            Draw();
+        }
+        SetArmorUiBoundary(nullptr);
+        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::linearBt2020UiRelative);
         CheckTarget();
         // Signed gamma raises the common code factor to 2.2; the linear
         // primary conversions preserve that RGB scale, below the completed peak.
@@ -127,34 +138,47 @@ struct ArmorFixture
         for (const auto& value : ReadScene(gpu, texture.Get())) CheckPixel(value, expected);
     }
 
-    void VerifyLifecycle(ArmorEncodedToken token)
+    void VerifyLifecycle()
     {
-        token.serial = 3;
+        // The bridge is retired before this independent direct-owner check.
+        // Clear its encoded/unknown image to establish authored linear input.
+        constexpr float linear[4]{1, 1, 1, 0.375f};
+        gpu.context->ClearRenderTargetView(renderTarget.Get(), linear);
+        ArmorEncodedComposition lifecycle;
+        const ArmorEncodedConfiguration configuration{renderTarget.Get(), target.Get(),
+            1, 430.0f / 203.0f, ArmorCompositionDomain::linearBt2020UiRelative};
+        FO4HDR_CHECK(lifecycle.Initialize(gpu.device.Get(), gpu.context.Get(), configuration));
+        const ArmorEncodedToken token{ArmorCompositionOwner::powerArmor,
+            std::this_thread::get_id(), 1, 1, 3, ArmorCompositionScope::qualifiedExclusive, true};
         auto stale = token;
         ++stale.resourceGeneration;
-        FO4HDR_CHECK(!composition.Begin(stale));
-        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::linearBt2020UiRelative);
-        FO4HDR_CHECK(composition.Begin(token));
-        FO4HDR_CHECK(!composition.End(stale));
-        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::unknown);
-        FO4HDR_CHECK(composition.Retire());
-        FO4HDR_CHECK(!composition.Begin(token));
-        FO4HDR_CHECK(!composition.End(token));
-        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::unknown);
+        FO4HDR_CHECK(!lifecycle.Begin(stale));
+        FO4HDR_CHECK(lifecycle.Domain() == ArmorCompositionDomain::linearBt2020UiRelative);
+        FO4HDR_CHECK(lifecycle.Begin(token));
+        FO4HDR_CHECK(!lifecycle.End(stale));
+        FO4HDR_CHECK(lifecycle.Domain() == ArmorCompositionDomain::unknown);
+        FO4HDR_CHECK(lifecycle.Retire());
+        FO4HDR_CHECK(!lifecycle.Begin(token));
+        FO4HDR_CHECK(!lifecycle.End(token));
+        FO4HDR_CHECK(lifecycle.Domain() == ArmorCompositionDomain::unknown);
     }
 
     void Verify()
     {
         const ArmorEncodedConfiguration configuration{renderTarget.Get(), target.Get(),
             1, 430.0f / 203.0f, ArmorCompositionDomain::linearBt2020UiRelative};
-        FO4HDR_CHECK(composition.Initialize(gpu.device.Get(), gpu.context.Get(), configuration));
-        const ArmorEncodedToken token{ArmorCompositionOwner::powerArmor,
-            std::this_thread::get_id(), 1, 1, 1, ArmorCompositionScope::qualifiedExclusive, true};
-        FO4HDR_CHECK(composition.Begin(token));
-        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::encodedBt709);
-        CheckTarget();
-        Draw();
-        FO4HDR_CHECK(composition.End(token));
+        frame = {1, 1, ArmorCompositionDomain::linearBt2020UiRelative,
+            gpu.context.Get(), renderTarget.Get(), target.Get(), true, true, true};
+        FO4HDR_CHECK(composition.Initialize(gpu.device.Get(), gpu.context.Get(), configuration,
+            {&CurrentFrame, this}));
+        SetArmorUiBoundary(&composition.Boundary());
+        {
+            ArmorUiScope scope({ArmorUiOwner::powerArmor, ::GetCurrentThreadId(), 0, true, true});
+            FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::encodedBt709);
+            CheckTarget();
+            Draw();
+        }
+        SetArmorUiBoundary(nullptr);
         FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::linearBt2020UiRelative);
         CheckTarget();
         // A 50% black code blend decodes to 0.5^2.2, distinguishing linear attenuation.
@@ -164,8 +188,19 @@ struct ArmorFixture
             CheckPixel(value, {float(expected), float(expected), float(expected), 0.375f});
             FO4HDR_CHECK(value.alpha == 0.375f);
         }
-        VerifyColoredBlend(token);
-        VerifyLifecycle(token);
+        VerifyColoredBlend();
+        SetArmorUiBoundary(&composition.Boundary());
+        try
+        {
+            ArmorUiScope scope({ArmorUiOwner::powerArmor, ::GetCurrentThreadId(), 0, true, true});
+            FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::encodedBt709);
+            throw AbortedSubmission{};
+        }
+        catch (const AbortedSubmission&) {}
+        SetArmorUiBoundary(nullptr);
+        FO4HDR_CHECK(composition.Domain() == ArmorCompositionDomain::unknown);
+        FO4HDR_CHECK(composition.Retire());
+        VerifyLifecycle();
     }
 };
 

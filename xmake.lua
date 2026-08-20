@@ -90,6 +90,7 @@ target("Fallout4HDR")
     add_defines(commonlib_runtime_define)
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
+        "src/game/ArmorUiObserver.cpp",
         "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp",
         "src/graphics/GameDeviceGeneration.cpp", "src/graphics/DeviceCreationHook.cpp",
         "src/graphics/SwapChainObservation.cpp", "src/graphics/RendererLifetime.cpp",
@@ -110,9 +111,12 @@ target("Fallout4HDR")
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
         "src/graphics/hooks/SwapChainHooks.cpp")
     add_files("src/ui/SettingsPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
+        "src/output/ArmorUiComposition.cpp",
+        "src/graphics/passes/ArmorCompositionPass.cpp",
         "src/graphics/passes/ObservedDraw.cpp",
         "src/graphics/passes/PresentationPass.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/config/SettingsPersistence.cpp")
+    add_files("src/graphics/passes/ArmorEncodedComposition.cpp")
     add_syslinks("version")
 target_end()
 
@@ -152,6 +156,7 @@ for _, fixture in ipairs({
             "tests/unit/output/HdrCoreTests.cpp", "tests/unit/runtime/RuntimeValidationTests.cpp",
             "tests/unit/output/PerformanceTests.cpp",
             "tests/unit/output/PipelineContractTests.cpp",
+            "tests/unit/game/DirectCallPatchTests.cpp",
             "tests/unit/game/GameSnapshotStoreTests.cpp",
             "tests/unit/config/HdrSettingsMathTests.cpp",
             "tests/unit/game/MenuEventQueueTests.cpp",
@@ -216,6 +221,8 @@ target("fo4hdr-shader-tests")
         "src/graphics/hooks/SwapChainHooks.cpp",
         "src/hooks/HookOwnership.cpp",
         "src/output/PerformanceStatistics.cpp",
+        "src/output/ArmorUiComposition.cpp",
+        "src/graphics/passes/ArmorCompositionPass.cpp",
         "src/graphics/passes/ObservedDraw.cpp",
         "src/graphics/passes/PresentationPass.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",

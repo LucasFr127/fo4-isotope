@@ -19,6 +19,7 @@ void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
 void RunHdrSettingsMathTests();
 void RunHdrPersistenceTests();
 void RunShaderTestOptionsTests();
+void RunDirectCallPatchTests();
 void RunGameSnapshotStoreTests();
 void RunMenuEventQueueTests();
 void RunRuntimeValidationTests();

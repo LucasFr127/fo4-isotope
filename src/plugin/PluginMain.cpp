@@ -96,7 +96,7 @@ F4SE_PLUGIN_VERSION = []() constexpr {
     F4SE::PluginVersionData data{};
     data.PluginVersion(pluginVersion);
     data.PluginName(pluginName);
-    data.HasNoStructUse(true);
+    data.HasNoStructUse(false);
     data.CompatibleVersions({REL::Version{1, 10, 163, 0}});
     data.MinimumRequiredXSEVersion(REL::Version{0, 6, 23, 0});
     return data;
