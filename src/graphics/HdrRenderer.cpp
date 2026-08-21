@@ -712,6 +712,7 @@ bool ScenePassRenderer::Retire() noexcept
 
 void ScenePassRenderer::ReleaseResources() noexcept
 {
+    RetirePipboyScreenObservation();
     ClearLineage();
     frameOpen_ = false;
     ResetExposurePolicy();
@@ -1085,6 +1086,7 @@ SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descrip
     const auto result = InvokeDraw(replacement, invocation);
     // Publish only after shader/classes, exposure/operator slots and video b0 are restored.
     CompleteExposureDraw(result, replacement.tone);
+    ObservePipboyScreenDraw(result.outcome);
     CompleteLineage(descriptor, destination, result.outcome, lineage);
     return result.outcome;
 }

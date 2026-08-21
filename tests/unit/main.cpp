@@ -14,6 +14,7 @@ int wmain(int argc, wchar_t** argv)
     fo4hdr::tests::RunHdrOperatorWorkerTests();
     fo4hdr::tests::RunGt7Tests();
     fo4hdr::tests::RunPipelineContractTests();
+    fo4hdr::tests::RunPipboyScreenObservationTests();
     fo4hdr::tests::RunHookTests();
     fo4hdr::tests::RunNativeImageSlotsTests();
     fo4hdr::tests::RunDeviceCreationHookTests();

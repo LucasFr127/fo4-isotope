@@ -150,6 +150,7 @@ for _, fixture in ipairs({
             "src/graphics/SwapChainObservation.cpp",
             "src/graphics/RendererLifetime.cpp",
             "tests/unit/graphics/DeviceCreationHookTests.cpp",
+            "tests/unit/graphics/PipboyScreenObservationTests.cpp",
             "tests/unit/graphics/SwapChainObservationTests.cpp",
             "src/runtime/RuntimeValidation.cpp",
             "src/runtime/RuntimeIdentityFiles.cpp", "tests/unit/main.cpp",

@@ -155,6 +155,8 @@ $expected = [string[]]@(
     "src/ui/SettingsPanel.cpp",
     "tests/shader/SettingsPanelTests.cpp",
     "src/graphics/DeveloperExposureLock.hpp",
+    "src/graphics/PipboyScreenObservation.hpp",
+    "tests/unit/graphics/PipboyScreenObservationTests.cpp",
     "src/graphics/resources/DeveloperExposureResources.hpp",
     "src/graphics/resources/DeveloperExposureResources.cpp",
     "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl",

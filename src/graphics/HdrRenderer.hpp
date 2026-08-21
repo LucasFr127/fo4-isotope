@@ -2,6 +2,7 @@
 #pragma once
 
 #include "DeveloperExposureLock.hpp"
+#include "PipboyScreenObservation.hpp"
 #include "RendererLifetime.hpp"
 #include "resources/DeveloperExposureResources.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
@@ -196,6 +197,11 @@ public:
     [[nodiscard]] bool CompleteExposureFrame(std::uint64_t savedFrame, bool eligible) noexcept;
     [[nodiscard]] bool SetExposureLockRequested(bool requested) noexcept;
     [[nodiscard]] bool ExposureLockActive() const noexcept;
+    // Off by default. Owner-thread callers exclude queries, command lists and
+    // concurrent mutation; the copied report is submission evidence only.
+    [[nodiscard]] bool StartPipboyScreenObservation() noexcept;
+    [[nodiscard]] bool StopPipboyScreenObservation() noexcept;
+    [[nodiscard]] PipboyScreenObservation PipboyScreenSnapshot() const noexcept;
     // Query at consumption: retained handles remain storage-valid after lineage expires.
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
     [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
@@ -253,6 +259,7 @@ private:
     {
         Microsoft::WRL::ComPtr<ID3D11PixelShader> original;
         const RenoDxShaderDescriptor* descriptor{};
+        PipboyScreenShader pipboyRole{PipboyScreenShader::unknown};
     };
 
     enum class OriginalContinuation { none, retain, advance };
@@ -333,6 +340,12 @@ private:
     [[nodiscard]] DrawResult PrepareExposureDraw(const DrawReplacement& replacement) noexcept;
     void CompleteExposureDraw(const DrawResult& result, bool tone) noexcept;
     void ResetExposurePolicy() noexcept;
+    void RetirePipboyScreenObservation() noexcept;
+    void ObservePipboyScreenDraw(SceneDrawOutcome outcome) noexcept;
+    [[nodiscard]] PipboyScreenShader BoundPipboyScreenRole() const noexcept;
+    void ObservePipboyScreenRole(PipboyScreenShader role) noexcept;
+    void RejectPipboyScreenDraw(bool producer) noexcept;
+    [[nodiscard]] bool CompletePipboyProducer(IUnknown* input) noexcept;
     [[nodiscard]] ID3D11Buffer* ConstantsForInput(SceneTextureHandle input) const noexcept;
     [[nodiscard]] ID3D11PixelShader* QualifiedReplacement(
         const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
@@ -368,6 +381,8 @@ private:
     DeveloperExposureResources exposureResources_;
     std::uint64_t exposureGeneration_{};
     std::uint64_t endedExposureFrame_{};
+    PipboyScreenObservation pipboyObservation_;
+    Microsoft::WRL::ComPtr<IUnknown> pipboyProducerIdentity_;
 };
 
 }  // namespace fo4hdr

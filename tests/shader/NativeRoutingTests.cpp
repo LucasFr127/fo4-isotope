@@ -37,12 +37,31 @@ void VerifyBorrowedRouting(PixelFixture& fixture, const std::filesystem::path& d
     const auto code = ReadShader(directory / "ScenePassPlain.dxbc");
     FO4HDR_CHECK(!borrowed.ObserveCreatedPixelShader(std::as_bytes(std::span{code}),
         fixture.plain.Get()));
+    FO4HDR_CHECK(borrowed.StartPipboyScreenObservation());
+    FO4HDR_CHECK(borrowed.BeginFrame());
+    fixture.Bind(false);
+    auto* diagnosticTarget = borrowed.Views(adopted).renderTarget;
+    fixture.gpu.context->OMSetRenderTargets(1, &diagnosticTarget, nullptr);
+    struct NativeDraw { UINT calls{}; } draw;
+    const FiniteDrawInvocation invocation{
+        [](ID3D11DeviceContext* context, void* payload) {
+            ++static_cast<NativeDraw*>(payload)->calls;
+            context->Draw(3, 0);
+        }, &draw};
+    FO4HDR_CHECK(borrowed.ExecuteObserved({}, {}, invocation) == SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(draw.calls == 1);
+    const auto observed = borrowed.PipboyScreenSnapshot();
+    FO4HDR_CHECK(observed.requested && observed.producerDraws == 0 && observed.consumerDraws == 0);
+    FO4HDR_CHECK(borrowed.StopPipboyScreenObservation());
+    FO4HDR_CHECK(!borrowed.PipboyScreenSnapshot().requested);
+    FO4HDR_CHECK(borrowed.StartPipboyScreenObservation());
     fixture.Bind(true);
     FO4HDR_CHECK(borrowed.Retire());
     ComPtr<ID3D11PixelShader> bound;
     fixture.gpu.context->PSGetShader(&bound, nullptr, nullptr);
     FO4HDR_CHECK(bound.Get() == fixture.sentinel.Get());
     FO4HDR_CHECK(borrowed.Views(adopted).texture == nullptr);
+    FO4HDR_CHECK(!borrowed.PipboyScreenSnapshot().requested);
 }
 
 struct QueryAdapterEvidence

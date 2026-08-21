@@ -64,6 +64,65 @@ bool SupportedSceneLayout(const D3D11_TEXTURE2D_DESC& description) noexcept
     return SingleSceneSubresource(description) && GpuSceneStorage(description);
 }
 
+bool PipboyTextureMatches(const D3D11_TEXTURE2D_DESC& value) noexcept
+{
+    const std::array layout{value.Width, value.Height, value.MipLevels,
+        value.ArraySize, value.SampleDesc.Count, value.SampleDesc.Quality};
+    constexpr std::array expected{876U, 700U, 1U, 1U, 1U, 0U};
+    return layout == expected && value.Format == DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+
+ComPtr<IUnknown> PipboyResourceIdentity(ID3D11Resource* resource) noexcept
+{
+    if (resource == nullptr) return {};
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture))) || !texture) return {};
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    return PipboyTextureMatches(description) ? CanonicalIdentity(resource) : ComPtr<IUnknown>{};
+}
+
+bool PipboyInputViewMatches(const D3D11_SHADER_RESOURCE_VIEW_DESC& value) noexcept
+{
+    if (value.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
+    if (value.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
+    if (value.Texture2D.MostDetailedMip != 0) return false;
+    return value.Texture2D.MipLevels == 1 || value.Texture2D.MipLevels == UINT(-1);
+}
+
+ComPtr<IUnknown> PipboyInputIdentity(ID3D11DeviceContext* context,
+    ID3D11Device* device, UINT slot) noexcept
+{
+    ComPtr<ID3D11ShaderResourceView> view;
+    context->PSGetShaderResources(slot, 1, &view);
+    if (!view || !SameDevice(view.Get(), device)) return {};
+    D3D11_SHADER_RESOURCE_VIEW_DESC description{};
+    view->GetDesc(&description);
+    if (!PipboyInputViewMatches(description)) return {};
+    ComPtr<ID3D11Resource> resource;
+    view->GetResource(&resource);
+    return PipboyResourceIdentity(resource.Get());
+}
+
+ComPtr<IUnknown> PipboyOutputIdentity(ID3D11DeviceContext* context, ID3D11Device* device) noexcept
+{
+    ComPtr<ID3D11Predicate> predicate;
+    BOOL value{};
+    context->GetPredication(&predicate, &value);
+    if (predicate) return {};
+    ComPtr<ID3D11RenderTargetView> view;
+    context->OMGetRenderTargets(1, &view, nullptr);
+    if (!view || !SameDevice(view.Get(), device)) return {};
+    D3D11_RENDER_TARGET_VIEW_DESC description{};
+    view->GetDesc(&description);
+    if (description.Format != DXGI_FORMAT_R8G8B8A8_UNORM ||
+        description.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D) return {};
+    if (description.Texture2D.MipSlice != 0) return {};
+    ComPtr<ID3D11Resource> resource;
+    view->GetResource(&resource);
+    return PipboyResourceIdentity(resource.Get());
+}
+
 }  // namespace
 
 HRESULT ScenePassRenderer::CreateObservedPixelShader(std::span<const std::byte> bytecode,
@@ -83,14 +142,17 @@ bool ScenePassRenderer::ObserveCreatedPixelShader(std::span<const std::byte> byt
 {
     if (!CanObserveShader(shader)) return false;
     if (!SameDevice(shader, device_.Get())) return false;
-    const auto* descriptor = FindRenoDxFallout4Shader(ComputeRenoDxShaderCrc32(bytecode));
-    if (descriptor == nullptr) return false;
+    const auto crc32 = ComputeRenoDxShaderCrc32(bytecode);
+    const auto* descriptor = FindRenoDxFallout4Shader(crc32);
+    const auto pipboyRole = MatchPipboyScreenBytecode(bytecode, crc32);
+    if (descriptor == nullptr && pipboyRole == PipboyScreenShader::unknown) return false;
     const auto end = observed_.begin() + observedCount_;
     const auto found = std::find_if(observed_.begin(), end,
         [shader](const ObservedShader& observed) { return SameIdentity(observed.original.Get(), shader); });
-    if (found != end) return found->descriptor == descriptor;
+    if (found != end)
+        return found->descriptor == descriptor && found->pipboyRole == pipboyRole;
     if (observedCount_ == observed_.size()) return false;
-    observed_[observedCount_++] = {shader, descriptor};
+    observed_[observedCount_++] = {shader, descriptor, pipboyRole};
     return true;
 }
 
@@ -158,6 +220,98 @@ bool ScenePassRenderer::QualifiedSceneTexture(const D3D11_TEXTURE2D_DESC& origin
     if (!SupportedSceneLayout(description)) return false;
     return description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
         description.Width == original.Width && description.Height == original.Height;
+}
+
+bool ScenePassRenderer::StartPipboyScreenObservation() noexcept
+{
+    if (!Active() || invoking_) return false;
+    pipboyProducerIdentity_.Reset();
+    const auto epoch = lifetime_.CurrentEpoch();
+    pipboyObservation_.Begin(epoch, epoch);
+    return true;
+}
+
+bool ScenePassRenderer::StopPipboyScreenObservation() noexcept
+{
+    if (!OnOwnerThread() || invoking_) return false;
+    RetirePipboyScreenObservation();
+    return true;
+}
+
+PipboyScreenObservation ScenePassRenderer::PipboyScreenSnapshot() const noexcept
+{
+    if (!OnOwnerThread() || invoking_) return {};
+    return pipboyObservation_;
+}
+
+void ScenePassRenderer::RetirePipboyScreenObservation() noexcept
+{
+    pipboyObservation_.Stop();
+    pipboyProducerIdentity_.Reset();
+}
+
+PipboyScreenShader ScenePassRenderer::BoundPipboyScreenRole() const noexcept
+{
+    ComPtr<ID3D11PixelShader> shader;
+    context_->PSGetShader(&shader, nullptr, nullptr);
+    if (!shader) return PipboyScreenShader::unknown;
+    const auto end = observed_.begin() + observedCount_;
+    const auto found = std::find_if(observed_.begin(), end, [&shader](const ObservedShader& entry) {
+        return SameIdentity(entry.original.Get(), shader.Get());
+    });
+    return found == end ? PipboyScreenShader::unknown : found->pipboyRole;
+}
+
+void ScenePassRenderer::ObservePipboyScreenDraw(SceneDrawOutcome outcome) noexcept
+{
+    if (!pipboyObservation_.requested) return;
+    const auto epoch = lifetime_.CurrentEpoch();
+    const bool continues = frameOpen_ && pipboyObservation_.Matches(epoch, epoch);
+    if (!continues || outcome == SceneDrawOutcome::callbackFailed)
+    {
+        RetirePipboyScreenObservation();
+        return;
+    }
+    if (outcome != SceneDrawOutcome::forwarded) return;
+    const auto role = BoundPipboyScreenRole();
+    if (role != PipboyScreenShader::unknown) ObservePipboyScreenRole(role);
+}
+
+void ScenePassRenderer::ObservePipboyScreenRole(PipboyScreenShader role) noexcept
+{
+    const bool producer = role == PipboyScreenShader::producer;
+    auto input = PipboyInputIdentity(context_.Get(), device_.Get(), producer ? 0 : 4);
+    if (!input)
+    {
+        RejectPipboyScreenDraw(producer);
+        return;
+    }
+    if (producer)
+    {
+        if (!CompletePipboyProducer(input.Get())) RejectPipboyScreenDraw(true);
+    }
+    else
+    {
+        pipboyObservation_.Consumer(frameGeneration_,
+            pipboyProducerIdentity_ && pipboyProducerIdentity_.Get() == input.Get(),
+            pipboyProducerIdentity_ != nullptr);
+    }
+}
+
+void ScenePassRenderer::RejectPipboyScreenDraw(bool producer) noexcept
+{
+    ++pipboyObservation_.rejectedDraws;
+    if (producer) pipboyProducerIdentity_.Reset();
+}
+
+bool ScenePassRenderer::CompletePipboyProducer(IUnknown* input) noexcept
+{
+    auto output = PipboyOutputIdentity(context_.Get(), device_.Get());
+    if (!output) return false;
+    if (output.Get() == input) return false;
+    pipboyProducerIdentity_ = std::move(output);
+    pipboyObservation_.Producer(frameGeneration_);
+    return true;
 }
 
 }  // namespace fo4hdr

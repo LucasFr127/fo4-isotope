@@ -12,6 +12,7 @@ void RunOperatorLutTests();
 void RunHdrOperatorWorkerTests();
 void RunGt7Tests();
 void RunPipelineContractTests();
+void RunPipboyScreenObservationTests();
 void RunHookTests();
 void RunNativeImageSlotsTests();
 void RunDeviceCreationHookTests();
