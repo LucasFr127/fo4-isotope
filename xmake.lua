@@ -114,7 +114,8 @@ target("Fallout4HDR")
         "src/output/ArmorUiComposition.cpp",
         "src/graphics/passes/ArmorCompositionPass.cpp",
         "src/graphics/passes/ObservedDraw.cpp",
-        "src/graphics/passes/PresentationPass.cpp", "src/graphics/OperatorLutWorker.cpp",
+        "src/graphics/passes/PresentationPass.cpp",
+        "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp", "src/graphics/OperatorLutWorker.cpp",
         "src/config/SettingsPersistence.cpp")
     add_files("src/graphics/passes/ArmorEncodedComposition.cpp")
     add_syslinks("version")
@@ -226,6 +227,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/passes/ArmorCompositionPass.cpp",
         "src/graphics/passes/ObservedDraw.cpp",
         "src/graphics/passes/PresentationPass.cpp",
+        "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp",
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/PresentationPassTests.cpp",

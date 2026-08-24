@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PresentationPass.hpp"
+#include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 #include "ObservedDraw.hpp"
 
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
@@ -183,10 +184,10 @@ class ScopedComputeState
 {
 public:
     explicit ScopedComputeState(ID3D11DeviceContext1* context) noexcept
-        : context_(context), outputs_(context)
+        : context_(context), outputs_(context), constants_(context)
     {
         context_->CSGetShader(&shader_, classes_.data(), &classCount_);
-        context_->CSGetConstantBuffers1(0, 1, &constants_, &firstConstant_, &constantCount_);
+        constants_.Capture();
         context_->CSGetShaderResources(0, static_cast<UINT>(inputs_.size()), inputs_.data());
         context_->GetPredication(&predicate_, &predicateValue_);
     }
@@ -202,8 +203,7 @@ public:
     [[nodiscard]] bool Ready() const noexcept
     {
         if (classCount_ > classCapacity) return false;
-        if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
-        if (constantCount_ > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT) return false;
+        if (!constants_.Ready()) return false;
         return outputs_.Valid();
     }
 
@@ -221,7 +221,7 @@ public:
         PrepareOutputs();
         context_->CSSetShaderResources(0, static_cast<UINT>(inputs.size()), inputs.data());
         context_->CSSetUnorderedAccessViews(0, 1, &target, preserveCounters.data());
-        context_->CSSetConstantBuffers(0, 1, &constants);
+        constants_.Bind(constants);
         context_->CSSetShader(shader, nullptr, 0);
     }
 
@@ -236,9 +236,8 @@ private:
         context_->CSSetShaderResources(0, static_cast<UINT>(emptyInputs.size()), emptyInputs.data());
         context_->CSSetUnorderedAccessViews(0, 1, &emptyTarget, preserveCounters.data());
         outputs_.Restore(context_);
-        auto* constants = constants_.Get();
         context_->CSSetShaderResources(0, static_cast<UINT>(inputs_.size()), inputs_.data());
-        context_->CSSetConstantBuffers1(0, 1, &constants, &firstConstant_, &constantCount_);
+        constants_.Restore();
         context_->CSSetShader(shader_.Get(), classes_.data(), classCount_);
         context_->SetPredication(predicate_.Get(), predicateValue_);
     }
@@ -246,13 +245,11 @@ private:
     ID3D11DeviceContext1* context_;
     OutputBindings outputs_;
     ComPtr<ID3D11ComputeShader> shader_;
-    ComPtr<ID3D11Buffer> constants_;
+    ScopedD3D11ComputeConstantBuffer constants_;
     std::array<ID3D11ShaderResourceView*, 4> inputs_{};
     ComPtr<ID3D11Predicate> predicate_;
     std::array<ID3D11ClassInstance*, classCapacity> classes_{};
     UINT classCount_{classCapacity};
-    UINT firstConstant_{};
-    UINT constantCount_{};
     BOOL predicateValue_{};
     bool mutated_{};
 };
