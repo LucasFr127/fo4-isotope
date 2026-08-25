@@ -10,6 +10,7 @@ int wmain(int argc, wchar_t** argv)
     fo4hdr::tests::RunHdrCoreTests();
     fo4hdr::tests::RunPerformanceTests();
     fo4hdr::tests::RunToneMappingTests();
+    fo4hdr::tests::RunAgxTests();
     fo4hdr::tests::RunOperatorLutTests();
     fo4hdr::tests::RunHdrOperatorWorkerTests();
     fo4hdr::tests::RunGt7Tests();
@@ -19,6 +20,7 @@ int wmain(int argc, wchar_t** argv)
     fo4hdr::tests::RunNativeImageSlotsTests();
     fo4hdr::tests::RunDeviceCreationHookTests();
     fo4hdr::tests::RunHdrSettingsMathTests();
+    fo4hdr::tests::RunHdrConfigurationTests();
     fo4hdr::tests::RunHdrPersistenceTests();
     fo4hdr::tests::RunShaderTestOptionsTests();
     fo4hdr::tests::RunDirectCallPatchTests();

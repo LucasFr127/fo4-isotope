@@ -2,6 +2,7 @@
 
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "HdrSettingsTestSupport.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
@@ -40,13 +41,6 @@ private:
     std::filesystem::path path_;
 };
 
-constexpr std::string_view kOriginal{
-    "\xEF\xBB\xBF"
-    "; retained heading\r\n[Output]\r\nDisplayPeakNits=1000 ; peak comment\r\n"
-    "UiPaperWhiteNits=203\r\nVideoWhiteNits=203\r\nUnknownOutput=kept\r\n"
-    "[ToneMapper]\r\nAlgorithm=AgX # operator comment\r\n"
-    "[Other]\r\nUntouched = yes\r\n"};
-
 void WriteFile(const std::filesystem::path& path, std::string_view text)
 {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
@@ -81,40 +75,6 @@ void CheckPreserved(std::string_view text)
     FO4HDR_CHECK(text.find("UnknownOutput=kept\r\n") != std::string_view::npos);
     FO4HDR_CHECK(text.find("[Other]\r\nUntouched = yes\r\nNewest=kept\r\n") !=
         std::string_view::npos);
-}
-
-void CheckParser()
-{
-    const auto original = ParsePluginConfiguration(kOriginal);
-    FO4HDR_CHECK(original.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(original.value.algorithm == OperatorLutAlgorithm::agX);
-    auto requested = original.value;
-    requested.algorithm = OperatorLutAlgorithm::gt7;
-    requested.display = {1500.0, 100.0, 300.0};
-    requested.display.vanillaColorGradingStrengthPercent = 50.0;
-    requested.display.exposureEv = 1;
-    requested.display.bloomStrengthPercent = 50;
-    requested.display.contrast = 25;
-    requested.display.blacks = -20;
-    requested.display.highlights = 30;
-    requested.display.shadows = -40;
-    requested.display.saturationPercent = 120;
-    requested.display.temperature = 15;
-    requested.display.tint = -10;
-    const auto rewritten = RewritePluginConfigurationIni(kOriginal, requested);
-    const auto parsed = ParsePluginConfiguration(rewritten);
-    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(parsed.value == requested);
-    const auto finalCr = RewritePluginConfigurationIni(
-        std::string(kOriginal) + "Keep=hello\r", requested);
-    FO4HDR_CHECK(finalCr.ends_with("Keep=hello\r"));
-    FO4HDR_CHECK(ParsePluginConfiguration("[ToneMapper]\nAlgorithm=unknown\n").status ==
-        PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(ParsePluginConfiguration(std::string(kOriginal) +
-        "[Output]\nDisplayPeakNits=1000\n").status == PluginConfigurationStatus::invalid);
-    requested.display.uiPaperWhiteNits = 99.0;
-    FO4HDR_CHECK(!ValidatePluginConfiguration(requested));
-    FO4HDR_CHECK(RewritePluginConfigurationIni(kOriginal, requested) == kOriginal);
 }
 
 void CheckRoundTrip()
@@ -167,7 +127,6 @@ void CheckRoundTrip()
 
 void RunHdrPersistenceTests()
 {
-    CheckParser();
     CheckRoundTrip();
 }
 

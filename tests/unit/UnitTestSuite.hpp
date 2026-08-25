@@ -8,6 +8,7 @@ namespace fo4hdr::tests {
 void RunHdrCoreTests();
 void RunPerformanceTests();
 void RunToneMappingTests();
+void RunAgxTests();
 void RunOperatorLutTests();
 void RunHdrOperatorWorkerTests();
 void RunGt7Tests();
@@ -18,6 +19,7 @@ void RunNativeImageSlotsTests();
 void RunDeviceCreationHookTests();
 void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
 void RunHdrSettingsMathTests();
+void RunHdrConfigurationTests();
 void RunHdrPersistenceTests();
 void RunShaderTestOptionsTests();
 void RunDirectCallPatchTests();

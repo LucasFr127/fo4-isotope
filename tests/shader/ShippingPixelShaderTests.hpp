@@ -3,6 +3,7 @@
 
 #include "d3d11/GpuHarness.hpp"
 #include "HdrRenderer.hpp"
+#include "ShaderTestSuite.hpp"
 
 #include <array>
 #include <cstddef>
@@ -12,9 +13,6 @@
 #include <vector>
 
 namespace fo4hdr::tests::gpu {
-
-void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory);
-void VerifyPresentationPass(const std::filesystem::path& fixtureDirectory);
 
 namespace detail {
 
