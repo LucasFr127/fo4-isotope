@@ -57,6 +57,8 @@ function Invoke-SourceChecks {
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/SourceArchive.Tests.ps1'))
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
+        [IO.Path]::Combine($root, 'tests/source/StagePolicy.Tests.ps1'), '-Mode', $Mode)
+    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/TestProcess.Tests.ps1'))
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/runtime/MonitorNativeSession.Tests.ps1'))

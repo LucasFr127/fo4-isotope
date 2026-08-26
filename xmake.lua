@@ -119,6 +119,25 @@ target("Fallout4HDR")
         "src/config/SettingsPersistence.cpp")
     add_files("src/graphics/passes/ArmorEncodedComposition.cpp")
     add_syslinks("version")
+    on_install(function(target)
+        local stage = path.join(os.projectdir(), "dist/1.10.163/Data/F4SE/Plugins")
+        assert(target:symbolfile(), "Missing plugin symbol file path")
+        local files = { target:targetfile(), target:symbolfile(),
+            path.join(os.projectdir(), "config/Fallout4HDR.ini") }
+        local allowed = { ["Fallout4HDR.dll"] = true, ["Fallout4HDR.pdb"] = true,
+            ["Fallout4HDR.ini"] = true }
+        for _, file in ipairs(files) do
+            assert(os.isfile(file), "Missing staging input: " .. file)
+        end
+        for _, file in ipairs(os.files(path.join(stage, "*"))) do
+            assert(allowed[path.filename(file)], "Unexpected staging file: " .. file)
+        end
+        assert(#os.dirs(path.join(stage, "*")) == 0, "Unexpected staging directory")
+        os.mkdir(stage)
+        for _, file in ipairs(files) do
+            os.cp(file, path.join(stage, path.filename(file)))
+        end
+    end)
 target_end()
 
 for _, fixture in ipairs({

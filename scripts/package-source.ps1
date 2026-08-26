@@ -196,6 +196,7 @@ $files = [string[]]@(
     "scripts/internal/Project.Process.ps1",
     "scripts/internal/Project.Source.ps1",
     "tests/source/SourceArchive.Tests.ps1",
+    "tests/source/StagePolicy.Tests.ps1",
     "scripts/test.ps1",
     "tests/source/TestProcess.Tests.ps1",
     "tests/shader/ShaderTestOptions.hpp",
