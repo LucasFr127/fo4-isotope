@@ -49,7 +49,7 @@ $expected = [string[]]@(
     "src/config/HdrSettings.cpp",
     "src/output/Hdr10Color.cpp", "src/plugin/PluginMain.cpp",
     "src/runtime/RuntimeIdentityFiles.cpp", "src/runtime/RuntimeIdentityFiles.hpp",
-    "src/runtime/RuntimeValidation.cpp", "tests/source/PackageSource.Tests.ps1",
+    "src/runtime/RuntimeValidation.cpp", "tests/source/PackageSource.Tests.ps1", "tests/source/SourceTree.Tests.ps1",
     "tests/support/TestHarness.hpp", "tests/unit/main.cpp", "tests/unit/output/HdrCoreTests.cpp",
     "tests/unit/output/PipelineContractTests.cpp",
     "tests/unit/config/HdrSettingsMathTests.cpp",

@@ -51,6 +51,8 @@ function Invoke-SourceChecks {
     $powerShell = if ($env:FO4HDR_PWSH) { $env:FO4HDR_PWSH }
         else { (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source }
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
+        [IO.Path]::Combine($root, 'tests/source/SourceTree.Tests.ps1'))
+    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/PackageSource.Tests.ps1'))
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/TestProcess.Tests.ps1'))

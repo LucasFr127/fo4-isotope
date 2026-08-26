@@ -2,3 +2,6 @@
 *.cpp text eol=lf
 *.hpp text eol=lf
 *.lua text eol=lf
+
+# Preserve the exact upstream source oracle bytes.
+/third_party/gt7/upstream/gt7_tone_mapping.cpp -text

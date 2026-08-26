@@ -62,7 +62,7 @@ $files = [string[]]@(
     "src/runtime/RuntimeIdentityFiles.cpp",
     "src/runtime/RuntimeIdentityFiles.hpp",
     "src/runtime/RuntimeValidation.cpp",
-    "tests/source/PackageSource.Tests.ps1",
+    "tests/source/PackageSource.Tests.ps1", "tests/source/SourceTree.Tests.ps1",
     "tests/support/TestHarness.hpp",
     "tests/unit/main.cpp",
     "tests/unit/config/HdrSettingsMathTests.cpp",
