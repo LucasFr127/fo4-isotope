@@ -3,6 +3,7 @@
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
+. ([IO.Path]::Combine($PSScriptRoot, "../../scripts/internal/Project.Source.ps1"))
 
 $root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, "../.."))
 $script = [IO.Path]::Combine($root, "scripts/package-source.ps1")
@@ -176,6 +177,8 @@ $expected = [string[]]@(
     "scripts/internal/NativeSession.Common.ps1",
     "tests/runtime/MonitorNativeSession.Tests.ps1",
     "scripts/internal/Project.Process.ps1",
+    "scripts/internal/Project.Source.ps1",
+    "tests/source/SourceArchive.Tests.ps1",
     "scripts/test.ps1",
     "tests/source/TestProcess.Tests.ps1",
     "tests/shader/ShaderTestOptions.hpp",
@@ -220,7 +223,7 @@ try {
 
     $stream = [IO.File]::OpenRead($first)
     try {
-        $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Read, $true)
+        $zip = Open-Fo4HdrValidatedZipArchive $first
         try {
             $counts = @{ Root = 0; Shared = 0; Spdlog = 0; ImGui = 0; Project = 0 }
             $previous = ""
