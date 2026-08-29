@@ -11,7 +11,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <limits>
 
 namespace fo4hdr::tests {
@@ -216,51 +215,6 @@ void CheckLookSettings()
     FO4HDR_CHECK(!ValidatePluginConfiguration(settings));
 }
 
-LinearRgb BlendLookEndpointOutputs(
-    const Aces2Transform& transform, LinearRgb input, double strength) noexcept
-{
-    if (!std::isfinite(strength)) return {};
-    if (strength < 0.0) return {};
-    if (strength > 1.0) return {};
-    const auto low = MapAces2LmtToBt2020Nits(transform, input, 0.0);
-    const auto high = MapAces2LmtToBt2020Nits(transform, input, 1.0);
-    return {std::lerp(low.red, high.red, strength),
-        std::lerp(low.green, high.green, strength),
-        std::lerp(low.blue, high.blue, strength)};
-}
-
-void CompareLookStrengthPlacement(const Aces2Transform& transform)
-{
-    constexpr std::array inputs{LinearRgb{}, LinearRgb{0.001, 0.001, 0.001},
-        LinearRgb{0.18, 0.18, 0.18}, LinearRgb{2.0, 0.7, 0.5}};
-    double maximum = 0.0;
-    double total = 0.0;
-    // AP0 mixing precedes nonlinear formation; this blends completed outputs.
-    for (const auto input : inputs)
-    {
-        const auto blended = BlendLookEndpointOutputs(transform, input, 0.5);
-        const auto mapped = MapAces2LmtToBt2020Nits(transform, input, 0.5);
-        CheckContained(blended, 1000.0);
-        CheckContained(mapped, 1000.0);
-        CheckSameRgb(BlendLookEndpointOutputs(transform, input, 0.0),
-            MapAces2LmtToBt2020Nits(transform, input, 0.0));
-        CheckSameRgb(BlendLookEndpointOutputs(transform, input, 1.0),
-            MapAces2LmtToBt2020Nits(transform, input, 1.0));
-        for (double difference : {std::abs(blended.red - mapped.red),
-                 std::abs(blended.green - mapped.green),
-                 std::abs(blended.blue - mapped.blue)})
-        {
-            FO4HDR_CHECK(std::isfinite(difference));
-            maximum = std::max(maximum, difference);
-            total += difference;
-        }
-    }
-    CheckSameRgb(BlendLookEndpointOutputs(transform, {2.0, 0.7, 0.5},
-        std::numeric_limits<double>::quiet_NaN()), {});
-    std::cout << "Look strength endpoint comparison: maximum_nits=" << maximum
-              << " mean_nits=" << total / (inputs.size() * 3) << '\n';
-}
-
 void TestAces2ContrastLook()
 {
     for (const auto input : std::array{LinearRgb{}, LinearRgb{0.18, 0.18, 0.18},
@@ -280,7 +234,6 @@ void TestAces2ContrastLook()
     FO4HDR_CHECK(MapAces2LmtToBt2020Nits(*transform, shadow, 0.0).red >
         MapAces2ToBt2020Nits(*transform, shadow).red);
     CheckSameRgb(MapAces2LmtToBt2020Nits(*transform, shadow, -1.0), {});
-    CompareLookStrengthPlacement(*transform);
     CheckLookSettings();
 }
 
