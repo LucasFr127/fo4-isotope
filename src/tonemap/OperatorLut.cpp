@@ -98,8 +98,8 @@ double DecodeOperatorLutCoordinate(
 struct PreparedOperator
 {
     explicit PreparedOperator(const OperatorLutData& data) noexcept :
-        algorithm(data.algorithm),
-        aces2(algorithm == OperatorLutAlgorithm::aces2 ?
+        algorithm(data.algorithm), lookStrength(data.parameters.acesLookStrength),
+        aces2((algorithm == OperatorLutAlgorithm::aces2 || algorithm == OperatorLutAlgorithm::aces2Lmt) ?
             CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
         agx(algorithm == OperatorLutAlgorithm::agX ?
             CreateAgxTransform(data.displayPeakNits, data.parameters) :
@@ -109,6 +109,7 @@ struct PreparedOperator
     {}
 
     OperatorLutAlgorithm algorithm;
+    double lookStrength;
     Aces2TransformHandle aces2;
     std::optional<AgxTransform> agx;
     Gt7TransformHandle gt7;
@@ -117,7 +118,8 @@ struct PreparedOperator
     {
         switch (algorithm)
         {
-        case OperatorLutAlgorithm::aces2: return aces2 != nullptr;
+        case OperatorLutAlgorithm::aces2:
+        case OperatorLutAlgorithm::aces2Lmt: return aces2 != nullptr;
         case OperatorLutAlgorithm::agX: return agx.has_value();
         case OperatorLutAlgorithm::gt7: return gt7 != nullptr;
         }
@@ -129,7 +131,8 @@ struct PreparedOperator
         switch (algorithm)
         {
         case OperatorLutAlgorithm::aces2:
-            return aces2 != nullptr ? EvaluateAces2LutNits(*aces2, sceneLinear) : LinearRgb{};
+        case OperatorLutAlgorithm::aces2Lmt:
+            return EvaluateAces(sceneLinear);
         case OperatorLutAlgorithm::agX:
             return agx.has_value() ? EvaluateAgxLutNits(*agx, sceneLinear) : LinearRgb{};
         case OperatorLutAlgorithm::gt7:
@@ -137,18 +140,28 @@ struct PreparedOperator
         }
         return {};
     }
+
+    [[nodiscard]] LinearRgb EvaluateAces(LinearRgb sceneLinear) const noexcept
+    {
+        if (!aces2) return {};
+        return algorithm == OperatorLutAlgorithm::aces2Lmt ?
+            EvaluateAces2LmtLutNits(*aces2, sceneLinear, lookStrength) :
+            EvaluateAces2LutNits(*aces2, sceneLinear);
+    }
 };
 
 [[nodiscard]] bool IsAces2Algorithm(
     OperatorLutAlgorithm algorithm) noexcept
 {
-    return algorithm == OperatorLutAlgorithm::aces2;
+    return algorithm == OperatorLutAlgorithm::aces2 ||
+        algorithm == OperatorLutAlgorithm::aces2Lmt;
 }
 
 [[nodiscard]] bool IsLutAlgorithm(
     OperatorLutAlgorithm algorithm) noexcept
 {
     return algorithm == OperatorLutAlgorithm::aces2 ||
+        algorithm == OperatorLutAlgorithm::aces2Lmt ||
         algorithm == OperatorLutAlgorithm::agX ||
         algorithm == OperatorLutAlgorithm::gt7;
 }
@@ -175,7 +188,7 @@ struct PreparedOperator
 [[nodiscard]] double ShaperCenter(
     OperatorLutAlgorithm algorithm, double peak) noexcept
 {
-    if (algorithm == OperatorLutAlgorithm::aces2) return 2.4;
+    if (IsAces2Algorithm(algorithm)) return 2.4;
     return algorithm == OperatorLutAlgorithm::gt7 ?
         std::log2(8.0 * peak / kSceneReferenceWhiteNits) : 6.0;
 }
@@ -462,6 +475,7 @@ double OperatorLutInputOffset(OperatorLutAlgorithm algorithm) noexcept
     switch (algorithm)
     {
     case OperatorLutAlgorithm::aces2:
+    case OperatorLutAlgorithm::aces2Lmt:
     case OperatorLutAlgorithm::agX:
     case OperatorLutAlgorithm::gt7: return 1.0 / 65536.0;
     }

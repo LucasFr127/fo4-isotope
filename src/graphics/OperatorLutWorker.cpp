@@ -16,6 +16,7 @@ bool ValidAlgorithm(OperatorLutAlgorithm algorithm) noexcept
     switch (algorithm)
     {
     case OperatorLutAlgorithm::aces2:
+    case OperatorLutAlgorithm::aces2Lmt:
     case OperatorLutAlgorithm::agX:
     case OperatorLutAlgorithm::gt7: return true;
     default: return false;

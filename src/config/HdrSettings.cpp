@@ -186,6 +186,9 @@ bool ValidateToneMapperParameters(
     switch (algorithm)
     {
     case OperatorLutAlgorithm::aces2: return true;
+    case OperatorLutAlgorithm::aces2Lmt:
+        return InRange(parameters.acesLookStrength,
+            kMinimumAcesLookStrength, kMaximumAcesLookStrength);
     case OperatorLutAlgorithm::agX:
         return AgxParametersValid(parameters);
     case OperatorLutAlgorithm::gt7:

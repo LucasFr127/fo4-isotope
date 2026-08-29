@@ -18,6 +18,8 @@ inline constexpr double kMinimumSaturationPercent{0.0};
 inline constexpr double kMaximumSaturationPercent{200.0};
 inline constexpr double kMinimumVanillaColorGradingPercent{0.0};
 inline constexpr double kMaximumVanillaColorGradingPercent{100.0};
+inline constexpr double kMinimumAcesLookStrength{0.0};
+inline constexpr double kMaximumAcesLookStrength{1.0};
 inline constexpr double kMinimumAgxMiddleGrayEv{-0.25};
 inline constexpr double kMaximumAgxMiddleGrayEv{0.25};
 inline constexpr double kMinimumAgxContrast{2.4};
@@ -37,11 +39,13 @@ enum class OperatorLutAlgorithm : std::uint8_t
 {
     aces2,
     agX,
-    gt7
+    gt7,
+    aces2Lmt
 };
 
 struct ToneMapperParameters
 {
+    double acesLookStrength{1.0};
     double agxMiddleGrayEv{};
     double agxContrast{2.7};
     double agxHdrPurity{0.5};
@@ -57,7 +61,9 @@ struct ToneMapperParameters
     OperatorLutAlgorithm algorithm, const ToneMapperParameters& parameters) noexcept
 {
     ToneMapperParameters active;
-    if (algorithm == OperatorLutAlgorithm::agX)
+    if (algorithm == OperatorLutAlgorithm::aces2Lmt)
+        active.acesLookStrength = parameters.acesLookStrength;
+    else if (algorithm == OperatorLutAlgorithm::agX)
     {
         active.agxMiddleGrayEv = parameters.agxMiddleGrayEv;
         active.agxContrast = parameters.agxContrast;

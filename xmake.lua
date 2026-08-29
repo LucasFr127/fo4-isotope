@@ -103,7 +103,7 @@ target("Fallout4HDR")
         "src/tonemap/OperatorLut.cpp",
         "src/tonemap/Gt7.cpp",
         "src/tonemap/Agx.cpp",
-        "src/tonemap/Aces2.cpp",
+        "src/tonemap/Aces2.cpp", "src/tonemap/Aces2Lmt.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp",
         "src/tonemap/aces2/Aces2Tables.cpp",
         "src/graphics/d3d11/ContextQuerySafety.cpp",
@@ -158,8 +158,8 @@ for _, fixture in ipairs({
             "tests/unit/config/HdrConfigurationTests.cpp",
             "tests/shader/ShaderTestOptions.cpp", "tests/unit/ShaderTestOptionsTests.cpp",
             "src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
-            "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
-            "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp",
+            "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/Aces2Lmt.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
+            "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp", "tests/support/reference/Aces2LmtSourceOracle.cpp",
             "tests/unit/tonemap/AgxTests.cpp",
             "src/tonemap/OperatorLut.cpp", "src/graphics/OperatorLutWorker.cpp",
             "tests/support/reference/OperatorLutTestSupport.cpp",
@@ -264,6 +264,6 @@ target("fo4hdr-shader-tests")
         "src/graphics/resources/DeveloperExposureResources.cpp",
         "tests/shader/DeveloperExposureTests.cpp",
         "src/config/SettingsPersistence.cpp", "src/graphics/OperatorLutWorker.cpp",
-        "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp",
+        "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/Aces2Lmt.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
 target_end()

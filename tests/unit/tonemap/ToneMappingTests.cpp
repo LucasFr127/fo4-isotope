@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Fallout4HDR/tonemap/Aces2.hpp"
+#include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
+#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "reference/Aces2LmtSourceOracle.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -178,11 +182,68 @@ void TestAces2PeakReuse()
     }
 }
 
+void CheckLookSource(LinearRgb input)
+{
+    const auto source = ApplyAces2ContrastLmtSourceFloat(input);
+    const auto actual = ApplyAces2ContrastLmt(input);
+    // Source-float versus double AP0, distinct from the absolute-nit ODT budget.
+    const double tolerance = 2.0e-4 * std::max({1.0,
+        std::abs(source.red), std::abs(source.green), std::abs(source.blue)});
+    FO4HDR_CHECK(std::abs(actual.red - source.red) <= tolerance);
+    FO4HDR_CHECK(std::abs(actual.green - source.green) <= tolerance);
+    FO4HDR_CHECK(std::abs(actual.blue - source.blue) <= tolerance);
+}
+
+void CheckLookSettings()
+{
+    PluginConfiguration settings;
+    settings.algorithm = OperatorLutAlgorithm::aces2Lmt;
+    settings.display.toneMapperParameters.acesLookStrength = 0.5;
+    FO4HDR_CHECK(ValidatePluginConfiguration(settings));
+    const auto saved = RewritePluginConfigurationIni("; retained\n", settings);
+    const auto parsed = ParsePluginConfiguration(saved);
+    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(parsed.value == settings);
+    auto changed = settings.display.toneMapperParameters;
+    changed.acesLookStrength = 1.0;
+    FO4HDR_CHECK(ActiveToneMapperParameters(settings.algorithm, changed) !=
+        ActiveToneMapperParameters(settings.algorithm, settings.display.toneMapperParameters));
+    FO4HDR_CHECK(ActiveToneMapperParameters(OperatorLutAlgorithm::gt7, changed) ==
+        ActiveToneMapperParameters(OperatorLutAlgorithm::gt7, settings.display.toneMapperParameters));
+    settings.display.toneMapperParameters.acesLookStrength =
+        std::numeric_limits<double>::quiet_NaN();
+    FO4HDR_CHECK(!ValidatePluginConfiguration(settings));
+}
+
+void TestAces2ContrastLook()
+{
+    for (const auto input : std::array{LinearRgb{}, LinearRgb{0.18, 0.18, 0.18},
+             LinearRgb{2.0, 0.7, 0.5}, LinearRgb{-0.01, 0.18, 1.0}})
+        CheckLookSource(input);
+    const auto transform = CreateAces2Transform(1000.0);
+    FO4HDR_CHECK(transform);
+    if (!transform) return;
+    for (double strength : {0.0, 0.5, 1.0})
+    {
+        CheckSameRgb(MapAces2LmtToBt2020Nits(*transform, {}, strength), {});
+        CheckContained(MapAces2LmtToBt2020Nits(*transform, {2.0, 0.7, 0.5}, strength), 1000.0);
+    }
+    // Strength zero retains the fixed shadow adaptation, rather than becoming
+    // the direct Academy operator. Direct reference checks above remain intact.
+    constexpr LinearRgb shadow{0.001, 0.001, 0.001};
+    FO4HDR_CHECK(MapAces2LmtToBt2020Nits(*transform, shadow, 0.0).red >
+        MapAces2ToBt2020Nits(*transform, shadow).red);
+    CheckSameRgb(MapAces2LmtToBt2020Nits(*transform, shadow, -1.0), {});
+    CheckLookSettings();
+}
+
+
 }  // namespace
 
 void RunToneMappingTests()
 {
     TestAces2ReferenceSamples();
+    TestAces2ContrastLook();
     TestAces2ContainedInputs();
     TestAces2InputPolicy();
     TestAces2PeakReuse();

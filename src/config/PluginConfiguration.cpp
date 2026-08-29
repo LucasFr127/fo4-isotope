@@ -14,11 +14,11 @@
 namespace fo4hdr {
 namespace {
 
-constexpr std::array<std::string_view, 3> kAlgorithms{"ACES2", "AgX", "GT7"};
+constexpr std::array<std::string_view, 4> kAlgorithms{"ACES2", "AgX", "GT7", "ACES2LMT"};
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 21> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 22> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
@@ -28,7 +28,7 @@ std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexc
         {"Image", "Contrast"}, {"Image", "Blacks"}, {"Image", "Highlights"},
         {"Image", "Shadows"}, {"Image", "Saturation"},
         {"Image", "Temperature"}, {"Image", "Tint"},
-        {"Image", "Exposure"}, {"Effects", "BloomStrength"}}};
+        {"Image", "Exposure"}, {"Effects", "BloomStrength"}, {"ACES2LMT", "LookStrength"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -101,7 +101,7 @@ private:
             &settings.vanillaColorGradingStrengthPercent, &settings.contrast, &settings.blacks,
             &settings.highlights, &settings.shadows, &settings.saturationPercent,
             &settings.temperature, &settings.tint,
-            &settings.exposureEv, &settings.bloomStrengthPercent};
+            &settings.exposureEv, &settings.bloomStrengthPercent, &parameters.acesLookStrength};
         return ParseNumber(value, *targets[index]);
     }
 
@@ -136,7 +136,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 21> seen_{};
+    std::array<bool, 22> seen_{};
 };
 
 }  // namespace
@@ -165,6 +165,8 @@ bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept
     if (ValidateHdrSettings(value.display) != HdrSettingsValidationError::none) return false;
     if (value.display.displayPeakNits < 400.0) return false;
     if (value.display.displayPeakNits > 2000.0) return false;
+    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::aces2Lmt,
+            value.display.toneMapperParameters)) return false;
     if (!ValidateToneMapperParameters(OperatorLutAlgorithm::agX,
             value.display.toneMapperParameters)) return false;
     if (!ValidateToneMapperParameters(OperatorLutAlgorithm::gt7,

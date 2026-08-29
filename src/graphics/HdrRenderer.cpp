@@ -322,7 +322,8 @@ std::uint32_t OperatorMode(OperatorLutAlgorithm algorithm) noexcept
 {
     switch (algorithm)
     {
-    case OperatorLutAlgorithm::aces2: return 1;
+    case OperatorLutAlgorithm::aces2:
+    case OperatorLutAlgorithm::aces2Lmt: return 1;
     case OperatorLutAlgorithm::agX: return 2;
     case OperatorLutAlgorithm::gt7: return 3;
     default: return 0;

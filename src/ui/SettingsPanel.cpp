@@ -138,7 +138,7 @@ bool DrawGt7(ToneMapperParameters& parameters) noexcept
 bool DrawOperator(PluginConfiguration& editable) noexcept
 {
     ImGui::SeparatorText("Tone mapper");
-    const char* choices[]{"ACES 2", "AgX", "GT7"};
+    const char* choices[]{"ACES 2", "AgX", "GT7", "ACES 2 Contrast Look"};
     auto selected = static_cast<int>(editable.algorithm);
     if (selected >= static_cast<int>(std::size(choices))) selected = 0;
     ImGui::SetNextItemWidth(-1.0f);
@@ -151,6 +151,11 @@ bool DrawOperator(PluginConfiguration& editable) noexcept
         break;
     case OperatorLutAlgorithm::gt7:
         changed |= DrawGt7(editable.display.toneMapperParameters);
+        break;
+    case OperatorLutAlgorithm::aces2Lmt:
+        changed |= DrawNumber("Look strength", editable.display.toneMapperParameters.acesLookStrength,
+            {kMinimumAcesLookStrength, kMaximumAcesLookStrength, "%.2f"});
+        ImGui::TextWrapped("Zero bypasses the look; the fixed shadow and gamut adaptations remain.");
         break;
     case OperatorLutAlgorithm::aces2:
         ImGui::TextUnformatted("ACES 2 has no adjustable look controls.");

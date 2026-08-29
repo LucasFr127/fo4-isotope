@@ -18,17 +18,17 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 21> kKeys{
+constexpr std::array<std::string_view, 22> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
     "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
     "Contrast", "Blacks", "Highlights", "Shadows", "Saturation", "Temperature", "Tint",
-    "Exposure", "BloomStrength"};
-constexpr std::array<std::string_view, 21> kSections{
+    "Exposure", "BloomStrength", "LookStrength"};
+constexpr std::array<std::string_view, 22> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
     "GT7", "GT7", "GT7", "Effects",
     "Image", "Image", "Image", "Image", "Image", "Image", "Image",
-    "Image", "Effects"};
+    "Image", "Effects", "ACES2LMT"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -46,7 +46,7 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 21> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 22> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
     return {FormatNumber(value.display.displayPeakNits),
@@ -60,7 +60,7 @@ std::array<std::string, 21> OwnedValues(const PluginConfiguration& value)
         FormatNumber(value.display.highlights), FormatNumber(value.display.shadows),
         FormatNumber(value.display.saturationPercent), FormatNumber(value.display.temperature),
         FormatNumber(value.display.tint), FormatNumber(value.display.exposureEv),
-        FormatNumber(value.display.bloomStrengthPercent)};
+        FormatNumber(value.display.bloomStrengthPercent), FormatNumber(parameters.acesLookStrength)};
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -94,6 +94,7 @@ public:
         AppendMissing("ToneMapper");
         AppendMissing("AgX");
         AppendMissing("GT7");
+        AppendMissing("ACES2LMT");
         AppendMissing("Effects");
         AppendMissing("Image");
         return std::move(result_);
@@ -157,8 +158,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 21> values_;
-    std::array<bool, 21> seen_{};
+    std::array<std::string, 22> values_;
+    std::array<bool, 22> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;
