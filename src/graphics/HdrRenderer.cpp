@@ -606,6 +606,9 @@ bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
     DeveloperExposureResources preparedExposure;
     if (!PrepareReplacementResources(device, prepared, preparedExposure,
             configuration.sceneGrade.imageControls)) return false;
+    NativeReferenceResources preparedReference;
+    // Optional preparation failure preserves the ordinary radial grade path.
+    (void)BuildNativeReferenceResources(device, preparedReference);
     ownerThread_ = std::this_thread::get_id();
     device_ = device;
     context_ = std::move(preparedContext);
@@ -620,6 +623,7 @@ bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
     height_ = configuration.height;
     replacements_ = std::move(prepared);
     exposureResources_ = std::move(preparedExposure);
+    nativeReference_ = std::move(preparedReference);
     return true;
 }
 
@@ -719,6 +723,7 @@ void ScenePassRenderer::ReleaseResources() noexcept
     ResetExposurePolicy();
     exposureGeneration_ = 0;
     exposureResources_.Reset();
+    ResetNativeReferenceResources(nativeReference_);
     for (auto& scene : scenes_) scene = {};
     for (auto& shader : observed_) shader = {};
     for (auto& shader : replacements_) shader.Reset();
@@ -745,6 +750,7 @@ SceneTextureViews ScenePassRenderer::Views(SceneTextureHandle handle) const noex
 
 void ScenePassRenderer::ClearLineage() noexcept
 {
+    nativeReferenceFrame_ = 0;
     selectedScene_ = {};
     for (auto& scene : scenes_) scene.toneProduced = false;
 }

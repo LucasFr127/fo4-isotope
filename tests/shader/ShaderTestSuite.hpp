@@ -4,6 +4,7 @@
 #include <filesystem>
 
 namespace fo4hdr::tests::gpu {
+void VerifyNativeReferencePreparation(const std::filesystem::path& fixtureDirectory);
 void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory);
 void VerifyPresentationPass(const std::filesystem::path& fixtureDirectory);
 void VerifyArmorEncodedComposition(const std::filesystem::path& directory);

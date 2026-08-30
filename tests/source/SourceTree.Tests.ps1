@@ -89,6 +89,17 @@ function Find-SelectedInclude {
     return $false
 }
 
+function Get-ComputeShaderSource {
+    param([string]$Name)
+
+    switch -CaseSensitive ($Name) {
+        'DeveloperExposureCapture' { return 'shaders/diagnostics/DeveloperExposureCapture.cs.hlsl' }
+        'NativeReferencePrepare' { return 'shaders/fallout4/NativeReferencePrepare.cs.hlsl' }
+        'ArmorEncodedComposition' { return 'shaders/armor/EncodedComposition.cs.hlsl' }
+        default { return $null }
+    }
+}
+
 function Assert-GeneratedIncludes {
     param([string]$Relative, [string]$Recipe,
         [Collections.Generic.HashSet[string]]$Selected)
@@ -102,13 +113,10 @@ function Assert-GeneratedIncludes {
             $source = 'shaders/output/PresentPixels.cs.hlsl'
             $declared = $name -ceq 'PresentPixels' -or $declared
         }
-        if ($name -ceq 'DeveloperExposureCapture') {
-            $source = 'shaders/diagnostics/DeveloperExposureCapture.cs.hlsl'
-            $declared = $Recipe.Contains('"kDeveloperExposureCaptureBytecode"')
-        }
-        if ($name -ceq 'ArmorEncodedComposition') {
-            $source = 'shaders/armor/EncodedComposition.cs.hlsl'
-            $declared = $Recipe.Contains('"kArmorEncodedCompositionBytecode"')
+        $computeSource = Get-ComputeShaderSource $name
+        if ($computeSource) {
+            $source = $computeSource
+            $declared = $Recipe.Contains('"k' + $name + 'Bytecode"')
         }
         if (-not $declared -or -not $Selected.Contains($source)) {
             throw "Generated include lacks its selected shader recipe: $name"

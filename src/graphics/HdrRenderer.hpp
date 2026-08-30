@@ -5,6 +5,7 @@
 #include "PipboyScreenObservation.hpp"
 #include "RendererLifetime.hpp"
 #include "resources/DeveloperExposureResources.hpp"
+#include "resources/NativeReferenceResources.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
@@ -125,6 +126,8 @@ enum class SceneColorDomain : std::uint8_t
     bt2020UiRelative = 1
 };
 
+enum class NativeReferencePreparationScope { unavailable, qualifiedExclusive };
+
 // One qualified immediate context, one initialization thread and one
 // nonrecycled generation. Handles/views expire at Retire or owner destruction;
 // do not retain them across destruction and reconstruction at the same address.
@@ -190,6 +193,9 @@ public:
 
     [[nodiscard]] bool BeginFrame() noexcept;
     [[nodiscard]] bool EndFrame() noexcept;
+    // Caller qualifies native look semantics and excludes active queries, command
+    // lists and concurrent context mutation. The private result expires at close.
+    [[nodiscard]] bool PrepareNativeReferenceLook(NativeReferencePreparationScope scope) noexcept;
     // Controlled diagnostic only: EndFrame alone never qualifies activation.
     // Save FrameGeneration before close; report eligibility once after that close.
     // The caller excludes active queries and command-list execution throughout
@@ -313,6 +319,7 @@ private:
         const SceneTexture& source, const SceneTexture& target) const noexcept;
     [[nodiscard]] std::uint8_t BoundWriteMask() const noexcept;
     void ClearLineage() noexcept;
+    [[nodiscard]] bool PrepareNativeReferenceInputs() noexcept;
     void InvalidateSlot(std::size_t slot) noexcept;
     void InvalidateWrites(std::uint8_t writes) noexcept;
     [[nodiscard]] std::uint8_t WriteMaskForResource(ID3D11Resource* resource) const noexcept;
@@ -377,6 +384,8 @@ private:
     SceneTextureHandle selectedScene_;
     bool frameOpen_{};
     std::uint64_t frameGeneration_{};
+    NativeReferenceResources nativeReference_;
+    std::uint64_t nativeReferenceFrame_{};
     DeveloperExposureLock exposureLock_;
     DeveloperExposureResources exposureResources_;
     std::uint64_t exposureGeneration_{};

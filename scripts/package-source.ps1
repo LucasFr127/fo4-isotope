@@ -216,7 +216,13 @@ $files = [string[]]@(
     "tests/shader/PresentationTiming.hpp",
     "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
     "tests/shader/shaders/HdrGradeTransfer.cs.hlsl",
-    "shaders/fallout4/ImageControls.hlsli", "tests/shader/ImageControlsTests.cpp"
+    "shaders/fallout4/ImageControls.hlsli", "tests/shader/ImageControlsTests.cpp",
+    "src/graphics/resources/NativeReferenceResources.hpp",
+    "src/graphics/resources/NativeReferenceResources.cpp",
+    "src/graphics/passes/NativeReferenceGradePass.hpp",
+    "src/graphics/passes/NativeReferenceGradePass.cpp",
+    "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
+    "tests/shader/NativeReferencePrepareTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

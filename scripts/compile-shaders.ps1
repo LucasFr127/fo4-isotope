@@ -57,6 +57,11 @@ function Get-ShaderPrograms {
         Symbol = "kArmorEncodedCompositionBytecode"
         Destination = [IO.Path]::Combine($shaderDirectory, "ArmorEncodedComposition.hpp")
     })
+    $programs.Add(@{
+        Source = "shaders/fallout4/NativeReferencePrepare.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
+        Symbol = "kNativeReferencePrepareBytecode"
+        Destination = [IO.Path]::Combine($shaderDirectory, "NativeReferencePrepare.hpp")
+    })
     foreach ($fixture in @(
         @{ Source = "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "HdrGradeTransfer" },
         @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },

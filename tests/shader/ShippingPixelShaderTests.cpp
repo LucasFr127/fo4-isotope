@@ -1088,6 +1088,7 @@ void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory)
     for (std::size_t variant = 0; variant < 4; ++variant) detail::VerifyTone(fixture, variant);
     detail::VerifyToneControls(fixtureDirectory);
     detail::VerifyLut(fixture);
+    VerifyNativeReferencePreparation(fixtureDirectory);
     detail::VerifyForwarding(fixture);
     detail::VerifyFxaaUniform(fixture);
     detail::VerifyTemporalAndLineage(fixture);
