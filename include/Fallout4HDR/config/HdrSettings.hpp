@@ -82,6 +82,12 @@ struct ToneMapperParameters
 [[nodiscard]] bool ValidateToneMapperParameters(
     OperatorLutAlgorithm algorithm, const ToneMapperParameters& parameters) noexcept;
 
+enum class ColorGradingMethod : std::uint8_t
+{
+    radial,
+    nativeReference
+};
+
 struct HdrSettings
 {
     double displayPeakNits{1000.0};
@@ -89,6 +95,7 @@ struct HdrSettings
     double videoWhiteNits{kDefaultVideoWhiteNits};
     ToneMapperParameters toneMapperParameters;
     double vanillaColorGradingStrengthPercent{100.0};
+    ColorGradingMethod colorGradingMethod{ColorGradingMethod::radial};
     double contrast{};
     double blacks{};
     double highlights{};
@@ -107,6 +114,7 @@ enum class HdrSettingsValidationError : std::uint8_t
     uiPaperWhiteOutOfRange,
     videoWhiteOutOfRange,
     vanillaColorGradingOutOfRange,
+    unsupportedColorGradingMethod,
     contrastOutOfRange,
     blacksOutOfRange,
     highlightsOutOfRange,

@@ -198,7 +198,7 @@ private:
     [[nodiscard]] static SceneGradeConfiguration Grade(const PluginConfiguration& value) noexcept
     {
         return {static_cast<float>(value.display.vanillaColorGradingStrengthPercent / 100.0),
-            DeriveHdrSettingsMath(value.display)};
+            DeriveHdrSettingsMath(value.display), value.display.colorGradingMethod};
     }
 
     [[nodiscard]] static OperatorLutBuildRequest BuildRequest(const PluginConfiguration& value,
@@ -276,6 +276,7 @@ private:
         if (requested_.display.videoWhiteNits != active_.display.videoWhiteNits) return false;
         const auto& requested = requested_.display;
         const auto& active = active_.display;
+        if (requested.colorGradingMethod != active.colorGradingMethod) return false;
         const std::array requestedImage{requested.vanillaColorGradingStrengthPercent,
             requested.contrast, requested.blacks, requested.highlights, requested.shadows,
             requested.saturationPercent, requested.temperature, requested.tint,

@@ -37,5 +37,6 @@ struct PluginConfigurationResult
 [[nodiscard]] PluginConfigurationResult LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;
 [[nodiscard]] std::string_view ToString(OperatorLutAlgorithm algorithm) noexcept;
+[[nodiscard]] std::string_view ToString(ColorGradingMethod method) noexcept;
 
 }  // namespace fo4hdr

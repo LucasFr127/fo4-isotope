@@ -41,10 +41,12 @@ struct SceneGradeConfiguration
     // Blend native grade in scene units before the independent operator sample.
     float vanillaColorGradingStrength{1.0F};
     HdrSettingsMath imageControls{};
+    ColorGradingMethod method{ColorGradingMethod::radial};
 
     [[nodiscard]] bool Valid() const noexcept
     {
-        return std::isfinite(vanillaColorGradingStrength) &&
+        return (method == ColorGradingMethod::radial || method == ColorGradingMethod::nativeReference) &&
+            std::isfinite(vanillaColorGradingStrength) &&
             vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F &&
             ImageScalarsValid() && MatrixValid();
     }
@@ -71,6 +73,19 @@ private:
         return std::all_of(matrix.begin(), matrix.end(), [](double value) {
             return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
         });
+    }
+};
+
+// Positive facts supplied by the controlled owner after a rendered frame closes.
+struct DeveloperExposureFrameQualification
+{
+    bool developerMode{};
+    bool rendered{};
+    bool gameplayReady{};
+    bool liveSettingsThreadCompatible{};
+    [[nodiscard]] constexpr bool Eligible() const noexcept
+    {
+        return developerMode && rendered && gameplayReady && liveSettingsThreadCompatible;
     }
 };
 
@@ -200,7 +215,8 @@ public:
     // Save FrameGeneration before close; report eligibility once after that close.
     // The caller excludes active queries and command-list execution throughout
     // capture/replay; idle state getters cannot establish their absence.
-    [[nodiscard]] bool CompleteExposureFrame(std::uint64_t savedFrame, bool eligible) noexcept;
+    [[nodiscard]] bool CompleteExposureFrame(std::uint64_t savedFrame,
+        DeveloperExposureFrameQualification qualification) noexcept;
     [[nodiscard]] bool SetExposureLockRequested(bool requested) noexcept;
     [[nodiscard]] bool ExposureLockActive() const noexcept;
     // Off by default. Owner-thread callers exclude queries, command lists and
@@ -237,6 +253,19 @@ public:
 
 private:
     friend class PresentationPass;
+    class NativeReferenceSource
+    {
+    public:
+        explicit NativeReferenceSource(ID3D11DeviceContext* context) noexcept;
+        ~NativeReferenceSource() noexcept;
+        void Bind(ID3D11ShaderResourceView* prepared) noexcept;
+        NativeReferenceSource(const NativeReferenceSource&) = delete;
+        NativeReferenceSource& operator=(const NativeReferenceSource&) = delete;
+    private:
+        ID3D11DeviceContext* context_;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> previous_;
+        bool bound_{};
+    };
     [[nodiscard]] HRESULT SceneRegistrationStatus(const D3D11_TEXTURE2D_DESC& original,
         const D3D11_SUBRESOURCE_DATA* initialData = nullptr) const noexcept;
     [[nodiscard]] bool CanObserveShader(ID3D11PixelShader* shader) const noexcept
@@ -286,6 +315,8 @@ private:
         ID3D11PixelShader* shader{};
         ID3D11Buffer* videoConstants{};
         ID3D11Buffer* operatorConstants{};
+        ID3D11PixelShader* radialFallback{};
+        bool prepareNativeReference{};
         bool tone{};
         bool capture{};
         bool replay{};
@@ -320,6 +351,10 @@ private:
     [[nodiscard]] std::uint8_t BoundWriteMask() const noexcept;
     void ClearLineage() noexcept;
     [[nodiscard]] bool PrepareNativeReferenceInputs() noexcept;
+    [[nodiscard]] bool PrepareNativeReferenceDraw(const DrawReplacement& replacement) noexcept;
+    void ConfigureNativeReferenceReplacement(DrawReplacement& replacement, RenoDxShaderPass pass) const noexcept;
+    [[nodiscard]] ID3D11ShaderResourceView* NativeReferenceSourceForDraw(
+        const DrawReplacement& replacement, bool prepared) const noexcept;
     void InvalidateSlot(std::size_t slot) noexcept;
     void InvalidateWrites(std::uint8_t writes) noexcept;
     [[nodiscard]] std::uint8_t WriteMaskForResource(ID3D11Resource* resource) const noexcept;
@@ -385,6 +420,8 @@ private:
     bool frameOpen_{};
     std::uint64_t frameGeneration_{};
     NativeReferenceResources nativeReference_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> nativeReferenceShader_;
+    SceneGradeConfiguration sceneGrade_;
     std::uint64_t nativeReferenceFrame_{};
     DeveloperExposureLock exposureLock_;
     DeveloperExposureResources exposureResources_;

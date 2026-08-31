@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "DeveloperExposureResources.hpp"
+#include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 
 #include <algorithm>
 #include <array>
@@ -71,48 +72,15 @@ bool CreateSnapshot(ID3D11Device* device, ID3D11Texture2D** texture) noexcept
     return SUCCEEDED(device->CreateTexture2D(&description, &initial, texture));
 }
 
-template <class T, std::size_t Count>
-bool AnyBoundAndRelease(const std::array<T*, Count>& objects) noexcept
+bool NativeExposureFormat(DXGI_FORMAT format) noexcept
 {
-    bool bound{};
-    for (auto* object : objects)
-    {
-        if (object == nullptr) continue;
-        bound = true;
-        object->Release();
-    }
-    return bound;
+    constexpr std::array formats{DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R16_FLOAT,
+        DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT};
+    return std::find(formats.begin(), formats.end(), format) != formats.end();
 }
-
-bool ComputeShaderIdle(ID3D11DeviceContext* context) noexcept
-{
-    ComPtr<ID3D11ComputeShader> shader;
-    std::array<ID3D11ClassInstance*, 256> classes{};
-    UINT count = static_cast<UINT>(classes.size());
-    context->CSGetShader(&shader, classes.data(), &count);
-    const bool boundClasses = AnyBoundAndRelease(classes);
-    ComPtr<ID3D11Predicate> predicate;
-    BOOL predicateValue{};
-    context->GetPredication(&predicate, &predicateValue);
-    return !shader && count == 0 && !boundClasses && !predicate;
-}
-
-bool UnorderedViewsIdle(ID3D11DeviceContext* context) noexcept
-{
-    constexpr UINT count = D3D11_PS_CS_UAV_REGISTER_COUNT;
-    std::array<ID3D11UnorderedAccessView*, count> compute{};
-    std::array<ID3D11UnorderedAccessView*, count> output{};
-    context->CSGetUnorderedAccessViews(0, count, compute.data());
-    context->OMGetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr,
-        0, count, output.data());
-    const bool computeBound = AnyBoundAndRelease(compute);
-    const bool outputBound = AnyBoundAndRelease(output);
-    return !computeBound && !outputBound;
-}
-
 bool ExposureViewDescriptionQualified(const D3D11_SHADER_RESOURCE_VIEW_DESC& description) noexcept
 {
-    return description.Format == DXGI_FORMAT_R32_FLOAT &&
+    return NativeExposureFormat(description.Format) &&
         description.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D &&
         description.Texture2D.MostDetailedMip == 0 && description.Texture2D.MipLevels == 1;
 }
@@ -121,7 +89,7 @@ bool ExposureTextureQualified(ID3D11Texture2D* texture) noexcept
 {
     D3D11_TEXTURE2D_DESC description{};
     texture->GetDesc(&description);
-    return description.Format == DXGI_FORMAT_R32_FLOAT &&
+    return NativeExposureFormat(description.Format) &&
         description.Width == 1 && description.Height == 1 && description.MipLevels == 1 &&
         description.ArraySize == 1 && description.SampleDesc.Count == 1;
 }
@@ -164,22 +132,7 @@ struct ExposureInputs
     ComPtr<ID3D11Buffer> constants;
     UINT first{};
     UINT count{};
-    UINT previousComputeFirst{};
-    UINT previousComputeCount{};
 };
-
-bool ComputeInputsIdle(ID3D11DeviceContext1* context, ExposureInputs& inputs) noexcept
-{
-    ComPtr<ID3D11ShaderResourceView> source;
-    ComPtr<ID3D11Buffer> constants;
-    context->CSGetShaderResources(0, 1, &source);
-    context->CSGetConstantBuffers(2, 1, &constants);
-    if (source || constants) return false;
-    context->CSGetConstantBuffers1(2, 1, nullptr,
-        &inputs.previousComputeFirst, &inputs.previousComputeCount);
-    return inputs.previousComputeFirst % 16 == 0 &&
-        inputs.previousComputeCount % 16 == 0 && inputs.previousComputeCount <= 4096;
-}
 
 bool ExposureRangeQualified(const ExposureInputs& inputs) noexcept
 {
@@ -216,26 +169,79 @@ bool ReadExposureInputs(ID3D11Device* device, ID3D11DeviceContext1* context,
         ExposureWindowQualified(device, inputs);
 }
 
-void DispatchCapture(ID3D11DeviceContext1* context, const ExposureInputs& inputs,
+class ScopedExposureCaptureState
+{
+public:
+    explicit ScopedExposureCaptureState(ID3D11DeviceContext1* context) noexcept
+        : context_(context), constants_(context, 2)
+    {
+        std::array<ID3D11ClassInstance*, 256> instances{};
+        context_->CSGetShader(&shader_, instances.data(), &instanceCount_);
+        for (UINT i = 0; i < std::min(instanceCount_, UINT(instances.size())); ++i)
+            instances_[i].Attach(instances[i]);
+        context_->CSGetShaderResources(0, 1, &source_);
+        context_->CSGetUnorderedAccessViews(0, 1, &target_);
+        constants_.Capture();
+    }
+    ~ScopedExposureCaptureState() noexcept { Restore(); }
+    [[nodiscard]] bool Ready() const noexcept
+    {
+        return instanceCount_ <= instances_.size() && constants_.Ready();
+    }
+    void Bind(const ExposureInputs& inputs, ID3D11ComputeShader* shader,
+        ID3D11UnorderedAccessView* target) noexcept
+    {
+        bound_ = true;
+        auto* source = inputs.source.Get();
+        constants_.BindRange(inputs.constants.Get(), inputs.first, inputs.count);
+        context_->CSSetShader(shader, nullptr, 0);
+        context_->CSSetShaderResources(0, 1, &source);
+        constexpr UINT preserveCounter = UINT(-1);
+        context_->CSSetUnorderedAccessViews(0, 1, &target, &preserveCounter);
+    }
+    void Restore() noexcept
+    {
+        if (!bound_) return;
+        ID3D11ShaderResourceView* noSource{};
+        ID3D11UnorderedAccessView* noTarget{};
+        context_->CSSetShaderResources(0, 1, &noSource);
+        constexpr UINT preserveCounter = UINT(-1);
+        context_->CSSetUnorderedAccessViews(0, 1, &noTarget, &preserveCounter);
+        auto* source = source_.Get();
+        auto* target = target_.Get();
+        context_->CSSetShaderResources(0, 1, &source);
+        context_->CSSetUnorderedAccessViews(0, 1, &target, &preserveCounter);
+        constants_.Restore();
+        std::array<ID3D11ClassInstance*, 256> instances{};
+        for (UINT i = 0; i < instanceCount_; ++i) instances[i] = instances_[i].Get();
+        context_->CSSetShader(shader_.Get(), instanceCount_ ? instances.data() : nullptr, instanceCount_);
+        bound_ = false;
+    }
+    ScopedExposureCaptureState(const ScopedExposureCaptureState&) = delete;
+    ScopedExposureCaptureState& operator=(const ScopedExposureCaptureState&) = delete;
+private:
+    ID3D11DeviceContext1* context_;
+    ComPtr<ID3D11ComputeShader> shader_;
+    std::array<ComPtr<ID3D11ClassInstance>, 256> instances_{};
+    UINT instanceCount_{256};
+    ComPtr<ID3D11ShaderResourceView> source_;
+    ComPtr<ID3D11UnorderedAccessView> target_;
+    ScopedD3D11ComputeConstantBuffer constants_;
+    bool bound_{};
+};
+
+bool DispatchCapture(ID3D11DeviceContext1* context, const ExposureInputs& inputs,
     ID3D11ComputeShader* shader, ID3D11UnorderedAccessView* target) noexcept
 {
-    auto* source = inputs.source.Get();
-    auto* constants = inputs.constants.Get();
-    context->CSSetShader(shader, nullptr, 0);
-    context->CSSetShaderResources(0, 1, &source);
-    context->CSSetConstantBuffers1(2, 1, &constants, &inputs.first, &inputs.count);
-    context->CSSetUnorderedAccessViews(0, 1, &target, nullptr);
+    ScopedExposureCaptureState previous(context);
+    if (!previous.Ready()) return false;
+    // The actual nonnull PS exposure source is disjoint from writable views.
+    // Caller excludes snapshot aliases; only the owned UAV is bound here.
+    previous.Bind(inputs, shader, target);
     context->Dispatch(1, 1, 1);
-    ID3D11UnorderedAccessView* noTarget{};
-    ID3D11ShaderResourceView* noSource{};
-    ID3D11Buffer* noConstants{};
-    context->CSSetUnorderedAccessViews(0, 1, &noTarget, nullptr);
-    context->CSSetShaderResources(0, 1, &noSource);
-    context->CSSetConstantBuffers1(2, 1, &noConstants,
-        &inputs.previousComputeFirst, &inputs.previousComputeCount);
-    context->CSSetShader(nullptr, nullptr, 0);
+    previous.Restore();
+    return true;
 }
-
 struct CaptureBundle
 {
     ComPtr<ID3D11Texture2D> texture;
@@ -276,12 +282,13 @@ bool CaptureContextQualified(ID3D11Device* device, ID3D11DeviceContext* context)
     return contextDevice.Get() == device;
 }
 
-bool CaptureComputeIdle(ID3D11DeviceContext1* context, ExposureInputs& inputs) noexcept
+bool CapturePredicateClear(ID3D11DeviceContext* context) noexcept
 {
-    return ComputeShaderIdle(context) && ComputeInputsIdle(context, inputs) &&
-        UnorderedViewsIdle(context);
+    ComPtr<ID3D11Predicate> predicate;
+    BOOL value{};
+    context->GetPredication(&predicate, &value);
+    return !predicate;
 }
-
 }  // namespace
 
 bool DeveloperExposureResources::Prepare(ID3D11Device* device,
@@ -357,10 +364,46 @@ bool DeveloperExposureResources::TryCapture(ID3D11DeviceContext* context) noexce
     ComPtr<ID3D11DeviceContext1> context1;
     if (FAILED(context->QueryInterface(IID_PPV_ARGS(&context1)))) return false;
     ExposureInputs inputs;
-    if (!CaptureComputeIdle(context1.Get(), inputs)) return false;
+    if (!CapturePredicateClear(context1.Get())) return false;
     if (!ReadExposureInputs(device_.Get(), context1.Get(), inputs)) return false;
-    DispatchCapture(context1.Get(), inputs, shader_.Get(), target_.Get());
+    if (!DispatchCapture(context1.Get(), inputs, shader_.Get(), target_.Get())) return false;
     return SUCCEEDED(device_->GetDeviceRemovedReason());
+}
+
+ScopedDeveloperExposureBindings::ScopedDeveloperExposureBindings(
+    ID3D11DeviceContext1* context, bool tone) noexcept : context_(context), tone_(tone)
+{
+    if (!tone_) return;
+    context_->PSGetConstantBuffers(13, 1, &previousConstants_);
+    context_->PSGetConstantBuffers1(13, 1, nullptr, &firstConstant_, &constantCount_);
+    context_->PSGetShaderResources(17, 1, &previousSource_);
+}
+
+ScopedDeveloperExposureBindings::~ScopedDeveloperExposureBindings() noexcept
+{
+    if (!bound_) return;
+    auto* source = previousSource_.Get();
+    auto* constants = previousConstants_.Get();
+    context_->PSSetShaderResources(17, 1, &source);
+    context_->PSSetConstantBuffers1(13, 1, &constants, &firstConstant_, &constantCount_);
+}
+
+bool ScopedDeveloperExposureBindings::Ready() const noexcept
+{
+    if (!tone_) return true;
+    // Bound empty windows cannot qualify an unspecified legacy default.
+    if (previousConstants_ && constantCount_ == 0) return false;
+    if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
+    return constantCount_ <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT;
+}
+
+void ScopedDeveloperExposureBindings::Bind(ID3D11Buffer* selector,
+    ID3D11ShaderResourceView* snapshot) noexcept
+{
+    if (!tone_) return;
+    context_->PSSetConstantBuffers(13, 1, &selector);
+    context_->PSSetShaderResources(17, 1, &snapshot);
+    bound_ = true;
 }
 
 }  // namespace fo4hdr

@@ -16,6 +16,7 @@ namespace {
 
 using namespace detail;
 constexpr Float4 exposureScene{2, 4, 1, 0.75f};
+constexpr DeveloperExposureFrameQualification qualifiedExposureFrame{true, true, true, true};
 
 struct NativeExposure
 {
@@ -236,13 +237,13 @@ void VerifyExposureCapture(ToneExposureInputs& inputs)
     const auto expected = ExposureExpected(ExposureGain(capturedExposure), capturedExposure.measured);
     const auto capturedFrame = DrawExposureFrame(inputs, capturedExposure, expected);
     FO4HDR_CHECK(!renderer.ExposureLockActive());
-    FO4HDR_CHECK(renderer.CompleteExposureFrame(capturedFrame, true));
+    FO4HDR_CHECK(renderer.CompleteExposureFrame(capturedFrame, qualifiedExposureFrame));
     FO4HDR_CHECK(renderer.ExposureLockActive());
     // This affine filter retains measured reference, so replaying gain alone differs.
     const auto gainOnly = ExposureExpected(ExposureGain(capturedExposure), changedExposure.measured);
     FO4HDR_CHECK(std::abs(expected.red - gainOnly.red) > 0.5f);
     const auto replayFrame = DrawExposureFrame(inputs, changedExposure, expected);
-    FO4HDR_CHECK(renderer.CompleteExposureFrame(replayFrame, true));
+    FO4HDR_CHECK(renderer.CompleteExposureFrame(replayFrame, qualifiedExposureFrame));
     FO4HDR_CHECK(renderer.ExposureLockActive());
 }
 
@@ -260,7 +261,7 @@ void VerifyExposureRefusal(ToneExposureInputs& inputs, const std::filesystem::pa
     const auto native = ExposureExpected(ExposureGain(changedExposure), changedExposure.measured);
     const auto frame = DrawExposureFrame(inputs, changedExposure, native);
     FO4HDR_CHECK(!fixture.renderer.ExposureLockActive());
-    FO4HDR_CHECK(!fixture.renderer.CompleteExposureFrame(frame, false));
+    FO4HDR_CHECK(!fixture.renderer.CompleteExposureFrame(frame, {}));
     FO4HDR_CHECK(!fixture.renderer.ExposureLockActive());
     inputs.context->CSSetShader(nullptr, nullptr, 0);
 }

@@ -11,6 +11,7 @@
 #include <fo4hdr-shaders/ToneMapNewA.hpp>
 #include <fo4hdr-shaders/ToneMapNewB.hpp>
 #include <fo4hdr-shaders/CreativeGradeLut.hpp>
+#include <fo4hdr-shaders/NativeReferenceGrade.hpp>
 #include <fo4hdr-shaders/TemporalAa.hpp>
 #include <fo4hdr-shaders/TemporalAa2.hpp>
 #include <fo4hdr-shaders/Fxaa.hpp>
@@ -446,6 +447,18 @@ public:
     }
 
     [[nodiscard]] bool Replaced() const noexcept { return replaced_; }
+    [[nodiscard]] bool Replace(ID3D11PixelShader* shader) noexcept
+    {
+        context_->PSSetShader(shader, nullptr, 0);
+        ComPtr<ID3D11PixelShader> actual;
+        context_->PSGetShader(&actual, nullptr, nullptr);
+        replaced_ = actual.Get() == shader;
+        return replaced_;
+    }
+    void UseFallbackIfRequired(bool prepared, ID3D11PixelShader* fallback) noexcept
+    {
+        if (!prepared) (void)Replace(fallback);
+    }
     ScopedPixelShader(const ScopedPixelShader&) = delete;
     ScopedPixelShader& operator=(const ScopedPixelShader&) = delete;
 
@@ -505,54 +518,6 @@ private:
     bool bound_{};
 };
 
-class ScopedExposureBindings
-{
-public:
-    ScopedExposureBindings(ID3D11DeviceContext1* context, bool tone) noexcept
-        : context_(context), tone_(tone)
-    {
-        if (!tone_) return;
-        context_->PSGetConstantBuffers(13, 1, &previousConstants_);
-        context_->PSGetConstantBuffers1(13, 1, nullptr, &firstConstant_, &constantCount_);
-        context_->PSGetShaderResources(17, 1, &previousSource_);
-    }
-
-    ~ScopedExposureBindings() noexcept
-    {
-        if (!bound_) return;
-        auto* source = previousSource_.Get();
-        auto* constants = previousConstants_.Get();
-        context_->PSSetShaderResources(17, 1, &source);
-        context_->PSSetConstantBuffers1(13, 1, &constants, &firstConstant_, &constantCount_);
-    }
-
-    [[nodiscard]] bool Ready() const noexcept
-    {
-        if (!tone_) return true;
-        // Bound empty windows cannot qualify an unspecified legacy default.
-        if (previousConstants_ && constantCount_ == 0) return false;
-        if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
-        return constantCount_ <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT;
-    }
-
-    void Bind(ID3D11Buffer* selector, ID3D11ShaderResourceView* snapshot) noexcept
-    {
-        if (!tone_) return;
-        context_->PSSetConstantBuffers(13, 1, &selector);
-        context_->PSSetShaderResources(17, 1, &snapshot);
-        bound_ = true;
-    }
-
-private:
-    ID3D11DeviceContext1* context_;
-    ComPtr<ID3D11Buffer> previousConstants_;
-    ComPtr<ID3D11ShaderResourceView> previousSource_;
-    UINT firstConstant_{};
-    UINT constantCount_{};
-    bool tone_{};
-    bool bound_{};
-};
-
 class DrawScope
 {
 public:
@@ -609,6 +574,9 @@ bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
     NativeReferenceResources preparedReference;
     // Optional preparation failure preserves the ordinary radial grade path.
     (void)BuildNativeReferenceResources(device, preparedReference);
+    ComPtr<ID3D11PixelShader> preparedReferenceShader;
+    (void)device->CreatePixelShader(kNativeReferenceGradeBytecode,
+        sizeof(kNativeReferenceGradeBytecode), nullptr, &preparedReferenceShader);
     ownerThread_ = std::this_thread::get_id();
     device_ = device;
     context_ = std::move(preparedContext);
@@ -624,6 +592,8 @@ bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
     replacements_ = std::move(prepared);
     exposureResources_ = std::move(preparedExposure);
     nativeReference_ = std::move(preparedReference);
+    nativeReferenceShader_ = std::move(preparedReferenceShader);
+    sceneGrade_ = configuration.sceneGrade;
     return true;
 }
 
@@ -649,6 +619,7 @@ bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
     operatorConstants_ = std::move(preparedOperator.constants);
     operatorEnabled_ = true;
     whites_ = whites;
+    sceneGrade_ = sceneGrade;
     MarkSettingsStale();
     ResetExposurePolicy();
     return true;
@@ -724,6 +695,7 @@ void ScenePassRenderer::ReleaseResources() noexcept
     exposureGeneration_ = 0;
     exposureResources_.Reset();
     ResetNativeReferenceResources(nativeReference_);
+    nativeReferenceShader_.Reset();
     for (auto& scene : scenes_) scene = {};
     for (auto& shader : observed_) shader = {};
     for (auto& shader : replacements_) shader.Reset();
@@ -807,7 +779,8 @@ bool ScenePassRenderer::ExposureLockActive() const noexcept
     return exposureLock_.Active() && exposureLock_.Generation() == exposureGeneration_;
 }
 
-bool ScenePassRenderer::CompleteExposureFrame(std::uint64_t savedFrame, bool eligible) noexcept
+bool ScenePassRenderer::CompleteExposureFrame(std::uint64_t savedFrame,
+    DeveloperExposureFrameQualification qualification) noexcept
 {
     if (!Active() || invoking_) return false;
     if (frameOpen_)
@@ -821,7 +794,7 @@ bool ScenePassRenderer::CompleteExposureFrame(std::uint64_t savedFrame, bool eli
         return false;
     }
     endedExposureFrame_ = 0;
-    exposureLock_.EndFrame(savedFrame, exposureGeneration_, eligible);
+    exposureLock_.EndFrame(savedFrame, exposureGeneration_, qualification.Eligible());
     return exposureLock_.Active();
 }
 
@@ -1112,6 +1085,7 @@ ScenePassRenderer::DrawReplacement ScenePassRenderer::PrepareDrawReplacement(
     }
     if (descriptor->pass == RenoDxShaderPass::video)
         replacement.videoConstants = videoConstants_.Get();
+    ConfigureNativeReferenceReplacement(replacement, descriptor->pass);
     replacement.tone = std::find(tonePasses.begin(), tonePasses.end(), descriptor->pass) != tonePasses.end();
     PrepareExposureReplacement(replacement, descriptor->pass);
     return replacement;
@@ -1120,7 +1094,7 @@ ScenePassRenderer::DrawReplacement ScenePassRenderer::PrepareDrawReplacement(
 void ScenePassRenderer::PrepareExposureReplacement(DrawReplacement& replacement,
     RenoDxShaderPass pass) const noexcept
 {
-    if (pass != RenoDxShaderPass::toneMapA) return;
+    if (std::find(tonePasses.begin(), tonePasses.end(), pass) == tonePasses.end()) return;
     if (!frameOpen_ || !exposureResources_.Ready()) return;
     replacement.capture = exposureLock_.NeedsCapture();
     replacement.replay = exposureLock_.Active() &&
@@ -1157,13 +1131,17 @@ ScenePassRenderer::DrawResult ScenePassRenderer::InvokeDraw(DrawReplacement repl
 {
     ScopedVideoConstants constantsScope{context_.Get(), replacement.videoConstants};
     ScopedD3D11PixelBindings operatorScope{context_.Get(), replacement.operatorConstants};
-    ScopedExposureBindings exposureScope{context_.Get(), replacement.tone};
+    ScopedDeveloperExposureBindings exposureScope{context_.Get(), replacement.tone};
     const auto constantsReady = constantsScope.Ready() && operatorScope.Ready();
     ScopedPixelShader pixelScope{context_.Get(),
         constantsReady && exposureScope.Ready() ? replacement.shader : nullptr};
+    NativeReferenceSource nativeSource{context_.Get()};
     DrawResult result;
     if (pixelScope.Replaced())
     {
+        const bool prepared = PrepareNativeReferenceDraw(replacement);
+        pixelScope.UseFallbackIfRequired(prepared, replacement.radialFallback);
+        nativeSource.Bind(NativeReferenceSourceForDraw(replacement, prepared));
         constantsScope.Bind();
         operatorScope.Bind(operatorSource_.Get(), operatorSampler_.Get());
         result = PrepareExposureDraw(replacement);

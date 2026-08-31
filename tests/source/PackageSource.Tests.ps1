@@ -205,6 +205,8 @@ $expected = [string[]]@(
     "src/graphics/passes/NativeReferenceGradePass.hpp",
     "src/graphics/passes/NativeReferenceGradePass.cpp",
     "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
+    "shaders/fallout4/NativeReferenceGrade.ps.hlsl",
+    "shaders/fallout4/NativeReferenceGrade.hlsli",
     "tests/shader/NativeReferencePrepareTests.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",

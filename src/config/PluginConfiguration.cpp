@@ -18,7 +18,7 @@ constexpr std::array<std::string_view, 4> kAlgorithms{"ACES2", "AgX", "GT7", "AC
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 22> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 23> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
@@ -28,7 +28,8 @@ std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexc
         {"Image", "Contrast"}, {"Image", "Blacks"}, {"Image", "Highlights"},
         {"Image", "Shadows"}, {"Image", "Saturation"},
         {"Image", "Temperature"}, {"Image", "Tint"},
-        {"Image", "Exposure"}, {"Effects", "BloomStrength"}, {"ACES2LMT", "LookStrength"}}};
+        {"Image", "Exposure"}, {"Effects", "BloomStrength"}, {"ACES2LMT", "LookStrength"},
+        {"Image", "ColorGradingMethod"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -79,10 +80,20 @@ public:
     }
 
 private:
+    bool SetGradingMethod(std::string_view value) noexcept
+    {
+        if (value == "Radial") result_.value.display.colorGradingMethod = ColorGradingMethod::radial;
+        else if (value == "NativeReference")
+            result_.value.display.colorGradingMethod = ColorGradingMethod::nativeReference;
+        else return false;
+        return true;
+    }
+
     bool SetValue(std::size_t index, std::string_view value) noexcept
     {
         if (seen_[index]) return false;
         seen_[index] = true;
+        if (index == 22) return SetGradingMethod(value);
         auto& settings = result_.value.display;
         auto& parameters = settings.toneMapperParameters;
         if (index == 3)
@@ -136,7 +147,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 22> seen_{};
+    std::array<bool, 23> seen_{};
 };
 
 }  // namespace
@@ -144,6 +155,7 @@ private:
 bool PluginConfiguration::operator==(const PluginConfiguration& other) const noexcept
 {
     if (algorithm != other.algorithm) return false;
+    if (display.colorGradingMethod != other.display.colorGradingMethod) return false;
     const std::array current{
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
         display.vanillaColorGradingStrengthPercent, display.contrast, display.blacks,
@@ -201,6 +213,13 @@ std::string_view ToString(OperatorLutAlgorithm algorithm) noexcept
 {
     const auto index = static_cast<std::size_t>(algorithm);
     return index < kAlgorithms.size() ? kAlgorithms[index] : std::string_view{};
+}
+
+std::string_view ToString(ColorGradingMethod method) noexcept
+{
+    constexpr std::array<std::string_view, 2> names{"Radial", "NativeReference"};
+    const auto index = static_cast<std::size_t>(method);
+    return index < names.size() ? names[index] : std::string_view{};
 }
 
 }  // namespace fo4hdr

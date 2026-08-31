@@ -94,7 +94,12 @@ bool DrawImage(HdrSettings& settings) noexcept
 bool DrawGrade(HdrSettings& settings) noexcept
 {
     ImGui::SeparatorText("Scene effects");
-    bool changed = DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
+    const char* methods[]{"Radial", "Native reference"};
+    auto method = static_cast<int>(settings.colorGradingMethod);
+    ImGui::SetNextItemWidth(-1.0f);
+    bool changed = ImGui::Combo("Grading method", &method, methods, static_cast<int>(std::size(methods)));
+    if (changed) settings.colorGradingMethod = static_cast<ColorGradingMethod>(method);
+    changed |= DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
     changed |= DrawNumber("Bloom strength", settings.bloomStrengthPercent,
         {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent, "%.0f%%"});
@@ -190,12 +195,19 @@ const char* OperatorName(OperatorLutAlgorithm algorithm) noexcept
     return name.empty() ? "Unknown operator" : name.data();
 }
 
+const char* GradingMethodName(ColorGradingMethod method) noexcept
+{
+    const auto name = ToString(method);
+    return name.empty() ? "Unknown grading method" : name.data();
+}
+
 void DrawConfigurationSummary(const char* label, const PluginConfiguration& value) noexcept
 {
     ImGui::TextWrapped("%s: %s, peak %.0f nits, UI %.0f nits, "
-        "video %.0f nits, grading %.0f%%",
+        "video %.0f nits, %s grading %.0f%%",
         label, OperatorName(value.algorithm), value.display.displayPeakNits,
         value.display.uiPaperWhiteNits, value.display.videoWhiteNits,
+        GradingMethodName(value.display.colorGradingMethod),
         value.display.vanillaColorGradingStrengthPercent);
 }
 

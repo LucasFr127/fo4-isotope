@@ -214,4 +214,50 @@ bool ScenePassRenderer::PrepareNativeReferenceInputs() noexcept
     return true;
 }
 
+ScenePassRenderer::NativeReferenceSource::NativeReferenceSource(ID3D11DeviceContext* context) noexcept
+    : context_(context) {}
+
+ScenePassRenderer::NativeReferenceSource::~NativeReferenceSource() noexcept
+{
+    if (!bound_) return;
+    auto* previous = previous_.Get();
+    context_->PSSetShaderResources(3, 1, &previous);
+}
+
+void ScenePassRenderer::NativeReferenceSource::Bind(ID3D11ShaderResourceView* prepared) noexcept
+{
+    if (!prepared) return;
+    context_->PSGetShaderResources(3, 1, &previous_);
+    context_->PSSetShaderResources(3, 1, &prepared);
+    bound_ = true;
+}
+
+void ScenePassRenderer::ConfigureNativeReferenceReplacement(DrawReplacement& replacement,
+    RenoDxShaderPass pass) const noexcept
+{
+    if (!replacement.shader || pass != RenoDxShaderPass::lut) return;
+    if (sceneGrade_.method != ColorGradingMethod::nativeReference || !nativeReferenceShader_) return;
+    replacement.radialFallback = replacement.shader;
+    replacement.shader = nativeReferenceShader_.Get();
+    replacement.prepareNativeReference = sceneGrade_.vanillaColorGradingStrength > 0.0F;
+}
+
+ID3D11ShaderResourceView* ScenePassRenderer::NativeReferenceSourceForDraw(
+    const DrawReplacement& replacement, bool prepared) const noexcept
+{
+    if (!prepared || !replacement.prepareNativeReference) return nullptr;
+    return nativeReference_.preblendSrv.Get();
+}
+
+bool ScenePassRenderer::PrepareNativeReferenceDraw(const DrawReplacement& replacement) noexcept
+{
+    if (!replacement.radialFallback) return true;
+    ComPtr<ID3D11PixelShader> actual;
+    context_->PSGetShader(&actual, nullptr, nullptr);
+    if (actual.Get() != nativeReferenceShader_.Get()) return false;
+    if (!replacement.prepareNativeReference) return true;
+    // Requalify after the shader setter; a captured setter may alter native inputs.
+    return PrepareNativeReferenceInputs();
+}
+
 } // namespace fo4hdr

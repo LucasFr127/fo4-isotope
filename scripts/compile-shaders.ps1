@@ -34,7 +34,7 @@ function Get-ShaderPrograms {
         Profile = "cs_5_0"; Entry = "main"; Destination = $outputPath
     })
     foreach ($name in @("ToneMapA", "ToneMapB", "ToneMapNewA", "ToneMapNewB", "CreativeGradeLut",
-        "TemporalAa", "TemporalAa2", "Fxaa", "Video")) {
+        "NativeReferenceGrade", "TemporalAa", "TemporalAa2", "Fxaa", "Video")) {
         $programs.Add(@{
             Source = "shaders/fallout4/$name.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"
             Symbol = "k$($name)Bytecode"; Destination = [IO.Path]::Combine($shaderDirectory, "$name.hpp")
@@ -88,6 +88,7 @@ function Get-ShaderInputs {
     }
     foreach ($include in @("shaders/fallout4/GradeTransfer.hlsli",
         "shaders/fallout4/ImageControls.hlsli",
+        "shaders/fallout4/NativeReferenceGrade.hlsli",
         "shaders/fallout4/TemporalIntermediate.hlsli", "shaders/fallout4/ToneMapBypassCommon.hlsli",
         "shaders/output/DisplayMath.hlsli", "shaders/output/SceneLayers.hlsli",
         "shaders/tonemap/Gt7.hlsli", "shaders/tonemap/OperatorLut.hlsli")) {

@@ -222,6 +222,8 @@ $files = [string[]]@(
     "src/graphics/passes/NativeReferenceGradePass.hpp",
     "src/graphics/passes/NativeReferenceGradePass.cpp",
     "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
+    "shaders/fallout4/NativeReferenceGrade.ps.hlsl",
+    "shaders/fallout4/NativeReferenceGrade.hlsli",
     "tests/shader/NativeReferencePrepareTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
