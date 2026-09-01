@@ -630,6 +630,7 @@ bool PresentationPass::Initialize(ID3D11Device* device,
     constants_ = std::move(prepared.constants);
     layerShaders_ = std::move(prepared.layerShaders);
     layers_ = std::move(preparedLayers);
+    (void)performance_.Initialize(device, immediateContext, configuration.measurePerformance);
     lifetime_.PublishInitial();
     return true;
 }
@@ -663,6 +664,18 @@ bool PresentationPass::ApplySettings(const OperatorLutData& table,
 bool PresentationPass::Active() const noexcept
 {
     return OnOwnerThread() && lifetime_.CurrentEpoch() == 3;
+}
+
+GpuPerformanceSnapshot PresentationPass::Performance() const noexcept
+{
+    if (!Active() || executing_) return {};
+    return performance_.Snapshot();
+}
+
+void PresentationPass::PollPerformance(PresentationScope scope) noexcept
+{
+    if (!CanExecute(scope)) return;
+    performance_.Poll();
 }
 
 bool PresentationPass::CanApplySettings(PresentationScope scope) const noexcept
@@ -909,6 +922,7 @@ bool PresentationPass::ExecuteCurrentScene(ID3D11UnorderedAccessView* terminal,
     if (!QualifiedTarget(terminal, source.texture)) return false;
     const auto frame = configuration_.scenes->FrameGeneration();
     if (frame != 0 && layerFailureFrame_ == frame) return false;
+    performance_.Poll();
     ExecutionScope executing{executing_};
     if (source.texture == nullptr)
     {
@@ -937,7 +951,9 @@ bool PresentationPass::ComposeSelected(SceneTextureViews source,
         layers_[1].source.Get(), overlay.source};
     const auto index = domain + (overlay.source != nullptr ? supportedSceneDomains.size() : 0);
     state.Bind(shader_.Get(), constants_[index].Get(), inputs, terminal);
+    const bool measured = performance_.Begin(frame);
     context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);
+    if (measured) performance_.End(true);
     return true;
 }
 
@@ -1014,6 +1030,7 @@ void PresentationPass::CompleteNativePresent(IDXGISwapChain* chain, HRESULT nati
 bool PresentationPass::Retire() noexcept
 {
     if (!CanRetire()) return false;
+    if (!performance_.Retire()) return false;
     lifetime_.Retire();
     CloseFrame();
     if (!UnbindChainBuffer()) return false;

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "../HdrRenderer.hpp"
+#include "../resources/GpuPerformanceQueries.hpp"
 
 #include <d3d11_1.h>
 #include <dxgi1_4.h>
@@ -33,12 +34,14 @@ struct PresentationConfiguration
     LayerWhiteConfiguration whites;
     // Borrowed settings owner uses this same context/thread and outlives this consumer.
     SettingsWindow* settingsWindow{};
+    bool measurePerformance{};
 };
 
 // Serialized initialization-thread calls on a genuine exclusively owned context.
 // Retire this consumer before the borrowed scene owner or context qualification;
 // the borrowed scene owner outlives this owner. qualifiedExclusive asserts no
-// active queries, command lists or concurrent/reentrant context mutation;
+// foreign active queries, command lists or concurrent/reentrant context mutation;
+// only this owner may bracket its final dispatch with diagnostic queries;
 // it is a caller qualification, not an automatically discovered property.
 class PresentationPass
 {
@@ -59,6 +62,8 @@ public:
     // changes revoke qualification; retire before resize.
     HRESULT PrepareChain(IDXGISwapChain* chain) noexcept;
     [[nodiscard]] bool Active() const noexcept;
+    [[nodiscard]] GpuPerformanceSnapshot Performance() const noexcept;
+    void PollPerformance(PresentationScope scope) noexcept;
     // Read-only qualification for closed-frame commits that need no native change.
     [[nodiscard]] bool CanApplySettings(PresentationScope scope) const noexcept;
     // Cold retirement/destruction requires the exclusive context scope above.
@@ -147,6 +152,7 @@ private:
     RendererLifetime lifetime_;
     std::thread::id ownerThread_;
     PresentationConfiguration configuration_;
+    GpuPerformanceQueries performance_;
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader_;

@@ -366,10 +366,10 @@ struct BorrowedComputeState
     }
 };
 
-void InitializePresentation(PresentationPass& pass, PixelFixture& fixture)
+void InitializePresentation(PresentationPass& pass, PixelFixture& fixture, bool measurePerformance = false)
 {
     const PresentationConfiguration configuration{presentationWidth, presentationHeight,
-        presentationPeakNits, &fixture.renderer, fixture.whites};
+        presentationPeakNits, &fixture.renderer, fixture.whites, nullptr, measurePerformance};
     const auto initialized = pass.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration);
     FO4HDR_CHECK(initialized);
     if (!initialized) throw std::runtime_error("Controlled presentation prerequisites unavailable");
@@ -754,7 +754,8 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
     PixelFixture fixture{directory, presentationWidth, presentationHeight};
     const LineageScenes scenes{fixture.input, fixture.destination, AdditionalScene(fixture), {}};
     PresentationPass pass;
-    InitializePresentation(pass, fixture);
+    InitializePresentation(pass, fixture, true);
+    FO4HDR_CHECK(pass.Performance().issuedSamples == 0);
     FO4HDR_CHECK(fixture.renderer.BeginFrame());
     SeedPresentation(fixture, scenes);
     const auto selected = fixture.renderer.Views(fixture.renderer.CurrentScene()).texture;
@@ -769,6 +770,15 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         MeasureEmptyLayerSubmission(pass, terminal.view.Get());
         state.CheckRestored();
         CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        pass.PollPerformance(presentationScope);
+        const auto timing = pass.Performance();
+        if (timing.available)
+        {
+            FO4HDR_CHECK(timing.issuedSamples == 1);
+            FO4HDR_CHECK(timing.pendingSamples + timing.rejectedSamples + timing.warmupSamples == 1);
+            FO4HDR_CHECK(timing.measuredSamples == 0 && !timing.complete);
+        }
+        state.CheckRestored();
         VerifyLayerTransport(pass, state, terminal, true);
         VerifyNativeUiComposition(pass, state, terminal);
         VerifyVideoPresentation(pass, state, terminal);
@@ -781,6 +791,8 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         VerifyTerminalRejections(pass, state, terminal);
     }
     FO4HDR_CHECK(fixture.renderer.EndFrame());
+    FO4HDR_CHECK(pass.Retire());
+    FO4HDR_CHECK(!pass.Performance().available);
     FO4HDR_CHECK(fixture.renderer.Retire());
     std::cout << "Checked odd-extent selected FP16 to terminal R10, linked CS, CB range and UAV counters\n";
 }

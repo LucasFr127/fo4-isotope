@@ -219,6 +219,8 @@ $files = [string[]]@(
     "shaders/fallout4/ImageControls.hlsli", "tests/shader/ImageControlsTests.cpp",
     "src/graphics/resources/NativeReferenceResources.hpp",
     "src/graphics/resources/NativeReferenceResources.cpp",
+    "src/graphics/resources/GpuPerformanceQueries.hpp",
+    "src/graphics/resources/GpuPerformanceQueries.cpp",
     "src/graphics/passes/NativeReferenceGradePass.hpp",
     "src/graphics/passes/NativeReferenceGradePass.cpp",
     "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
