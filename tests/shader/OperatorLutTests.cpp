@@ -520,8 +520,13 @@ void CheckLiveTuple(const LiveSettingsSnapshot& snapshot, const PluginConfigurat
     FO4HDR_CHECK(snapshot.active == active);
     FO4HDR_CHECK(snapshot.requested == requested);
     FO4HDR_CHECK(snapshot.pending == pending);
-    FO4HDR_CHECK(snapshot.activeGeneration == (pending ? 1u : 2u));
-    FO4HDR_CHECK(snapshot.requestedGeneration == 2);
+
+}
+
+void CheckLiveGenerations(const LiveSettingsSnapshot& snapshot, std::uint64_t previous, bool pending)
+{
+    FO4HDR_CHECK(snapshot.activeGeneration == (pending ? previous : previous + 1));
+    FO4HDR_CHECK(snapshot.requestedGeneration == previous + 1);
 }
 
 void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginConfiguration& initial)
@@ -540,8 +545,10 @@ void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginCon
     invalidImage.display.shadows = 101;
     FO4HDR_CHECK(live.Request(invalidImage) == LiveSettingsRequestStatus::invalid);
     CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    CheckLiveGenerations(live.Snapshot(), 1, true);
     FO4HDR_CHECK(!live.CommitAtClosedFrame(PresentationScope::unavailable));
     CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    CheckLiveGenerations(live.Snapshot(), 1, true);
     FO4HDR_CHECK(fixture.renderer.MatchesLayerWhites({100, 203}));
     FO4HDR_CHECK(live.Snapshot().error == LiveSettingsError::applyRejected);
     FO4HDR_CHECK(!live.RequestSave());
@@ -549,6 +556,7 @@ void VerifyLiveChange(LiveSettings& live, PixelFixture& fixture, const PluginCon
     FO4HDR_CHECK(live.Snapshot().saveRejected);
     FO4HDR_CHECK(live.CommitAtClosedFrame(PresentationScope::qualifiedExclusive));
     CheckLiveTuple(live.Snapshot(), desired, desired, false);
+    CheckLiveGenerations(live.Snapshot(), 1, false);
     FO4HDR_CHECK(live.Snapshot().error == LiveSettingsError::none);
     FO4HDR_CHECK(live.Snapshot().saveRejected);
     FO4HDR_CHECK(fixture.renderer.MatchesLayerWhites({150, 250}));
@@ -604,6 +612,29 @@ void VerifyLiveRefresh(PixelFixture& fixture, BorrowedOperatorBindings& borrowed
     FO4HDR_CHECK(fixture.renderer.EndFrame());
 }
 
+void VerifyLiveMethod(LiveSettings& live, PixelFixture& fixture, const OperatorLutData& table)
+{
+    const auto initial = live.Snapshot().active;
+    auto desired = initial;
+    desired.display.colorGradingMethod = ColorGradingMethod::nativeReference;
+    const OperatorLutBuildRequest key{desired.algorithm, desired.display.displayPeakNits, 1,
+        desired.display.toneMapperParameters};
+    FO4HDR_CHECK(PreparedOperatorLutMatches(table, key));
+    // The uninitialized worker rejects rebuilds; this request must reuse the prepared key.
+    FO4HDR_CHECK(live.Request(desired) == LiveSettingsRequestStatus::accepted);
+    CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    CheckLiveGenerations(live.Snapshot(), 2, true);
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    FO4HDR_CHECK(!live.CommitAtClosedFrame(PresentationScope::qualifiedExclusive));
+    CheckLiveTuple(live.Snapshot(), initial, desired, true);
+    CheckLiveGenerations(live.Snapshot(), 2, true);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+    FO4HDR_CHECK(live.CommitAtClosedFrame(PresentationScope::qualifiedExclusive));
+    CheckLiveTuple(live.Snapshot(), desired, desired, false);
+    CheckLiveGenerations(live.Snapshot(), 2, false);
+    FO4HDR_CHECK(live.Snapshot().error == LiveSettingsError::none);
+    FO4HDR_CHECK(PreparedOperatorLutMatches(table, key));
+}
 void VerifyLiveSettings(const std::filesystem::path& directory, const OperatorLutData& table)
 {
     const LiveConfigurationFile input;
@@ -640,6 +671,7 @@ void VerifyLiveSettings(const std::filesystem::path& directory, const OperatorLu
     VerifyLiveChange(live, fixture, loaded.value);
     borrowed.Check();
     VerifyLiveRefresh(fixture, borrowed, scenes, before);
+    VerifyLiveMethod(live, fixture, table);
     FO4HDR_CHECK(live.Retire());
     FO4HDR_CHECK(!live.Snapshot().available);
     FO4HDR_CHECK(presentation.Retire());

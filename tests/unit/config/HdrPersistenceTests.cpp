@@ -85,10 +85,14 @@ void CheckRoundTrip()
     WriteFile(path, kOriginal);
     const auto loaded = LoadPluginConfiguration(path);
     FO4HDR_CHECK(loaded.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(loaded.value.display.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(ParsePluginConfiguration(std::string(kOriginal) +
+        "[Image]\nColorGradingMethod=invalid\n").status == PluginConfigurationStatus::invalid);
     auto requested = loaded.value;
     requested.algorithm = OperatorLutAlgorithm::gt7;
     requested.display = {1500.0, 100.0, 300.0};
     requested.display.vanillaColorGradingStrengthPercent = 50.0;
+    requested.display.colorGradingMethod = ColorGradingMethod::nativeReference;
     requested.display.exposureEv = 1;
     requested.display.bloomStrengthPercent = 50;
     requested.display.contrast = 25;

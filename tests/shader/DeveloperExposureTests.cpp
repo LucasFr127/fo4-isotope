@@ -38,11 +38,12 @@ ComPtr<ID3D11ShaderResourceView> ExposureView(ID3D11Device* device,
     return view;
 }
 
-ComPtr<ID3D11ShaderResourceView> ExposureTexture(ID3D11Device* device, float measured)
+ComPtr<ID3D11ShaderResourceView> ExposureTexture(ID3D11Device* device, float measured, bool color)
 {
     auto description = SceneDescription(1, 1);
-    description.Format = DXGI_FORMAT_R32_FLOAT;
-    const D3D11_SUBRESOURCE_DATA data{&measured, sizeof(measured), 0};
+    description.Format = color ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R32_FLOAT;
+    const Float4 channels{measured, 7, 8, 9};
+    const D3D11_SUBRESOURCE_DATA data{&channels, static_cast<UINT>(color ? sizeof(channels) : sizeof(measured)), 0};
     return ExposureView(device, description, data);
 }
 
@@ -88,14 +89,14 @@ struct ToneExposureInputs
         borrowedSelector = ConstantBuffer(owner.gpu.device.Get(), borrowed);
     }
 
-    void Bind(NativeExposure values)
+    void Bind(NativeExposure values, bool color)
     {
         fixture.Bind(true);
         FO4HDR_CHECK(fixture.renderer.InvalidateScene(fixture.input));
         Pixels scene;
         scene.fill(exposureScene);
         UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, scene);
-        exposure = ExposureTexture(fixture.gpu.device.Get(), values.measured);
+        exposure = ExposureTexture(fixture.gpu.device.Get(), values.measured, color);
         std::array<Float4, 32> constants{};
         constants[1] = {16, 8, 4, 0};
         const auto tone = ToneConstants();
@@ -214,15 +215,16 @@ void CheckExposurePixels(PixelFixture& fixture, Float4 expected)
     for (std::size_t index = 1; index < pixels.size(); ++index) CheckPixel(pixels[index], expected);
 }
 
-std::uint64_t DrawExposureFrame(ToneExposureInputs& inputs, NativeExposure values, Float4 expected)
+std::uint64_t DrawExposureFrame(ToneExposureInputs& inputs, NativeExposure values, Float4 expected,
+    std::size_t program = 0)
 {
     auto& fixture = inputs.fixture;
     FO4HDR_CHECK(fixture.renderer.BeginFrame());
     const auto token = fixture.renderer.FrameGeneration();
     FO4HDR_CHECK(token != 0);
-    inputs.Bind(values);
+    inputs.Bind(values, program != 0);
     const ExposureComputeState compute(*inputs.context.Get());
-    FO4HDR_CHECK(DrawPass(fixture, 0, true) == SceneDrawOutcome::replaced);
+    FO4HDR_CHECK(DrawPass(fixture, program, true) == SceneDrawOutcome::replaced);
     inputs.Check();
     compute.Check(*inputs.context.Get());
     CheckExposurePixels(fixture, expected);
@@ -242,12 +244,12 @@ void VerifyExposureCapture(ToneExposureInputs& inputs)
     // This affine filter retains measured reference, so replaying gain alone differs.
     const auto gainOnly = ExposureExpected(ExposureGain(capturedExposure), changedExposure.measured);
     FO4HDR_CHECK(std::abs(expected.red - gainOnly.red) > 0.5f);
-    const auto replayFrame = DrawExposureFrame(inputs, changedExposure, expected);
+    const auto replayFrame = DrawExposureFrame(inputs, changedExposure, expected, 1);
     FO4HDR_CHECK(renderer.CompleteExposureFrame(replayFrame, qualifiedExposureFrame));
     FO4HDR_CHECK(renderer.ExposureLockActive());
 }
 
-void VerifyExposureRefusal(ToneExposureInputs& inputs, const std::filesystem::path& directory)
+void VerifyExposureCompletionRefusal(ToneExposureInputs& inputs, const std::filesystem::path& directory)
 {
     auto& fixture = inputs.fixture;
     FO4HDR_CHECK(fixture.renderer.SetExposureLockRequested(false));
@@ -261,11 +263,25 @@ void VerifyExposureRefusal(ToneExposureInputs& inputs, const std::filesystem::pa
     const auto native = ExposureExpected(ExposureGain(changedExposure), changedExposure.measured);
     const auto frame = DrawExposureFrame(inputs, changedExposure, native);
     FO4HDR_CHECK(!fixture.renderer.ExposureLockActive());
-    FO4HDR_CHECK(!fixture.renderer.CompleteExposureFrame(frame, {}));
+    FO4HDR_CHECK(!fixture.renderer.CompleteExposureFrame(frame, {true, true, false, true}));
     FO4HDR_CHECK(!fixture.renderer.ExposureLockActive());
     inputs.context->CSSetShader(nullptr, nullptr, 0);
 }
 
+void BindExposureCompute(ToneExposureInputs& inputs, const std::filesystem::path& directory)
+{
+    const auto bytes = ReadShader(directory / "ScenePassCompute.dxbc");
+    ComPtr<ID3D11ComputeShader> shader;
+    CheckHresult(inputs.fixture.gpu.device->CreateComputeShader(bytes.data(), bytes.size(), nullptr, &shader),
+        "Borrowed exposure compute state");
+    inputs.context->CSSetShader(shader.Get(), nullptr, 0);
+    auto* source = inputs.bloom.Get();
+    inputs.context->CSSetShaderResources(0, 1, &source);
+    auto* buffer = inputs.borrowedSelector.Get();
+    constexpr UINT first = 16;
+    constexpr UINT count = 16;
+    inputs.context->CSSetConstantBuffers1(2, 1, &buffer, &first, &count);
+}
 void VerifyExposurePolicy()
 {
     DeveloperExposureLock policy;
@@ -286,8 +302,9 @@ void VerifyDeveloperExposure(const std::filesystem::path& fixtureDirectory)
     VerifyExposurePolicy();
     PixelFixture fixture(fixtureDirectory);
     ToneExposureInputs inputs(fixture);
+    BindExposureCompute(inputs, fixtureDirectory);
     VerifyExposureCapture(inputs);
-    VerifyExposureRefusal(inputs, fixtureDirectory);
+    VerifyExposureCompletionRefusal(inputs, fixtureDirectory);
 }
 
 }  // namespace fo4hdr::tests::gpu
