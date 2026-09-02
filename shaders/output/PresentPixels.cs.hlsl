@@ -18,20 +18,6 @@ cbuffer PresentFrame : register(b0)
 };
 
 [numthreads(8, 8, 1)]
-void PrepareBackdrop(uint3 pixel : SV_DispatchThreadID)
-{
-    if (any(pixel.xy >= FrameSize)) return;
-    PresentTarget[pixel.xy] = Fo4HdrPrepareAuthoredLayer(ScenePixels.Load(int3(pixel.xy, 0)), true);
-}
-
-[numthreads(8, 8, 1)]
-void PrepareHud(uint3 pixel : SV_DispatchThreadID)
-{
-    if (any(pixel.xy >= FrameSize)) return;
-    PresentTarget[pixel.xy] = Fo4HdrPrepareAuthoredLayer(ScenePixels.Load(int3(pixel.xy, 0)), false);
-}
-
-[numthreads(8, 8, 1)]
 void CopySdrCodes(uint3 pixel : SV_DispatchThreadID)
 {
     if (any(pixel.xy >= FrameSize)) return;
@@ -46,12 +32,11 @@ void main(uint3 pixel : SV_DispatchThreadID)
     // Domain 0 retains the 203-nit scene white; domain 1 is BT.2020 relative to UI white.
     const float3 scene = ScenePixels.Load(int3(pixel.xy, 0)).rgb;
     float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrBt709ToBt2020Nits(scene, 203.0f);
-    light = Fo4HdrBlendLinearLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
-    light = Fo4HdrBlendLinearLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits);
+    light = Fo4HdrBlendAuthoredLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, true);
+    light = Fo4HdrBlendAuthoredLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
     if (SettingsPresent != 0u)
     {
-        const float4 settings = Fo4HdrPrepareAuthoredLayer(SettingsPixels.Load(int3(pixel.xy, 0)), false);
-        light = Fo4HdrBlendLinearLayer(light, settings, UiWhiteNits);
+        light = Fo4HdrBlendAuthoredLayer(light, SettingsPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
     }
     const float3 contained = Fo4HdrBoundLight(light, DisplayPeakNits);
     // Encode only at the terminal UAV, after all contributions are linear light.

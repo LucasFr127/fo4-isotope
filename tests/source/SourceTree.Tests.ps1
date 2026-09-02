@@ -109,7 +109,7 @@ function Assert-GeneratedIncludes {
         $name = $include.Groups[1].Value
         $source = "shaders/fallout4/$name.ps.hlsl"
         $declared = $Recipe.Contains('"' + $name + '"')
-        if ($name -in @('PresentPixels', 'PrepareBackdrop', 'PrepareHud', 'CopySdrCodes')) {
+        if ($name -in @('PresentPixels', 'CopySdrCodes')) {
             $source = 'shaders/output/PresentPixels.cs.hlsl'
             $declared = $name -ceq 'PresentPixels' -or $declared
         }

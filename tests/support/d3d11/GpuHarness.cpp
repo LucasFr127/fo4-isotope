@@ -89,6 +89,32 @@ std::vector<char> ReadShader(const std::filesystem::path& path)
     return bytes;
 }
 
+std::vector<std::uint32_t> ReadPackedTexture(const Device& gpu, ID3D11Texture2D* texture)
+{
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    description.Usage = D3D11_USAGE_STAGING;
+    description.BindFlags = 0;
+    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> staging;
+    CheckHresult(gpu.device->CreateTexture2D(&description, nullptr, &staging), "Terminal staging");
+    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(description.Width) * description.Height);
+    gpu.context->CopyResource(staging.Get(), texture);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    CheckHresult(gpu.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Terminal map");
+    if (!mapped.pData || mapped.RowPitch < description.Width * sizeof(std::uint32_t))
+    {
+        gpu.context->Unmap(staging.Get(), 0);
+        throw std::runtime_error("Invalid terminal readback pitch");
+    }
+    for (UINT row = 0; row < description.Height; ++row)
+        std::memcpy(pixels.data() + row * description.Width,
+            static_cast<const char*>(mapped.pData) + row * mapped.RowPitch,
+            description.Width * sizeof(std::uint32_t));
+    gpu.context->Unmap(staging.Get(), 0);
+    return pixels;
+}
+
 namespace {
 
 D3D11_TEXTURE2D_DESC TextureDescription()

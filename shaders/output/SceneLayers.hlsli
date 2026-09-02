@@ -24,9 +24,10 @@ float4 Fo4HdrPrepareAuthoredLayer(float4 coded, bool backdrop)
     return float4(contribution, coverage);
 }
 
-float3 Fo4HdrBlendLinearLayer(float3 behind, float4 layer, float uiWhiteNits)
+float3 Fo4HdrBlendAuthoredLayer(float3 behind, float4 coded, float uiWhiteNits, bool backdrop)
 {
-    // Transport is normalized premultiplied BT.709; composition uses FP32 display light.
+    // Decode and premultiply in registers; stored layers retain their authored codes.
+    const float4 layer = Fo4HdrPrepareAuthoredLayer(coded, backdrop);
     return Fo4HdrBt709ToBt2020Nits(layer.rgb, uiWhiteNits) + behind * (1.0f - saturate(layer.a));
 }
 

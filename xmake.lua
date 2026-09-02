@@ -208,9 +208,9 @@ target("fo4hdr-shaders")
         local info = json.decode(report)
         assert(info.compiler and info.compiler.path and info.compiler.version and info.compiler.sha256,
             "Shader dependency report lacks compiler identity")
-        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 26,
+        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 24,
             "Shader dependency report lacks the current input/output closure")
-        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 26 and info.outputRoot,
+        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 24 and info.outputRoot,
             "Shader dependency report lacks program values")
         local values = { pwsh, info.compiler.path, info.compiler.version, info.compiler.sha256,
             info.outputRoot, json.encode(info.flags), json.encode(info.outputs) }

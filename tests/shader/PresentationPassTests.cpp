@@ -126,32 +126,6 @@ struct TerminalImage
     }
 };
 
-std::vector<std::uint32_t> ReadTerminal(const Device& gpu, ID3D11Texture2D* texture)
-{
-    D3D11_TEXTURE2D_DESC description{};
-    texture->GetDesc(&description);
-    description.Usage = D3D11_USAGE_STAGING;
-    description.BindFlags = 0;
-    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    ComPtr<ID3D11Texture2D> staging;
-    CheckHresult(gpu.device->CreateTexture2D(&description, nullptr, &staging), "Terminal staging");
-    std::vector<std::uint32_t> pixels(static_cast<std::size_t>(description.Width) * description.Height);
-    gpu.context->CopyResource(staging.Get(), texture);
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    CheckHresult(gpu.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Terminal map");
-    if (!mapped.pData || mapped.RowPitch < description.Width * sizeof(std::uint32_t))
-    {
-        gpu.context->Unmap(staging.Get(), 0);
-        throw std::runtime_error("Invalid terminal readback pitch");
-    }
-    for (UINT row = 0; row < description.Height; ++row)
-        std::memcpy(pixels.data() + row * description.Width,
-            static_cast<const char*>(mapped.pData) + row * mapped.RowPitch,
-            description.Width * sizeof(std::uint32_t));
-    gpu.context->Unmap(staging.Get(), 0);
-    return pixels;
-}
-
 void CheckTerminalNits(std::uint32_t packed, LinearRgb light)
 {
     const auto encoded = EncodeSt2084Pq(ContainBt2020Nits(light, presentationPeakNits));
@@ -378,12 +352,12 @@ void InitializePresentation(PresentationPass& pass, PixelFixture& fixture, bool 
 void CheckRejectedTerminal(PresentationPass& pass, BorrowedComputeState& state,
     TerminalImage& terminal, PresentationScope scope)
 {
-    const auto before = ReadTerminal(state.fixture.gpu, terminal.texture.Get());
+    const auto before = ReadPackedTexture(state.fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(std::any_of(before.begin(), before.end(),
         [](std::uint32_t pixel) { return (pixel & 0x3fffffffu) != 0; }));
     FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), scope));
     state.CheckRestored();
-    FO4HDR_CHECK(ReadTerminal(state.fixture.gpu, terminal.texture.Get()) == before);
+    FO4HDR_CHECK(ReadPackedTexture(state.fixture.gpu, terminal.texture.Get()) == before);
 }
 
 void CheckLineageBlack(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
@@ -393,7 +367,7 @@ void CheckLineageBlack(PresentationPass& pass, BorrowedComputeState& state, Term
     CheckSelection(fixture, {});
     FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    const auto black = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    const auto black = ReadPackedTexture(fixture.gpu, terminal.texture.Get());
     for (const auto pixel : black) FO4HDR_CHECK(pixel == 0xc0000000u);
     FO4HDR_CHECK(pass.Retire());
     FO4HDR_CHECK(pass.Retire());
@@ -403,7 +377,7 @@ void CheckLineageBlack(PresentationPass& pass, BorrowedComputeState& state, Term
         presentationPeakNits, &fixture.renderer, fixture.whites};
     FO4HDR_CHECK(!pass.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
     state.CheckRestored();
-    FO4HDR_CHECK(ReadTerminal(fixture.gpu, terminal.texture.Get()) == black);
+    FO4HDR_CHECK(ReadPackedTexture(fixture.gpu, terminal.texture.Get()) == black);
 }
 
 void VerifyTerminalRejections(PresentationPass& pass, BorrowedComputeState& state,
@@ -439,6 +413,16 @@ ComPtr<ID3D11ShaderResourceView> CompletedLayerSource(PixelFixture& fixture, Cod
     return source;
 }
 
+void OverwriteLayerCodes(PixelFixture& fixture, ID3D11ShaderResourceView* source)
+{
+    const std::vector<CodedLayer> changed(presentationWidth * presentationHeight, CodedLayer{255, 255, 255, 255});
+    ComPtr<ID3D11Resource> texture;
+    source->GetResource(&texture);
+    if (!texture) throw std::runtime_error("Completed layer lost its owned texture");
+    fixture.gpu.context->UpdateSubresource(texture.Get(), 0, nullptr, changed.data(),
+        presentationWidth * sizeof(CodedLayer), 0);
+}
+
 Float4 DecodedLayer(CodedLayer codes, bool hud, float uiWhiteNits)
 {
     const auto coverage = codes[3] / 255.0;
@@ -469,9 +453,12 @@ void VerifyLayerTransport(PresentationPass& pass, BorrowedComputeState& state, T
     state.Bind();
     FO4HDR_CHECK(pass.PrepareLayers(backdrop.Get(), hud.Get(), presentationScope));
     state.CheckRestored();
+    // Preparation owns a code snapshot even when the caller changes both sources.
+    OverwriteLayerCodes(fixture, backdrop.Get());
+    OverwriteLayerCodes(fixture, hud.Get());
     FO4HDR_CHECK(SubmitPreparedLayers(pass, terminal.view.Get(), measureSubmission));
     state.CheckRestored();
-    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    const auto pixels = ReadPackedTexture(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == scene.size());
     if (pixels.size() != scene.size()) throw std::runtime_error("Layer composition extent mismatch");
     const auto decodedBackdrop = DecodedLayer(backdropCodes, false, fixture.whites.uiWhiteNits);
@@ -572,7 +559,7 @@ std::vector<CodedLayer> ReadNativeLayer(const Device& gpu, ID3D11Texture2D* text
     if (!texture) return std::vector<CodedLayer>(presentationWidth * presentationHeight);
     gpu.context->OMSetRenderTargets(0, nullptr, nullptr);
     // R8 RGBA and terminal R10 each store one packed 32-bit word per pixel.
-    const auto packed = ReadTerminal(gpu, texture);
+    const auto packed = ReadPackedTexture(gpu, texture);
     std::vector<CodedLayer> pixels(packed.size());
     for (std::size_t index = 0; index < packed.size(); ++index)
         std::memcpy(pixels[index].data(), &packed[index], sizeof(CodedLayer));
@@ -626,7 +613,7 @@ void VerifyNativeBlendCase(PresentationPass& pass, BorrowedComputeState& state,
     state.CheckRestored();
     FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    const auto pixels = ReadPackedTexture(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == scene.size());
     if (pixels.size() != scene.size()) throw std::runtime_error("Native composition extent mismatch");
     for (std::size_t index = 0; index < pixels.size(); ++index)
@@ -652,11 +639,11 @@ void CheckRejectedLayers(PresentationPass& pass, BorrowedComputeState& state,
     FO4HDR_CHECK(pass.PrepareLayers(valid.Get(), nullptr, presentationScope));
     FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    const auto before = ReadTerminal(state.fixture.gpu, terminal.texture.Get());
+    const auto before = ReadPackedTexture(state.fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(!pass.PrepareLayers(inputs.backdrop, inputs.hud, presentationScope));
     FO4HDR_CHECK(!pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    FO4HDR_CHECK(ReadTerminal(state.fixture.gpu, terminal.texture.Get()) == before);
+    FO4HDR_CHECK(ReadPackedTexture(state.fixture.gpu, terminal.texture.Get()) == before);
 }
 
 void VerifyLayerRejections(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
@@ -676,11 +663,11 @@ void VerifyLayerRejections(PresentationPass& pass, BorrowedComputeState& state, 
     for (const auto inputs : rejected) CheckRejectedLayers(pass, state, terminal, inputs);
     FO4HDR_CHECK(pass.PrepareLayers(alias.Get(), nullptr, presentationScope));
     FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
-    const auto before = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    const auto before = ReadPackedTexture(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(!pass.PrepareLayers(nullptr, nullptr, PresentationScope::unavailable));
     FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    FO4HDR_CHECK(ReadTerminal(fixture.gpu, terminal.texture.Get()) == before);
+    FO4HDR_CHECK(ReadPackedTexture(fixture.gpu, terminal.texture.Get()) == before);
 }
 
 void VerifyNativeUiComposition(PresentationPass& pass, BorrowedComputeState& state, TerminalImage& terminal)
@@ -738,7 +725,7 @@ void VerifyVideoPresentation(PresentationPass& pass, BorrowedComputeState& state
     state.Bind();
     FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
     state.CheckRestored();
-    const auto pixels = ReadTerminal(fixture.gpu, terminal.texture.Get());
+    const auto pixels = ReadPackedTexture(fixture.gpu, terminal.texture.Get());
     FO4HDR_CHECK(pixels.size() == filtered.size());
     if (pixels.size() != filtered.size()) throw std::runtime_error("Video composition extent mismatch");
     // The ratio-adjusted FP16 transport is relative to the configured UI white.
@@ -769,7 +756,7 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         state.CheckRestored();
         MeasureEmptyLayerSubmission(pass, terminal.view.Get());
         state.CheckRestored();
-        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        CheckPresentationPixels(scene, ReadPackedTexture(fixture.gpu, terminal.texture.Get()));
         pass.PollPerformance(presentationScope);
         const auto timing = pass.Performance();
         if (timing.available)
@@ -787,7 +774,7 @@ void VerifyTerminalPresentation(const std::filesystem::path& directory)
         state.Bind();
         FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
         state.CheckRestored();
-        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        CheckPresentationPixels(scene, ReadPackedTexture(fixture.gpu, terminal.texture.Get()));
         VerifyTerminalRejections(pass, state, terminal);
     }
     FO4HDR_CHECK(fixture.renderer.EndFrame());
@@ -814,7 +801,7 @@ void VerifyColdWhiteLevels(const std::filesystem::path& directory)
         state.Bind();
         FO4HDR_CHECK(pass.ExecuteCurrentScene(terminal.view.Get(), presentationScope));
         state.CheckRestored();
-        CheckPresentationPixels(scene, ReadTerminal(fixture.gpu, terminal.texture.Get()));
+        CheckPresentationPixels(scene, ReadPackedTexture(fixture.gpu, terminal.texture.Get()));
         VerifyLayerTransport(pass, state, terminal);
         VerifyVideoPresentation(pass, state, terminal);
         FO4HDR_CHECK(pass.Retire());
@@ -914,7 +901,7 @@ void ClearOriginalSdr(PixelFixture& fixture, IDXGISwapChain* chain)
     CheckHresult(fixture.gpu.device->CreateRenderTargetView(texture.Get(), nullptr, &target), "Original SDR view");
     const float bounded[]{0.125f, 0.25f, 0.5f, 1};
     fixture.gpu.context->ClearRenderTargetView(target.Get(), bounded);
-    const auto pixels = ReadTerminal(fixture.gpu, texture.Get());
+    const auto pixels = ReadPackedTexture(fixture.gpu, texture.Get());
     FO4HDR_CHECK(std::any_of(pixels.begin(), pixels.end(),
         [](std::uint32_t pixel) { return (pixel & 0x00ffffffu) != 0; }));
     for (const auto pixel : pixels) FO4HDR_CHECK((pixel >> 24) == 255);
@@ -978,7 +965,7 @@ void CheckLogicalBuffer(PixelFixture& fixture, IDXGISwapChain1* chain)
     ComPtr<ID3D11Device> device;
     buffer->GetDevice(&device);
     FO4HDR_CHECK(device.Get() == fixture.gpu.device.Get());
-    const auto black = ReadTerminal(fixture.gpu, buffer.Get());
+    const auto black = ReadPackedTexture(fixture.gpu, buffer.Get());
     for (const auto pixel : black) FO4HDR_CHECK(pixel == 0xc0000000u);
     std::cout << "Controlled logical backbuffer=0; pre-Present black verified; post-Present pixels unverified\n";
 }
@@ -1052,14 +1039,14 @@ void VerifySdrHandoff(PixelFixture& fixture, PresentationPass& pass,
     CheckHresult(chain->GetBuffer(0, IID_PPV_ARGS(&buffer)), "SDR handoff buffer");
     pass.PrepareNativePresent(chain, 0, presentationScope);
     state.CheckRestored();
-    CheckSdrCodes(ReadTerminal(fixture.gpu, buffer.Get()), codes);
+    CheckSdrCodes(ReadPackedTexture(fixture.gpu, buffer.Get()), codes);
     const auto result = chain->Present(0, 0);
     pass.CompleteNativePresent(chain, result);
     CheckHresult(result, "SDR handoff Present");
     FO4HDR_CHECK(pass.BeginFrame(presentationScope));
     pass.PrepareNativePresent(chain, 0, presentationScope);
     state.CheckRestored();
-    CheckSdrCodes(ReadTerminal(fixture.gpu, buffer.Get()), {});
+    CheckSdrCodes(ReadPackedTexture(fixture.gpu, buffer.Get()), {});
 }
 
 void VerifyChainRetirement(PixelFixture& fixture, PresentationPass& pass,

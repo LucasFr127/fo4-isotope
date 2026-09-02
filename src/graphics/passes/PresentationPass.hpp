@@ -115,6 +115,12 @@ private:
         Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> target;
     };
 
+    struct CodedLayer
+    {
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> source;
+    };
+
     [[nodiscard]] bool OnOwnerThread() const noexcept;
     [[nodiscard]] bool CanExecute(PresentationScope scope) const noexcept;
     [[nodiscard]] bool CanPrepareChain() const noexcept;
@@ -143,8 +149,12 @@ private:
         Microsoft::WRL::ComPtr<IUnknown>& identity, DXGI_FORMAT format) const noexcept;
     [[nodiscard]] bool PrepareLayerSources(ID3D11ShaderResourceView* backdrop,
         ID3D11ShaderResourceView* hud, PresentationScope scope, DXGI_FORMAT backdropFormat) noexcept;
+    [[nodiscard]] bool CopyLayerSources(ID3D11ShaderResourceView* backdrop,
+        ID3D11ShaderResourceView* hud, DXGI_FORMAT backdropFormat) noexcept;
     [[nodiscard]] static bool PrepareLayer(ID3D11Device* device,
         const PresentationConfiguration& configuration, LinearLayer& prepared) noexcept;
+    [[nodiscard]] static bool PrepareCodedLayer(ID3D11Device* device,
+        const PresentationConfiguration& configuration, DXGI_FORMAT format, CodedLayer& prepared) noexcept;
     void ClearLayers() noexcept;
     [[nodiscard]] bool ComposeSelected(SceneTextureViews source,
         ID3D11UnorderedAccessView* terminal) noexcept;
@@ -157,8 +167,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader_;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 4> constants_;
-    std::array<Microsoft::WRL::ComPtr<ID3D11ComputeShader>, 2> layerShaders_;
-    std::array<LinearLayer, 2> layers_;
+    std::array<CodedLayer, 3> layers_;
+    std::array<ID3D11ShaderResourceView*, 2> selectedLayers_{};
     LinearLayer sdrProxy_;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> sdrShader_;
     std::uint64_t sdrFrame_{};

@@ -40,7 +40,7 @@ function Get-ShaderPrograms {
             Symbol = "k$($name)Bytecode"; Destination = [IO.Path]::Combine($shaderDirectory, "$name.hpp")
         })
     }
-    foreach ($entry in @("main", "PrepareBackdrop", "PrepareHud", "CopySdrCodes")) {
+    foreach ($entry in @("main", "CopySdrCodes")) {
         $name = if ($entry -ceq "main") { "PresentPixels" } else { $entry }
         $programs.Add(@{
             Source = "shaders/output/PresentPixels.cs.hlsl"; Profile = "cs_5_0"; Entry = $entry

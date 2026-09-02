@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string_view>
 #include <vector>
@@ -24,6 +25,8 @@ struct Device
 void CheckHresult(HRESULT result, std::string_view operation);
 [[nodiscard]] Device CreateWarpDevice();
 [[nodiscard]] std::vector<char> ReadShader(const std::filesystem::path& path);
+// Caller supplies a packed 32-bit texture with conflicting output bindings removed.
+[[nodiscard]] std::vector<std::uint32_t> ReadPackedTexture(const Device& gpu, ID3D11Texture2D* texture);
 
 struct Float4
 {
