@@ -166,7 +166,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context_;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> shader_;
-    std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 4> constants_;
+    std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 24> constants_;
     std::array<CodedLayer, 3> layers_;
     std::array<ID3D11ShaderResourceView*, 2> selectedLayers_{};
     LinearLayer sdrProxy_;

@@ -168,6 +168,8 @@ $expected = [string[]]@(
     "src/ui/SettingsWindow.cpp",
     "src/ui/SettingsPanel.hpp",
     "src/ui/SettingsPanel.cpp",
+    "src/ui/DisplayCalibrationPanel.hpp",
+    "src/ui/DisplayCalibrationPanel.cpp",
     "tests/shader/SettingsPanelTests.cpp",
     "src/graphics/DeveloperExposureLock.hpp",
     "src/graphics/PipboyScreenObservation.hpp",

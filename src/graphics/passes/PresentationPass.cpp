@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <utility>
 
@@ -23,6 +24,8 @@ constexpr UINT outputCapacity = 8;
 constexpr UINT classCapacity = 256;
 constexpr std::array supportedSceneDomains{
     SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
+constexpr std::array<UINT, 6> calibrationModes{0, 10, 11, 12, 13, 14};
+constexpr std::size_t variantsPerCalibration = supportedSceneDomains.size() * 2;
 constexpr std::array codedLayerFormats{DXGI_FORMAT_R8G8B8A8_UNORM,
     DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT};
 constexpr std::array<UINT, outputCapacity> preserveCounters{
@@ -45,9 +48,28 @@ struct PresentConstants
     UINT sceneDomain;
     float uiWhite;
     UINT settingsPresent{};
-    std::array<UINT, 2> reserved{};
+    UINT calibrationMode{};
+    UINT reserved{};
 };
 static_assert(sizeof(PresentConstants) == 32);
+static_assert(offsetof(PresentConstants, calibrationMode) == 24);
+
+std::size_t CalibrationIndex(std::uint32_t mode) noexcept
+{
+    if (mode == 0) return 0;
+    if (mode >= 10 && mode <= 14) return mode - 9;
+    return calibrationModes.size();
+}
+
+bool CurrentSettingsPublication(const SettingsWindowOverlay& overlay,
+    std::uint64_t frame, const PresentationConfiguration& configuration) noexcept
+{
+    if (CalibrationIndex(overlay.calibrationMode) >= calibrationModes.size()) return false;
+    if (overlay.source == nullptr && overlay.calibrationMode == 0) return true;
+    if (overlay.frame != frame) return false;
+    if (overlay.width != configuration.width) return false;
+    return overlay.height == configuration.height;
+}
 
 ComPtr<IUnknown> Identity(IUnknown* object) noexcept
 {
@@ -334,7 +356,7 @@ struct PreparedPresentation
     ComPtr<ID3D11DeviceContext1> context;
     ComPtr<ID3D11ComputeShader> shader;
     ComPtr<ID3D11ComputeShader> sdrShader;
-    std::array<ComPtr<ID3D11Buffer>, 4> constants;
+    std::array<ComPtr<ID3D11Buffer>, variantsPerCalibration * calibrationModes.size()> constants;
 };
 
 bool ValidInitialization(ID3D11Device* device, ID3D11DeviceContext* context,
@@ -364,7 +386,8 @@ bool PrepareConstantVariants(ID3D11Device* device,
         const PresentConstants values{
             configuration.width, configuration.height, configuration.displayPeakNits,
             static_cast<UINT>(domain), configuration.whites.uiWhiteNits,
-            index >= supportedSceneDomains.size() ? 1U : 0U};
+            (index % variantsPerCalibration) >= supportedSceneDomains.size() ? 1U : 0U,
+            calibrationModes[index / variantsPerCalibration]};
         if (FAILED(CreateConstants(device, values, &prepared.constants[index]))) return false;
         if (!prepared.constants[index]) return false;
     }
@@ -795,11 +818,8 @@ bool PresentationPass::ReadSettingsOverlay(std::uint64_t frame,
 {
     if (configuration_.settingsWindow == nullptr) return true;
     overlay = configuration_.settingsWindow->Draw(frame, SettingsWindowScope::qualifiedExclusive);
-    if (overlay.source == nullptr) return true;
-    if (overlay.frame != frame) return false;
-    if (overlay.width != configuration_.width) return false;
-    if (overlay.height != configuration_.height) return false;
-    return QualifiedSettingsSource(overlay.source, terminal);
+    if (!CurrentSettingsPublication(overlay, frame, configuration_)) return false;
+    return overlay.source == nullptr || QualifiedSettingsSource(overlay.source, terminal);
 }
 
 bool PresentationPass::QualifiedLayerSource(ID3D11ShaderResourceView* source,
@@ -975,7 +995,8 @@ bool PresentationPass::ComposeSelected(SceneTextureViews source,
     }
     const std::array inputs{source.shaderResource, selectedLayers_[0],
         selectedLayers_[1], overlay.source};
-    const auto index = domain + (overlay.source != nullptr ? supportedSceneDomains.size() : 0);
+    const auto index = CalibrationIndex(overlay.calibrationMode) * variantsPerCalibration +
+        domain + (overlay.source != nullptr ? supportedSceneDomains.size() : 0);
     state.Bind(shader_.Get(), constants_[index].Get(), inputs, terminal);
     const bool measured = performance_.Begin(frame);
     context_->Dispatch((configuration_.width + 7) / 8, (configuration_.height + 7) / 8, 1);

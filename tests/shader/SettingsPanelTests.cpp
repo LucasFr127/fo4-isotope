@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SettingsPanel.hpp"
+#include "DisplayCalibrationPanel.hpp"
 #include "LiveSettings.hpp"
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "ShippingPixelShaderTests.hpp"
@@ -95,6 +96,31 @@ void RenderSettingsFrame(OperatorLutAlgorithm algorithm, LiveSettings& live)
     ImGui::Render();
     CheckDrawData();
     FO4HDR_CHECK(editable == before);
+}
+
+void RenderCalibrationFrame()
+{
+    HdrSettings editable;
+    editable.displayPeakNits = 900.0;
+    editable.uiPaperWhiteNits = 150.0;
+    editable.videoWhiteNits = 175.0;
+    const auto before = editable;
+    std::uint32_t mode = 11;
+    ImGui::NewFrame();
+    ImGui::SetNextWindowSize({400, 900}, ImGuiCond_Always);
+    if (ImGui::Begin("Display calibration", nullptr, ImGuiWindowFlags_NoSavedSettings))
+    {
+        const auto vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        const auto actions = DrawDisplayCalibrationPanel(editable, mode);
+        FO4HDR_CHECK(!actions.changed);
+        FO4HDR_CHECK(!actions.hideOverlay);
+        FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size > vertices);
+    }
+    ImGui::End();
+    ImGui::Render();
+    CheckDrawData();
+    FO4HDR_CHECK(editable == before);
+    FO4HDR_CHECK(mode == 11);
 }
 
 thread_local unsigned forwardedToggles{};
@@ -226,6 +252,7 @@ void RunSettingsPanelTests()
             RenderSettingsFrame(algorithm, live);
         // The caller dispatches panel intent through the real unavailable owner.
         DispatchPanelActions({true, true}, live, PluginConfiguration{});
+        RenderCalibrationFrame();
     }
     RenderOwnedBackend();
 }

@@ -29,6 +29,7 @@ struct SettingsWindowOverlay
     std::uint64_t frame{};
     UINT width{};
     UINT height{};
+    std::uint32_t calibrationMode{};
 };
 
 // Initialize/Draw/Retire and destruction require one renderer thread. Borrowed
@@ -48,6 +49,8 @@ public:
     // Returned FP16 RGB is premultiplied authored IEC code, with independent
     // coverage alpha, BT.709/UI-relative. Consume only in the named frame,
     // without externally binding its private view; decode before HDR blend.
+    // A hidden calibration control surface can publish a null source with current
+    // frame/extent/mode. Mode 0 is normal, 10-14 are diagnostic patterns.
     // Same-frame Draw returns the saved publication without draining input again.
     // A newer-frame Draw or Retire invalidates it. Never render into PQ/R10.
     [[nodiscard]] SettingsWindowOverlay Draw(std::uint64_t frame,

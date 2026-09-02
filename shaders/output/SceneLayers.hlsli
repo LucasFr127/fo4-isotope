@@ -31,4 +31,44 @@ float3 Fo4HdrBlendAuthoredLayer(float3 behind, float4 coded, float uiWhiteNits, 
     return Fo4HdrBt709ToBt2020Nits(layer.rgb, uiWhiteNits) + behind * (1.0f - saturate(layer.a));
 }
 
+float3 Fo4HdrCalibrationLight(uint mode, uint2 pixel, uint2 extent,
+    float2 peakAndWhite, float3 sceneNits)
+{
+    const float peak = peakAndWhite.x;
+    const float white = peakAndWhite.y;
+    switch (mode)
+    {
+    case 10u:
+        return (floor(pixel.x / max(1.0f, float(extent.x) - 1.0f) * 31.0f + 1.0e-6f) *
+            (peak * 1.125f / 31.0f)).xxx;
+    case 11u:
+        {
+            const float2 coordinate = (float2(pixel) + 0.5f) / max(float2(extent), 1.0f);
+            return all(coordinate >= 0.2f) && all(coordinate <= 0.8f) ? white.xxx : 0.0f;
+        }
+    case 12u:
+        {
+            static const float stops[10] = {0.0f, 0.001f, 0.005f, 0.01f, 0.02f,
+                0.05f, 0.1f, 0.2f, 0.5f, 1.0f};
+            return stops[min(pixel.x * 10u / max(extent.x, 1u), 9u)].xxx;
+        }
+    case 13u:
+        {
+            static const float3 patches[6] = {float3(1,0,0), float3(0,1,0),
+                float3(0,0,1), float3(1,1,0), float3(0,1,1), float3(1,0,1)};
+            const float3 patch = patches[min(pixel.x * 6u / max(extent.x, 1u), 5u)] * white;
+            return pixel.y >= extent.y / 2u ? Fo4HdrBt709ToBt2020Nits(patch, 1.0f) : patch;
+        }
+    case 14u:
+        {
+            const float largest = max(sceneNits.r, max(sceneNits.g, sceneNits.b));
+            if (largest >= peak * (1.0f - 1.0e-5f)) return float3(peak, 0, 0);
+            if (largest >= 0.9f * peak) return float3(peak, peak, 0);
+            return sceneNits;
+        }
+    default:
+        return sceneNits;
+    }
+}
+
 #endif

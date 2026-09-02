@@ -2,6 +2,7 @@
 
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "SettingsPanel.hpp"
+#include "DisplayCalibrationPanel.hpp"
 #include "LiveSettings.hpp"
 
 #include <imgui.h>
@@ -356,6 +357,8 @@ struct SettingsWindow::State
     SettingsWindowOverlay publication;
     bool platform{};
     bool renderer{};
+    std::uint32_t calibrationMode{};
+    bool hideOverlay{};
     bool open{};
     bool drawing{};
 
@@ -469,8 +472,17 @@ struct SettingsWindow::State
         ImGui::SetNextWindowPos({static_cast<float>(configuration.width) * 0.5F,
             static_cast<float>(configuration.height) * 0.5F}, ImGuiCond_FirstUseEver, {0.5F, 0.5F});
         SettingsPanelActions actions;
+        hideOverlay = false;
         if (ImGui::Begin("Fallout4HDR", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
+        {
             actions = DrawSettingsPanel(editable, snapshot);
+            if (ImGui::CollapsingHeader("Display calibration"))
+            {
+                const auto calibration = DrawDisplayCalibrationPanel(editable.display, calibrationMode);
+                actions.request |= calibration.changed;
+                hideOverlay = calibration.hideOverlay;
+            }
+        }
         ImGui::End();
         if (actions.request) (void)configuration.live->Request(editable);
         if (actions.save) (void)configuration.live->RequestSave();
@@ -486,9 +498,15 @@ struct SettingsWindow::State
         frameOpen = false;
         const auto& io = ImGui::GetIO();
         configuration.input->SetCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
-        if (!open) return {};
+        if (!open)
+        {
+            calibrationMode = 0;
+            return {};
+        }
+        if (hideOverlay)
+            return {nullptr, requestedFrame, configuration.width, configuration.height, calibrationMode};
         if (!DrawOverlay()) return {};
-        return {source.Get(), requestedFrame, configuration.width, configuration.height};
+        return {source.Get(), requestedFrame, configuration.width, configuration.height, calibrationMode};
     }
     bool DrawOverlay()
     {
@@ -544,6 +562,7 @@ SettingsWindowOverlay SettingsWindow::Draw(std::uint64_t frame, SettingsWindowSc
         if (frameOpen) ImGui::EndFrame();
         state_->configuration.input->SetCapture(false, false, false);
     }
+    if (overlay.frame == 0) state_->calibrationMode = 0;
     state_->frame = frame;
     state_->publication = overlay;
     state_->drawing = false;

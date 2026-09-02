@@ -14,7 +14,8 @@ cbuffer PresentFrame : register(b0)
     uint SceneDomain;
     float UiWhiteNits;
     uint SettingsPresent;
-    uint2 Reserved;
+    uint CalibrationMode;
+    uint Reserved;
 };
 
 [numthreads(8, 8, 1)]
@@ -32,8 +33,13 @@ void main(uint3 pixel : SV_DispatchThreadID)
     // Domain 0 retains the 203-nit scene white; domain 1 is BT.2020 relative to UI white.
     const float3 scene = ScenePixels.Load(int3(pixel.xy, 0)).rgb;
     float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrBt709ToBt2020Nits(scene, 203.0f);
-    light = Fo4HdrBlendAuthoredLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, true);
-    light = Fo4HdrBlendAuthoredLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
+    light = Fo4HdrCalibrationLight(CalibrationMode, pixel.xy, FrameSize,
+        float2(DisplayPeakNits, UiWhiteNits), light);
+    if (CalibrationMode < 10u || CalibrationMode > 13u)
+    {
+        light = Fo4HdrBlendAuthoredLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, true);
+        light = Fo4HdrBlendAuthoredLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
+    }
     if (SettingsPresent != 0u)
     {
         light = Fo4HdrBlendAuthoredLayer(light, SettingsPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
