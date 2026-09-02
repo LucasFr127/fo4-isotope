@@ -3,6 +3,7 @@
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "SettingsPanel.hpp"
 #include "DisplayCalibrationPanel.hpp"
+#include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
 
 #include <imgui.h>
@@ -344,6 +345,7 @@ struct SettingsWindow::State
 {
     DWORD thread{GetCurrentThreadId()};
     SettingsWindowConfiguration configuration;
+    DisplayDiscovery displayDiscovery;
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext1> context;
     ComPtr<ID3D11Texture2D> texture;
@@ -364,6 +366,7 @@ struct SettingsWindow::State
 
     ~State() noexcept
     {
+        displayDiscovery.Reset();
         if (!imgui) return;
         auto* old = ImGui::GetCurrentContext();
         ImGui::SetCurrentContext(imgui);
@@ -478,7 +481,13 @@ struct SettingsWindow::State
             actions = DrawSettingsPanel(editable, snapshot);
             if (ImGui::CollapsingHeader("Display calibration"))
             {
-                const auto calibration = DrawDisplayCalibrationPanel(editable.display, calibrationMode);
+                const auto display = displayDiscovery.Refresh(configuration.window);
+                const DisplayCalibrationView view{display.known, display.monitorDevicePath[0] != L'\0',
+                    display.friendlyName[0] ? display.friendlyName.data() : display.description.DeviceName,
+                    display.description.MaxLuminance, display.description.MaxFullFrameLuminance,
+                    display.sdrWhiteNits};
+                const auto calibration = DrawDisplayCalibrationPanel(editable.display, calibrationMode, view);
+                if (calibration.refreshDisplay) displayDiscovery.Reset();
                 actions.request |= calibration.changed;
                 hideOverlay = calibration.hideOverlay;
             }

@@ -7,13 +7,24 @@
 
 namespace fo4hdr {
 
+struct DisplayCalibrationView
+{
+    bool known{};
+    bool identityAvailable{};
+    const wchar_t* name{};
+    double reportedPeakNits{};
+    double reportedFullFrameNits{};
+    double sdrWhiteNits{};
+};
+
 struct DisplayCalibrationActions
 {
     bool changed{};
     bool hideOverlay{};
+    bool refreshDisplay{};
 };
 
 [[nodiscard]] DisplayCalibrationActions DrawDisplayCalibrationPanel(
-    HdrSettings& settings, std::uint32_t& mode) noexcept;
+    HdrSettings& settings, std::uint32_t& mode, DisplayCalibrationView display = {}) noexcept;
 
 }  // namespace fo4hdr

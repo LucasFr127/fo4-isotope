@@ -2,6 +2,7 @@
 
 #include "SettingsPanel.hpp"
 #include "DisplayCalibrationPanel.hpp"
+#include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "ShippingPixelShaderTests.hpp"
@@ -213,6 +214,12 @@ void RenderOwnedBackend()
     (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, 1ULL << 31);
     FO4HDR_CHECK(forwardedToggles == 2);
     CheckCapturedText(*window.input, window.Window());
+    DisplayDiscovery discovery;
+    FO4HDR_CHECK(!discovery.Refresh(nullptr).known);
+    const auto display = discovery.Refresh(window.Window());
+    FO4HDR_CHECK(!display.known || display.description.Monitor != nullptr);
+    discovery.Reset();
+    FO4HDR_CHECK(!discovery.Refresh(nullptr).known);
     RECT client{};
     FO4HDR_CHECK(GetClientRect(window.Window(), &client));
     const auto device = gpu::CreateWarpDevice();

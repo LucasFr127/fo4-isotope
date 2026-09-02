@@ -110,7 +110,8 @@ target("Fallout4HDR")
         "src/graphics/hooks/ContextHooks.cpp",
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",
         "src/graphics/hooks/SwapChainHooks.cpp")
-    add_files("src/ui/SettingsPanel.cpp", "src/ui/DisplayCalibrationPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
+    add_files("src/graphics/DisplayDiscovery.cpp",
+        "src/ui/SettingsPanel.cpp", "src/ui/DisplayCalibrationPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
         "src/output/PerformanceStatistics.cpp",
         "src/output/ArmorUiComposition.cpp",
         "src/graphics/passes/ArmorCompositionPass.cpp",
@@ -266,6 +267,7 @@ target("fo4hdr-shader-tests")
         "tests/support/reference/OperatorLutTestSupport.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/config/HdrSettings.cpp", "src/config/PluginConfiguration.cpp",
+        "src/graphics/DisplayDiscovery.cpp",
         "src/ui/SettingsPanel.cpp", "src/ui/DisplayCalibrationPanel.cpp", "src/ui/SettingsWindow.cpp", "src/ui/HdrSettingsInput.cpp",
         "tests/shader/SettingsPanelTests.cpp",
         "src/graphics/resources/DeveloperExposureResources.cpp",

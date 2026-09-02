@@ -95,6 +95,8 @@ $files = [string[]]@(
     "shaders/fallout4/ToneMapBypassCommon.hlsli",
     "shaders/fallout4/ToneMapNewA.ps.hlsl",
     "shaders/fallout4/ToneMapNewB.ps.hlsl",
+    "src/graphics/DisplayDiscovery.hpp",
+    "src/graphics/DisplayDiscovery.cpp",
     "src/graphics/HdrRenderer.hpp",
     "src/graphics/HdrRenderer.cpp",
     "src/graphics/resources/HdrResourcePolicy.hpp",

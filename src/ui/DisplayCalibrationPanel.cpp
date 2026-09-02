@@ -5,6 +5,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace fo4hdr {
@@ -99,16 +100,42 @@ void DrawChecks(std::uint32_t& mode) noexcept
         14, mode);
 }
 
+bool DrawReportedDisplay(HdrSettings& settings, DisplayCalibrationView display) noexcept
+{
+    if (!display.known)
+    {
+        ImGui::TextUnformatted("Display information unavailable.");
+        return false;
+    }
+    if (display.name) ImGui::Text("Display: %ls", display.name);
+    ImGui::Text("Last-observed peak: %.0f nits; full frame: %.0f nits; OS SDR white: %.0f nits",
+        display.reportedPeakNits, display.reportedFullFrameNits, display.sdrWhiteNits);
+    const bool usable = display.identityAvailable && std::isfinite(display.reportedPeakNits) &&
+        display.reportedPeakNits > 0;
+    ImGui::BeginDisabled(!usable);
+    const bool requested = ImGui::Button("Use reported peak");
+    ImGui::EndDisabled();
+    ImGui::SetItemTooltip("Reported metadata is a starting point, not a measurement.");
+    if (!requested || !usable) return false;
+    const auto peak = std::clamp(display.reportedPeakNits,
+        kMinimumDisplayPeakNits, kMaximumDisplayPeakNits);
+    const bool changed = settings.displayPeakNits != peak;
+    settings.displayPeakNits = peak;
+    return changed;
+}
+
 }  // namespace
 
 DisplayCalibrationActions DrawDisplayCalibrationPanel(
-    HdrSettings& settings, std::uint32_t& mode) noexcept
+    HdrSettings& settings, std::uint32_t& mode, DisplayCalibrationView display) noexcept
 {
     if (!ValidCalibrationMode(mode)) mode = 0;
     DisplayCalibrationActions actions;
     ImGui::PushID("display-calibration");
     ImGui::TextWrapped("Use the patterns on a qualified HDR output. They do not measure display capability. "
         "Pending brightness changes use the active values until applied.");
+    actions.refreshDisplay = ImGui::Button("Refresh display details");
+    actions.changed |= DrawReportedDisplay(settings, display);
     DrawPatternControls(mode, actions);
     actions.changed |= DrawPeak(settings, mode);
     actions.changed |= DrawWhites(settings, mode);
