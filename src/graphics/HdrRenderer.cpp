@@ -889,7 +889,8 @@ const ScenePassRenderer::SceneTexture* ScenePassRenderer::SelectedBoundInput(
     if (source->settingsStale) return nullptr;
     ComPtr<ID3D11ShaderResourceView> bound;
     context_->PSGetShaderResources(descriptor->sceneInputSlot, 1, &bound);
-    return bound.Get() == source->shaderResource.Get() ? source : nullptr;
+    return (bound.Get() == source->shaderResource.Get() ||
+        EquivalentSceneSrv(device_.Get(), source->texture.Get(), bound.Get())) ? source : nullptr;
 }
 
 ScenePassRenderer::OriginalContinuation ScenePassRenderer::QualifyOriginalContinuation(
@@ -1025,8 +1026,10 @@ bool ScenePassRenderer::BoundSceneViewsMatch(const RenoDxShaderDescriptor& descr
     ComPtr<ID3D11RenderTargetView> boundTarget;
     context_->PSGetShaderResources(descriptor.sceneInputSlot, 1, &boundInput);
     context_->OMGetRenderTargets(1, &boundTarget, nullptr);
-    return boundInput.Get() == source.shaderResource.Get() &&
-        boundTarget.Get() == target.renderTarget.Get();
+    return (boundInput.Get() == source.shaderResource.Get() ||
+        EquivalentSceneSrv(device_.Get(), source.texture.Get(), boundInput.Get())) &&
+        (boundTarget.Get() == target.renderTarget.Get() ||
+        EquivalentSceneRtv(device_.Get(), target.texture.Get(), boundTarget.Get()));
 }
 
 bool ScenePassRenderer::BoundTemporalViewsMatch(const RenoDxShaderDescriptor& descriptor,
@@ -1038,11 +1041,13 @@ bool ScenePassRenderer::BoundTemporalViewsMatch(const RenoDxShaderDescriptor& de
     ComPtr<ID3D11RenderTargetView> color;
     metadata.Attach(raw[0]);
     color.Attach(raw[1]);
-    if (color.Get() != target.renderTarget.Get()) return false;
+    if (color.Get() != target.renderTarget.Get() &&
+        !EquivalentSceneRtv(device_.Get(), target.texture.Get(), color.Get())) return false;
     if (!CompatibleMetadataTarget(metadata.Get(), target.texture.Get())) return false;
     const auto metadataResource = ViewResource(metadata.Get());
     const auto inputs = TemporalInputs(context_.Get(), descriptor.pass == RenoDxShaderPass::taa ? 4 : 5);
-    if (inputs[0].Get() != source.shaderResource.Get()) return false;
+    if (inputs[0].Get() != source.shaderResource.Get() &&
+        !EquivalentSceneSrv(device_.Get(), source.texture.Get(), inputs[0].Get())) return false;
     if (!CompatibleHistoryView(inputs[1].Get(), source.texture.Get())) return false;
     return InputsAvoidTemporalOutputs(inputs, source.texture.Get(),
         metadataResource.Get(), target.texture.Get());

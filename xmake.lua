@@ -97,6 +97,7 @@ target("Fallout4HDR")
         "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp")
     add_files("src/graphics/HdrRenderer.cpp",
         "src/graphics/ScenePassRegistration.cpp",
+        "src/graphics/resources/NativeSceneAssociation.cpp",
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/graphics/resources/DeveloperExposureResources.cpp",
         "src/output/Hdr10Color.cpp",
@@ -243,6 +244,7 @@ target("fo4hdr-shader-tests")
         "tests/shader/Gt7ReferenceTests.cpp",
         "src/output/Hdr10Color.cpp", "src/graphics/HdrRenderer.cpp",
         "src/graphics/ScenePassRegistration.cpp",
+        "src/graphics/resources/NativeSceneAssociation.cpp",
         "src/graphics/d3d11/ContextQuerySafety.cpp",
         "src/graphics/hooks/ContextHooks.cpp", "tests/shader/NativeRoutingTests.cpp",
         "src/graphics/hooks/DeviceHooks.cpp", "src/graphics/hooks/NativeImageSlots.cpp",

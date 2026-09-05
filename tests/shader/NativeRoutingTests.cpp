@@ -19,6 +19,66 @@ namespace {
 
 using namespace detail;
 
+struct AttributedScene
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> source;
+    ComPtr<ID3D11RenderTargetView> target;
+    SceneTextureHandle handle;
+
+    AttributedScene(ID3D11Device* device, ScenePassRenderer& renderer)
+    {
+        const auto original = SceneDescription();
+        FO4HDR_CHECK(renderer.CanPromoteNativeSceneTexture(original));
+        auto promoted = original;
+        promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        CheckHresult(device->CreateTexture2D(&promoted, nullptr, &texture), "Native private texture");
+        CheckHresult(device->CreateShaderResourceView(texture.Get(), nullptr, &source), "Native private SRV");
+        CheckHresult(device->CreateRenderTargetView(texture.Get(), nullptr, &target), "Native private RTV");
+        NativeSceneTexture candidate;
+        FO4HDR_CHECK(candidate.Prepare({device, original, 1}, {texture.Get(), source.Get(), target.Get()}));
+        CheckHresult(renderer.AdoptPromotedNativeSceneTexture(candidate, handle), "Commit attributed scene");
+        source.Reset();
+        target.Reset();
+        CheckHresult(device->CreateShaderResourceView(texture.Get(), nullptr, &source), "Native alias SRV");
+        CheckHresult(device->CreateRenderTargetView(texture.Get(), nullptr, &target), "Native alias RTV");
+    }
+};
+
+void VerifyNativeBindings(PixelFixture& fixture, ScenePassRenderer& renderer,
+    const AttributedScene& input, const AttributedScene& output)
+{
+    auto* source = input.source.Get();
+    auto* target = output.target.Get();
+    const auto& descriptor = kRenoDxFallout4Shaders[0];
+    fixture.gpu.context->PSSetShaderResources(descriptor.sceneInputSlot, 1, &source);
+    fixture.gpu.context->OMSetRenderTargets(1, &target, nullptr);
+    const auto scenes = renderer.ResolveNativeSceneBindings(descriptor);
+    FO4HDR_CHECK(renderer.Views(scenes.input).texture == input.texture.Get());
+    FO4HDR_CHECK(renderer.Views(scenes.destination).texture == output.texture.Get());
+    FO4HDR_CHECK(renderer.Views(renderer.BoundNativeSceneHandles().input).texture == nullptr);
+    auto* unrelated = fixture.renderer.Views(fixture.input).shaderResource;
+    fixture.gpu.context->PSSetShaderResources(descriptor.sceneInputSlot, 1, &unrelated);
+    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture == nullptr);
+    fixture.gpu.context->PSSetShaderResources(descriptor.sceneInputSlot, 1, &source);
+    UINT calls{};
+    const FiniteDrawInvocation invocation{
+        [](ID3D11DeviceContext* context, void* argument) {
+            ++*static_cast<UINT*>(argument);
+            context->Draw(3, 0);
+        }, &calls};
+    // The authored shader is unknown; this direct descriptor call retains its
+    // independent caller contract and missing tone bindings forward once.
+    FO4HDR_CHECK(renderer.Execute(descriptor, scenes.input, scenes.destination, invocation) ==
+        SceneDrawOutcome::forwarded);
+    FO4HDR_CHECK(calls == 1);
+    NativeSceneAttribution marker{1, 32, 1};
+    CheckHresult(input.texture->SetPrivateData(kNativeSceneAttributionGuid, 0, nullptr), "Clear native attribution");
+    FO4HDR_CHECK(!ReadNativeSceneAttribution(fixture.gpu.device.Get(), input.texture.Get(), 1, marker));
+    FO4HDR_CHECK(marker == NativeSceneAttribution{});
+    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture == nullptr);
+}
+
 void VerifyBorrowedRouting(PixelFixture& fixture, const std::filesystem::path& directory)
 {
     ScenePassRenderer borrowed;
@@ -40,6 +100,9 @@ void VerifyBorrowedRouting(PixelFixture& fixture, const std::filesystem::path& d
     FO4HDR_CHECK(borrowed.StartPipboyScreenObservation());
     FO4HDR_CHECK(borrowed.BeginFrame());
     fixture.Bind(false);
+    const AttributedScene nativeInput(fixture.gpu.device.Get(), borrowed);
+    const AttributedScene nativeOutput(fixture.gpu.device.Get(), borrowed);
+    VerifyNativeBindings(fixture, borrowed, nativeInput, nativeOutput);
     auto* diagnosticTarget = borrowed.Views(adopted).renderTarget;
     fixture.gpu.context->OMSetRenderTargets(1, &diagnosticTarget, nullptr);
     struct NativeDraw { UINT calls{}; } draw;
@@ -61,6 +124,11 @@ void VerifyBorrowedRouting(PixelFixture& fixture, const std::filesystem::path& d
     fixture.gpu.context->PSGetShader(&bound, nullptr, nullptr);
     FO4HDR_CHECK(bound.Get() == fixture.sentinel.Get());
     FO4HDR_CHECK(borrowed.Views(adopted).texture == nullptr);
+    FO4HDR_CHECK(borrowed.Views(nativeOutput.handle).texture == nullptr);
+    FO4HDR_CHECK(borrowed.Views(borrowed.ResolveNativeSceneBindings(kRenoDxFallout4Shaders[0]).destination).texture == nullptr);
+    NativeSceneAttribution retiredAttribution{};
+    FO4HDR_CHECK(ReadNativeSceneAttribution(fixture.gpu.device.Get(), nativeOutput.texture.Get(),
+        1, retiredAttribution));
     FO4HDR_CHECK(!borrowed.PipboyScreenSnapshot().requested);
 }
 

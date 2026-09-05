@@ -4,6 +4,7 @@
 #include "HookRecords.hpp"
 #include "NativeImageSlots.hpp"
 #include "SwapChainHooks.hpp"
+#include "../resources/NativeSceneAssociation.hpp"
 
 #include <d3d11_4.h>
 #include <dxgi1_6.h>
@@ -351,6 +352,144 @@ HRESULT NativeResult(Call next, Arguments... arguments) noexcept
     catch (...) { return E_FAIL; }
 }
 
+bool CurrentNativeSceneContext(ContextHookRecord& context) noexcept
+{
+    return NativeRoutingOwned() && context.queries.CanDispatch();
+}
+
+bool NativeSceneDimensions(const DXGI_SWAP_CHAIN_DESC& actual,
+    const DXGI_SWAP_CHAIN_DESC& expected) noexcept
+{
+    const std::array dimensions{actual.BufferDesc.Width, actual.BufferDesc.Height};
+    const std::array owned{expected.BufferDesc.Width, expected.BufferDesc.Height};
+    return actual.BufferDesc.Width != 0 && actual.BufferDesc.Height != 0 && dimensions == owned;
+}
+
+bool NativeSceneAdmission(ContextHookRecord& context) noexcept
+{
+    const auto* chain = g_swapChainHooks.load(std::memory_order_acquire);
+    const auto* device = g_deviceHooks.load(std::memory_order_acquire);
+    if (chain == nullptr) return false;
+    if (device == nullptr) return false;
+    if (!chain->resourcesReady.load(std::memory_order_acquire)) return false;
+    if (!CurrentNativeSceneContext(context)) return false;
+    if (!context.renderer.MatchesContext(device->owned, context.owned)) return false;
+    DXGI_SWAP_CHAIN_DESC actual{};
+    if (FAILED(chain->owned->GetDesc(&actual))) return false;
+    return NativeSceneDimensions(actual, chain->description) && CurrentNativeSceneContext(context);
+}
+
+struct PrivateNativeScene
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> source;
+    ComPtr<ID3D11RenderTargetView> target;
+};
+
+HRESULT PrepareNativeViews(const DeviceHookRecord& device, PrivateNativeScene& scene) noexcept
+{
+    auto result = NativeResult(device.nextCreateSrv, device.owned,
+        scene.texture.Get(), nullptr, scene.source.GetAddressOf());
+    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
+    if (!scene.source) return E_FAIL;
+    result = NativeResult(device.nextCreateRtv, device.owned,
+        scene.texture.Get(), nullptr, scene.target.GetAddressOf());
+    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
+    return scene.target ? S_OK : E_FAIL;
+}
+
+HRESULT CreatePromotedScene(const DeviceHookRecord& device, ContextHookRecord& context,
+    const D3D11_TEXTURE2D_DESC& original, ID3D11Texture2D** output) noexcept
+{
+    *output = nullptr;
+    auto promoted = original;
+    promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    PrivateNativeScene scene;
+    auto result = NativeResult(device.nextCreateTexture2D, device.owned,
+        &promoted, nullptr, scene.texture.GetAddressOf());
+    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
+    if (!scene.texture) return E_FAIL;
+    result = PrepareNativeViews(device, scene);
+    if (FAILED(result)) return result;
+    NativeSceneTexture candidate;
+    const NativeSceneCreation creation{device.owned, original, context.generation};
+    if (!candidate.Prepare(creation, {scene.texture.Get(), scene.source.Get(), scene.target.Get()}))
+        return E_FAIL;
+    if (!NativeSceneAdmission(context)) return E_FAIL;
+    // Slot commit and output transfer perform no new native calls. No retry can
+    // safely assume admission survived the first private creation transaction.
+    SceneTextureHandle handle;
+    result = context.renderer.AdoptPromotedNativeSceneTexture(candidate, handle);
+    if (FAILED(result)) return result;
+    *output = scene.texture.Detach();
+    return S_OK;
+}
+
+const ContextHookRecord* AttributedDeviceOwner(ID3D11Device* device) noexcept
+{
+    const auto* owned = g_deviceHooks.load(std::memory_order_acquire);
+    const auto* context = g_contextHooks.load(std::memory_order_acquire);
+    if (owned == nullptr) return nullptr;
+    if (context == nullptr) return nullptr;
+    if (device != owned->owned) return nullptr;
+    // Read compatibility attribution after retirement, but never inspect mutable
+    // renderer slots or use device APIs from an unqualified foreign thread.
+    return GetCurrentThreadId() == context->thread ? context : nullptr;
+}
+
+bool AttributedResource(ID3D11Device* device, ID3D11Resource* resource) noexcept
+{
+    const auto* context = AttributedDeviceOwner(device);
+    if (context == nullptr) return false;
+    if (resource == nullptr) return false;
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture)))) return false;
+    NativeSceneAttribution record{};
+    return ReadNativeSceneAttribution(device, texture.Get(), context->generation, record);
+}
+
+bool RemappableSrv(const D3D11_SHADER_RESOURCE_VIEW_DESC& value) noexcept
+{
+    return value.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
+        value.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D &&
+        value.Texture2D.MostDetailedMip == 0 &&
+        (value.Texture2D.MipLevels == 1 || value.Texture2D.MipLevels == UINT(-1));
+}
+
+bool RemappableRtv(const D3D11_RENDER_TARGET_VIEW_DESC& value) noexcept
+{
+    return value.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
+        value.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D && value.Texture2D.MipSlice == 0;
+}
+
+bool CompatibleSrvRequest(ID3D11Device* device, ID3D11Resource* resource,
+    const D3D11_SHADER_RESOURCE_VIEW_DESC* description) noexcept
+{
+    if (description == nullptr) return false;
+    if (!RemappableSrv(*description)) return false;
+    return AttributedResource(device, resource);
+}
+
+bool CompatibleRtvRequest(ID3D11Device* device, ID3D11Resource* resource,
+    const D3D11_RENDER_TARGET_VIEW_DESC* description) noexcept
+{
+    if (description == nullptr) return false;
+    if (!RemappableRtv(*description)) return false;
+    return AttributedResource(device, resource);
+}
+
+bool NativeTextureRequest(const D3D11_TEXTURE2D_DESC* description,
+    const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Texture2D** texture) noexcept
+{
+    return description != nullptr && texture != nullptr && initialData == nullptr;
+}
+
+bool PromotableNativeRequest(ContextHookRecord* context, const D3D11_TEXTURE2D_DESC& description) noexcept
+{
+    if (context == nullptr) return false;
+    return NativeSceneAdmission(*context) && context->renderer.CanPromoteNativeSceneTexture(description);
+}
+
 struct NativeBindingPreparation
 {
     NativeSlotProof proof;
@@ -528,7 +667,13 @@ HRESULT STDMETHODCALLTYPE HookCreateTexture2D(ID3D11Device* device,
 {
     const auto* record = g_deviceHooks.load(std::memory_order_acquire);
     if (record == nullptr) return E_UNEXPECTED;
-    // Preserve actual native storage and initialized layout; footprint is no scene-role proof.
+    const bool ownedRequest = device == record->owned && NativeTextureRequest(description, initialData, texture);
+    if (!ownedRequest)
+        return NativeResult(record->nextCreateTexture2D, device, description, initialData, texture);
+    const NativeRoutingScope scope{device};
+    auto* context = scope.Record();
+    if (PromotableNativeRequest(context, *description))
+        return CreatePromotedScene(*record, *context, *description, texture);
     return NativeResult(record->nextCreateTexture2D, device, description, initialData, texture);
 }
 
@@ -537,6 +682,12 @@ HRESULT STDMETHODCALLTYPE HookCreateSrv(ID3D11Device* device, ID3D11Resource* re
 {
     const auto* record = g_deviceHooks.load(std::memory_order_acquire);
     if (record == nullptr) return E_UNEXPECTED;
+    if (CompatibleSrvRequest(device, resource, description))
+    {
+        auto compatible = *description;
+        compatible.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        return NativeResult(record->nextCreateSrv, device, resource, &compatible, view);
+    }
     return NativeResult(record->nextCreateSrv, device, resource, description, view);
 }
 
@@ -553,6 +704,12 @@ HRESULT STDMETHODCALLTYPE HookCreateRtv(ID3D11Device* device, ID3D11Resource* re
 {
     const auto* record = g_deviceHooks.load(std::memory_order_acquire);
     if (record == nullptr) return E_UNEXPECTED;
+    if (CompatibleRtvRequest(device, resource, description))
+    {
+        auto compatible = *description;
+        compatible.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        return NativeResult(record->nextCreateRtv, device, resource, &compatible, view);
+    }
     return NativeResult(record->nextCreateRtv, device, resource, description, view);
 }
 

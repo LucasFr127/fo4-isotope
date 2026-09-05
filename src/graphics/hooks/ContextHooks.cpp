@@ -335,8 +335,8 @@ void ObserveFiniteDraw(ContextHookRecord* record, NativeUiDrawKind kind,
     if (!record->queries.CanDispatch()) { record->uiCapture.CloseFrame(); return; }
     if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return; }
     if (captured == SceneDrawOutcome::replaced) return;
-    // Invalid scene handles preserve the native draw until actual storage is admitted.
-    const auto result = record->renderer.ExecuteObserved({}, {}, invocation);
+    const auto scenes = record->renderer.BoundNativeSceneHandles();
+    const auto result = record->renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
     if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
 }
 

@@ -100,6 +100,8 @@ $files = [string[]]@(
     "src/graphics/HdrRenderer.hpp",
     "src/graphics/HdrRenderer.cpp",
     "src/graphics/resources/HdrResourcePolicy.hpp",
+    "src/graphics/resources/NativeSceneAssociation.hpp",
+    "src/graphics/resources/NativeSceneAssociation.cpp",
     "tests/shader/ShippingPixelShaderTests.hpp",
     "tests/shader/ShaderTestSuite.hpp",
     "tests/shader/ShippingPixelShaderTests.cpp",

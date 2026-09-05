@@ -6,6 +6,7 @@
 #include "RendererLifetime.hpp"
 #include "resources/DeveloperExposureResources.hpp"
 #include "resources/NativeReferenceResources.hpp"
+#include "resources/NativeSceneAssociation.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
@@ -118,6 +119,12 @@ struct SceneTextureViews
     ID3D11RenderTargetView* renderTarget{};
 };
 
+struct NativeSceneHandles
+{
+    SceneTextureHandle input;
+    SceneTextureHandle destination;
+};
+
 struct FiniteDrawInvocation
 {
     // The caller issues exactly one finite draw and does not mutate other state.
@@ -204,6 +211,15 @@ public:
     // Cold caller supplies qualified scene storage; footprint alone proves no semantics.
     HRESULT AdoptSceneTexture(const D3D11_TEXTURE2D_DESC& original,
         ID3D11Texture2D* texture, SceneTextureHandle& handle) noexcept;
+    [[nodiscard]] bool CanPromoteNativeSceneTexture(const D3D11_TEXTURE2D_DESC& original) const noexcept;
+    // Caller rechecks native admission after candidate preparation. This commit
+    // moves private references without another native call or format inference.
+    HRESULT AdoptPromotedNativeSceneTexture(NativeSceneTexture& prepared,
+        SceneTextureHandle& handle) noexcept;
+    // Explicit descriptor callers carry Execute's independent pass qualification.
+    // Native callbacks instead use the observed-shader wrapper below.
+    [[nodiscard]] NativeSceneHandles ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) const noexcept;
+    [[nodiscard]] NativeSceneHandles BoundNativeSceneHandles() const noexcept;
     [[nodiscard]] SceneTextureViews Views(SceneTextureHandle handle) const noexcept;
 
     [[nodiscard]] bool BeginFrame() noexcept;
@@ -284,6 +300,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
+        std::uint64_t nativeCreationGeneration{};
         bool toneProduced{};
         bool operatorProduced{};
         bool settingsStale{};
@@ -342,6 +359,8 @@ private:
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
     [[nodiscard]] bool PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept;
+    [[nodiscard]] SceneTextureHandle NativeSceneForView(ID3D11View* view, bool input) const noexcept;
+    [[nodiscard]] bool NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept;
     [[nodiscard]] bool QualifiedSceneTexture(const D3D11_TEXTURE2D_DESC& original,
         ID3D11Texture2D* texture) const noexcept;
     [[nodiscard]] bool BoundSceneViewsMatch(const RenoDxShaderDescriptor& descriptor,

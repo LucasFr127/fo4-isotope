@@ -200,6 +200,85 @@ HRESULT ScenePassRenderer::SceneRegistrationStatus(const D3D11_TEXTURE2D_DESC& o
     return sceneCount_ == scenes_.size() ? E_OUTOFMEMORY : S_OK;
 }
 
+bool ScenePassRenderer::CanPromoteNativeSceneTexture(const D3D11_TEXTURE2D_DESC& original) const noexcept
+{
+    return SceneRegistrationStatus(original) == S_OK;
+}
+
+HRESULT ScenePassRenderer::AdoptPromotedNativeSceneTexture(NativeSceneTexture& prepared,
+    SceneTextureHandle& handle) noexcept
+{
+    handle = {};
+    if (!prepared.PreparedFor(device_.Get())) return E_INVALIDARG;
+    const auto status = SceneRegistrationStatus(prepared.Creation().original);
+    if (status != S_OK) return status;
+    SceneTexture scene;
+    scene.texture = std::move(prepared.texture_);
+    scene.shaderResource = std::move(prepared.source_);
+    scene.renderTarget = std::move(prepared.target_);
+    scene.nativeCreationGeneration = prepared.creation_.generation;
+    prepared.creation_ = {};
+    const auto slot = sceneCount_++;
+    scenes_[slot] = std::move(scene);
+    handle.owner_ = this;
+    handle.epoch_ = lifetime_.CurrentEpoch();
+    handle.slot_ = slot;
+    return S_OK;
+}
+
+bool ScenePassRenderer::NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept
+{
+    NativeSceneAttribution attribution{};
+    if (!ReadNativeSceneAttribution(device_.Get(), scene.texture.Get(),
+            scene.nativeCreationGeneration, attribution)) return false;
+    ComPtr<ID3D11ShaderResourceView> source;
+    ComPtr<ID3D11RenderTargetView> target;
+    if (input) static_cast<void>(view->QueryInterface(IID_PPV_ARGS(&source)));
+    else static_cast<void>(view->QueryInterface(IID_PPV_ARGS(&target)));
+    return input ? EquivalentSceneSrv(device_.Get(), scene.texture.Get(), source.Get())
+                 : EquivalentSceneRtv(device_.Get(), scene.texture.Get(), target.Get());
+}
+
+SceneTextureHandle ScenePassRenderer::NativeSceneForView(ID3D11View* view, bool input) const noexcept
+{
+    if (view == nullptr) return {};
+    for (std::size_t slot = 0; slot < sceneCount_; ++slot)
+    {
+        if (!NativeSceneViewMatches(scenes_[slot], view, input)) continue;
+        SceneTextureHandle handle;
+        handle.owner_ = this;
+        handle.epoch_ = lifetime_.CurrentEpoch();
+        handle.slot_ = slot;
+        return handle;
+    }
+    return {};
+}
+
+NativeSceneHandles ScenePassRenderer::BoundNativeSceneHandles() const noexcept
+{
+    if (!Active() || invoking_) return {};
+    const auto* descriptor = BoundDescriptor();
+    if (descriptor == nullptr) return {};
+    return ResolveNativeSceneBindings(*descriptor);
+}
+
+NativeSceneHandles ScenePassRenderer::ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) const noexcept
+{
+    if (!Active() || invoking_) return {};
+    if (FindRenoDxFallout4Shader(descriptor.crc32) != &descriptor) return {};
+    ComPtr<ID3D11ShaderResourceView> input;
+    context_->PSGetShaderResources(descriptor.sceneInputSlot, 1, &input);
+    std::array<ID3D11RenderTargetView*, 2> raw{};
+    context_->OMGetRenderTargets(static_cast<UINT>(raw.size()), raw.data(), nullptr);
+    ComPtr<ID3D11RenderTargetView> first, second;
+    first.Attach(raw[0]);
+    second.Attach(raw[1]);
+    const bool temporal = descriptor.pass == RenoDxShaderPass::taa ||
+        descriptor.pass == RenoDxShaderPass::taa2;
+    return {NativeSceneForView(input.Get(), true),
+        NativeSceneForView(temporal ? second.Get() : first.Get(), false)};
+}
+
 bool ScenePassRenderer::PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept
 {
     if (!SupportedSceneLayout(original)) return false;
