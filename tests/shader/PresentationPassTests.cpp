@@ -911,6 +911,7 @@ void ForwardOriginalSdr(PixelFixture& fixture, PresentationPass& pass, HWND wind
 {
     ComPtr<IDXGISwapChain> chain;
     CheckHresult(CreateOriginalSdrChain(fixture, window, chain), "Original SDR chain");
+    VerifyNativePresentationProxy(fixture, chain.Get());
     ClearOriginalSdr(fixture, chain.Get());
     const auto rejected = pass.PrepareChain(chain.Get());
     FO4HDR_CHECK(FAILED(rejected));

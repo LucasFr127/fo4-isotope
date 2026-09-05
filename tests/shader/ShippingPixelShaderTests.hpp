@@ -81,5 +81,6 @@ void CheckSelection(PixelFixture& fixture, SceneTextureHandle expected);
 }  // namespace detail
 
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory);
+void VerifyNativePresentationProxy(detail::PixelFixture& fixture, IDXGISwapChain* chain);
 
 }  // namespace fo4hdr::tests::gpu

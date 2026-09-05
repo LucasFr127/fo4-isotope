@@ -5,6 +5,7 @@
 #include "passes/ObservedDraw.hpp"
 #include "hooks/ContextHooks.hpp"
 #include "hooks/SwapChainHooks.hpp"
+#include "resources/NativePresentationProxy.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>
@@ -533,7 +534,111 @@ void VerifyQualifiedUiCapture(PixelFixture& fixture)
     fixture.gpu.context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R32_UINT, 0);
 }
 
+ComPtr<ID3D11RenderTargetView> OriginalProxyTarget(PixelFixture& fixture, IDXGISwapChain* chain)
+{
+    ComPtr<ID3D11Texture2D> buffer;
+    CheckHresult(chain->GetBuffer(0, IID_PPV_ARGS(&buffer)), "Proxy original buffer0");
+    ComPtr<ID3D11RenderTargetView> target;
+    CheckHresult(fixture.gpu.device->CreateRenderTargetView(buffer.Get(), nullptr, &target), "Proxy original RTV");
+    return target;
+}
+
+ComPtr<ID3D11ShaderResourceView> ProxyAliasSource(PixelFixture& fixture, ID3D11RenderTargetView* target)
+{
+    ComPtr<ID3D11Resource> resource;
+    target->GetResource(&resource);
+    ComPtr<ID3D11ShaderResourceView> source;
+    CheckHresult(fixture.gpu.device->CreateShaderResourceView(resource.Get(), nullptr, &source), "Proxy alias SRV");
+    return source;
+}
+
+void VerifyProxyInputRetirement(PixelFixture& fixture, NativePresentationProxy& proxy,
+    ID3D11RenderTargetView* target)
+{
+    const auto alias = ProxyAliasSource(fixture, target);
+    for (const auto write : uiAliasWriters) write(fixture.gpu.context.Get(), alias.Get());
+    auto* foreign = fixture.renderer.Views(fixture.input).shaderResource;
+    fixture.gpu.context->PSSetShaderResources(0, 1, &foreign);
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire proxy input aliases");
+    for (const auto read : uiAliasReaders)
+    {
+        ComPtr<ID3D11ShaderResourceView> actual;
+        read(fixture.gpu.context.Get(), &actual);
+        FO4HDR_CHECK(!actual);
+    }
+    ComPtr<ID3D11ShaderResourceView> actual;
+    fixture.gpu.context->PSGetShaderResources(0, 1, &actual);
+    FO4HDR_CHECK(actual.Get() == foreign);
+    fixture.CheckRestored(false);
+}
+
+void VerifyProxyOutputRetirement(PixelFixture& fixture, NativePresentationProxy& proxy,
+    ID3D11RenderTargetView* target)
+{
+    CheckHresult(target != nullptr ? S_OK : E_FAIL, "Proxy output lookup");
+    const auto foreign = fixture.renderer.Views(fixture.destination).renderTarget;
+    std::array<ID3D11RenderTargetView*, 2> outputs{foreign, target};
+    fixture.gpu.context->OMSetRenderTargets(static_cast<UINT>(outputs.size()), outputs.data(), nullptr);
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire proxy output alias");
+    outputs = {};
+    fixture.gpu.context->OMGetRenderTargets(static_cast<UINT>(outputs.size()), outputs.data(), nullptr);
+    ComPtr<ID3D11RenderTargetView> first, second;
+    first.Attach(outputs[0]);
+    second.Attach(outputs[1]);
+    FO4HDR_CHECK(first.Get() == foreign && !second);
+    fixture.CheckRestored(false);
+}
+
+void VerifyProxyLifecycle(PixelFixture& fixture, IDXGISwapChain* chain)
+{
+    fixture.Bind();
+    NativePresentationProxy proxy;
+    CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
+        ? S_OK : E_FAIL, "Prepare owned presentation proxy");
+    auto original = OriginalProxyTarget(fixture, chain);
+    auto alias = OriginalProxyTarget(fixture, chain);
+    auto* borrowed = proxy.ResolveRenderTarget(original.Get());
+    CheckHresult(borrowed != nullptr ? S_OK : E_FAIL, "Proxy original lookup");
+    FO4HDR_CHECK(borrowed != nullptr && proxy.ResolveRenderTarget(alias.Get()) == borrowed);
+    FO4HDR_CHECK(proxy.ResolveRenderTarget(fixture.renderer.Views(fixture.destination).renderTarget) == nullptr);
+    D3D11_RENDER_TARGET_VIEW_DESC description{};
+    borrowed->GetDesc(&description);
+    FO4HDR_CHECK(description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    original->GetDesc(&description);
+    FO4HDR_CHECK(description.Format == DXGI_FORMAT_R8G8B8A8_UNORM);
+    VerifyProxyInputRetirement(fixture, proxy, borrowed);
+    borrowed = nullptr;
+    FO4HDR_CHECK(proxy.ResolveRenderTarget(original.Get()) == nullptr);
+    CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
+        ? S_OK : E_FAIL, "Reprepare output proxy");
+    VerifyProxyOutputRetirement(fixture, proxy, proxy.ResolveRenderTarget(original.Get()));
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire before proxy resize");
+    // Retire releases the owner's aliases; the caller separately drops original
+    // backbuffer bindings and its own views before the actual native resize.
+    auto* native = original.Get();
+    fixture.gpu.context->OMSetRenderTargets(1, &native, nullptr);
+    fixture.gpu.context->OMSetRenderTargets(0, nullptr, nullptr);
+    native = nullptr;
+    original.Reset();
+    alias.Reset();
+    DXGI_SWAP_CHAIN_DESC chainDescription{};
+    CheckHresult(chain->GetDesc(&chainDescription), "Proxy chain descriptor");
+    CheckHresult(chain->ResizeBuffers(0, chainDescription.BufferDesc.Width,
+        chainDescription.BufferDesc.Height, DXGI_FORMAT_UNKNOWN, chainDescription.Flags), "Proxy retired resize");
+    CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
+        ? S_OK : E_FAIL, "Prepare resized proxy");
+    original = OriginalProxyTarget(fixture, chain);
+    FO4HDR_CHECK(proxy.ResolveRenderTarget(original.Get()) != nullptr);
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire resized proxy");
+    original.Reset();
+}
+
 }  // namespace
+
+void VerifyNativePresentationProxy(detail::PixelFixture& fixture, IDXGISwapChain* chain)
+{
+    VerifyProxyLifecycle(fixture, chain);
+}
 
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory)
 {
