@@ -346,6 +346,10 @@ struct SettingsWindow::State
     DWORD thread{GetCurrentThreadId()};
     SettingsWindowConfiguration configuration;
     DisplayDiscovery displayDiscovery;
+    DisplayCalibrationSnapshot profileStatus;
+    DisplayCalibrationProfile loadDraft;
+    std::uint64_t profileGeneration{};
+    bool loadingProfile{};
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext1> context;
     ComPtr<ID3D11Texture2D> texture;
@@ -465,6 +469,92 @@ struct SettingsWindow::State
         return true;
     }
 
+    static DisplayCalibrationProfile ProfileFor(
+        const DisplayCapabilities& display, const HdrSettings& settings) noexcept
+    {
+        return {display.monitorDevicePath, settings.displayPeakNits,
+            settings.uiPaperWhiteNits, settings.videoWhiteNits};
+    }
+
+    bool LoadStillApplies(const DisplayCapabilities& display,
+        const DisplayCalibrationProfile& profile) const noexcept
+    {
+        if (profile.monitorDevicePath != display.monitorDevicePath) return false;
+        const auto current = ProfileFor(display, editable.display);
+        if (current.displayPeakNits != loadDraft.displayPeakNits) return false;
+        if (current.uiPaperWhiteNits != loadDraft.uiPaperWhiteNits) return false;
+        return current.videoWhiteNits == loadDraft.videoWhiteNits;
+    }
+
+    DisplayCapabilities ResolveDisplay() noexcept
+    {
+        displayDiscovery.Reset();
+        return displayDiscovery.Refresh(configuration.window);
+    }
+
+    void ApplyLoadedProfile(const DisplayCalibrationSnapshot& status) noexcept
+    {
+        if (!loadingProfile || status.state != SettingsPersistenceState::loaded) return;
+        const auto display = ResolveDisplay();
+        if (!display.known || !LoadStillApplies(display, status.profile)) return;
+        auto candidate = editable;
+        candidate.display.displayPeakNits = status.profile.displayPeakNits;
+        candidate.display.uiPaperWhiteNits = status.profile.uiPaperWhiteNits;
+        candidate.display.videoWhiteNits = status.profile.videoWhiteNits;
+        if (configuration.live->Request(candidate)) editable = candidate;
+    }
+
+    bool OwnProfileCompletion(const DisplayCalibrationSnapshot& status) noexcept
+    {
+        if (!profileGeneration) return false;
+        if (status.requestedGeneration != profileGeneration)
+        {
+            profileGeneration = 0;
+            return false;
+        }
+        if (status.completedGeneration != profileGeneration) return false;
+        profileGeneration = 0;
+        return true;
+    }
+
+    void ConsumeProfile() noexcept
+    {
+        if (!configuration.persistence) return;
+        const auto status = configuration.persistence->DisplayCalibrationStatus();
+        if (status.state == SettingsPersistenceState::busy) return;
+        profileStatus = status;
+        if (!OwnProfileCompletion(status)) return;
+        ApplyLoadedProfile(status);
+    }
+
+    bool CanRequestProfile(const DisplayCalibrationActions& actions,
+        const DisplayCapabilities& display) const noexcept
+    {
+        if (!configuration.persistence || profileGeneration) return false;
+        if (!display.known || display.monitorDevicePath[0] == L'\0') return false;
+        return actions.saveProfile || actions.loadProfile;
+    }
+
+    void RequestProfile(const DisplayCalibrationActions& actions,
+        const DisplayCapabilities& display, const PluginConfiguration& active) noexcept
+    {
+        if (!CanRequestProfile(actions, display)) return;
+        const auto resolved = ResolveDisplay();
+        if (!resolved.known || resolved.monitorDevicePath != display.monitorDevicePath) return;
+        if (actions.saveProfile)
+        {
+            loadingProfile = false;
+            profileGeneration = configuration.persistence->RequestDisplayCalibrationSave(
+                ProfileFor(display, active.display));
+        }
+        else if (actions.loadProfile)
+        {
+            loadingProfile = true;
+            loadDraft = ProfileFor(display, editable.display);
+            profileGeneration = configuration.persistence->RequestDisplayCalibrationLoad(loadDraft);
+        }
+    }
+
     void DrawPanel()
     {
         const auto snapshot = configuration.live->Snapshot();
@@ -482,12 +572,15 @@ struct SettingsWindow::State
             if (ImGui::CollapsingHeader("Display calibration"))
             {
                 const auto display = displayDiscovery.Refresh(configuration.window);
+                ConsumeProfile();
                 const DisplayCalibrationView view{display.known, display.monitorDevicePath[0] != L'\0',
                     display.friendlyName[0] ? display.friendlyName.data() : display.description.DeviceName,
                     display.description.MaxLuminance, display.description.MaxFullFrameLuminance,
-                    display.sdrWhiteNits};
+                    display.sdrWhiteNits, configuration.persistence && profileGeneration == 0,
+                    profileStatus.state};
                 const auto calibration = DrawDisplayCalibrationPanel(editable.display, calibrationMode, view);
                 if (calibration.refreshDisplay) displayDiscovery.Reset();
+                RequestProfile(calibration, display, snapshot.active);
                 actions.request |= calibration.changed;
                 hideOverlay = calibration.hideOverlay;
             }

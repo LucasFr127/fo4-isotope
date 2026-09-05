@@ -127,11 +127,93 @@ void CheckRoundTrip()
     FO4HDR_CHECK(ReadFile(temporary) == "unrelated temporary");
 }
 
+std::uint64_t QueueProfile(SettingsPersistence& persistence,
+    const DisplayCalibrationProfile& profile, bool load)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        const auto token = load ? persistence.RequestDisplayCalibrationLoad(profile) :
+            persistence.RequestDisplayCalibrationSave(profile);
+        if (token) return token;
+        std::this_thread::yield();
+    }
+    return 0;
+}
+
+DisplayCalibrationSnapshot WaitProfile(SettingsPersistence& persistence, std::uint64_t token)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+    while (std::chrono::steady_clock::now() < deadline)
+    {
+        const auto status = persistence.DisplayCalibrationStatus();
+        if (status.completedGeneration == token) return status;
+        std::this_thread::yield();
+    }
+    throw std::runtime_error("Display profile did not complete");
+}
+
+void CheckProfileRead(SettingsPersistence& persistence, const DisplayCalibrationProfile& profile)
+{
+    const auto token = QueueProfile(persistence, profile, true);
+    FO4HDR_CHECK(token != 0);
+    if (!token) throw std::runtime_error("Display profile load rejected");
+    const auto result = WaitProfile(persistence, token);
+    FO4HDR_CHECK(result.state == SettingsPersistenceState::loaded);
+    FO4HDR_CHECK(result.profile.monitorDevicePath == profile.monitorDevicePath);
+    FO4HDR_CHECK(result.profile.displayPeakNits == 1200);
+    FO4HDR_CHECK(result.profile.uiPaperWhiteNits == 150);
+    FO4HDR_CHECK(result.profile.videoWhiteNits == 175);
+}
+
+void CheckProfileFailures(SettingsPersistence& persistence, DisplayCalibrationProfile profile,
+    const std::filesystem::path& path)
+{
+    auto invalid = profile;
+    invalid.displayPeakNits = 99;
+    FO4HDR_CHECK(persistence.RequestDisplayCalibrationSave(invalid) == 0);
+    FO4HDR_CHECK(persistence.RequestDisplayCalibrationLoad({}) == 0);
+    profile.monitorDevicePath[0] = L'B';
+    const auto missing = QueueProfile(persistence, profile, true);
+    FO4HDR_CHECK(missing != 0);
+    if (!missing) throw std::runtime_error("Missing display load rejected");
+    FO4HDR_CHECK(WaitProfile(persistence, missing).state == SettingsPersistenceState::missing);
+    profile.monitorDevicePath[0] = L'A';
+    WriteFile(path, ReadFile(path) + "[DisplayProfile:0041]\nDisplayPeakNits=1200\n"
+        "UiPaperWhiteNits=150\nVideoWhiteNits=175\n");
+    const auto duplicate = QueueProfile(persistence, profile, true);
+    FO4HDR_CHECK(duplicate != 0);
+    if (!duplicate) throw std::runtime_error("Duplicate display load rejected");
+    FO4HDR_CHECK(WaitProfile(persistence, duplicate).state == SettingsPersistenceState::failed);
+}
+
+void CheckDisplayProfiles()
+{
+    const TemporaryDirectory directory;
+    const auto path = directory.IniPath();
+    WriteFile(path, std::string(kOriginal) + "Newest=kept\r\n");
+    SettingsPersistence persistence;
+    FO4HDR_CHECK(persistence.Initialize(path));
+    DisplayCalibrationProfile profile;
+    profile.monitorDevicePath[0] = L'A';
+    profile.displayPeakNits = 1200;
+    profile.uiPaperWhiteNits = 150;
+    profile.videoWhiteNits = 175;
+    const auto saved = QueueProfile(persistence, profile, false);
+    FO4HDR_CHECK(saved != 0);
+    if (!saved) throw std::runtime_error("Display profile save rejected");
+    FO4HDR_CHECK(WaitProfile(persistence, saved).state == SettingsPersistenceState::saved);
+    CheckPreserved(ReadFile(path));
+    CheckProfileRead(persistence, profile);
+    CheckProfileFailures(persistence, profile, path);
+}
+
 }  // namespace
 
 void RunHdrPersistenceTests()
 {
     CheckRoundTrip();
+    CheckDisplayProfiles();
 }
 
 }  // namespace fo4hdr::tests

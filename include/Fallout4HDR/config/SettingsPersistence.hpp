@@ -3,6 +3,7 @@
 
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
 
+#include <array>
 #include <condition_variable>
 #include <cstdint>
 #include <filesystem>
@@ -21,7 +22,28 @@ enum class SettingsPersistenceState : std::uint8_t
     saving,
     saved,
     failed,
-    busy
+    busy,
+    loading,
+    loaded,
+    missing
+};
+
+inline constexpr std::size_t kMaximumDisplayIdentityLength{127};
+
+struct DisplayCalibrationProfile
+{
+    std::array<wchar_t, kMaximumDisplayIdentityLength + 1> monitorDevicePath{};
+    double displayPeakNits{};
+    double uiPaperWhiteNits{};
+    double videoWhiteNits{};
+};
+
+struct DisplayCalibrationSnapshot
+{
+    SettingsPersistenceState state{SettingsPersistenceState::unavailable};
+    std::uint64_t requestedGeneration{};
+    std::uint64_t completedGeneration{};
+    DisplayCalibrationProfile profile;
 };
 
 struct SettingsPersistenceSnapshot
@@ -50,6 +72,11 @@ public:
     [[nodiscard]] bool RequestSave(
         const PluginConfiguration& value, std::uint64_t generation) noexcept;
     [[nodiscard]] SettingsPersistenceSnapshot Snapshot() const noexcept;
+    [[nodiscard]] std::uint64_t RequestDisplayCalibrationSave(
+        const DisplayCalibrationProfile& profile) noexcept;
+    [[nodiscard]] std::uint64_t RequestDisplayCalibrationLoad(
+        const DisplayCalibrationProfile& identity) noexcept;
+    [[nodiscard]] DisplayCalibrationSnapshot DisplayCalibrationStatus() const noexcept;
 
 private:
     struct SaveRequest
@@ -57,6 +84,15 @@ private:
         PluginConfiguration value;
         std::uint64_t generation{};
     };
+    struct ProfileRequest
+    {
+        DisplayCalibrationProfile profile;
+        std::uint64_t generation{};
+        bool load{};
+    };
+    std::uint64_t QueueProfile(const DisplayCalibrationProfile& profile, bool load) noexcept;
+    void PublishProfile(const DisplayCalibrationSnapshot& result) noexcept;
+    void RunProfile(const ProfileRequest& request) noexcept;
     void Run() noexcept;
     void Publish(std::uint64_t generation, bool saved) noexcept;
 
@@ -66,6 +102,8 @@ private:
     std::thread thread_;
     std::optional<SaveRequest> pending_;
     SettingsPersistenceSnapshot snapshot_;
+    std::optional<ProfileRequest> pendingProfile_;
+    DisplayCalibrationSnapshot profileSnapshot_;
     bool stopping_{};
 };
 

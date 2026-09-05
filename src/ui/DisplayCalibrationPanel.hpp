@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Fallout4HDR/config/HdrSettings.hpp"
+#include "Fallout4HDR/config/SettingsPersistence.hpp"
 
 #include <cstdint>
 
@@ -15,6 +16,8 @@ struct DisplayCalibrationView
     double reportedPeakNits{};
     double reportedFullFrameNits{};
     double sdrWhiteNits{};
+    bool profileAvailable{};
+    SettingsPersistenceState profileState{SettingsPersistenceState::unavailable};
 };
 
 struct DisplayCalibrationActions
@@ -22,6 +25,8 @@ struct DisplayCalibrationActions
     bool changed{};
     bool hideOverlay{};
     bool refreshDisplay{};
+    bool saveProfile{};
+    bool loadProfile{};
 };
 
 [[nodiscard]] DisplayCalibrationActions DrawDisplayCalibrationPanel(

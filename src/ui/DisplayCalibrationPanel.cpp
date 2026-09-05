@@ -124,6 +124,29 @@ bool DrawReportedDisplay(HdrSettings& settings, DisplayCalibrationView display) 
     return changed;
 }
 
+const char* ProfileStatusText(SettingsPersistenceState state) noexcept
+{
+    switch (state)
+    {
+    case SettingsPersistenceState::loading: return "Reading display profile...";
+    case SettingsPersistenceState::saving: return "Saving display profile...";
+    case SettingsPersistenceState::saved: return "Display profile saved.";
+    case SettingsPersistenceState::loaded: return "Display profile read completed.";
+    case SettingsPersistenceState::missing: return "No profile for this display.";
+    case SettingsPersistenceState::failed: return "Display profile operation failed.";
+    default: return nullptr;
+    }
+}
+
+void DrawProfileActions(DisplayCalibrationView display, DisplayCalibrationActions& actions) noexcept
+{
+    ImGui::BeginDisabled(!display.identityAvailable || !display.profileAvailable);
+    actions.saveProfile = ImGui::Button("Save active calibration for this display");
+    actions.loadProfile = ImGui::Button("Load calibration for this display");
+    ImGui::EndDisabled();
+    if (const auto status = ProfileStatusText(display.profileState)) ImGui::TextUnformatted(status);
+}
+
 }  // namespace
 
 DisplayCalibrationActions DrawDisplayCalibrationPanel(
@@ -136,6 +159,7 @@ DisplayCalibrationActions DrawDisplayCalibrationPanel(
         "Pending brightness changes use the active values until applied.");
     actions.refreshDisplay = ImGui::Button("Refresh display details");
     actions.changed |= DrawReportedDisplay(settings, display);
+    DrawProfileActions(display, actions);
     DrawPatternControls(mode, actions);
     actions.changed |= DrawPeak(settings, mode);
     actions.changed |= DrawWhites(settings, mode);

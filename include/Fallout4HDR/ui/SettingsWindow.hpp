@@ -11,6 +11,7 @@
 namespace fo4hdr {
 
 class LiveSettings;
+class SettingsPersistence;
 
 enum class SettingsWindowScope { unavailable, qualifiedExclusive };
 
@@ -21,6 +22,8 @@ struct SettingsWindowConfiguration
     UINT height{};
     HdrSettingsInput* input{};
     LiveSettings* live{};
+    // Optional joined owner must outlive the window; retire the window before destroying it.
+    SettingsPersistence* persistence{};
 };
 
 struct SettingsWindowOverlay

@@ -112,9 +112,13 @@ void RenderCalibrationFrame()
     if (ImGui::Begin("Display calibration", nullptr, ImGuiWindowFlags_NoSavedSettings))
     {
         const auto vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size;
-        const auto actions = DrawDisplayCalibrationPanel(editable, mode);
+        const DisplayCalibrationView display{true, true, L"Authored display", 1200, 400, 203,
+            true, SettingsPersistenceState::missing};
+        const auto actions = DrawDisplayCalibrationPanel(editable, mode, display);
         FO4HDR_CHECK(!actions.changed);
         FO4HDR_CHECK(!actions.hideOverlay);
+        FO4HDR_CHECK(!actions.refreshDisplay);
+        FO4HDR_CHECK(!actions.saveProfile && !actions.loadProfile);
         FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size > vertices);
     }
     ImGui::End();
@@ -229,6 +233,7 @@ void RenderOwnedBackend()
     SettingsWindow settings;
     const SettingsWindowConfiguration configuration{window.Window(),
         static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), window.input, &live};
+    FO4HDR_CHECK(configuration.persistence == nullptr);
     const auto initialized = settings.Initialize(device.device.Get(), context.Get(), configuration);
     FO4HDR_CHECK(initialized);
     if (!initialized) return;
