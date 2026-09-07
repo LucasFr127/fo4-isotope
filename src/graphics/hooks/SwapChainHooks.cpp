@@ -98,7 +98,11 @@ bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
-    if ((flags & DXGI_PRESENT_TEST) == 0) admitted->uiCapture.CloseFrame();
+    if ((flags & DXGI_PRESENT_TEST) == 0)
+    {
+        admitted->presentationProxy.InvalidateFrame();
+        admitted->uiCapture.CloseFrame();
+    }
     if (!admitted->queries.CanDispatch())
     {
         if ((flags & DXGI_PRESENT_TEST) == 0) static_cast<void>(admitted->renderer.EndFrame());
@@ -127,19 +131,33 @@ bool PrepareResize(SwapChainHookRecord& chain) noexcept
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
+    admitted->presentationProxy.RevokePublication();
+    if (!admitted->queries.CanDispatch()) return false;
+    const ChainResourcePreparation preparation{*admitted};
+    if (!admitted->presentationProxy.Retire()) return false;
     if (!admitted->uiCapture.Retire()) return false;
     return admitted->renderer.RetireForResize();
 }
 
+bool ChainResourcesCurrent(const ContextHookRecord& context) noexcept
+{
+    return context.admitted.load(std::memory_order_acquire) && NativeRoutingOwned() &&
+        context.queries.CanDispatch();
+}
+
 bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
-    ScenePassConfiguration configuration) noexcept
+    IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
 {
     const ChainResourcePreparation preparation{context};
     if (!context.renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
     static_cast<void>(context.uiCapture.Initialize(device, context.owned, configuration));
-    if (!context.admitted.load(std::memory_order_acquire)) return false;
-    if (!NativeRoutingOwned()) return false;
-    return context.queries.CanDispatch();
+    static_cast<void>(context.presentationProxy.Prepare(device, context.owned, chain));
+    if (!ChainResourcesCurrent(context))
+    {
+        context.presentationProxy.RevokePublication();
+        return false;
+    }
+    return true;
 }
 
 bool ReinitializeAfterResize(SwapChainHookRecord& chain) noexcept
@@ -155,7 +173,7 @@ bool ReinitializeAfterResize(SwapChainHookRecord& chain) noexcept
     if (admitted == nullptr) return false;
     if (!admitted->queries.CanDispatch()) return false;
     const ScenePassConfiguration configuration{current.BufferDesc.Width, current.BufferDesc.Height, {}};
-    if (!RebuildChainResources(*admitted, device->owned, configuration)) return false;
+    if (!RebuildChainResources(*admitted, device->owned, chain.owned, configuration)) return false;
     if (!chain.admitted.load(std::memory_order_acquire)) return false;
     chain.description = current;
     chain.resourcesReady.store(true, std::memory_order_release);
@@ -209,7 +227,7 @@ HRESULT STDMETHODCALLTYPE HookResizeBuffers(IDXGISwapChain* chain, UINT count, U
         return CallNative(record->nextResize, chain, count, width, height, format, flags);
     const ChainCallScope call{*record};
     const bool retired = call.Valid() && PrepareResize(*record);
-    // No owned backbuffer aliases exist; borrowed retirement preserves foreign bindings.
+    // A refused retirement keeps resources unavailable; native Resize decides its result.
     const auto result = CallNative(record->nextResize, chain, count, width, height, format, flags);
     if (DeviceLost(result)) RevokeNativeRouting();
     else if (retired && SUCCEEDED(result)) static_cast<void>(ReinitializeAfterResize(*record));

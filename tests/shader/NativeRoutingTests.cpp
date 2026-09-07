@@ -640,6 +640,35 @@ void VerifyNativePresentationProxy(detail::PixelFixture& fixture, IDXGISwapChain
     VerifyProxyLifecycle(fixture, chain);
 }
 
+void VerifyRetainedNativeSdrFrame(detail::PixelFixture& fixture, PresentationPass& pass,
+    IDXGISwapChain* chain)
+{
+    constexpr auto scope = PresentationScope::qualifiedExclusive;
+    constexpr auto codes = NativeSdrCaptureScope::completedAuthoredCodesExclusive;
+    NativePresentationProxy proxy;
+    CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
+        ? S_OK : E_FAIL, "Prepare retained SDR proxy");
+    const auto original = OriginalProxyTarget(fixture, chain);
+    auto* target = proxy.ResolveRenderTarget(original.Get());
+    CheckHresult(target != nullptr ? S_OK : E_FAIL, "Resolve retained SDR proxy");
+    constexpr std::array authored{64.0f / 255.0f, 128.0f / 255.0f, 192.0f / 255.0f, 1.0f};
+    fixture.gpu.context->ClearRenderTargetView(target, authored.data());
+    CheckHresult(proxy.CaptureCompletedSdr(NativeSdrSourceRole::ownedProxy, fixture.renderer, codes)
+        ? S_OK : E_FAIL, "Capture completed authored SDR codes");
+    const auto frame = fixture.renderer.FrameGeneration();
+    const auto packet = proxy.CompletedFrame();
+    FO4HDR_CHECK(packet.ReadyFor(frame, &fixture.renderer));
+    // The original source changes after capture; only the private snapshot is handed off.
+    constexpr std::array black{0.0f, 0.0f, 0.0f, 0.0f};
+    fixture.gpu.context->ClearRenderTargetView(target, black.data());
+    CheckHresult(pass.PrepareNativeSdrHandoff(packet, scope) ? S_OK : E_FAIL,
+        "Consume retained authored SDR codes");
+    pass.PrepareNativePresent(chain, 0, scope);
+    FO4HDR_CHECK(!packet.ReadyFor(frame, &fixture.renderer));
+    FO4HDR_CHECK(!pass.PrepareNativeSdrHandoff(packet, scope));
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire retained SDR proxy");
+}
+
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory)
 {
     VerifyBorrowedRouting(fixture, directory);

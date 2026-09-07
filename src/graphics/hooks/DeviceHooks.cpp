@@ -340,6 +340,7 @@ bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& crea
     if (!record.renderer.InitializeBorrowed(created.device, created.context, configuration)) return false;
     // UI preparation has its own unavailable state; it cannot qualify a presentation target.
     static_cast<void>(record.uiCapture.Initialize(created.device, created.context, configuration));
+    static_cast<void>(record.presentationProxy.Prepare(created.device, created.context, created.swapChain));
     const ContextQueryPredecessors next{record.nextBegin, record.nextEnd, record.nextExecuteCommandList};
     return record.queries.Prepare(created.context, record.generation, next, &record.renderer) ==
         ContextQueryPreparation::coverageUnobserved;
@@ -536,6 +537,7 @@ struct NativeBindingPreparation
         PublishContextNexts(*context, contextOriginals);
         if (!PrepareRenderer(*context, created))
         {
+            static_cast<void>(context->presentationProxy.Retire());
             static_cast<void>(context->uiCapture.Retire());
             static_cast<void>(context->renderer.Retire());
             return nullptr;
@@ -559,6 +561,17 @@ bool InstallNativeSlots(ContextHookRecord& context) noexcept
     if (!InstallSlots(residentDevice, devicePatches)) return false;
     if (!InstallSlots(context, contextPatches)) return false;
     return InstallSlots(residentChain, chainPatches);
+}
+
+bool RetireNativeOwners(ContextHookRecord& record) noexcept
+{
+    return record.queries.Retire() && record.uiCapture.Retire() && record.renderer.Retire();
+}
+
+bool NativeRetirementSafe(const ContextHookRecord& record) noexcept
+{
+    return GetCurrentThreadId() == record.thread && !record.busy.test(std::memory_order_acquire) &&
+        !residentChain.busy.test(std::memory_order_acquire) && record.queries.CanDispatch();
 }
 
 bool ValidCreation(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
@@ -591,6 +604,7 @@ void RevokeNativeRouting() noexcept
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
     record->admitted.store(false, std::memory_order_release);
+    record->presentationProxy.RevokePublication();
     record->queries.RevokeCoverage();
 }
 
@@ -631,13 +645,16 @@ bool NativeRoutingInstaller::Retire() noexcept
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return true;
+    record->presentationProxy.RevokePublication();
+    if (GetCurrentThreadId() != record->thread) { RevokeNativeRouting(); return false; }
+    if (record->resourcesRetired) return true;
+    // Query safety must be checked before revocation resets observation coverage.
+    if (!NativeRetirementSafe(*record)) { RevokeNativeRouting(); return false; }
     RevokeNativeRouting();
-    if (GetCurrentThreadId() != record->thread) return false;
-    if (record->busy.test(std::memory_order_acquire)) return false;
-    if (residentChain.busy.test(std::memory_order_acquire)) return false;
-    if (!record->queries.Retire()) return false;
-    if (!record->uiCapture.Retire()) return false;
-    return record->renderer.Retire();
+    const bool proxyRetired = record->presentationProxy.Retire();
+    if (!proxyRetired) return false;
+    record->resourcesRetired = RetireNativeOwners(*record);
+    return record->resourcesRetired;
 }
 
 HRESULT STDMETHODCALLTYPE HookCreatePixelShader(ID3D11Device* device, const void* bytecode,

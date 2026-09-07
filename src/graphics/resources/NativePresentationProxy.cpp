@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "NativePresentationProxy.hpp"
+#include "../HdrRenderer.hpp"
 
 #include <array>
 #include <exception>
+#include <limits>
 #include <utility>
 
 namespace fo4hdr {
@@ -220,12 +222,36 @@ bool NativePresentationProxy::PrepareProxy(ID3D11Device* device, Resources& cand
     return candidate.proxyIdentity != nullptr;
 }
 
+bool NativePresentationProxy::PrepareSnapshot(ID3D11Device* device,
+    ID3D11Texture2D* source, CodeSnapshot& snapshot) noexcept
+{
+    D3D11_TEXTURE2D_DESC description{};
+    source->GetDesc(&description);
+    UINT support{};
+    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_SHADER_LOAD;
+    if (FAILED(device->CheckFormatSupport(description.Format, &support))) return false;
+    if ((support & required) != required) return false;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    if (FAILED(device->CreateTexture2D(&description, nullptr, &snapshot.texture))) return false;
+    if (!snapshot.texture) return false;
+    if (FAILED(device->CreateShaderResourceView(snapshot.texture.Get(), nullptr, &snapshot.source))) return false;
+    return snapshot.source != nullptr;
+}
+
+bool NativePresentationProxy::PrepareSnapshots(ID3D11Device* device, Resources& candidate) noexcept
+{
+    if (!PrepareSnapshot(device, candidate.proxy.Get(), candidate.snapshots[1])) return false;
+    if (candidate.nativeFormat != DXGI_FORMAT_R8G8B8A8_UNORM) return true;
+    return PrepareSnapshot(device, candidate.backBuffer.Get(), candidate.snapshots[0]);
+}
+
 bool NativePresentationProxy::PrepareResources(ID3D11Device* device,
     ID3D11DeviceContext* context, IDXGISwapChain* chain, Resources& candidate) noexcept
 {
     if (!QualifiedContext(device, context)) return false;
     if (!CaptureBackBuffer(device, chain, candidate)) return false;
     if (!PrepareProxy(device, candidate)) return false;
+    if (!PrepareSnapshots(device, candidate)) return false;
     candidate.context = context;
     return true;
 }
@@ -234,11 +260,14 @@ bool NativePresentationProxy::Prepare(ID3D11Device* device, ID3D11DeviceContext*
     IDXGISwapChain* chain) noexcept
 {
     if (resources_.context || executing_) return false;
+    if (epoch_ == std::numeric_limits<std::uint64_t>::max()) return false;
     const OwnerWork work{executing_};
     Resources candidate;
     if (!PrepareResources(device, context, chain, candidate)) return false;
     resources_ = std::move(candidate);
     ownerThread_ = std::this_thread::get_id();
+    ++epoch_;
+    publicationAllowed_.store(true, std::memory_order_release);
     return true;
 }
 
@@ -270,11 +299,123 @@ ID3D11RenderTargetView* NativePresentationProxy::ResolveRenderTarget(
     return resources_.target.Get();
 }
 
+bool NativePresentationProxy::MatchesSceneOwner(const ScenePassRenderer& scenes) const noexcept
+{
+    ComPtr<ID3D11Device> device;
+    resources_.context->GetDevice(&device);
+    return scenes.MatchesContext(device.Get(), resources_.context.Get());
+}
+
+bool NativePresentationProxy::CanCapture(const ScenePassRenderer& scenes,
+    NativeSdrCaptureScope scope) const noexcept
+{
+    if (scope != NativeSdrCaptureScope::completedAuthoredCodesExclusive) return false;
+    if (!CanResolve()) return false;
+    if (!MatchesSceneOwner(scenes)) return false;
+    const auto frame = scenes.FrameGeneration();
+    if (frame == 0 || frame <= lastCapturedFrame_) return false;
+    return publicationAllowed_.load(std::memory_order_acquire);
+}
+
+void NativePresentationProxy::RevokePublication() noexcept
+{
+    publicationAllowed_.store(false, std::memory_order_release);
+}
+
+void NativePresentationProxy::InvalidateFrame() noexcept
+{
+    if (!OnOwnerThread() || executing_) { RevokePublication(); return; }
+    frame_ = 0;
+    scenes_ = nullptr;
+}
+
+bool NativePresentationProxy::CanPublishCapture(const ScenePassRenderer& scenes,
+    std::uint64_t frame) const noexcept
+{
+    if (!MatchesSceneOwner(scenes)) return false;
+    if (frame == 0 || frame <= lastCapturedFrame_) return false;
+    if (scenes.FrameGeneration() != frame) return false;
+    return publicationAllowed_.load(std::memory_order_acquire);
+}
+
+bool NativePresentationProxy::SubmitCapture(NativeSdrSourceRole role,
+    ScenePassRenderer& scenes) noexcept
+{
+    const auto index = static_cast<std::size_t>(role);
+    if (index >= resources_.snapshots.size()) return false;
+    const auto& snapshot = resources_.snapshots[index];
+    if (!snapshot.texture || !snapshot.source) return false;
+    const auto frame = scenes.FrameGeneration();
+    if (frame == 0) return false;
+    auto* source = index == 0 ? resources_.backBuffer.Get() : resources_.proxy.Get();
+    const OwnerWork work{executing_};
+    resources_.context->CopyResource(snapshot.texture.Get(), source);
+    // Reentry revocation or a closed producer frame cannot publish the submitted copy.
+    if (!CanPublishCapture(scenes, frame)) return false;
+    scenes_ = &scenes;
+    frame_ = frame;
+    lastCapturedFrame_ = frame;
+    snapshotIndex_ = index;
+    return true;
+}
+
+bool NativePresentationProxy::CaptureCompletedSdr(NativeSdrSourceRole role,
+    ScenePassRenderer& scenes, NativeSdrCaptureScope scope) noexcept
+{
+    if (!OnOwnerThread() || executing_) { RevokePublication(); return false; }
+    InvalidateFrame();
+    if (!CanCapture(scenes, scope)) return false;
+    return SubmitCapture(role, scenes);
+}
+
+bool NativePresentationProxy::FrameReady(std::uint64_t frame,
+    const ScenePassRenderer* scenes) const noexcept
+{
+    if (!CanResolve()) return false;
+    if (!publicationAllowed_.load(std::memory_order_acquire)) return false;
+    if (frame == 0 || frame != frame_) return false;
+    if (scenes == nullptr || scenes != scenes_) return false;
+    return scenes->FrameGeneration() == frame;
+}
+
+bool NativePresentationProxy::PacketIdentityCurrent(const CompletedNativeSdrFrame& packet) const noexcept
+{
+    if (packet.owner_ != this || packet.epoch_ != epoch_) return false;
+    if (packet.scenes_ != scenes_ || packet.frame_ != frame_) return false;
+    return packet.source_ == resources_.snapshots[snapshotIndex_].source.Get();
+}
+
+bool NativePresentationProxy::PacketReady(const CompletedNativeSdrFrame& packet,
+    std::uint64_t frame, const ScenePassRenderer* scenes) const noexcept
+{
+    return FrameReady(frame, scenes) && PacketIdentityCurrent(packet);
+}
+
+CompletedNativeSdrFrame NativePresentationProxy::CompletedFrame() const noexcept
+{
+    if (!CanResolve() || scenes_ == nullptr) return {};
+    CompletedNativeSdrFrame packet;
+    packet.owner_ = this;
+    packet.scenes_ = scenes_;
+    packet.source_ = resources_.snapshots[snapshotIndex_].source.Get();
+    packet.epoch_ = epoch_;
+    packet.frame_ = frame_;
+    return PacketReady(packet, frame_, scenes_) ? packet : CompletedNativeSdrFrame{};
+}
+
+bool CompletedNativeSdrFrame::ReadyFor(std::uint64_t frame,
+    const ScenePassRenderer* scenes) const noexcept
+{
+    return owner_ != nullptr && owner_->PacketReady(*this, frame, scenes);
+}
+
 bool NativePresentationProxy::Retire() noexcept
 {
     if (executing_) return false;
     if (!resources_.context) return true;
     if (!OnOwnerThread()) return false;
+    InvalidateFrame();
+    RevokePublication();
     const OwnerWork work{executing_};
     {
         ProxyBindings bindings{resources_.context.Get()};
@@ -282,6 +423,7 @@ bool NativePresentationProxy::Retire() noexcept
         bindings.Apply(resources_.context.Get());
     }
     resources_ = {};
+    lastCapturedFrame_ = 0;
     ownerThread_ = {};
     return true;
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "PresentationPass.hpp"
+#include "../resources/NativePresentationProxy.hpp"
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 #include "ObservedDraw.hpp"
 
@@ -59,6 +60,12 @@ std::size_t CalibrationIndex(std::uint32_t mode) noexcept
     if (mode == 0) return 0;
     if (mode >= 10 && mode <= 14) return mode - 9;
     return calibrationModes.size();
+}
+
+bool SdrPacketCurrent(const CompletedNativeSdrFrame* packet, std::uint64_t frame,
+    const ScenePassRenderer* scenes) noexcept
+{
+    return packet == nullptr || packet->ReadyFor(frame, scenes);
 }
 
 bool CurrentSettingsPublication(const SettingsWindowOverlay& overlay,
@@ -926,20 +933,41 @@ bool PresentationPass::CopySdrCodes(ID3D11ShaderResourceView* source,
     return true;
 }
 
-bool PresentationPass::PrepareSdrHandoff(ID3D11ShaderResourceView* completedAuthoredCodes,
-    PresentationScope scope) noexcept
+bool PresentationPass::PrepareSdrSource(ID3D11ShaderResourceView* source,
+    PresentationScope scope, DXGI_FORMAT format, const CompletedNativeSdrFrame* packet) noexcept
 {
     if (!CanExecute(scope)) return false;
     sdrFrame_ = 0;
     const auto frame = configuration_.scenes->FrameGeneration();
     if (!framePrepared_ || frame == 0) return false;
-    if (completedAuthoredCodes == nullptr) return false;
-    if (!CodedLayerSource(completedAuthoredCodes, device_.Get(), configuration_)) return false;
+    if (source == nullptr) return false;
+    if (!CodedLayerSource(source, device_.Get(), configuration_, format)) return false;
     ExecutionScope executing{executing_};
-    if (!CopySdrCodes(completedAuthoredCodes, sdrProxy_.target.Get())) return false;
+    if (!CopySdrCodes(source, sdrProxy_.target.Get())) return false;
+    if (!SdrPacketCurrent(packet, frame, configuration_.scenes)) return false;
     // The private code-domain image is published only after borrowed state is restored.
     sdrFrame_ = frame;
     return true;
+}
+
+bool PresentationPass::PrepareSdrHandoff(ID3D11ShaderResourceView* completedAuthoredCodes,
+    PresentationScope scope) noexcept
+{
+    return PrepareSdrSource(completedAuthoredCodes, scope, DXGI_FORMAT_R8G8B8A8_UNORM, nullptr);
+}
+
+bool PresentationPass::PrepareNativeSdrHandoff(const CompletedNativeSdrFrame& packet,
+    PresentationScope scope) noexcept
+{
+    if (!CanExecute(scope)) return false;
+    sdrFrame_ = 0;
+    const auto frame = configuration_.scenes->FrameGeneration();
+    if (!packet.ReadyFor(frame, configuration_.scenes)) return false;
+    D3D11_SHADER_RESOURCE_VIEW_DESC description{};
+    packet.source_->GetDesc(&description);
+    if (description.Format != DXGI_FORMAT_R8G8B8A8_UNORM &&
+        description.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) return false;
+    return PrepareSdrSource(packet.source_, scope, description.Format, &packet);
 }
 
 bool PresentationPass::BeginFrame(PresentationScope scope) noexcept

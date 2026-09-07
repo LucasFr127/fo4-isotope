@@ -18,6 +18,7 @@ namespace fo4hdr {
 class SettingsWindow;
 struct SettingsWindowOverlay;
 class CompletedNativeUiLayers;
+class CompletedNativeSdrFrame;
 
 enum class PresentationScope
 {
@@ -91,6 +92,9 @@ public:
     // no caller view is retained. Intercepted pixels need separate semantic proof.
     [[nodiscard]] bool PrepareSdrHandoff(ID3D11ShaderResourceView* completedAuthoredCodes,
         PresentationScope scope) noexcept;
+    // A live owned packet additionally admits explicitly authored FP16 codes.
+    [[nodiscard]] bool PrepareNativeSdrHandoff(const CompletedNativeSdrFrame& frame,
+        PresentationScope scope) noexcept;
     // Nonfatal TEST leaves the frame open; device removal/reset revokes publication.
     // Without a successful BeginFrame, qualified
     // presentation clears black but does not compose; unavailable scope cannot clear.
@@ -141,6 +145,8 @@ private:
         PresentationScope scope) noexcept;
     [[nodiscard]] bool ComposeSdrChain(ID3D11UnorderedAccessView* target) noexcept;
     [[nodiscard]] bool SetHdrColorSpace(bool hdr) noexcept;
+    [[nodiscard]] bool PrepareSdrSource(ID3D11ShaderResourceView* source,
+        PresentationScope scope, DXGI_FORMAT format, const CompletedNativeSdrFrame* packet) noexcept;
     [[nodiscard]] bool CopySdrCodes(ID3D11ShaderResourceView* source,
         ID3D11UnorderedAccessView* target) noexcept;
     [[nodiscard]] bool QualifiedLayerSources(ID3D11ShaderResourceView* backdrop,

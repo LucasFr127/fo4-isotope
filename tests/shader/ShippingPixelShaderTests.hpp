@@ -12,6 +12,10 @@
 #include <span>
 #include <vector>
 
+namespace fo4hdr {
+class PresentationPass;
+}
+
 namespace fo4hdr::tests::gpu {
 
 namespace detail {
@@ -82,5 +86,7 @@ void CheckSelection(PixelFixture& fixture, SceneTextureHandle expected);
 
 void VerifyNativeRouting(detail::PixelFixture& fixture, const std::filesystem::path& directory);
 void VerifyNativePresentationProxy(detail::PixelFixture& fixture, IDXGISwapChain* chain);
+void VerifyRetainedNativeSdrFrame(detail::PixelFixture& fixture, PresentationPass& pass,
+    IDXGISwapChain* chain);
 
 }  // namespace fo4hdr::tests::gpu

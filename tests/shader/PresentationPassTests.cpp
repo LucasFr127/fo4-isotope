@@ -1048,6 +1048,14 @@ void VerifySdrHandoff(PixelFixture& fixture, PresentationPass& pass,
     pass.PrepareNativePresent(chain, 0, presentationScope);
     state.CheckRestored();
     CheckSdrCodes(ReadPackedTexture(fixture.gpu, buffer.Get()), {});
+    CheckHresult(pass.BeginFrame(presentationScope) ? S_OK : E_FAIL, "Begin retained SDR frame");
+    state.Bind();
+    VerifyRetainedNativeSdrFrame(fixture, pass, chain);
+    state.CheckRestored();
+    CheckSdrCodes(ReadPackedTexture(fixture.gpu, buffer.Get()), codes);
+    const auto retainedResult = chain->Present(0, 0);
+    pass.CompleteNativePresent(chain, retainedResult);
+    CheckHresult(retainedResult, "Retained SDR handoff Present");
 }
 
 void VerifyChainRetirement(PixelFixture& fixture, PresentationPass& pass,
