@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <type_traits>
+#include <memory>
 
 namespace fo4hdr {
 namespace {
@@ -90,6 +91,25 @@ HRESULT CallNative(Call next, Arguments... arguments) noexcept
     catch (...) { return E_FAIL; }
 }
 
+bool ComposeNativeOutput(ContextHookRecord& context) noexcept
+{
+    const bool gameplay = NativeGameplayReady(context);
+    const auto packet = context.uiCapture.CompletedLayers();
+    const bool layers = context.presentation.PrepareNativeLayers(packet, PresentationScope::qualifiedExclusive);
+    static_cast<void>(context.presentation.PrepareNativeSdrHandoff(
+        context.presentationProxy.CompletedFrame(), PresentationScope::qualifiedExclusive));
+    const bool hdr = gameplay && context.renderer.CurrentSceneOperatorProduced() && layers;
+    return context.presentation.FinishNativeFrame(context.frameRedirected, hdr, PresentationScope::qualifiedExclusive);
+}
+
+bool PresentQuerySafe(ContextHookRecord& context) noexcept
+{
+    if (context.queries.CanDispatch()) return true;
+    static_cast<void>(context.renderer.EndFrame());
+    RevokeNativeRouting();
+    return false;
+}
+
 bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
 {
     if (!chain.resourcesReady.load(std::memory_order_acquire)) return false;
@@ -98,17 +118,15 @@ bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
-    if ((flags & DXGI_PRESENT_TEST) == 0)
-    {
-        admitted->presentationProxy.InvalidateFrame();
-        admitted->uiCapture.CloseFrame();
-    }
-    if (!admitted->queries.CanDispatch())
-    {
-        if ((flags & DXGI_PRESENT_TEST) == 0) static_cast<void>(admitted->renderer.EndFrame());
-        return false;
-    }
-    return CloseNativePresentFrame(admitted->renderer, flags);
+    if ((flags & DXGI_PRESENT_TEST) != 0) return true;
+    if (!PresentQuerySafe(*admitted)) return false;
+    const ChainResourcePreparation preparation{*admitted};
+    const bool completed = admitted->hdrPrepared ? ComposeNativeOutput(*admitted)
+        : CloseNativePresentFrame(admitted->renderer, flags);
+    admitted->presentationProxy.InvalidateFrame();
+    admitted->uiCapture.CloseFrame();
+    admitted->frameRedirected = false;
+    return completed;
 }
 
 void CompletePresent(SwapChainHookRecord& chain, UINT flags, HRESULT result) noexcept
@@ -119,9 +137,23 @@ void CompletePresent(SwapChainHookRecord& chain, UINT flags, HRESULT result) noe
     auto* admitted = scope.Record();
     if (admitted == nullptr) return;
     if (!admitted->queries.CanDispatch()) return;
-    if (!OpenNativePresentFrame(admitted->renderer, flags, result)) RevokeNativeRouting();
-    else if ((flags & DXGI_PRESENT_TEST) == 0 && SUCCEEDED(result))
-        admitted->uiCapture.AdvanceFrame(admitted->renderer.FrameGeneration());
+    if ((flags & DXGI_PRESENT_TEST) != 0 || FAILED(result)) return;
+    const ChainResourcePreparation preparation{*admitted};
+    const bool opened = admitted->hdrPrepared
+        ? admitted->presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive)
+        : OpenNativePresentFrame(admitted->renderer, flags, result);
+    if (!opened) RevokeNativeRouting();
+    else admitted->uiCapture.AdvanceFrame(admitted->renderer.FrameGeneration());
+}
+
+bool RetireChainResources(ContextHookRecord& context) noexcept
+{
+    const ChainResourcePreparation preparation{context};
+    if (context.hdrPrepared && !context.presentation.RestoreNativeSdrSpace()) return false;
+    if (!context.presentation.Retire()) return false;
+    if (!context.presentationProxy.Retire()) return false;
+    if (!context.uiCapture.Retire()) return false;
+    return context.renderer.RetireForResize();
 }
 
 bool PrepareResize(SwapChainHookRecord& chain) noexcept
@@ -133,10 +165,7 @@ bool PrepareResize(SwapChainHookRecord& chain) noexcept
     if (admitted == nullptr) return false;
     admitted->presentationProxy.RevokePublication();
     if (!admitted->queries.CanDispatch()) return false;
-    const ChainResourcePreparation preparation{*admitted};
-    if (!admitted->presentationProxy.Retire()) return false;
-    if (!admitted->uiCapture.Retire()) return false;
-    return admitted->renderer.RetireForResize();
+    return RetireChainResources(*admitted);
 }
 
 bool ChainResourcesCurrent(const ContextHookRecord& context) noexcept
@@ -145,13 +174,30 @@ bool ChainResourcesCurrent(const ContextHookRecord& context) noexcept
         context.queries.CanDispatch();
 }
 
+bool RebuildHdrOutput(ContextHookRecord& context, ID3D11Device* device,
+    IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
+{
+    if (FAILED(context.renderer.AdoptPresentationScene(context.presentationProxy, context.presentationScene))) return false;
+    std::destroy_at(&context.presentation);
+    std::construct_at(&context.presentation);
+    const PresentationConfiguration output{configuration.width, configuration.height,
+        static_cast<float>(context.defaultOperator.displayPeakNits), &context.renderer, configuration.whites};
+    if (!context.presentation.Initialize(device, context.owned, output)) return false;
+    return SUCCEEDED(context.presentation.PrepareNativeChain(chain, true));
+}
+
 bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
     IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
 {
     const ChainResourcePreparation preparation{context};
     if (!context.renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
-    static_cast<void>(context.uiCapture.Initialize(device, context.owned, configuration));
-    static_cast<void>(context.presentationProxy.Prepare(device, context.owned, chain));
+    const bool ui = context.uiCapture.Initialize(device, context.owned, configuration);
+    const bool proxy = context.presentationProxy.Prepare(device, context.owned, chain);
+    if (context.hdrPrepared)
+    {
+        if (!ui || !proxy) return false;
+        if (!RebuildHdrOutput(context, device, chain, configuration)) return false;
+    }
     if (!ChainResourcesCurrent(context))
     {
         context.presentationProxy.RevokePublication();
@@ -160,24 +206,65 @@ bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
     return true;
 }
 
+bool ReadResizeDescription(const SwapChainHookRecord& chain, DXGI_SWAP_CHAIN_DESC& current) noexcept
+{
+    if (FAILED(chain.owned->GetDesc(&current))) return false;
+    return current.OutputWindow == chain.description.OutputWindow && IsWindow(current.OutputWindow);
+}
+
 bool ReinitializeAfterResize(SwapChainHookRecord& chain) noexcept
 {
     DXGI_SWAP_CHAIN_DESC current{};
-    if (FAILED(chain.owned->GetDesc(&current))) return false;
-    if (current.OutputWindow != chain.description.OutputWindow) return false;
-    if (!IsWindow(current.OutputWindow)) return false;
+    if (!ReadResizeDescription(chain, current)) return false;
     auto* context = g_contextHooks.load(std::memory_order_acquire);
     const auto* device = g_deviceHooks.load(std::memory_order_acquire);
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
     if (!admitted->queries.CanDispatch()) return false;
-    const ScenePassConfiguration configuration{current.BufferDesc.Width, current.BufferDesc.Height, {}};
+    const ScenePassConfiguration configuration{current.BufferDesc.Width, current.BufferDesc.Height, {},
+        admitted->hdrPrepared ? &admitted->defaultOperator : nullptr};
     if (!RebuildChainResources(*admitted, device->owned, chain.owned, configuration)) return false;
     if (!chain.admitted.load(std::memory_order_acquire)) return false;
     chain.description = current;
     chain.resourcesReady.store(true, std::memory_order_release);
     return true;
+}
+
+struct NativeResizeRequest
+{
+    UINT count;
+    UINT width;
+    UINT height;
+    DXGI_FORMAT format;
+    UINT flags;
+};
+
+void CompleteResize(SwapChainHookRecord& record, bool retired, HRESULT result) noexcept
+{
+    if (DeviceLost(result)) { RevokeNativeRouting(); return; }
+    if (!retired || FAILED(result)) return;
+    if (!ReinitializeAfterResize(record)) RevokeNativeRouting();
+}
+
+void PreserveHdrResize(NativeResizeRequest& request, bool retired) noexcept
+{
+    const auto* context = g_contextHooks.load(std::memory_order_acquire);
+    if (!retired || context == nullptr) return;
+    if (!context->hdrPrepared) return;
+    if (request.count != 0) request.count = 2;
+    if (request.format != DXGI_FORMAT_UNKNOWN) request.format = DXGI_FORMAT_R10G10B10A2_UNORM;
+}
+
+HRESULT ResizeOwnedChain(SwapChainHookRecord& record, NativeResizeRequest request) noexcept
+{
+    const ChainCallScope call{record};
+    const bool retired = call.Valid() && PrepareResize(record);
+    PreserveHdrResize(request, retired);
+    const auto result = CallNative(record.nextResize, record.owned, request.count,
+        request.width, request.height, request.format, request.flags);
+    CompleteResize(record, retired, result);
+    return result;
 }
 
 }  // namespace
@@ -186,6 +273,8 @@ bool NativeChainOwned() noexcept
 {
     auto* record = g_swapChainHooks.load(std::memory_order_acquire);
     if (record == nullptr) return false;
+    const auto* context = g_contextHooks.load(std::memory_order_acquire);
+    if (context == nullptr || !context->retainedReferences.load(std::memory_order_acquire)) return false;
     if (*reinterpret_cast<void***>(record->owned) != record->table) return false;
     return std::all_of(record->owners.begin(), record->owners.end(),
         [](auto& slot) { return slot.Health() == HookOwnershipState::owned; });
@@ -225,13 +314,7 @@ HRESULT STDMETHODCALLTYPE HookResizeBuffers(IDXGISwapChain* chain, UINT count, U
     if (record == nullptr) return E_UNEXPECTED;
     if (chain != record->owned)
         return CallNative(record->nextResize, chain, count, width, height, format, flags);
-    const ChainCallScope call{*record};
-    const bool retired = call.Valid() && PrepareResize(*record);
-    // A refused retirement keeps resources unavailable; native Resize decides its result.
-    const auto result = CallNative(record->nextResize, chain, count, width, height, format, flags);
-    if (DeviceLost(result)) RevokeNativeRouting();
-    else if (retired && SUCCEEDED(result)) static_cast<void>(ReinitializeAfterResize(*record));
-    return result;
+    return ResizeOwnedChain(*record, {count, width, height, format, flags});
 }
 
 static_assert(std::is_convertible_v<decltype(&HookPresent), SwapChainPresent>);

@@ -3,6 +3,7 @@
 #include "HdrRenderer.hpp"
 #include "RenoDxShaderIdentity.hpp"
 #include "resources/HdrResourcePolicy.hpp"
+#include "resources/NativePresentationProxy.hpp"
 
 #include <algorithm>
 #include <utility>
@@ -226,11 +227,21 @@ HRESULT ScenePassRenderer::AdoptPromotedNativeSceneTexture(NativeSceneTexture& p
     return S_OK;
 }
 
+bool ScenePassRenderer::PresentationStorageCurrent(const SceneTexture& scene) const noexcept
+{
+    return scene.presentationProxy == nullptr ||
+        scene.presentationProxy->SceneViews().texture == scene.texture.Get();
+}
+
 bool ScenePassRenderer::NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept
 {
-    NativeSceneAttribution attribution{};
-    if (!ReadNativeSceneAttribution(device_.Get(), scene.texture.Get(),
-            scene.nativeCreationGeneration, attribution)) return false;
+    if (!PresentationStorageCurrent(scene)) return false;
+    if (scene.presentationProxy == nullptr)
+    {
+        NativeSceneAttribution attribution{};
+        if (!ReadNativeSceneAttribution(device_.Get(), scene.texture.Get(),
+                scene.nativeCreationGeneration, attribution)) return false;
+    }
     ComPtr<ID3D11ShaderResourceView> source;
     ComPtr<ID3D11RenderTargetView> target;
     if (input) static_cast<void>(view->QueryInterface(IID_PPV_ARGS(&source)));
@@ -299,6 +310,37 @@ bool ScenePassRenderer::QualifiedSceneTexture(const D3D11_TEXTURE2D_DESC& origin
     if (!SupportedSceneLayout(description)) return false;
     return description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
         description.Width == original.Width && description.Height == original.Height;
+}
+
+bool ScenePassRenderer::PresentationViewsQualified(SceneTextureViews views) const noexcept
+{
+    D3D11_TEXTURE2D_DESC footprint{};
+    footprint.Width = width_;
+    footprint.Height = height_;
+    return QualifiedSceneTexture(footprint, views.texture) &&
+        EquivalentSceneSrv(device_.Get(), views.texture, views.shaderResource) &&
+        EquivalentSceneRtv(device_.Get(), views.texture, views.renderTarget);
+}
+
+HRESULT ScenePassRenderer::AdoptPresentationScene(NativePresentationProxy& proxy,
+    SceneTextureHandle& handle) noexcept
+{
+    handle = {};
+    if (!Active() || invoking_) return E_UNEXPECTED;
+    if (sceneCount_ == scenes_.size()) return E_OUTOFMEMORY;
+    const auto views = proxy.SceneViews();
+    if (!PresentationViewsQualified(views)) return E_INVALIDARG;
+    SceneTexture scene;
+    scene.texture = views.texture;
+    scene.shaderResource = views.shaderResource;
+    scene.renderTarget = views.renderTarget;
+    scene.presentationProxy = &proxy;
+    const auto slot = sceneCount_++;
+    scenes_[slot] = std::move(scene);
+    handle.owner_ = this;
+    handle.epoch_ = lifetime_.CurrentEpoch();
+    handle.slot_ = slot;
+    return S_OK;
 }
 
 bool ScenePassRenderer::StartPipboyScreenObservation() noexcept
@@ -391,6 +433,43 @@ bool ScenePassRenderer::CompletePipboyProducer(IUnknown* input) noexcept
     pipboyProducerIdentity_ = std::move(output);
     pipboyObservation_.Producer(frameGeneration_);
     return true;
+}
+
+const ScenePassRenderer::SceneTexture* ScenePassRenderer::Resolve(
+    SceneTextureHandle handle) const noexcept
+{
+    if (!Active() || handle.owner_ != this) return nullptr;
+    if (handle.epoch_ != lifetime_.CurrentEpoch() || handle.slot_ >= sceneCount_) return nullptr;
+    const auto& scene = scenes_[handle.slot_];
+    if (!PresentationStorageCurrent(scene)) return nullptr;
+    return &scene;
+}
+
+SceneTextureViews ScenePassRenderer::Views(SceneTextureHandle handle) const noexcept
+{
+    const auto* scene = Resolve(handle);
+    if (scene == nullptr) return {};
+    return {scene->texture.Get(), scene->shaderResource.Get(), scene->renderTarget.Get()};
+}
+
+SceneTextureHandle ScenePassRenderer::CurrentScene() const noexcept
+{
+    if (invoking_) return {};
+    if (!frameOpen_) return {};
+    if (Resolve(selectedScene_) == nullptr) return {};
+    return selectedScene_;
+}
+
+SceneColorDomain ScenePassRenderer::CurrentSceneDomain() const noexcept
+{
+    const auto* scene = Resolve(CurrentScene());
+    return scene != nullptr ? scene->domain : SceneColorDomain::bt709Scene;
+}
+
+bool ScenePassRenderer::CurrentSceneOperatorProduced() const noexcept
+{
+    const auto* scene = Resolve(CurrentScene());
+    return scene != nullptr && scene->operatorProduced;
 }
 
 }  // namespace fo4hdr

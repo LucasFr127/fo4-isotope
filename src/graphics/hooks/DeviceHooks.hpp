@@ -23,10 +23,16 @@ class NativeRoutingInstaller
 public:
     [[nodiscard]] static NativeRoutingStatus Install(const CreatedDeviceBinding& created,
         std::uint64_t generation, void* creationNext) noexcept;
+    [[nodiscard]] static bool InstallHdr(const CreatedDeviceBinding& created,
+        std::uint64_t generation, void* creationNext) noexcept;
+    // Fresh outputs have not escaped. False retains resident references and forbids retry.
+    [[nodiscard]] static bool DiscardFresh(const CreatedDeviceBinding& created) noexcept;
     [[nodiscard]] static bool Retire() noexcept;
 
 private:
     [[nodiscard]] static bool CompleteCoverage() noexcept;
+    [[nodiscard]] static NativeRoutingStatus InstallImpl(const CreatedDeviceBinding& created,
+        std::uint64_t generation, void* creationNext, bool hdr) noexcept;
 };
 
 HRESULT STDMETHODCALLTYPE HookCreatePixelShader(ID3D11Device* device, const void* bytecode,

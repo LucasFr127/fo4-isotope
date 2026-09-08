@@ -18,12 +18,17 @@ struct CreatedDeviceBinding
 
 using CreatedDeviceObserver = bool (*)(const CreatedDeviceBinding& binding);
 using CreationDisabledObserver = void (*)() noexcept;
+using DiscardHdrCreation = bool (*)(const CreatedDeviceBinding& binding) noexcept;
 
 struct DeviceCreationCallbacks
 {
     DeviceCreationObserver facts{};
     CreatedDeviceObserver created{};
     CreationDisabledObserver disabled{};
+    // HDR preparation occurs before outputs escape. Cleanup true proves that all
+    // fresh owned aliases/references and installed object hooks were retired safely.
+    CreatedDeviceObserver hdrCreated{};
+    DiscardHdrCreation discardHdr{};
 };
 
 // Returned interfaces are borrowed during delivery; a receiver owns any retained references.

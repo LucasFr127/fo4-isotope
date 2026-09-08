@@ -196,6 +196,33 @@ void TestLifecycleTransitions()
     FO4HDR_CHECK(snapshot.lifecycleEvent == Event::NewGame);
 }
 
+void TestGraphicsLifecyclePublication()
+{
+    using Event = fo4hdr::GameLifecycleEvent;
+    fo4hdr::GraphicsLifecyclePublisher publisher;
+    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().resetEpoch == 0);
+    publisher.PublishTransition(Event::PreLoadGame, true);
+    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().resetEpoch == 1);
+    publisher.PublishTransition(Event::PostLoadGame, false);
+    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    publisher.PublishTransition(Event::PostLoadGame, true);
+    FO4HDR_CHECK(publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().resetEpoch == 1);
+    publisher.PublishTransition(Event::PreSaveGame, true);
+    FO4HDR_CHECK(publisher.Read().gameplayReady);
+    publisher.PublishTransition(Event::NewGame, true);
+    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().resetEpoch == 2);
+    publisher.PublishTransition(Event::PostLoadGame, true);
+    FO4HDR_CHECK(publisher.Read().gameplayReady);
+    publisher.Disable();
+    publisher.PublishTransition(Event::PostLoadGame, true);
+    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().resetEpoch == 2);
+}
+
 void TestCollectedPublication()
 {
     fo4hdr::GameHdrSnapshot unavailable{};
@@ -244,6 +271,7 @@ void RunGameSnapshotStoreTests()
     TestConcurrentWriters();
     TestLifecycleOutcome();
     TestLifecycleTransitions();
+    TestGraphicsLifecyclePublication();
     TestCollectedPublication();
 }
 

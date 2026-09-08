@@ -16,6 +16,7 @@ namespace fo4hdr {
 class ScenePassRenderer;
 class PresentationPass;
 class NativePresentationProxy;
+struct SceneTextureViews;
 
 enum class NativeSdrSourceRole
 {
@@ -63,6 +64,8 @@ public:
     // native view establishes identity, not permission to redirect or a color domain.
     [[nodiscard]] ID3D11RenderTargetView* ResolveRenderTarget(
         ID3D11RenderTargetView* nativeTarget) const noexcept;
+    // Borrowed owned storage until Retire; registration establishes no pixel domain.
+    [[nodiscard]] SceneTextureViews SceneViews() const noexcept;
     // Caller proves completed authored SDR-code production, immutable selected
     // source and the exclusive query/list/reentry scope; storage does not prove codes.
     // Copies once into private same-format storage, with no wait or retained source alias.

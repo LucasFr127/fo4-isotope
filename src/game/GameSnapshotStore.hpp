@@ -4,13 +4,72 @@
 #include "Fallout4HDR/game/GameHdrSnapshot.hpp"
 #include "MenuEventQueue.hpp"
 
+#include <atomic>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <type_traits>
 #include <utility>
 
 namespace fo4hdr {
+
+class GraphicsLifecyclePublisher
+{
+public:
+    void PublishTransition(GameLifecycleEvent event, bool succeeded) noexcept
+    {
+        if (event == GameLifecycleEvent::PreLoadGame || event == GameLifecycleEvent::NewGame)
+        {
+            Publish(false, true);
+        }
+        else if (event == GameLifecycleEvent::PostLoadGame && succeeded)
+        {
+            Publish(true, false);
+        }
+    }
+
+    void Disable() noexcept
+    {
+        packed_.fetch_or(failedMask, std::memory_order_release);
+    }
+
+    [[nodiscard]] GraphicsLifecyclePublication Read() const noexcept
+    {
+        const auto packed = packed_.load(std::memory_order_acquire);
+        return {(packed & (readyMask | failedMask)) == readyMask, packed >> 2};
+    }
+
+private:
+    void Publish(bool ready, bool advanceReset) noexcept
+    {
+        auto previous = packed_.load(std::memory_order_relaxed);
+        if ((previous & failedMask) != 0)
+        {
+            return;
+        }
+        const auto epoch = previous >> 2;
+        if (advanceReset && epoch == maximumEpoch)
+        {
+            // Exhaustion must not reuse an epoch that a graphics owner could retain.
+            Disable();
+            return;
+        }
+        const auto next = ((epoch + (advanceReset ? 1 : 0)) << 2) | (ready ? readyMask : 0);
+        // Normal writers share the snapshot-store lock; racing failure is terminal.
+        if (!packed_.compare_exchange_strong(previous, next,
+                std::memory_order_release, std::memory_order_relaxed))
+        {
+            Disable();
+        }
+    }
+
+    static constexpr std::uint64_t readyMask = 1;
+    static constexpr std::uint64_t failedMask = 2;
+    static constexpr std::uint64_t maximumEpoch = std::numeric_limits<std::uint64_t>::max() >> 2;
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+    std::atomic<std::uint64_t> packed_{};
+};
 
 class GameSnapshotStore
 {

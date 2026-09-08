@@ -283,6 +283,12 @@ bool NativePresentationProxy::CanResolve() const noexcept
     return resources_.context != nullptr;
 }
 
+SceneTextureViews NativePresentationProxy::SceneViews() const noexcept
+{
+    if (!CanResolve() || !publicationAllowed_.load(std::memory_order_acquire)) return {};
+    return {resources_.proxy.Get(), resources_.source.Get(), resources_.target.Get()};
+}
+
 ID3D11RenderTargetView* NativePresentationProxy::ResolveRenderTarget(
     ID3D11RenderTargetView* nativeTarget) const noexcept
 {

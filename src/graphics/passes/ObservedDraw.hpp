@@ -10,6 +10,7 @@ namespace fo4hdr {
 
 class NativeUiCapture;
 class PresentationPass;
+class NativePresentationProxy;
 
 enum class NativeUiCaptureScope
 {
@@ -88,7 +89,10 @@ public:
     void AdvanceFrame(std::uint64_t frame) noexcept;
     void CloseFrame() noexcept;
     [[nodiscard]] bool BeginFrame(NativeUiFrame frame, NativeUiCaptureScope scope) noexcept;
+    [[nodiscard]] bool BeginPresentationFrame(NativePresentationProxy& proxy,
+        ScenePassRenderer& scenes, NativeUiCaptureScope scope) noexcept;
     [[nodiscard]] NativeUiFrameStatus Status() const noexcept;
+    void WithdrawLostPresentationScene() noexcept;
     [[nodiscard]] CompletedNativeUiLayers CompletedLayers() const noexcept;
     // Controlled caller qualifies the supplied shader's authored-code/coverage role.
     // The native path obtains that role only from successful matched shader creation.
@@ -112,7 +116,11 @@ private:
     };
 
     [[nodiscard]] bool CanUse() const noexcept;
+    [[nodiscard]] bool FrameAdmissionCurrent(const NativeUiFrame& frame) const noexcept;
     [[nodiscard]] bool CanBeginFrame(const NativeUiFrame& frame, NativeUiCaptureScope scope) const noexcept;
+    [[nodiscard]] bool CommitFrame(const NativeUiFrame& frame) noexcept;
+    [[nodiscard]] bool PresentationSceneCurrent() const noexcept;
+    [[nodiscard]] bool MissingRequiredLayer() const noexcept;
     [[nodiscard]] bool CanCapture(const QualifiedNativeUiDraw& draw) const noexcept;
     [[nodiscard]] bool OwnedLayerAlias(ID3D11Texture2D* texture) const noexcept;
     [[nodiscard]] bool QualifiedTarget(ID3D11RenderTargetView* target) const noexcept;
@@ -132,6 +140,7 @@ private:
     std::size_t observedCount_{};
     ScenePassConfiguration configuration_;
     ScenePassRenderer* scenes_{};
+    const NativePresentationProxy* presentationProxy_{};
     std::thread::id thread_;
     std::uint64_t frame_{};
     std::uint64_t lastFrame_{};

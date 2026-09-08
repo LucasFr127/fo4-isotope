@@ -131,6 +131,7 @@ $files = [string[]]@(
     "src/graphics/passes/ArmorCompositionPass.hpp",
     "src/graphics/passes/ArmorCompositionPass.cpp",
     "src/graphics/passes/PresentationPass.cpp",
+    "src/graphics/passes/NativePresentationOutput.cpp",
     "shaders/output/DisplayMath.hlsli",
     "shaders/output/SceneLayers.hlsli",
     "shaders/output/PresentPixels.cs.hlsl",

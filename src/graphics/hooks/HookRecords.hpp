@@ -3,6 +3,8 @@
 
 #include "ContextHooks.hpp"
 #include "../HdrRenderer.hpp"
+#include "../passes/PresentationPass.hpp"
+#include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "../passes/ObservedDraw.hpp"
 #include "../resources/NativePresentationProxy.hpp"
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
@@ -49,6 +51,8 @@ struct DeviceHookRecord
     CreateRenderTargetView nextCreateRtv{};
     CreatePixelShader nextCreatePixelShader{};
     std::array<PointerHookOwnership, 5> owners;
+    std::array<void*, 5> originals{};
+    std::array<DWORD, 5> slotProtection{};
 };
 
 struct ContextHookRecord
@@ -68,10 +72,19 @@ struct ContextHookRecord
     OmSetRenderTargetsAndUavs nextOmSetRenderTargetsAndUavs{};
     ContextCommandListCall nextExecuteCommandList{};
     std::array<PointerHookOwnership, 10> owners;
+    std::array<void*, 10> originals{};
+    std::array<DWORD, 10> slotProtection{};
     ContextQueryObserver queries;
     ScenePassRenderer renderer;
     NativeUiCapture uiCapture;
     NativePresentationProxy presentationProxy;
+    PresentationPass presentation;
+    OperatorLutData defaultOperator;
+    SceneTextureHandle presentationScene;
+    std::atomic<bool> retainedReferences{};
+    std::uint64_t lifecycleEpoch{};
+    bool hdrPrepared{};
+    bool frameRedirected{};
     std::atomic<bool> admitted{};
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
     bool internalWork{};
@@ -85,6 +98,8 @@ struct SwapChainHookRecord
     SwapChainPresent nextPresent{};
     SwapChainResize nextResize{};
     std::array<PointerHookOwnership, 2> owners;
+    std::array<void*, 2> originals{};
+    std::array<DWORD, 2> slotProtection{};
     DXGI_SWAP_CHAIN_DESC description{};
     std::atomic<bool> admitted{};
     std::atomic<bool> resourcesReady{};
@@ -98,6 +113,7 @@ extern std::atomic<SwapChainHookRecord*> g_swapChainHooks;
 [[nodiscard]] bool NativeRoutingOwned() noexcept;
 [[nodiscard]] bool NativeChainOwned() noexcept;
 void RevokeNativeRouting() noexcept;
+[[nodiscard]] bool NativeGameplayReady(ContextHookRecord& record) noexcept;
 
 // Only the admitted owner thread reads internalWork or the renderer. Other
 // objects sharing the table use its captured predecessor directly.

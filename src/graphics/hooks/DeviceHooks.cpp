@@ -308,6 +308,18 @@ const std::array chainPatches{
     SlotPatch{13, reinterpret_cast<void*>(&HookResizeBuffers), PublishChainOriginal<&SwapChainHookRecord::nextResize>}};
 
 template <class Record, std::size_t Count>
+bool CaptureSlotProtection(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
+{
+    for (std::size_t index = 0; index < Count; ++index)
+    {
+        MEMORY_BASIC_INFORMATION page{};
+        if (VirtualQuery(record.table + patches[index].index, &page, sizeof(page)) != sizeof(page)) return false;
+        record.slotProtection[index] = page.Protect;
+    }
+    return true;
+}
+
+template <class Record, std::size_t Count>
 bool InstallSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
 {
     const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
@@ -331,16 +343,45 @@ void RollbackSlots(Record& record, const std::array<SlotPatch, Count>& patches) 
     }
 }
 
-bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& created) noexcept
+bool PrepareDefaultOperator(ContextHookRecord& record, bool hdr) noexcept
+{
+    if (!hdr) return true;
+    record.defaultOperator = BuildOperatorLut(OperatorLutAlgorithm::aces2, 1000.0);
+    return record.defaultOperator.IsValid();
+}
+
+bool PrepareHdrOutput(ContextHookRecord& record, const CreatedDeviceBinding& created,
+    ScenePassConfiguration configuration) noexcept
+{
+    if (FAILED(record.renderer.AdoptPresentationScene(record.presentationProxy, record.presentationScene))) return false;
+    const PresentationConfiguration output{configuration.width, configuration.height, 1000.0F, &record.renderer, {}};
+    if (!record.presentation.Initialize(created.device, created.context, output)) return false;
+    if (FAILED(record.presentation.PrepareNativeChain(created.swapChain))) return false;
+    record.hdrPrepared = true;
+    return true;
+}
+
+bool PrepareRendererResources(ContextHookRecord& record, const CreatedDeviceBinding& created,
+    ScenePassConfiguration configuration, bool hdr) noexcept
+{
+    const bool uiPrepared = record.uiCapture.Initialize(created.device, created.context, configuration);
+    const bool proxyPrepared = record.presentationProxy.Prepare(created.device, created.context, created.swapChain);
+    if (!hdr) return true;
+    if (!uiPrepared) return false;
+    if (!proxyPrepared) return false;
+    return PrepareHdrOutput(record, created, configuration);
+}
+
+bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& created, bool hdr) noexcept
 {
     if (created.swapChain == nullptr) return false;
     DXGI_SWAP_CHAIN_DESC description{};
     if (FAILED(created.swapChain->GetDesc(&description))) return false;
-    const ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height, {}};
+    if (!PrepareDefaultOperator(record, hdr)) return false;
+    const ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height, {},
+        hdr ? &record.defaultOperator : nullptr};
     if (!record.renderer.InitializeBorrowed(created.device, created.context, configuration)) return false;
-    // UI preparation has its own unavailable state; it cannot qualify a presentation target.
-    static_cast<void>(record.uiCapture.Initialize(created.device, created.context, configuration));
-    static_cast<void>(record.presentationProxy.Prepare(created.device, created.context, created.swapChain));
+    if (!PrepareRendererResources(record, created, configuration, hdr)) return false;
     const ContextQueryPredecessors next{record.nextBegin, record.nextEnd, record.nextExecuteCommandList};
     return record.queries.Prepare(created.context, record.generation, next, &record.renderer) ==
         ContextQueryPreparation::coverageUnobserved;
@@ -431,7 +472,7 @@ const ContextHookRecord* AttributedDeviceOwner(ID3D11Device* device) noexcept
     const auto* owned = g_deviceHooks.load(std::memory_order_acquire);
     const auto* context = g_contextHooks.load(std::memory_order_acquire);
     if (owned == nullptr) return nullptr;
-    if (context == nullptr) return nullptr;
+    if (context == nullptr || !context->retainedReferences.load(std::memory_order_acquire)) return nullptr;
     if (device != owned->owned) return nullptr;
     // Read compatibility attribution after retirement, but never inspect mutable
     // renderer slots or use device APIs from an unqualified foreign thread.
@@ -502,6 +543,7 @@ struct NativeBindingPreparation
     std::array<void*, 10> contextOriginals{};
     std::array<void*, 2> chainOriginals{};
     DXGI_SWAP_CHAIN_DESC description{};
+    bool hdr{};
 
     bool PrepareChain(const CreatedDeviceBinding& created) noexcept
     {
@@ -526,22 +568,18 @@ struct NativeBindingPreparation
     {
         auto* context = std::construct_at(reinterpret_cast<ContextHookRecord*>(residentContextStorage.data()));
         residentDevice.table = deviceTable;
+        residentDevice.originals = deviceOriginals;
         context->table = contextTable;
+        context->originals = contextOriginals;
         context->generation = generation;
         context->thread = GetCurrentThreadId();
         residentChain.table = chainTable;
+        residentChain.originals = chainOriginals;
         residentChain.nextPresent = reinterpret_cast<SwapChainPresent>(chainOriginals[0]);
         residentChain.nextResize = reinterpret_cast<SwapChainResize>(chainOriginals[1]);
         residentChain.description = description;
         PublishDeviceNexts(deviceOriginals);
         PublishContextNexts(*context, contextOriginals);
-        if (!PrepareRenderer(*context, created))
-        {
-            static_cast<void>(context->presentationProxy.Retire());
-            static_cast<void>(context->uiCapture.Retire());
-            static_cast<void>(context->renderer.Retire());
-            return nullptr;
-        }
         // Reachable wrappers retain these objects even after generation retirement.
         created.device->AddRef();
         created.context->AddRef();
@@ -551,8 +589,12 @@ struct NativeBindingPreparation
         residentChain.owned = created.swapChain;
         g_deviceHooks.store(&residentDevice, std::memory_order_release);
         g_contextHooks.store(context, std::memory_order_release);
+        context->retainedReferences.store(true, std::memory_order_release);
         g_swapChainHooks.store(&residentChain, std::memory_order_release);
-        return context;
+        if (!CaptureSlotProtection(residentDevice, devicePatches)) return nullptr;
+        if (!CaptureSlotProtection(*context, contextPatches)) return nullptr;
+        if (!CaptureSlotProtection(residentChain, chainPatches)) return nullptr;
+        return PrepareRenderer(*context, created, hdr) ? context : nullptr;
     }
 };
 
@@ -565,13 +607,84 @@ bool InstallNativeSlots(ContextHookRecord& context) noexcept
 
 bool RetireNativeOwners(ContextHookRecord& record) noexcept
 {
-    return record.queries.Retire() && record.uiCapture.Retire() && record.renderer.Retire();
+    return record.presentation.Retire() && record.uiCapture.Retire() &&
+        record.presentationProxy.Retire() && record.renderer.Retire() && record.queries.Retire();
 }
 
 bool NativeRetirementSafe(const ContextHookRecord& record) noexcept
 {
     return GetCurrentThreadId() == record.thread && !record.busy.test(std::memory_order_acquire) &&
         !residentChain.busy.test(std::memory_order_acquire) && record.queries.CanDispatch();
+}
+
+bool SlotProtectionMatches(void** slot, DWORD protection) noexcept
+{
+    MEMORY_BASIC_INFORMATION page{};
+    return VirtualQuery(slot, &page, sizeof(page)) == sizeof(page) && page.Protect == protection;
+}
+
+template <class Record>
+bool RestoreFreshSlot(Record& record, SlotPatch patch, std::size_t index) noexcept
+{
+    auto* slot = record.table + patch.index;
+    if (!SlotProtectionMatches(slot, record.slotProtection[index])) return false;
+    const auto current = AtomicPointerLoad(slot);
+    if (current == record.originals[index]) return true;
+    if (current != patch.replacement) return false;
+    auto& owner = record.owners[index];
+    const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
+    const bool changed = owner.State() == HookOwnershipState::owned
+        ? owner.Remove(writer) : writer(slot, patch.replacement, record.originals[index]);
+    return changed && AtomicPointerLoad(slot) == record.originals[index];
+}
+
+template <class Record, std::size_t Count>
+bool RestoreFreshSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
+{
+    bool restored = true;
+    for (std::size_t reverse = Count; reverse != 0; --reverse)
+    {
+        const auto index = reverse - 1;
+        if (!RestoreFreshSlot(record, patches[index], index)) restored = false;
+    }
+    return restored;
+}
+
+bool MatchesFreshObjects(const CreatedDeviceBinding& created, const ContextHookRecord& record) noexcept
+{
+    return created.context == record.owned && created.device == residentDevice.owned &&
+        created.swapChain == residentChain.owned;
+}
+
+bool RestoreFreshTables(ContextHookRecord& record) noexcept
+{
+    const bool chain = RestoreFreshSlots(residentChain, chainPatches);
+    const bool context = RestoreFreshSlots(record, contextPatches);
+    const bool device = RestoreFreshSlots(residentDevice, devicePatches);
+    return chain && context && device;
+}
+
+void ReleaseFreshReferences(ContextHookRecord& record) noexcept
+{
+    if (!record.retainedReferences.exchange(false, std::memory_order_acq_rel)) return;
+    residentChain.owned->Release();
+    record.owned->Release();
+    residentDevice.owned->Release();
+}
+
+bool FreshOwnerSafe(const ContextHookRecord& record) noexcept
+{
+    return GetCurrentThreadId() == record.thread && !record.busy.test(std::memory_order_acquire) &&
+        !residentChain.busy.test(std::memory_order_acquire);
+}
+
+void WithdrawFailedInstallation(ContextHookRecord& context, bool hdr) noexcept
+{
+    RevokeNativeRouting();
+    if (hdr) return;
+    RollbackSlots(residentChain, chainPatches);
+    RollbackSlots(context, contextPatches);
+    RollbackSlots(residentDevice, devicePatches);
 }
 
 bool ValidCreation(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
@@ -586,6 +699,7 @@ bool NativeRoutingOwned() noexcept
     auto* device = g_deviceHooks.load(std::memory_order_acquire);
     auto* context = g_contextHooks.load(std::memory_order_acquire);
     if (device == nullptr || context == nullptr) return false;
+    if (!context->retainedReferences.load(std::memory_order_acquire)) return false;
     if (*reinterpret_cast<void***>(device->owned) != device->table) return false;
     if (*reinterpret_cast<void***>(context->owned) != context->table) return false;
     const auto owned = [](auto& slot) { return slot.Health() == HookOwnershipState::owned; };
@@ -623,36 +737,61 @@ bool NativeRoutingInstaller::CompleteCoverage() noexcept
 NativeRoutingStatus NativeRoutingInstaller::Install(const CreatedDeviceBinding& created,
     std::uint64_t generation, void* creationNext) noexcept
 {
+    return InstallImpl(created, generation, creationNext, false);
+}
+
+bool NativeRoutingInstaller::InstallHdr(const CreatedDeviceBinding& created,
+    std::uint64_t generation, void* creationNext) noexcept
+{
+    return InstallImpl(created, generation, creationNext, true) == NativeRoutingStatus::installed;
+}
+
+NativeRoutingStatus NativeRoutingInstaller::InstallImpl(const CreatedDeviceBinding& created,
+    std::uint64_t generation, void* creationNext, bool hdr) noexcept
+{
     if (g_contextHooks.load(std::memory_order_acquire) != nullptr)
         return NativeRoutingStatus::residentRecordUnavailable;
     if (!ValidCreation(created, generation))
         return NativeRoutingStatus::unqualified;
     NativeBindingPreparation preparation;
+    preparation.hdr = hdr;
     if (!preparation.Prepare(created, creationNext)) return NativeRoutingStatus::unqualified;
     if (residentClaim.test_and_set(std::memory_order_acq_rel)) return NativeRoutingStatus::residentRecordUnavailable;
     auto* context = preparation.Publish(created, generation);
     if (context == nullptr) return NativeRoutingStatus::preparationFailed;
     if (InstallNativeSlots(*context) && CompleteCoverage())
         return NativeRoutingStatus::installed;
-    RevokeNativeRouting();
-    RollbackSlots(residentChain, chainPatches);
-    RollbackSlots(*context, contextPatches);
-    RollbackSlots(residentDevice, devicePatches);
+    WithdrawFailedInstallation(*context, hdr);
     return NativeRoutingStatus::installationFailed;
+}
+
+bool NativeRoutingInstaller::DiscardFresh(const CreatedDeviceBinding& created) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (record == nullptr) return true;
+    if (!MatchesFreshObjects(created, *record)) return true;
+    if (!FreshOwnerSafe(*record)) { RevokeNativeRouting(); return false; }
+    // Only the creation callback can discard this not-yet-escaped candidate.
+    RevokeNativeRouting();
+    if (!RestoreFreshTables(*record)) return false;
+    if (!RetireNativeOwners(*record)) return false;
+    record->resourcesRetired = true;
+    ReleaseFreshReferences(*record);
+    // Immutable raw identity values/next pointers remain comparison-only after release.
+    return true;
 }
 
 bool NativeRoutingInstaller::Retire() noexcept
 {
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return true;
+    if (!record->retainedReferences.load(std::memory_order_acquire)) return true;
     record->presentationProxy.RevokePublication();
     if (GetCurrentThreadId() != record->thread) { RevokeNativeRouting(); return false; }
     if (record->resourcesRetired) return true;
     // Query safety must be checked before revocation resets observation coverage.
     if (!NativeRetirementSafe(*record)) { RevokeNativeRouting(); return false; }
     RevokeNativeRouting();
-    const bool proxyRetired = record->presentationProxy.Retire();
-    if (!proxyRetired) return false;
     record->resourcesRetired = RetireNativeOwners(*record);
     return record->resourcesRetired;
 }

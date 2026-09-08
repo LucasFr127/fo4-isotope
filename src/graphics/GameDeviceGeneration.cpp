@@ -72,6 +72,7 @@ void* expectedExport{};
 
 void DisableBinding() noexcept
 {
+    RevokeNativeRouting();
     RevokeSettingsInputHost();
     static_cast<void>(publication.exchange(disabledToken, std::memory_order_acq_rel));
 }
@@ -189,6 +190,46 @@ bool ObserveDevice(const CreatedDeviceBinding& created) noexcept
         return false;
     }
     PublishBoundInputWindow(generation);
+    return true;
+}
+
+bool ObserveHdrDevice(const CreatedDeviceBinding& created) noexcept
+{
+    const auto thread = GetCurrentThreadId();
+    if (!RevokeForReplacement(thread)) return false;
+    if (binding.device != nullptr) return false;
+    DeviceCandidate candidate;
+    if (!CaptureCandidate(created, candidate)) return false;
+    if (binding.lastGeneration == disabledToken - 1) return false;
+    binding.thread = thread;
+    const auto generation = ++binding.lastGeneration;
+    if (!NativeRoutingInstaller::InstallHdr(created, generation, expectedExport)) return false;
+    binding.routing = NativeRoutingStatus::installed;
+    binding.Retain(candidate);
+    std::uint64_t expected{};
+    if (!publication.compare_exchange_strong(expected, generation, std::memory_order_release)) return false;
+    PublishBoundInputWindow(generation);
+    return true;
+}
+
+bool MatchesRetainedBinding(const CreatedDeviceBinding& created) noexcept
+{
+    return created.device == binding.device && created.context == binding.context &&
+        created.swapChain == binding.chain;
+}
+
+bool DiscardHdrDevice(const CreatedDeviceBinding& created) noexcept
+{
+    if (!NativeRoutingInstaller::DiscardFresh(created)) return false;
+    if (MatchesRetainedBinding(created))
+    {
+        if (binding.thread != GetCurrentThreadId()) return false;
+        RevokeSettingsInputHost();
+        binding.ReleaseOwned();
+        auto value = publication.load(std::memory_order_acquire);
+        if (value != disabledToken)
+            static_cast<void>(publication.compare_exchange_strong(value, 0, std::memory_order_acq_rel));
+    }
     return true;
 }
 
@@ -312,7 +353,7 @@ GraphicsDeviceBindingStatus InstallImport(std::span<std::byte> image) noexcept
     if (imported.status != PeIatStatus::success) return GraphicsDeviceBindingStatus::importUnavailable;
     if (!ResolveExpectedExport(imported.slot))
         return GraphicsDeviceBindingStatus::foreignPredecessor;
-    if (!PrepareDeviceCreationObserver(DeviceCreationCallbacks{nullptr, ObserveDevice, DisableBinding}))
+    if (!PrepareDeviceCreationObserver(DeviceCreationCallbacks{nullptr, ObserveDevice, DisableBinding, ObserveHdrDevice, DiscardHdrDevice}))
         return GraphicsDeviceBindingStatus::installationFailed;
     const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
     if (!importOwner.Install(imported.slot, reinterpret_cast<void*>(&HookD3dCreate),

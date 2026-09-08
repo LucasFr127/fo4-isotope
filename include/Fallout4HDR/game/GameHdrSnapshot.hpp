@@ -55,4 +55,13 @@ struct GameHdrSnapshot
 
 static_assert(std::is_trivially_copyable_v<GameHdrSnapshot>);
 
+struct GraphicsLifecyclePublication
+{
+    bool gameplayReady{};
+    std::uint64_t resetEpoch{};
+};
+
+// One copied publication; it conveys no game pointers or render-context ownership.
+[[nodiscard]] GraphicsLifecyclePublication ReadGraphicsLifecycle() noexcept;
+
 }  // namespace fo4hdr

@@ -3,6 +3,7 @@
 #include "ContextHooks.hpp"
 #include "HookRecords.hpp"
 #include "../HdrRenderer.hpp"
+#include "Fallout4HDR/game/GameHdrSnapshot.hpp"
 
 #include <d3d11_1.h>
 #include <wrl/client.h>
@@ -312,6 +313,7 @@ private:
 ContextHookRecord* OwnedQueryContext(ContextHookRecord& record,
     ID3D11DeviceContext* context) noexcept
 {
+    if (!record.retainedReferences.load(std::memory_order_acquire)) return nullptr;
     if (context != record.owned) return nullptr;
     return GetCurrentThreadId() == record.thread ? &record : nullptr;
 }
@@ -324,20 +326,67 @@ void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... argume
     if (record != nullptr && context == record->owned) RevokeNativeRouting();
 }
 
+void PublishPresentationUi(ContextHookRecord& record) noexcept
+{
+    record.uiCapture.WithdrawLostPresentationScene();
+    if (!record.hdrPrepared) return;
+    const auto status = record.uiCapture.Status();
+    if (status != NativeUiFrameStatus::targetUnqualified && status != NativeUiFrameStatus::unprepared) return;
+    static_cast<void>(record.uiCapture.BeginPresentationFrame(record.presentationProxy,
+        record.renderer, NativeUiCaptureScope::qualifiedExclusive));
+}
+
+void ObserveNativeScene(ContextHookRecord& record, FiniteDrawInvocation invocation) noexcept
+{
+    const auto scenes = record.renderer.BoundNativeSceneHandles();
+    const auto result = record.renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
+    if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
+    PublishPresentationUi(record);
+}
+
+bool ContinueAfterUi(ContextHookRecord& record, SceneDrawOutcome captured) noexcept
+{
+    if (!NativeRoutingOwned()) RevokeNativeRouting();
+    if (!record.queries.CanDispatch()) { record.uiCapture.CloseFrame(); return false; }
+    if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return false; }
+    return captured != SceneDrawOutcome::replaced;
+}
+
 void ObserveFiniteDraw(ContextHookRecord* record, NativeUiDrawKind kind,
     FiniteDrawInvocation invocation) noexcept
 {
     if (record == nullptr) return;
     if (!record->queries.CanDispatch()) return;
     const InternalRoutingWork internal{*record};
+    if (record->hdrPrepared && !NativeGameplayReady(*record)) return;
     const auto captured = record->uiCapture.ExecuteObserved(record->renderer.FrameGeneration(), kind, invocation);
-    if (!NativeRoutingOwned()) RevokeNativeRouting();
-    if (!record->queries.CanDispatch()) { record->uiCapture.CloseFrame(); return; }
-    if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return; }
-    if (captured == SceneDrawOutcome::replaced) return;
-    const auto scenes = record->renderer.BoundNativeSceneHandles();
-    const auto result = record->renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
-    if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
+    if (ContinueAfterUi(*record, captured)) ObserveNativeScene(*record, invocation);
+}
+
+bool CanRedirect(ContextHookRecord* record, UINT count, ID3D11RenderTargetView* const* targets) noexcept
+{
+    if (record == nullptr || !record->hdrPrepared) return false;
+    if (count > D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT) return false;
+    if (count != 0 && targets == nullptr) return false;
+    return record->queries.CanDispatch() && NativeGameplayReady(*record);
+}
+
+bool RedirectTargets(ContextHookRecord* record, UINT count, ID3D11RenderTargetView* const* targets,
+    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT>& redirected) noexcept
+{
+    if (!CanRedirect(record, count, targets)) return false;
+    bool changed{};
+    for (UINT index = 0; index < count; ++index)
+    {
+        auto* replacement = record->presentationProxy.ResolveRenderTarget(targets[index]);
+        redirected[index] = replacement != nullptr ? replacement : targets[index];
+        changed = changed || replacement != nullptr;
+    }
+    if (!changed) return false;
+    const InternalRoutingWork internal{*record};
+    if (!record->frameRedirected &&
+        !record->presentation.PrepareNativeRedirect(PresentationScope::qualifiedExclusive)) return false;
+    return true;
 }
 
 template <class Call>
@@ -367,6 +416,23 @@ void ForwardFiniteDraw(ID3D11DeviceContext* context, NativeUiDrawKind kind, Argu
 }
 
 }  // namespace
+
+bool NativeGameplayReady(ContextHookRecord& record) noexcept
+{
+    const auto lifecycle = ReadGraphicsLifecycle();
+    const bool changed = lifecycle.resetEpoch != record.lifecycleEpoch;
+    record.lifecycleEpoch = lifecycle.resetEpoch;
+    if (changed || !lifecycle.gameplayReady)
+    {
+        record.presentationProxy.InvalidateFrame();
+        record.uiCapture.CloseFrame();
+        static_cast<void>(record.renderer.EndFrame());
+    }
+    if (!lifecycle.gameplayReady) return false;
+    if (record.renderer.FrameGeneration() == 0)
+        return record.presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive);
+    return true;
+}
 
 void STDMETHODCALLTYPE HookBegin(ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
 {
@@ -415,7 +481,12 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(ID3D11DeviceContext* context, UINT
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
     const NativeRoutingScope scope{context};
-    ForwardContext(record->nextOmSetRenderTargets, context, count, targets, depth);
+    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> redirected{};
+    const bool changed = RedirectTargets(scope.Record(), count, targets, redirected);
+    auto* selected = changed ? redirected.data() : targets;
+    const bool completed = CallCaptured(record->nextOmSetRenderTargets, context, count, selected, depth);
+    if (!completed) RevokeNativeRouting();
+    else if (changed) scope.Record()->frameRedirected = true;
 }
 
 void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* context, UINT count,
@@ -425,7 +496,14 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* contex
     auto* record = g_contextHooks.load(std::memory_order_acquire);
     if (record == nullptr) return;
     const NativeRoutingScope scope{context};
-    ForwardContext(record->nextOmSetRenderTargetsAndUavs, context, count, targets, depth,
+    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> redirected{};
+    const auto* selected = targets;
+    if (RedirectTargets(scope.Record(), count, targets, redirected))
+    {
+        selected = redirected.data();
+        scope.Record()->frameRedirected = true;
+    }
+    ForwardContext(record->nextOmSetRenderTargetsAndUavs, context, count, selected, depth,
         firstUav, uavCount, uavs, initialCounts);
 }
 

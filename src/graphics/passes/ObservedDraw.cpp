@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ObservedDraw.hpp"
+#include "../resources/NativePresentationProxy.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -446,6 +447,7 @@ void NativeUiCapture::CloseFrame() noexcept
     if (!CanUse()) return;
     presentationTarget_.Reset();
     scenes_ = nullptr;
+    presentationProxy_ = nullptr;
     frame_ = 0;
     captured_ = {};
     failed_ = false;
@@ -472,12 +474,18 @@ bool NativeUiCapture::OwnedLayerAlias(ID3D11Texture2D* texture) const noexcept
         [texture](const Layer& layer) { return SameObject(texture, layer.texture.Get()); });
 }
 
+bool NativeUiCapture::FrameAdmissionCurrent(const NativeUiFrame& frame) const noexcept
+{
+    if (frame.frame == 0 || frame.frame < lastFrame_) return false;
+    return frame.frame != lastFrame_ || frame_ != 0;
+}
+
 bool NativeUiCapture::CanBeginFrame(const NativeUiFrame& frame, NativeUiCaptureScope scope) const noexcept
 {
     if (!CanUse()) return false;
     if (scope != NativeUiCaptureScope::qualifiedExclusive) return false;
-    if (frame.frame == 0) return false;
-    if (frame.frame < lastFrame_ || presentationTarget_) return false;
+    if (!FrameAdmissionCurrent(frame)) return false;
+    if (presentationTarget_) return false;
     if (!QualifiedRequirements(frame)) return false;
     return FrameScene(frame, device_.Get(), context_.Get());
 }
@@ -486,6 +494,26 @@ bool NativeUiCapture::BeginFrame(NativeUiFrame frame, NativeUiCaptureScope scope
 {
     if (!CanBeginFrame(frame, scope)) return false;
     if (!QualifiedTarget(frame.presentationTarget)) return false;
+    return CommitFrame(frame);
+}
+
+bool NativeUiCapture::BeginPresentationFrame(NativePresentationProxy& proxy,
+    ScenePassRenderer& scenes, NativeUiCaptureScope scope) noexcept
+{
+    const auto owned = proxy.SceneViews();
+    const auto selected = scenes.Views(scenes.CurrentScene());
+    if (!scenes.CurrentSceneOperatorProduced()) return false;
+    if (!SameObject(owned.texture, selected.texture)) return false;
+    if (!SameDevice(owned.renderTarget, device_.Get())) return false;
+    const NativeUiFrame frame{scenes.FrameGeneration(), owned.renderTarget, &scenes};
+    if (!CanBeginFrame(frame, scope)) return false;
+    if (!CommitFrame(frame)) return false;
+    presentationProxy_ = &proxy;
+    return PresentationSceneCurrent();
+}
+
+bool NativeUiCapture::CommitFrame(const NativeUiFrame& frame) noexcept
+{
     if (frame.frame != frame_) AdvanceFrame(frame.frame);
     if (frame.frame != frame_) return false;
     presentationTarget_ = frame.presentationTarget;
@@ -494,14 +522,24 @@ bool NativeUiCapture::BeginFrame(NativeUiFrame frame, NativeUiCaptureScope scope
     return true;
 }
 
+void NativeUiCapture::WithdrawLostPresentationScene() noexcept
+{
+    if (CanUse() && !PresentationSceneCurrent()) CloseFrame();
+}
+
+bool NativeUiCapture::MissingRequiredLayer() const noexcept
+{
+    for (std::size_t index = 0; index < captured_.size(); ++index)
+        if (!captured_[index] && requirements_[index] == NativeUiLayerRequirement::required) return true;
+    return false;
+}
+
 NativeUiFrameStatus NativeUiCapture::Status() const noexcept
 {
     if (!CanUse() || frame_ == 0) return NativeUiFrameStatus::unprepared;
-    if (failed_) return NativeUiFrameStatus::failed;
+    if (failed_ || !PresentationSceneCurrent()) return NativeUiFrameStatus::failed;
     if (!presentationTarget_) return NativeUiFrameStatus::targetUnqualified;
-    for (std::size_t index = 0; index < captured_.size(); ++index)
-        if (!captured_[index] && requirements_[index] == NativeUiLayerRequirement::required)
-            return NativeUiFrameStatus::missingRequired;
+    if (MissingRequiredLayer()) return NativeUiFrameStatus::missingRequired;
     return NativeUiFrameStatus::ready;
 }
 
@@ -520,9 +558,20 @@ bool NativeUiCapture::QualifiedDraw(const QualifiedNativeUiDraw& draw) const noe
     return draw.kind == NativeUiDrawKind::indexedSix;
 }
 
+bool NativeUiCapture::PresentationSceneCurrent() const noexcept
+{
+    if (presentationProxy_ == nullptr) return true;
+    if (scenes_ == nullptr || !scenes_->CurrentSceneOperatorProduced()) return false;
+    if (scenes_->CurrentSceneDomain() != SceneColorDomain::bt2020UiRelative) return false;
+    const auto owned = presentationProxy_->SceneViews();
+    const auto selected = scenes_->Views(scenes_->CurrentScene());
+    return owned.texture != nullptr && SameObject(owned.texture, selected.texture) &&
+        SameObject(owned.renderTarget, presentationTarget_.Get());
+}
+
 bool NativeUiCapture::CanCapture(const QualifiedNativeUiDraw& draw) const noexcept
 {
-    if (!CanUse()) return false;
+    if (!CanUse() || !PresentationSceneCurrent()) return false;
     if (draw.frame != frame_ || !presentationTarget_) return false;
     return scenes_ != nullptr && scenes_->FrameGeneration() == draw.frame;
 }

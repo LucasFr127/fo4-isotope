@@ -62,6 +62,17 @@ public:
     // Numeric LUT/peak/white changes retain the chain. Device, descriptor or display
     // changes revoke qualification; retire before resize.
     HRESULT PrepareChain(IDXGISwapChain* chain) noexcept;
+    // Fresh native candidates prove both spaces before applying either. Resize
+    // reuses only this same admitted chain's recorded qualification. Initial pixels stay SDR.
+    HRESULT PrepareNativeChain(IDXGISwapChain* chain, bool previouslyQualified = false) noexcept;
+    [[nodiscard]] bool BeginNativeFrame(PresentationScope scope) noexcept;
+    // Before the first redirect only: establish a current SDR black terminal while
+    // query-safe. A later refused composition leaves this prepared fallback intact.
+    [[nodiscard]] bool PrepareNativeRedirect(PresentationScope scope) noexcept;
+    [[nodiscard]] bool RestoreNativeSdrSpace() noexcept;
+    // Consume before captured native Present; unredirected native pixels remain SDR.
+    [[nodiscard]] bool FinishNativeFrame(bool redirected, bool hdrEligible,
+        PresentationScope scope) noexcept;
     [[nodiscard]] bool Active() const noexcept;
     [[nodiscard]] GpuPerformanceSnapshot Performance() const noexcept;
     void PollPerformance(PresentationScope scope) noexcept;
@@ -130,6 +141,12 @@ private:
     [[nodiscard]] bool CanPrepareChain() const noexcept;
     [[nodiscard]] bool CanRetire() const noexcept;
     HRESULT PrepareBuffer(IDXGISwapChain3* chain, ChainBuffer& prepared) const noexcept;
+    [[nodiscard]] bool OwnedChainCall(IDXGISwapChain* chain) const noexcept;
+    HRESULT CreateTerminalView(ChainBuffer& prepared) const noexcept;
+    HRESULT PrepareOutputChain(IDXGISwapChain* chain,
+        Microsoft::WRL::ComPtr<IDXGISwapChain3>& candidate, ChainBuffer& prepared) const noexcept;
+    void CommitOutputChain(Microsoft::WRL::ComPtr<IDXGISwapChain3> candidate,
+        ChainBuffer prepared, bool hdr) noexcept;
     [[nodiscard]] bool UnbindChainBuffer() noexcept;
     void CloseFrame() noexcept;
     [[nodiscard]] bool SameChain(IDXGISwapChain* chain) const noexcept;
@@ -140,6 +157,8 @@ private:
         ID3D11UnorderedAccessView* terminal) const noexcept;
     [[nodiscard]] bool ReadSettingsOverlay(std::uint64_t frame,
         ID3D11UnorderedAccessView* terminal, SettingsWindowOverlay& overlay) noexcept;
+    [[nodiscard]] bool ClearTerminal(ID3D11UnorderedAccessView* target) noexcept;
+    [[nodiscard]] bool ComposeNativeFallback(ID3D11UnorderedAccessView* target) noexcept;
     void ComposeChain(PresentationScope scope) noexcept;
     [[nodiscard]] bool ComposeHdrChain(ID3D11UnorderedAccessView* target,
         PresentationScope scope) noexcept;

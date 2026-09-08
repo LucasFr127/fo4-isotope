@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShippingPixelShaderTests.hpp"
+#include "Fallout4HDR/game/GameHdrSnapshot.hpp"
 #include "passes/PresentationPass.hpp"
 #include "passes/ObservedDraw.hpp"
 #include "hooks/ContextHooks.hpp"
@@ -14,6 +15,16 @@
 #include <cstdint>
 #include <type_traits>
 #include <vector>
+
+namespace fo4hdr {
+
+GraphicsLifecyclePublication ReadGraphicsLifecycle() noexcept
+{
+    // This controlled process has no game observer and must not admit gameplay.
+    return {};
+}
+
+}  // namespace fo4hdr
 
 namespace fo4hdr::tests::gpu {
 namespace {
@@ -589,12 +600,41 @@ void VerifyProxyOutputRetirement(PixelFixture& fixture, NativePresentationProxy&
     fixture.CheckRestored(false);
 }
 
+void VerifyProxyRegistration(PixelFixture& fixture, NativePresentationProxy& proxy,
+    ScenePassRenderer& scenes, IDXGISwapChain* chain)
+{
+    DXGI_SWAP_CHAIN_DESC description{};
+    CheckHresult(chain->GetDesc(&description), "Registered proxy descriptor");
+    const ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height, fixture.whites};
+    FO4HDR_CHECK(scenes.InitializeBorrowed(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
+    SceneTextureHandle handle;
+    CheckHresult(scenes.AdoptPresentationScene(proxy, handle), "Register exact owned proxy");
+    FO4HDR_CHECK(scenes.Views(handle).texture == proxy.SceneViews().texture);
+    FO4HDR_CHECK(scenes.BeginFrame());
+    FO4HDR_CHECK(scenes.Views(scenes.CurrentScene()).texture == nullptr);
+    FO4HDR_CHECK(!scenes.CurrentSceneOperatorProduced());
+    proxy.RevokePublication();
+    FO4HDR_CHECK(scenes.Views(handle).texture == nullptr);
+    FO4HDR_CHECK(scenes.Retire());
+}
+
+void VerifyRegisteredProxyLifecycle(PixelFixture& fixture, NativePresentationProxy& proxy,
+    IDXGISwapChain* chain)
+{
+    ScenePassRenderer registered;
+    VerifyProxyRegistration(fixture, proxy, registered, chain);
+    CheckHresult(proxy.Retire() ? S_OK : E_FAIL, "Retire registered proxy");
+    CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
+        ? S_OK : E_FAIL, "Prepare ordinary proxy lifetime");
+}
+
 void VerifyProxyLifecycle(PixelFixture& fixture, IDXGISwapChain* chain)
 {
     fixture.Bind();
     NativePresentationProxy proxy;
     CheckHresult(proxy.Prepare(fixture.gpu.device.Get(), fixture.gpu.context.Get(), chain)
         ? S_OK : E_FAIL, "Prepare owned presentation proxy");
+    VerifyRegisteredProxyLifecycle(fixture, proxy, chain);
     auto original = OriginalProxyTarget(fixture, chain);
     auto alias = OriginalProxyTarget(fixture, chain);
     auto* borrowed = proxy.ResolveRenderTarget(original.Get());

@@ -2,6 +2,7 @@
 
 #include "HdrRenderer.hpp"
 #include "OperatorConstants.hpp"
+#include "resources/NativePresentationProxy.hpp"
 #include "RenoDxShaderIdentity.hpp"
 #include "d3d11/ScopedD3D11PixelBindings.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
@@ -705,21 +706,6 @@ void ScenePassRenderer::ReleaseResources() noexcept
     observedCount_ = 0;
 }
 
-const ScenePassRenderer::SceneTexture* ScenePassRenderer::Resolve(
-    SceneTextureHandle handle) const noexcept
-{
-    if (!Active() || handle.owner_ != this) return nullptr;
-    if (handle.epoch_ != lifetime_.CurrentEpoch() || handle.slot_ >= sceneCount_) return nullptr;
-    return &scenes_[handle.slot_];
-}
-
-SceneTextureViews ScenePassRenderer::Views(SceneTextureHandle handle) const noexcept
-{
-    const auto* scene = Resolve(handle);
-    if (scene == nullptr) return {};
-    return {scene->texture.Get(), scene->shaderResource.Get(), scene->renderTarget.Get()};
-}
-
 void ScenePassRenderer::ClearLineage() noexcept
 {
     nativeReferenceFrame_ = 0;
@@ -796,20 +782,6 @@ bool ScenePassRenderer::CompleteExposureFrame(std::uint64_t savedFrame,
     endedExposureFrame_ = 0;
     exposureLock_.EndFrame(savedFrame, exposureGeneration_, qualification.Eligible());
     return exposureLock_.Active();
-}
-
-SceneTextureHandle ScenePassRenderer::CurrentScene() const noexcept
-{
-    if (invoking_) return {};
-    if (!frameOpen_) return {};
-    if (Resolve(selectedScene_) == nullptr) return {};
-    return selectedScene_;
-}
-
-SceneColorDomain ScenePassRenderer::CurrentSceneDomain() const noexcept
-{
-    const auto* scene = Resolve(CurrentScene());
-    return scene != nullptr ? scene->domain : SceneColorDomain::bt709Scene;
 }
 
 void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept

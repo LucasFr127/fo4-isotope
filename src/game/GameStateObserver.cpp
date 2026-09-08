@@ -23,6 +23,7 @@ enum class InitializationState
 };
 
 fo4hdr::GameSnapshotStore snapshotStore;
+fo4hdr::GraphicsLifecyclePublisher graphicsLifecycle;
 fo4hdr::MenuEventQueue<256> menuEvents;
 std::atomic<InitializationState> initializationState{};
 std::atomic<bool> collectorFailed{};
@@ -149,6 +150,7 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
             fo4hdr::GameHdrSnapshot& snapshot) noexcept {
             fo4hdr::ApplyGameLifecycleTransition(
                 snapshot, event, succeeded, menuEvents.PublishedSequence());
+            graphicsLifecycle.PublishTransition(event, succeeded);
             resourceGeneration = snapshot.resourceGeneration;
         });
         if (fo4hdr::ShouldCollectGameSnapshotAtLifecycle(event, *outcome))
@@ -158,6 +160,7 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
     }
     catch (...)
     {
+        graphicsLifecycle.Disable();
         DisableCollection();
     }
 }
@@ -271,3 +274,12 @@ void InitializeGameStateObserver(const F4SE::LoadInterface* f4se) noexcept
 }
 
 }  // namespace fo4hdr::game
+
+namespace fo4hdr {
+
+GraphicsLifecyclePublication ReadGraphicsLifecycle() noexcept
+{
+    return graphicsLifecycle.Read();
+}
+
+}  // namespace fo4hdr

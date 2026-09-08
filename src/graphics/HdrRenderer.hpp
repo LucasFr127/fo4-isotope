@@ -28,6 +28,7 @@ namespace fo4hdr {
 class ScenePassRenderer;
 class PresentationPass;
 struct OperatorLutData;
+class NativePresentationProxy;
 
 struct LayerWhiteConfiguration
 {
@@ -216,6 +217,8 @@ public:
     // moves private references without another native call or format inference.
     HRESULT AdoptPromotedNativeSceneTexture(NativeSceneTexture& prepared,
         SceneTextureHandle& handle) noexcept;
+    // Exact owner-qualified FP16 presentation storage, not an R11 promotion marker.
+    HRESULT AdoptPresentationScene(NativePresentationProxy& proxy, SceneTextureHandle& handle) noexcept;
     // Explicit descriptor callers carry Execute's independent pass qualification.
     // Native callbacks instead use the observed-shader wrapper below.
     [[nodiscard]] NativeSceneHandles ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) const noexcept;
@@ -243,6 +246,7 @@ public:
     // Query at consumption: retained handles remain storage-valid after lineage expires.
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
     [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
+    [[nodiscard]] bool CurrentSceneOperatorProduced() const noexcept;
     // Zero denotes a closed or unavailable frame; completed layers use this token.
     [[nodiscard]] std::uint64_t FrameGeneration() const noexcept
     {
@@ -301,6 +305,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
         std::uint64_t nativeCreationGeneration{};
+        const NativePresentationProxy* presentationProxy{};
         bool toneProduced{};
         bool operatorProduced{};
         bool settingsStale{};
@@ -360,6 +365,8 @@ private:
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
     [[nodiscard]] bool PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept;
     [[nodiscard]] SceneTextureHandle NativeSceneForView(ID3D11View* view, bool input) const noexcept;
+    [[nodiscard]] bool PresentationStorageCurrent(const SceneTexture& scene) const noexcept;
+    [[nodiscard]] bool PresentationViewsQualified(SceneTextureViews views) const noexcept;
     [[nodiscard]] bool NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept;
     [[nodiscard]] bool QualifiedSceneTexture(const D3D11_TEXTURE2D_DESC& original,
         ID3D11Texture2D* texture) const noexcept;
