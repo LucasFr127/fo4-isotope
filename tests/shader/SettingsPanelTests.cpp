@@ -298,6 +298,7 @@ void CheckSettingsHostResize(NativeSettingsHost& host, ScenePassRenderer& scenes
     (void)SendMessageW(window, WM_KEYUP, VK_F10, toggleScan | (1ULL << 31));
     const auto overlay = host.Window()->Draw(3, SettingsWindowScope::qualifiedExclusive);
     FO4HDR_CHECK(overlay.width == width && overlay.height == height);
+    FO4HDR_CHECK(overlay.calibrationMode == 0);
     CheckOverlayPixels(gpu, overlay);
 }
 
@@ -353,12 +354,16 @@ void RenderOwnedBackend()
     FO4HDR_CHECK(forwardedToggles == 2);
     const auto overlay = settings.Draw(1, SettingsWindowScope::qualifiedExclusive);
     FO4HDR_CHECK(overlay.frame == 1);
+    FO4HDR_CHECK(overlay.calibrationMode == 0);
     CheckOverlayPixels(device, overlay);
     FO4HDR_CHECK(settings.Draw(1, SettingsWindowScope::qualifiedExclusive).source == overlay.source);
     (void)SendMessageW(window.Window(), WM_KILLFOCUS, 0, 0);
-    FO4HDR_CHECK(settings.Draw(2, SettingsWindowScope::qualifiedExclusive).source == nullptr);
+    const auto closed = settings.Draw(2, SettingsWindowScope::qualifiedExclusive);
+    FO4HDR_CHECK(closed.source == nullptr && closed.calibrationMode == 0);
     CheckSettingsHostResize(host, scenes, device, configuration);
     RequireSettingsHost(host.RetireCold(), "Settings host cold retirement");
+    const auto retired = settings.Draw(4, SettingsWindowScope::qualifiedExclusive);
+    FO4HDR_CHECK(retired.source == nullptr && retired.calibrationMode == 0);
     RequireSettingsHost(output.Retire(), "Settings host output retirement");
     RequireSettingsHost(scenes.Retire(), "Settings host scene retirement");
 }

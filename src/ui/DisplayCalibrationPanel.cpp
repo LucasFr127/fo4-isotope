@@ -69,7 +69,7 @@ bool DrawPeak(HdrSettings& settings, std::uint32_t& mode) noexcept
 {
     ImGui::SeparatorText("1. Set peak brightness");
     DrawPattern("Peak-white clipping ramp",
-        "32 steps from zero to 112.5 percent of the active peak; above-peak steps are contained.",
+        "32 steps from zero to 112.5 percent of the active peak; above-peak steps remain for comparison.",
         10, mode);
     return DrawBrightness("Calibration display peak", settings.displayPeakNits,
         {kMinimumDisplayPeakNits, kMaximumDisplayPeakNits, HdrSettings{}.displayPeakNits});

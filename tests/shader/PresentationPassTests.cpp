@@ -128,7 +128,7 @@ struct TerminalImage
 
 void CheckTerminalNits(std::uint32_t packed, LinearRgb light)
 {
-    const auto encoded = EncodeSt2084Pq(ContainBt2020Nits(light, presentationPeakNits));
+    const auto encoded = EncodeSt2084Pq(ContainBt2020Nits(light, 10000.0));
     const std::array expected{QuantizeR10Unorm(encoded.red), QuantizeR10Unorm(encoded.green),
         QuantizeR10Unorm(encoded.blue)};
     for (UINT channel = 0; channel < expected.size(); ++channel)

@@ -44,7 +44,6 @@ void main(uint3 pixel : SV_DispatchThreadID)
     {
         light = Fo4HdrBlendAuthoredLayer(light, SettingsPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
     }
-    const float3 contained = Fo4HdrBoundLight(light, DisplayPeakNits);
     // Encode only at the terminal UAV, after all contributions are linear light.
-    PresentTarget[pixel.xy] = float4(Fo4HdrEncodeAbsoluteLight(contained), 1.0f);
+    PresentTarget[pixel.xy] = float4(Fo4HdrEncodeAbsoluteLight(light), 1.0f);
 }

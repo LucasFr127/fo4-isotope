@@ -136,6 +136,7 @@ $files = [string[]]@(
     "shaders/output/SceneLayers.hlsli",
     "shaders/output/PresentPixels.cs.hlsl",
     "tests/shader/PresentationPassTests.cpp",
+    "tests/shader/DisplayCalibrationTests.cpp",
     "LICENSES/Apache-2.0.txt",
     "include/Fallout4HDR/tonemap/Aces2.hpp",
     "include/Fallout4HDR/tonemap/Aces2Lmt.hpp",

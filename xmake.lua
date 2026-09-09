@@ -266,6 +266,7 @@ target("fo4hdr-shader-tests")
         "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/NativeReferencePrepareTests.cpp", "tests/shader/PresentationPassTests.cpp",
+        "tests/shader/DisplayCalibrationTests.cpp",
         "tests/shader/CreativeGradeLutTests.cpp", "tests/shader/HdrGradeTransferTests.cpp",
         "tests/shader/ImageControlsTests.cpp",
         "src/graphics/passes/ArmorEncodedComposition.cpp", "tests/shader/ArmorCompositionTests.cpp",

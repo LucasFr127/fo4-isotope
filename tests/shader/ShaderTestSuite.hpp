@@ -7,6 +7,7 @@ namespace fo4hdr::tests::gpu {
 void VerifyNativeReferencePreparation(const std::filesystem::path& fixtureDirectory);
 void VerifyShippingPixelShaders(const std::filesystem::path& fixtureDirectory);
 void VerifyPresentationPass(const std::filesystem::path& fixtureDirectory);
+void VerifyDisplayCalibration(const std::filesystem::path& fixtureDirectory);
 void VerifyArmorEncodedComposition(const std::filesystem::path& directory);
 void VerifyImageControls(const std::filesystem::path& directory);
 void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory);

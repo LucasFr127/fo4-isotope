@@ -110,6 +110,7 @@ int wmain(int argc, wchar_t** argv)
             shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyDeveloperExposure(
             shaderPath.parent_path());
+        fo4hdr::tests::gpu::VerifyDisplayCalibration(shaderPath.parent_path());
         fo4hdr::tests::RunSettingsPanelTests();
         if (fo4hdr::test::failures != 0)
         {
