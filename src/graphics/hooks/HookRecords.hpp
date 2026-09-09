@@ -3,6 +3,7 @@
 
 #include "ContextHooks.hpp"
 #include "../HdrRenderer.hpp"
+#include "../NativeSettingsHost.hpp"
 #include "../passes/PresentationPass.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "../passes/ObservedDraw.hpp"
@@ -79,7 +80,7 @@ struct ContextHookRecord
     NativeUiCapture uiCapture;
     NativePresentationProxy presentationProxy;
     PresentationPass presentation;
-    OperatorLutData defaultOperator;
+    NativeSettingsHost settingsHost;
     SceneTextureHandle presentationScene;
     std::atomic<bool> retainedReferences{};
     std::uint64_t lifecycleEpoch{};

@@ -4,6 +4,7 @@
 #include "DisplayCalibrationPanel.hpp"
 #include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
+#include "NativeSettingsHost.hpp"
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "ShippingPixelShaderTests.hpp"
 #include "TestHarness.hpp"
@@ -13,6 +14,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <stdexcept>
+#include <string_view>
 
 namespace fo4hdr::tests {
 namespace {
@@ -129,6 +136,7 @@ void RenderCalibrationFrame()
 }
 
 thread_local unsigned forwardedToggles{};
+constexpr LPARAM toggleScan = 0x44 << 16;
 
 LRESULT CALLBACK SettingsTestWindowProcedure(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
 {
@@ -202,6 +210,7 @@ void CheckCapturedText(HdrSettingsInput& input, HWND window)
     constexpr LPARAM scan = 0x1E << 16;
     input.SetCapture(true, true, false);
     FO4HDR_CHECK(input.Observe(window, WM_KEYDOWN, 'A', scan));
+    FO4HDR_CHECK(!SetSettingsInputHostConsumerReady(1, false));
     FO4HDR_CHECK(input.Observe(window, WM_CHAR, 'A', scan));
     input.SetCapture(false, false, false);
     FO4HDR_CHECK(input.Observe(window, WM_KEYUP, 'A', scan | (1ULL << 31)));
@@ -210,12 +219,94 @@ void CheckCapturedText(HdrSettingsInput& input, HWND window)
     FO4HDR_CHECK(snapshot.messages == 3);
     FO4HDR_CHECK(messages[1].message == WM_CHAR && messages[1].key == 'A');
 }
+class SettingsHostInputFile
+{
+public:
+    SettingsHostInputFile()
+    {
+        const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
+        directory_ = std::filesystem::temp_directory_path() /
+            ("Fallout4HDR-settings-host-" + std::to_string(token));
+        if (!std::filesystem::create_directory(directory_))
+            throw std::runtime_error("Cannot create settings host directory");
+        std::ofstream output(Path(), std::ios::binary | std::ios::trunc);
+        output << "[Output]\nDisplayPeakNits=900\nUiPaperWhiteNits=150\nVideoWhiteNits=175\n"
+                  "[ToneMapper]\nAlgorithm=GT7\n";
+        output.close();
+        if (!output) throw std::runtime_error("Cannot write settings host input");
+    }
+
+    ~SettingsHostInputFile()
+    {
+        std::error_code ignored;
+        std::filesystem::remove_all(directory_, ignored);
+    }
+
+    std::filesystem::path Path() const { return directory_ / "settings.ini"; }
+
+private:
+    std::filesystem::path directory_;
+};
+
+std::unique_ptr<OperatorLutBuildResult> PrepareSettingsHostTable(const PluginConfiguration& initial)
+{
+    auto prepared = std::make_unique<OperatorLutBuildResult>();
+    prepared->request = {initial.algorithm, initial.display.displayPeakNits, 1,
+        ActiveToneMapperParameters(initial.algorithm, initial.display.toneMapperParameters)};
+    prepared->data = BuildOperatorLut(initial.algorithm, initial.display.displayPeakNits,
+        prepared->request.parameters, {});
+    gpu::CheckHresult(prepared->data.IsValid() ? S_OK : E_FAIL, "Settings host table");
+    return prepared;
+}
+
+void RequireSettingsHost(bool accepted, std::string_view operation)
+{
+    gpu::CheckHresult(accepted ? S_OK : E_FAIL, operation);
+}
+
+void CheckSettingsHostResize(NativeSettingsHost& host, ScenePassRenderer& scenes,
+    const gpu::Device& gpu, const NativeSettingsHostConfiguration& configuration)
+{
+    auto& output = *configuration.presentation;
+    const auto window = configuration.window;
+
+    RequireSettingsHost(host.SuspendSurfaceForResize(), "Settings host suspend");
+    RequireSettingsHost(output.Retire(), "Settings host output retire");
+    RequireSettingsHost(scenes.RetireForResize(), "Settings host scene retire");
+    RECT previous{};
+    RequireSettingsHost(GetWindowRect(window, &previous) != FALSE, "Settings host old window");
+    RequireSettingsHost(SetWindowPos(window, nullptr, 0, 0,
+        previous.right - previous.left + 2, previous.bottom - previous.top + 2,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "Settings host window resize");
+    RECT client{};
+    RequireSettingsHost(GetClientRect(window, &client) != FALSE, "Settings host new client");
+    const auto width = static_cast<UINT>(client.right);
+    const auto height = static_cast<UINT>(client.bottom);
+    PresentationConfiguration active;
+    RequireSettingsHost(host.ReadActiveOutputConfiguration(width, height, scenes, active),
+        "Settings host active output tuple");
+    RequireSettingsHost(scenes.ReinitializeBorrowed(gpu.device.Get(), gpu.context.Get(),
+        {width, height, active.whites}), "Settings host scene rebuild");
+    std::destroy_at(&output);
+    std::construct_at(&output);
+    RequireSettingsHost(output.Initialize(gpu.device.Get(), gpu.context.Get(),
+        active), "Settings host output rebuild");
+    RequireSettingsHost(host.ResumeAfterResize(width, height, PresentationScope::qualifiedExclusive), "Settings host active reapply");
+    FO4HDR_CHECK(!host.CommitClosedFrame(PresentationScope::qualifiedExclusive));
+    (void)SendMessageW(window, WM_SETFOCUS, 0, 0);
+    (void)SendMessageW(window, WM_KEYDOWN, VK_F10, toggleScan);
+    (void)SendMessageW(window, WM_KEYUP, VK_F10, toggleScan | (1ULL << 31));
+    const auto overlay = host.Window()->Draw(3, SettingsWindowScope::qualifiedExclusive);
+    FO4HDR_CHECK(overlay.width == width && overlay.height == height);
+    CheckOverlayPixels(gpu, overlay);
+}
+
 void RenderOwnedBackend()
 {
     OwnedSettingsWindow window;
     if (!window.Window() || !window.input) return;
-    (void)SendMessageW(window.Window(), WM_KEYDOWN, VK_F10, 0);
-    (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, 1ULL << 31);
+    (void)SendMessageW(window.Window(), WM_KEYDOWN, VK_F10, toggleScan);
+    (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, toggleScan | (1ULL << 31));
     FO4HDR_CHECK(forwardedToggles == 2);
     CheckCapturedText(*window.input, window.Window());
     DisplayDiscovery discovery;
@@ -229,18 +320,36 @@ void RenderOwnedBackend()
     const auto device = gpu::CreateWarpDevice();
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context;
     gpu::CheckHresult(device.context.As(&context), "Settings Context1");
-    LiveSettings live;
-    SettingsWindow settings;
-    const SettingsWindowConfiguration configuration{window.Window(),
-        static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), window.input, &live};
-    FO4HDR_CHECK(configuration.persistence == nullptr);
-    const auto initialized = settings.Initialize(device.device.Get(), context.Get(), configuration);
-    FO4HDR_CHECK(initialized);
-    if (!initialized) return;
-    FO4HDR_CHECK(SetSettingsInputHostConsumerReady(1, true));
+    const SettingsHostInputFile inputFile;
+    const auto loaded = LoadPluginConfiguration(inputFile.Path());
+    RequireSettingsHost(loaded.status == PluginConfigurationStatus::loaded,
+        "Settings host loaded tuple");
+    auto prepared = PrepareSettingsHostTable(loaded.value);
+    const LayerWhiteConfiguration whites{static_cast<float>(loaded.value.display.uiPaperWhiteNits),
+        static_cast<float>(loaded.value.display.videoWhiteNits)};
+    const auto width = static_cast<UINT>(client.right);
+    const auto height = static_cast<UINT>(client.bottom);
+    ScenePassRenderer scenes;
+    NativeSettingsHost host;
+    PresentationPass output;
+    RequireSettingsHost(scenes.InitializeBorrowed(device.device.Get(), device.context.Get(),
+        {width, height, whites, &prepared->data}), "Settings host scenes");
+    RequireSettingsHost(output.Initialize(device.device.Get(), device.context.Get(),
+        {width, height, static_cast<float>(loaded.value.display.displayPeakNits),
+            &scenes, whites, host.Window()}), "Settings host output");
+    NativeSettingsHostConfiguration configuration{device.device.Get(), context.Get(), &output,
+        PresentationScope::qualifiedExclusive, window.Window(), width, height, 2,
+        inputFile.Path(), loaded.value};
+    FO4HDR_CHECK(!host.InitializeCold(configuration, prepared));
+    FO4HDR_CHECK(prepared != nullptr);
+    configuration.generation = 1;
+    RequireSettingsHost(host.InitializeCold(configuration, prepared),
+        "Settings host initial adoption");
+    FO4HDR_CHECK(!prepared);
+    auto& settings = *host.Window();
     (void)SendMessageW(window.Window(), WM_SETFOCUS, 0, 0);
-    (void)SendMessageW(window.Window(), WM_KEYDOWN, VK_F10, 0);
-    (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, 1ULL << 31);
+    (void)SendMessageW(window.Window(), WM_KEYDOWN, VK_F10, toggleScan);
+    (void)SendMessageW(window.Window(), WM_KEYUP, VK_F10, toggleScan | (1ULL << 31));
     FO4HDR_CHECK(forwardedToggles == 2);
     const auto overlay = settings.Draw(1, SettingsWindowScope::qualifiedExclusive);
     FO4HDR_CHECK(overlay.frame == 1);
@@ -248,8 +357,10 @@ void RenderOwnedBackend()
     FO4HDR_CHECK(settings.Draw(1, SettingsWindowScope::qualifiedExclusive).source == overlay.source);
     (void)SendMessageW(window.Window(), WM_KILLFOCUS, 0, 0);
     FO4HDR_CHECK(settings.Draw(2, SettingsWindowScope::qualifiedExclusive).source == nullptr);
-    FO4HDR_CHECK(SetSettingsInputHostConsumerReady(1, false));
-    FO4HDR_CHECK(settings.Retire());
+    CheckSettingsHostResize(host, scenes, device, configuration);
+    RequireSettingsHost(host.RetireCold(), "Settings host cold retirement");
+    RequireSettingsHost(output.Retire(), "Settings host output retirement");
+    RequireSettingsHost(scenes.Retire(), "Settings host scene retirement");
 }
 
 }  // namespace

@@ -186,6 +186,8 @@ $files = [string[]]@(
     "tests/unit/config/HdrSettingsTestSupport.hpp",
     "tests/unit/config/HdrConfigurationTests.cpp",
     "src/graphics/LiveSettings.hpp",
+    "src/graphics/NativeSettingsHost.hpp",
+    "src/graphics/NativeSettingsHost.cpp",
     "include/Fallout4HDR/ui/HdrSettingsInput.hpp",
     "include/Fallout4HDR/ui/SettingsWindow.hpp",
     "src/ui/HdrSettingsInput.cpp",

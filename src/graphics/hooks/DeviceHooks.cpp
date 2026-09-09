@@ -343,45 +343,61 @@ void RollbackSlots(Record& record, const std::array<SlotPatch, Count>& patches) 
     }
 }
 
-bool PrepareDefaultOperator(ContextHookRecord& record, bool hdr) noexcept
+bool QualifiedSettingsStartup(const NativeSettingsStartup& startup) noexcept
 {
-    if (!hdr) return true;
-    record.defaultOperator = BuildOperatorLut(OperatorLutAlgorithm::aces2, 1000.0);
-    return record.defaultOperator.IsValid();
+    if (!startup.prepared) return false;
+    const auto& value = startup.configuration.settings;
+    if (!ValidatePluginConfiguration(value)) return false;
+    const auto& result = *startup.prepared;
+    if (result.request.algorithm != value.algorithm ||
+        result.request.displayPeakNits != value.display.displayPeakNits) return false;
+    return ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters) ==
+        ActiveToneMapperParameters(result.request.algorithm, result.request.parameters) &&
+        PreparedOperatorLutMatches(result.data, result.request);
+}
+
+ScenePassConfiguration InitialSceneConfiguration(const DXGI_SWAP_CHAIN_DESC& description,
+    const NativeSettingsStartup* startup) noexcept
+{
+    ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height};
+    if (startup == nullptr) return configuration;
+    const auto& display = startup->configuration.settings.display;
+    configuration.whites = {static_cast<float>(display.uiPaperWhiteNits),
+        static_cast<float>(display.videoWhiteNits)};
+    configuration.operatorLut = &startup->prepared->data;
+    configuration.sceneGrade = {static_cast<float>(display.vanillaColorGradingStrengthPercent / 100.0),
+        DeriveHdrSettingsMath(display), display.colorGradingMethod};
+    return configuration;
 }
 
 bool PrepareHdrOutput(ContextHookRecord& record, const CreatedDeviceBinding& created,
     ScenePassConfiguration configuration) noexcept
 {
     if (FAILED(record.renderer.AdoptPresentationScene(record.presentationProxy, record.presentationScene))) return false;
-    const PresentationConfiguration output{configuration.width, configuration.height, 1000.0F, &record.renderer, {}};
+    const PresentationConfiguration output{configuration.width, configuration.height,
+        static_cast<float>(configuration.operatorLut->displayPeakNits), &record.renderer,
+        configuration.whites, record.settingsHost.Window()};
     if (!record.presentation.Initialize(created.device, created.context, output)) return false;
     if (FAILED(record.presentation.PrepareNativeChain(created.swapChain))) return false;
     record.hdrPrepared = true;
     return true;
 }
 
-bool PrepareRendererResources(ContextHookRecord& record, const CreatedDeviceBinding& created,
-    ScenePassConfiguration configuration, bool hdr) noexcept
-{
-    const bool uiPrepared = record.uiCapture.Initialize(created.device, created.context, configuration);
-    const bool proxyPrepared = record.presentationProxy.Prepare(created.device, created.context, created.swapChain);
-    if (!hdr) return true;
-    if (!uiPrepared) return false;
-    if (!proxyPrepared) return false;
-    return PrepareHdrOutput(record, created, configuration);
-}
-
-bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& created, bool hdr) noexcept
+bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& created,
+    const NativeSettingsStartup* startup) noexcept
 {
     if (created.swapChain == nullptr) return false;
     DXGI_SWAP_CHAIN_DESC description{};
     if (FAILED(created.swapChain->GetDesc(&description))) return false;
-    if (!PrepareDefaultOperator(record, hdr)) return false;
-    const ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height, {},
-        hdr ? &record.defaultOperator : nullptr};
+    const auto configuration = InitialSceneConfiguration(description, startup);
     if (!record.renderer.InitializeBorrowed(created.device, created.context, configuration)) return false;
-    if (!PrepareRendererResources(record, created, configuration, hdr)) return false;
+    const bool ui = record.uiCapture.Initialize(created.device, created.context, configuration);
+    const bool proxy = record.presentationProxy.Prepare(created.device, created.context, created.swapChain);
+    if (startup != nullptr)
+    {
+        if (!ui || !proxy) return false;
+        if (!PrepareHdrOutput(record, created, configuration)) return false;
+    }
     const ContextQueryPredecessors next{record.nextBegin, record.nextEnd, record.nextExecuteCommandList};
     return record.queries.Prepare(created.context, record.generation, next, &record.renderer) ==
         ContextQueryPreparation::coverageUnobserved;
@@ -543,7 +559,7 @@ struct NativeBindingPreparation
     std::array<void*, 10> contextOriginals{};
     std::array<void*, 2> chainOriginals{};
     DXGI_SWAP_CHAIN_DESC description{};
-    bool hdr{};
+    const NativeSettingsStartup* startup{};
 
     bool PrepareChain(const CreatedDeviceBinding& created) noexcept
     {
@@ -594,7 +610,7 @@ struct NativeBindingPreparation
         if (!CaptureSlotProtection(residentDevice, devicePatches)) return nullptr;
         if (!CaptureSlotProtection(*context, contextPatches)) return nullptr;
         if (!CaptureSlotProtection(residentChain, chainPatches)) return nullptr;
-        return PrepareRenderer(*context, created, hdr) ? context : nullptr;
+        return PrepareRenderer(*context, created, startup) ? context : nullptr;
     }
 };
 
@@ -607,7 +623,7 @@ bool InstallNativeSlots(ContextHookRecord& context) noexcept
 
 bool RetireNativeOwners(ContextHookRecord& record) noexcept
 {
-    return record.presentation.Retire() && record.uiCapture.Retire() &&
+    return record.settingsHost.RetireCold() && record.presentation.Retire() && record.uiCapture.Retire() &&
         record.presentationProxy.Retire() && record.renderer.Retire() && record.queries.Retire();
 }
 
@@ -720,6 +736,7 @@ void RevokeNativeRouting() noexcept
     record->admitted.store(false, std::memory_order_release);
     record->presentationProxy.RevokePublication();
     record->queries.RevokeCoverage();
+    record->settingsHost.Revoke();
 }
 
 bool NativeRoutingInstaller::CompleteCoverage() noexcept
@@ -737,32 +754,84 @@ bool NativeRoutingInstaller::CompleteCoverage() noexcept
 NativeRoutingStatus NativeRoutingInstaller::Install(const CreatedDeviceBinding& created,
     std::uint64_t generation, void* creationNext) noexcept
 {
-    return InstallImpl(created, generation, creationNext, false);
+    return InstallImpl(created, generation, creationNext, nullptr);
 }
 
 bool NativeRoutingInstaller::InstallHdr(const CreatedDeviceBinding& created,
-    std::uint64_t generation, void* creationNext) noexcept
+    std::uint64_t generation, void* creationNext, const NativeSettingsStartup& startup) noexcept
 {
-    return InstallImpl(created, generation, creationNext, true) == NativeRoutingStatus::installed;
+    if (!QualifiedSettingsStartup(startup)) return false;
+    return InstallImpl(created, generation, creationNext, &startup) == NativeRoutingStatus::installed;
 }
 
 NativeRoutingStatus NativeRoutingInstaller::InstallImpl(const CreatedDeviceBinding& created,
-    std::uint64_t generation, void* creationNext, bool hdr) noexcept
+    std::uint64_t generation, void* creationNext, const NativeSettingsStartup* startup) noexcept
 {
     if (g_contextHooks.load(std::memory_order_acquire) != nullptr)
         return NativeRoutingStatus::residentRecordUnavailable;
     if (!ValidCreation(created, generation))
         return NativeRoutingStatus::unqualified;
     NativeBindingPreparation preparation;
-    preparation.hdr = hdr;
+    preparation.startup = startup;
     if (!preparation.Prepare(created, creationNext)) return NativeRoutingStatus::unqualified;
     if (residentClaim.test_and_set(std::memory_order_acq_rel)) return NativeRoutingStatus::residentRecordUnavailable;
     auto* context = preparation.Publish(created, generation);
     if (context == nullptr) return NativeRoutingStatus::preparationFailed;
     if (InstallNativeSlots(*context) && CompleteCoverage())
         return NativeRoutingStatus::installed;
-    WithdrawFailedInstallation(*context, hdr);
+    WithdrawFailedInstallation(*context, startup != nullptr);
     return NativeRoutingStatus::installationFailed;
+}
+
+namespace {
+
+class SettingsResourcePreparation
+{
+public:
+    explicit SettingsResourcePreparation(ContextHookRecord& record) noexcept : record_(record)
+    { record_.internalWork = true; }
+    ~SettingsResourcePreparation() noexcept { record_.internalWork = false; }
+    SettingsResourcePreparation(const SettingsResourcePreparation&) = delete;
+    SettingsResourcePreparation& operator=(const SettingsResourcePreparation&) = delete;
+private:
+    ContextHookRecord& record_;
+};
+
+bool ActivateNativeSettings(ContextHookRecord& record, const NativeSettingsStartup& startup) noexcept
+{
+    try
+    {
+        ComPtr<ID3D11DeviceContext1> context;
+        if (FAILED(record.owned->QueryInterface(IID_PPV_ARGS(&context)))) return false;
+        const auto& chain = residentChain.description;
+        const NativeSettingsHostConfiguration configuration{residentDevice.owned, context.Get(),
+            &record.presentation, PresentationScope::qualifiedExclusive, chain.OutputWindow,
+            chain.BufferDesc.Width, chain.BufferDesc.Height, record.generation,
+            startup.configuration.persistencePath, startup.configuration.settings};
+        const SettingsResourcePreparation preparation{record};
+        return record.settingsHost.InitializeCold(configuration, startup.prepared);
+    }
+    catch (...) { return false; }
+}
+
+bool FreshSettingsOwner(const CreatedDeviceBinding& created, const ContextHookRecord* record) noexcept
+{
+    return record != nullptr && MatchesFreshObjects(created, *record) &&
+        FreshOwnerSafe(*record) && NativeRoutingOwned();
+}
+
+}  // namespace
+
+bool NativeRoutingInstaller::ActivateSettingsHost(const CreatedDeviceBinding& created,
+    const NativeSettingsStartup& startup) noexcept
+{
+    auto* record = g_contextHooks.load(std::memory_order_acquire);
+    if (!FreshSettingsOwner(created, record)) return false;
+    const NativeRoutingScope scope{created.context};
+    auto* admitted = scope.Record();
+    if (admitted == nullptr || !admitted->queries.CanDispatch()) return false;
+    if (!admitted->hdrPrepared || !QualifiedSettingsStartup(startup)) return false;
+    return ActivateNativeSettings(*admitted, startup);
 }
 
 bool NativeRoutingInstaller::DiscardFresh(const CreatedDeviceBinding& created) noexcept
@@ -771,6 +840,8 @@ bool NativeRoutingInstaller::DiscardFresh(const CreatedDeviceBinding& created) n
     if (record == nullptr) return true;
     if (!MatchesFreshObjects(created, *record)) return true;
     if (!FreshOwnerSafe(*record)) { RevokeNativeRouting(); return false; }
+    // Refused UI quiescence retains every published borrower and forbids retry.
+    if (!record->settingsHost.RetireCold()) return false;
     // Only the creation callback can discard this not-yet-escaped candidate.
     RevokeNativeRouting();
     if (!RestoreFreshTables(*record)) return false;
@@ -791,6 +862,7 @@ bool NativeRoutingInstaller::Retire() noexcept
     if (record->resourcesRetired) return true;
     // Query safety must be checked before revocation resets observation coverage.
     if (!NativeRetirementSafe(*record)) { RevokeNativeRouting(); return false; }
+    if (!record->settingsHost.RetireCold()) return false;
     RevokeNativeRouting();
     record->resourcesRetired = RetireNativeOwners(*record);
     return record->resourcesRetired;

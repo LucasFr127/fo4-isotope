@@ -44,12 +44,16 @@ public:
         std::span<HdrSettingsInputMessage> messages = {}) noexcept;
     void SetCapture(bool open, bool keyboard, bool mouse) noexcept;
     [[nodiscard]] bool Matches(HWND window, DWORD consumerThread) const noexcept;
+    // Same producer/consumer thread only; held gestures and reset handshakes refuse.
+    [[nodiscard]] bool CanChangeConsumerReadiness() const noexcept;
 
     static constexpr std::size_t capacity = 256;
 
 private:
     [[nodiscard]] bool OnProducerThread() const noexcept;
     [[nodiscard]] bool OnConsumerThread() const noexcept;
+    [[nodiscard]] bool HasCapturedKeyboardGesture() const noexcept;
+    [[nodiscard]] bool HasCapturedPointerGesture() const noexcept;
     void ResetProducer() noexcept;
     void RequestReset() noexcept;
     void Push(HdrSettingsInputMessage message) noexcept;

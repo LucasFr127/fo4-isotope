@@ -15,6 +15,7 @@
 #include <atomic>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 
 namespace {
 
@@ -45,7 +46,7 @@ std::atomic<bool> graphicsInstallationAttempted{};
     return executable && *executable == reported.runtimeVersion;
 }
 
-void ReadStartupSettings()
+std::optional<fo4hdr::GraphicsStartupConfiguration> ReadStartupSettings()
 {
     std::array<wchar_t, 32768> path{};
     const auto length = GetModuleFileNameW(nullptr, path.data(),
@@ -53,34 +54,37 @@ void ReadStartupSettings()
     if (length == 0 || length >= path.size())
     {
         spdlog::error("Cannot resolve the settings path");
-        return;
+        return std::nullopt;
     }
     const std::filesystem::path executable(path.data(), path.data() + length);
-    const auto configuration = fo4hdr::LoadPluginConfiguration(executable.parent_path() /
-        L"Data/F4SE/Plugins/Fallout4HDR.ini");
+    const auto settingsPath = executable.parent_path() / L"Data/F4SE/Plugins/Fallout4HDR.ini";
+    const auto configuration = fo4hdr::LoadPluginConfiguration(settingsPath);
     if (configuration.status == fo4hdr::PluginConfigurationStatus::missing)
     {
         spdlog::info("HDR settings file is absent; defaults apply");
-        return;
+        const fo4hdr::PluginConfiguration defaults;
+        if (!fo4hdr::ValidatePluginConfiguration(defaults)) return std::nullopt;
+        return fo4hdr::GraphicsStartupConfiguration{defaults, settingsPath};
     }
     if (configuration.status != fo4hdr::PluginConfigurationStatus::loaded)
     {
         spdlog::error("HDR settings could not be loaded: status={}, line={}",
             static_cast<unsigned>(configuration.status), configuration.line);
-        return;
+        return std::nullopt;
     }
     const auto& settings = configuration.value;
     spdlog::info("HDR settings: operator={}, peak={}, UI white={}, video white={}",
         fo4hdr::ToString(settings.algorithm), settings.display.displayPeakNits,
         settings.display.uiPaperWhiteNits, settings.display.videoWhiteNits);
+    return fo4hdr::GraphicsStartupConfiguration{settings, settingsPath};
 }
 
-void InstallStartupGraphics() noexcept
+void InstallStartupGraphics(const fo4hdr::GraphicsStartupConfiguration& configuration) noexcept
 {
     // A failed protected write can leave the callback reachable; never reject this
     // resident module after attempting installation merely because diagnostics fail.
     graphicsInstallationAttempted.store(true, std::memory_order_release);
-    const auto graphics = fo4hdr::InitializeGameDeviceGeneration();
+    const auto graphics = fo4hdr::InitializeGameDeviceGeneration(configuration);
     try
     {
         spdlog::info("Graphics device observation installation: status={}",
@@ -131,9 +135,9 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
             return false;
         }
         std::call_once(startup, [] {
-            ReadStartupSettings();
+            const auto settings = ReadStartupSettings();
             spdlog::info("Fallout4HDR 0.1.0 loaded: runtime 1.10.163, F4SE 0.6.23");
-            InstallStartupGraphics();
+            if (settings) InstallStartupGraphics(*settings);
         });
         fo4hdr::game::InitializeGameStateObserver(f4se);
         return true;

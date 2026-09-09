@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/config/PluginConfiguration.hpp"
+
+#include <filesystem>
+
 namespace fo4hdr {
+
+struct GraphicsStartupConfiguration
+{
+    PluginConfiguration settings;
+    std::filesystem::path persistencePath;
+};
 
 enum class GraphicsDeviceBindingStatus
 {
@@ -10,11 +20,13 @@ enum class GraphicsDeviceBindingStatus
     imageUnavailable,
     importUnavailable,
     foreignPredecessor,
-    installationFailed
+    installationFailed,
+    settingsUnavailable
 };
 
 // Call only after validating the main executable/runtime/F4SE tuple. Callback code and
 // ownership records remain resident for process lifetime; this owner never unhooks or unloads.
-[[nodiscard]] GraphicsDeviceBindingStatus InitializeGameDeviceGeneration() noexcept;
+[[nodiscard]] GraphicsDeviceBindingStatus InitializeGameDeviceGeneration(
+    const GraphicsStartupConfiguration& configuration) noexcept;
 
 }  // namespace fo4hdr

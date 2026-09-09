@@ -110,6 +110,12 @@ bool PresentQuerySafe(ContextHookRecord& context) noexcept
     return false;
 }
 
+void CommitNativeSettings(ContextHookRecord& context, bool completed) noexcept
+{
+    if (!completed || !context.hdrPrepared) return;
+    static_cast<void>(context.settingsHost.CommitClosedFrame(PresentationScope::qualifiedExclusive));
+}
+
 bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
 {
     if (!chain.resourcesReady.load(std::memory_order_acquire)) return false;
@@ -123,6 +129,7 @@ bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
     const ChainResourcePreparation preparation{*admitted};
     const bool completed = admitted->hdrPrepared ? ComposeNativeOutput(*admitted)
         : CloseNativePresentFrame(admitted->renderer, flags);
+    CommitNativeSettings(*admitted, completed);
     admitted->presentationProxy.InvalidateFrame();
     admitted->uiCapture.CloseFrame();
     admitted->frameRedirected = false;
@@ -158,13 +165,15 @@ bool RetireChainResources(ContextHookRecord& context) noexcept
 
 bool PrepareResize(SwapChainHookRecord& chain) noexcept
 {
-    chain.resourcesReady.store(false, std::memory_order_release);
     auto* context = g_contextHooks.load(std::memory_order_acquire);
     const NativeRoutingScope scope{context->owned};
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
-    admitted->presentationProxy.RevokePublication();
     if (!admitted->queries.CanDispatch()) return false;
+    // A held gesture or nested HWND callback refuses before any owner retirement.
+    if (!admitted->settingsHost.SuspendSurfaceForResize()) return false;
+    chain.resourcesReady.store(false, std::memory_order_release);
+    admitted->presentationProxy.RevokePublication();
     return RetireChainResources(*admitted);
 }
 
@@ -180,16 +189,30 @@ bool RebuildHdrOutput(ContextHookRecord& context, ID3D11Device* device,
     if (FAILED(context.renderer.AdoptPresentationScene(context.presentationProxy, context.presentationScene))) return false;
     std::destroy_at(&context.presentation);
     std::construct_at(&context.presentation);
-    const PresentationConfiguration output{configuration.width, configuration.height,
-        static_cast<float>(context.defaultOperator.displayPeakNits), &context.renderer, configuration.whites};
+    PresentationConfiguration output;
+    if (!context.settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
+            context.renderer, output)) return false;
     if (!context.presentation.Initialize(device, context.owned, output)) return false;
-    return SUCCEEDED(context.presentation.PrepareNativeChain(chain, true));
+    if (FAILED(context.presentation.PrepareNativeChain(chain, true))) return false;
+    return context.settingsHost.ResumeAfterResize(configuration.width, configuration.height,
+        PresentationScope::qualifiedExclusive);
+}
+
+bool ReadResizeWhites(ContextHookRecord& context, ScenePassConfiguration& configuration) noexcept
+{
+    if (!context.hdrPrepared) return true;
+    PresentationConfiguration active;
+    if (!context.settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
+            context.renderer, active)) return false;
+    configuration.whites = active.whites;
+    return true;
 }
 
 bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
     IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
 {
     const ChainResourcePreparation preparation{context};
+    if (!ReadResizeWhites(context, configuration)) return false;
     if (!context.renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
     const bool ui = context.uiCapture.Initialize(device, context.owned, configuration);
     const bool proxy = context.presentationProxy.Prepare(device, context.owned, chain);
@@ -222,8 +245,9 @@ bool ReinitializeAfterResize(SwapChainHookRecord& chain) noexcept
     auto* admitted = scope.Record();
     if (admitted == nullptr) return false;
     if (!admitted->queries.CanDispatch()) return false;
-    const ScenePassConfiguration configuration{current.BufferDesc.Width, current.BufferDesc.Height, {},
-        admitted->hdrPrepared ? &admitted->defaultOperator : nullptr};
+    // Reapply the retained active table after reconstruction; never build here or
+    // resurrect the startup operator while a newer accepted tuple exists.
+    const ScenePassConfiguration configuration{current.BufferDesc.Width, current.BufferDesc.Height};
     if (!RebuildChainResources(*admitted, device->owned, chain.owned, configuration)) return false;
     if (!chain.admitted.load(std::memory_order_acquire)) return false;
     chain.description = current;

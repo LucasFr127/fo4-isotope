@@ -133,6 +133,15 @@ public:
         return true;
     }
 
+    // The caller reconstructed the same-address output while every borrower was
+    // suspended. Reapply only the active tuple; pending requests and tokens survive.
+    [[nodiscard]] bool ReapplyAfterResize(PresentationScope scope) noexcept
+    {
+        if (!OnOwnerThread()) return false;
+        if (!available_ || !activeTable_) return false;
+        return presentation_->ApplySettings(activeTable_->data, Whites(active_), scope, Grade(active_));
+    }
+
     // Saving the accepted request is independent of native activation. Save
     // tokens do not describe render generations and never gate a native commit.
     [[nodiscard]] bool RequestSave() noexcept

@@ -3,6 +3,7 @@
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <windowsx.h>
 
 namespace fo4hdr {
@@ -307,6 +308,28 @@ void HdrSettingsInput::SetCapture(bool open, bool keyboard, bool mouse) noexcept
     capture_.store(value, std::memory_order_release);
 }
 
+bool HdrSettingsInput::HasCapturedKeyboardGesture() const noexcept
+{
+    const auto held = [](bool value) { return value; };
+    // Reserved scan markers suppress later characters and can outlive key-up.
+    // Only the armed toggle and captured keys describe an unfinished gesture.
+    return toggleArmed_ || std::any_of(capturedKeys_.begin(), capturedKeys_.end(), held);
+}
+
+bool HdrSettingsInput::HasCapturedPointerGesture() const noexcept
+{
+    return mouseButtons_ != 0 || ownedCapture_ || releasingCapture_ ||
+        std::any_of(capturedButtons_.begin(), capturedButtons_.end(), [](bool value) { return value; });
+}
+
+bool HdrSettingsInput::CanChangeConsumerReadiness() const noexcept
+{
+    if (!OnProducerThread() || !OnConsumerThread()) return false;
+    if (resetRequested_.load(std::memory_order_acquire)) return false;
+    if (HasCapturedKeyboardGesture()) return false;
+    return !HasCapturedPointerGesture();
+}
+
 HdrSettingsInputSnapshot HdrSettingsInput::Drain(std::span<HdrSettingsInputMessage> messages) noexcept
 {
     HdrSettingsInputSnapshot snapshot;
@@ -349,6 +372,8 @@ struct SettingsInputHost
     DWORD windowThread{};
     DWORD consumerThread{};
     std::uint64_t generation{};
+    unsigned callbackDepth{};
+    bool callbackOverflow{};
     HdrSettingsInput input;
 };
 
@@ -390,14 +415,36 @@ LRESULT ForwardHostMessage(HWND window, UINT message, WPARAM key, LPARAM details
     catch (...) { return 0; }
 }
 
+bool EnterHostCallback(HWND window) noexcept
+{
+    if (window != inputHost.window || GetCurrentThreadId() != inputHost.windowThread) return false;
+    if (inputHost.callbackDepth == std::numeric_limits<unsigned>::max())
+    {
+        inputHost.callbackOverflow = true;
+        return false;
+    }
+    ++inputHost.callbackDepth;
+    return true;
+}
+
+LRESULT ConsumedHostMessageResult(UINT message) noexcept
+{
+    const auto booleanResult = message == WM_UNICHAR || message == WM_XBUTTONDOWN ||
+        message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK;
+    return booleanResult ? TRUE : 0;
+}
+
 LRESULT CALLBACK SettingsHostWindowProcedure(HWND window, UINT message,
     WPARAM key, LPARAM details) noexcept
 {
+    const auto entered = EnterHostCallback(window);
     const auto consumed = HostMessage(window, message, key, details);
     if (message == WM_NCDESTROY) RevokeSettingsInputHost();
-    if (!consumed) return ForwardHostMessage(window, message, key, details);
-    return message == WM_UNICHAR || message == WM_XBUTTONDOWN ||
-        message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK ? TRUE : 0;
+    LRESULT result{};
+    if (!consumed) result = ForwardHostMessage(window, message, key, details);
+    else result = ConsumedHostMessageResult(message);
+    if (entered) --inputHost.callbackDepth;
+    return result;
 }
 
 bool PrepareHostProcedure(WNDPROC& expected) noexcept
@@ -474,7 +521,9 @@ HdrSettingsInput* SettingsInputForGeneration(std::uint64_t generation) noexcept
 bool SetSettingsInputHostConsumerReady(std::uint64_t generation, bool ready) noexcept
 {
     auto* input = SettingsInputForGeneration(generation);
-    if (!input) return false;
+    if (!input || !input->CanChangeConsumerReadiness()) return false;
+    // Depth is read only after the same HWND-owner thread has been established.
+    if (inputHost.callbackDepth != 0 || inputHost.callbackOverflow) return false;
     if (!ready) input->SetCapture(false, false, false);
     inputHost.consumerReady.store(ready, std::memory_order_release);
     return true;

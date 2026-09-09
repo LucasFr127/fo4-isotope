@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <utility>
 #include <span>
 #include <string_view>
 
@@ -69,6 +71,28 @@ PointerHookOwnership importOwner;
 std::atomic_flag initialization = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> publication{};
 void* expectedExport{};
+GraphicsStartupConfiguration startupConfiguration;
+std::unique_ptr<OperatorLutBuildResult> startupTable;
+
+bool PrepareStartupSettings(const GraphicsStartupConfiguration& configuration) noexcept
+{
+    if (!configuration.persistencePath.is_absolute()) return false;
+    if (!ValidatePluginConfiguration(configuration.settings)) return false;
+    try
+    {
+        auto result = std::make_unique<OperatorLutBuildResult>();
+        const auto& value = configuration.settings;
+        result->request = {value.algorithm, value.display.displayPeakNits, 1,
+            ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters)};
+        result->data = BuildOperatorLut(value.algorithm, value.display.displayPeakNits,
+            result->request.parameters, {});
+        if (!PreparedOperatorLutMatches(result->data, result->request)) return false;
+        startupConfiguration = configuration;
+        startupTable = std::move(result);
+        return true;
+    }
+    catch (...) { return false; }
+}
 
 void DisableBinding() noexcept
 {
@@ -203,13 +227,14 @@ bool ObserveHdrDevice(const CreatedDeviceBinding& created) noexcept
     if (binding.lastGeneration == disabledToken - 1) return false;
     binding.thread = thread;
     const auto generation = ++binding.lastGeneration;
-    if (!NativeRoutingInstaller::InstallHdr(created, generation, expectedExport)) return false;
+    const NativeSettingsStartup settings{startupConfiguration, startupTable};
+    if (!NativeRoutingInstaller::InstallHdr(created, generation, expectedExport, settings)) return false;
     binding.routing = NativeRoutingStatus::installed;
     binding.Retain(candidate);
     std::uint64_t expected{};
     if (!publication.compare_exchange_strong(expected, generation, std::memory_order_release)) return false;
     PublishBoundInputWindow(generation);
-    return true;
+    return NativeRoutingInstaller::ActivateSettingsHost(created, settings);
 }
 
 bool MatchesRetainedBinding(const CreatedDeviceBinding& created) noexcept
@@ -367,10 +392,13 @@ GraphicsDeviceBindingStatus InstallImport(std::span<std::byte> image) noexcept
 
 }  // namespace
 
-GraphicsDeviceBindingStatus InitializeGameDeviceGeneration() noexcept
+GraphicsDeviceBindingStatus InitializeGameDeviceGeneration(
+    const GraphicsStartupConfiguration& configuration) noexcept
 {
     if (initialization.test_and_set(std::memory_order_acq_rel))
         return GraphicsDeviceBindingStatus::alreadyInitialized;
+    // CPU preparation precedes reachable native callbacks and starts no worker.
+    if (!PrepareStartupSettings(configuration)) return GraphicsDeviceBindingStatus::settingsUnavailable;
     const auto image = MainImage();
     if (image.empty()) return GraphicsDeviceBindingStatus::imageUnavailable;
     return InstallImport(image);

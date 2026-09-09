@@ -2,6 +2,8 @@
 #pragma once
 
 #include "../DeviceCreationHook.hpp"
+#include "../GameDeviceGeneration.hpp"
+#include "../OperatorLutWorker.hpp"
 
 #include <cstdint>
 
@@ -16,6 +18,14 @@ enum class NativeRoutingStatus
     installed
 };
 
+// Synchronous cold borrows. The exact result initializes both GPU owners before
+// moving into the generation's resident settings host after input activation.
+struct NativeSettingsStartup
+{
+    const GraphicsStartupConfiguration& configuration;
+    std::unique_ptr<OperatorLutBuildResult>& prepared;
+};
+
 // Admission is called only by the successful fresh-creation callback, before
 // outputs escape. A resident record is never recycled for another generation.
 class NativeRoutingInstaller
@@ -24,7 +34,9 @@ public:
     [[nodiscard]] static NativeRoutingStatus Install(const CreatedDeviceBinding& created,
         std::uint64_t generation, void* creationNext) noexcept;
     [[nodiscard]] static bool InstallHdr(const CreatedDeviceBinding& created,
-        std::uint64_t generation, void* creationNext) noexcept;
+        std::uint64_t generation, void* creationNext, const NativeSettingsStartup& startup) noexcept;
+    [[nodiscard]] static bool ActivateSettingsHost(const CreatedDeviceBinding& created,
+        const NativeSettingsStartup& startup) noexcept;
     // Fresh outputs have not escaped. False retains resident references and forbids retry.
     [[nodiscard]] static bool DiscardFresh(const CreatedDeviceBinding& created) noexcept;
     [[nodiscard]] static bool Retire() noexcept;
@@ -32,7 +44,7 @@ public:
 private:
     [[nodiscard]] static bool CompleteCoverage() noexcept;
     [[nodiscard]] static NativeRoutingStatus InstallImpl(const CreatedDeviceBinding& created,
-        std::uint64_t generation, void* creationNext, bool hdr) noexcept;
+        std::uint64_t generation, void* creationNext, const NativeSettingsStartup* startup) noexcept;
 };
 
 HRESULT STDMETHODCALLTYPE HookCreatePixelShader(ID3D11Device* device, const void* bytecode,
