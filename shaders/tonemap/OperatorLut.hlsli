@@ -19,6 +19,17 @@ cbuffer Fallout4OperatorConstants : register(b13)
     float4 Fo4HdrColorAdaptationRow0;
     float4 Fo4HdrColorAdaptationRow1;
     float4 Fo4HdrColorAdaptationRow2;
+    uint Fo4HdrSelectiveColorActive;
+    uint3 SelectiveColorPadding;
+    float4 Fo4HdrSelectiveRed;
+    float4 Fo4HdrSelectiveOrange;
+    float4 Fo4HdrSelectiveYellow;
+    float4 Fo4HdrSelectiveGreen;
+    float4 Fo4HdrSelectiveCyan;
+    float4 Fo4HdrSelectiveBlue;
+    float4 Fo4HdrSelectiveMagenta;
+    float4 Fo4HdrSelectivePlaneA;
+    float4 Fo4HdrSelectivePlaneB;
 }
 
 Texture3D<float4> OperatorLut : register(t7);

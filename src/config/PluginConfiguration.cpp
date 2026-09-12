@@ -18,7 +18,7 @@ constexpr std::array<std::string_view, 4> kAlgorithms{"ACES2", "AgX", "GT7", "AC
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 23> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 46> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
@@ -29,7 +29,30 @@ std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexc
         {"Image", "Shadows"}, {"Image", "Saturation"},
         {"Image", "Temperature"}, {"Image", "Tint"},
         {"Image", "Exposure"}, {"Effects", "BloomStrength"}, {"ACES2LMT", "LookStrength"},
-        {"Image", "ColorGradingMethod"}}};
+        {"Image", "ColorGradingMethod"},
+        {"SelectiveColor", "Enabled"},
+        {"SelectiveColor", "Amount"},
+        {"SelectiveColor", "RedHue"},
+        {"SelectiveColor", "RedSaturation"},
+        {"SelectiveColor", "RedBrightness"},
+        {"SelectiveColor", "OrangeHue"},
+        {"SelectiveColor", "OrangeSaturation"},
+        {"SelectiveColor", "OrangeBrightness"},
+        {"SelectiveColor", "YellowHue"},
+        {"SelectiveColor", "YellowSaturation"},
+        {"SelectiveColor", "YellowBrightness"},
+        {"SelectiveColor", "GreenHue"},
+        {"SelectiveColor", "GreenSaturation"},
+        {"SelectiveColor", "GreenBrightness"},
+        {"SelectiveColor", "CyanHue"},
+        {"SelectiveColor", "CyanSaturation"},
+        {"SelectiveColor", "CyanBrightness"},
+        {"SelectiveColor", "BlueHue"},
+        {"SelectiveColor", "BlueSaturation"},
+        {"SelectiveColor", "BlueBrightness"},
+        {"SelectiveColor", "MagentaHue"},
+        {"SelectiveColor", "MagentaSaturation"},
+        {"SelectiveColor", "MagentaBrightness"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -80,6 +103,15 @@ public:
     }
 
 private:
+    bool SetAlgorithm(std::string_view value) noexcept
+    {
+        const auto found = std::ranges::find(kAlgorithms, value);
+        if (found == kAlgorithms.end()) return false;
+        result_.value.algorithm =
+            static_cast<OperatorLutAlgorithm>(found - kAlgorithms.begin());
+        return true;
+    }
+
     bool SetGradingMethod(std::string_view value) noexcept
     {
         if (value == "Radial") result_.value.display.colorGradingMethod = ColorGradingMethod::radial;
@@ -89,21 +121,31 @@ private:
         return true;
     }
 
+    bool SetSelectiveValue(std::size_t index, std::string_view value) noexcept
+    {
+        auto& settings = result_.value.display.selectiveColor;
+        if (index == 23)
+        {
+            if (value != "0" && value != "1") return false;
+            settings.enabled = value == "1";
+            return true;
+        }
+        if (index == 24) return ParseNumber(value, settings.amountPercent);
+        const auto offset = index - 25;
+        auto& region = settings.regions[offset / 3];
+        const std::array targets{&region.hueDegrees, &region.saturationPercent, &region.brightness};
+        return ParseNumber(value, *targets[offset % 3]);
+    }
+
     bool SetValue(std::size_t index, std::string_view value) noexcept
     {
         if (seen_[index]) return false;
         seen_[index] = true;
         if (index == 22) return SetGradingMethod(value);
+        if (index >= 23) return SetSelectiveValue(index, value);
         auto& settings = result_.value.display;
         auto& parameters = settings.toneMapperParameters;
-        if (index == 3)
-        {
-            const auto found = std::ranges::find(kAlgorithms, value);
-            if (found == kAlgorithms.end()) return false;
-            result_.value.algorithm =
-                static_cast<OperatorLutAlgorithm>(found - kAlgorithms.begin());
-            return true;
-        }
+        if (index == 3) return SetAlgorithm(value);
         const std::array targets{&settings.displayPeakNits, &settings.uiPaperWhiteNits,
             &settings.videoWhiteNits, static_cast<double*>(nullptr),
             &parameters.agxMiddleGrayEv, &parameters.agxContrast, &parameters.agxHdrPurity,
@@ -147,7 +189,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 23> seen_{};
+    std::array<bool, 46> seen_{};
 };
 
 }  // namespace
@@ -156,6 +198,7 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
 {
     if (algorithm != other.algorithm) return false;
     if (display.colorGradingMethod != other.display.colorGradingMethod) return false;
+    if (display.selectiveColor != other.display.selectiveColor) return false;
     const std::array current{
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
         display.vanillaColorGradingStrengthPercent, display.contrast, display.blacks,

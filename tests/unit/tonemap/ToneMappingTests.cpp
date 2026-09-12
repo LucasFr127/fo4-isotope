@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "Fallout4HDR/tonemap/Aces2.hpp"
-#include "Fallout4HDR/output/SelectiveColor.hpp"
 #include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
 #include "Fallout4HDR/config/SettingsPersistence.hpp"
 #include "reference/Aces2LmtSourceOracle.hpp"
-#include "reference/SelectiveColorSourceOracle.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
@@ -14,7 +12,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <numbers>
 
 namespace fo4hdr::tests {
 namespace {
@@ -241,69 +238,6 @@ void TestAces2ContrastLook()
 }
 
 
-void CheckSelectiveSame(SelectiveColorRgb actual, SelectiveColorRgb expected)
-{
-    FO4HDR_CHECK(actual.red == expected.red);
-    FO4HDR_CHECK(actual.green == expected.green);
-    FO4HDR_CHECK(actual.blue == expected.blue);
-}
-
-void CheckSelectiveReferenceChannel(double actual, double expected)
-{
-    FO4HDR_CHECK(std::isfinite(expected));
-    FO4HDR_CHECK(expected >= 0.0);
-    // Absolute source-parity allowance for the selected positive domain only.
-    FO4HDR_CHECK(std::abs(actual - expected) <= 2.0e-5);
-}
-
-void CheckSelectiveSource(SelectiveColorRgb input, const SelectiveColorPrepared& prepared)
-{
-    const auto expected = smooth_tetra_oracle::Apply(input, prepared);
-    const auto actual = ApplySelectiveColor(input, prepared);
-    CheckSelectiveReferenceChannel(actual.red, expected.red);
-    CheckSelectiveReferenceChannel(actual.green, expected.green);
-    CheckSelectiveReferenceChannel(actual.blue, expected.blue);
-}
-
-void TestSelectiveColorMath()
-{
-    SelectiveColorSettings settings;
-    SelectiveColorPrepared prepared;
-    FO4HDR_CHECK(PrepareSelectiveColor(settings, prepared));
-    FO4HDR_CHECK(!prepared.effectiveActive);
-    constexpr SelectiveColorRgb identity{0.8, 0.2, 0.1};
-    CheckSelectiveSame(ApplySelectiveColor(identity, prepared), identity);
-    settings.enabled = true;
-    FO4HDR_CHECK(PrepareSelectiveColor(settings, prepared));
-    FO4HDR_CHECK(!prepared.effectiveActive);
-    CheckSelectiveSame(ApplySelectiveColor(identity, prepared), identity);
-    for (std::size_t index = 0; index < settings.regions.size(); ++index)
-    {
-        const auto position = static_cast<double>(index);
-        settings.regions[index] = {(position - 3.0) * 1.25,
-            94.0 + position * 2.0, (position - 3.0) * 4.0};
-    }
-    FO4HDR_CHECK(PrepareSelectiveColor(settings, prepared));
-    FO4HDR_CHECK(prepared.effectiveActive);
-    for (std::size_t index = 0; index < prepared.regions.size(); ++index)
-    {
-        const auto position = static_cast<double>(index);
-        FO4HDR_CHECK(std::abs(prepared.regions[index][0] -
-            (position - 3.0) * 1.25 * std::numbers::pi / 180.0) <= 1.0e-14);
-        FO4HDR_CHECK(std::abs(prepared.regions[index][1] -
-            (94.0 + position * 2.0) / 100.0) <= 1.0e-14);
-        FO4HDR_CHECK(std::abs(prepared.regions[index][2] -
-            (position - 3.0) * 4.0 / 100.0) <= 1.0e-14);
-    }
-    for (const auto sample : std::array{SelectiveColorRgb{0.8, 0.2, 0.1},
-             SelectiveColorRgb{0.1, 0.8, 0.2}, SelectiveColorRgb{0.2, 0.1, 0.8},
-             SelectiveColorRgb{0.18, 0.18, 0.18}, SelectiveColorRgb{0.6, 0.5, 0.4},
-             SelectiveColorRgb{0.4, 0.6, 0.5}})
-        CheckSelectiveSource(sample, prepared);
-    settings.regions[0].hueDegrees = 10.01;
-    FO4HDR_CHECK(!PrepareSelectiveColor(settings, prepared));
-}
-
 }  // namespace
 
 void RunToneMappingTests()
@@ -313,7 +247,6 @@ void RunToneMappingTests()
     TestAces2ContainedInputs();
     TestAces2InputPolicy();
     TestAces2PeakReuse();
-    TestSelectiveColorMath();
 }
 
 }  // namespace fo4hdr::tests

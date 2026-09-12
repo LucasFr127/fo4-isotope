@@ -8,6 +8,7 @@ namespace fo4hdr::tests {
 void RunHdrCoreTests();
 void RunPerformanceTests();
 void RunToneMappingTests();
+void RunHdrSelectiveColorTests();
 void RunAgxTests();
 void RunOperatorLutTests();
 void RunHdrOperatorWorkerTests();

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/output/SelectiveColor.hpp"
+
 #include <array>
 #include <cstdint>
 
@@ -105,6 +107,7 @@ struct HdrSettings
     double tint{};
     double exposureEv{};
     double bloomStrengthPercent{100.0};
+    SelectiveColorSettings selectiveColor{};
 };
 
 enum class HdrSettingsValidationError : std::uint8_t
@@ -123,7 +126,8 @@ enum class HdrSettingsValidationError : std::uint8_t
     temperatureOutOfRange,
     tintOutOfRange,
     exposureOutOfRange,
-    bloomStrengthOutOfRange
+    bloomStrengthOutOfRange,
+    selectiveColorOutOfRange
 };
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(

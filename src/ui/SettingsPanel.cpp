@@ -106,6 +106,44 @@ bool DrawGrade(HdrSettings& settings) noexcept
     return changed;
 }
 
+bool DrawSelectiveRegion(SelectiveColorRegionSettings& region) noexcept
+{
+    bool changed{};
+    changed |= DrawNumber("Hue", region.hueDegrees,
+        {kMinimumSelectiveColorHueDegrees, kMaximumSelectiveColorHueDegrees, "%+.1f deg"});
+    changed |= DrawNumber("Saturation", region.saturationPercent,
+        {kMinimumSelectiveColorSaturationPercent, kMaximumSelectiveColorSaturationPercent, "%.0f%%"});
+    changed |= DrawNumber("Brightness", region.brightness,
+        {kMinimumSelectiveColorBrightness, kMaximumSelectiveColorBrightness, "%+.0f"});
+    return changed;
+}
+
+bool DrawSelective(SelectiveColorSettings& settings) noexcept
+{
+    if (!ImGui::CollapsingHeader("Selective color")) return false;
+    ImGui::PushID("selective-color");
+    bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
+    ImGui::BeginDisabled(!settings.enabled);
+    changed |= DrawNumber("Amount", settings.amountPercent,
+        {kMinimumSelectiveColorAmountPercent, kMaximumSelectiveColorAmountPercent, "%.0f%%"});
+    constexpr std::array names{"Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Magenta"};
+    for (std::size_t index = 0; index < settings.regions.size(); ++index)
+    {
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::SeparatorText(names[index]);
+        changed |= DrawSelectiveRegion(settings.regions[index]);
+        ImGui::PopID();
+    }
+    ImGui::EndDisabled();
+    if (ImGui::Button("Reset selective color"))
+    {
+        settings = {};
+        changed = true;
+    }
+    ImGui::PopID();
+    return changed;
+}
+
 bool DrawControls(ToneMapperParameters& parameters, std::span<const OperatorControl> controls) noexcept
 {
     bool changed{};
@@ -245,6 +283,7 @@ SettingsPanelActions DrawSettingsPanel(PluginConfiguration& editable,
     actions.request |= DrawOperator(editable);
     actions.request |= DrawImage(editable.display);
     actions.request |= DrawGrade(editable.display);
+    actions.request |= DrawSelective(editable.display.selectiveColor);
     if (ImGui::Button("Reset settings"))
     {
         editable = PluginConfiguration{};

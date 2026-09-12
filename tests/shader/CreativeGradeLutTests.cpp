@@ -100,11 +100,13 @@ void CheckGradeChannel(float actual, double expectedNits)
 }
 
 void VerifyGradeStrength(WeightedGradeInputs& inputs, PresentationPass& presentation,
-    const OperatorLutData& table, float strength)
+    const OperatorLutData& table, const SceneGradeConfiguration& configuration)
 {
+    const auto strength = configuration.vanillaColorGradingStrength;
+    const auto& selective = configuration.selectiveColor;
     auto& fixture = inputs.fixture;
     FO4HDR_CHECK(presentation.ApplySettings(table, fixture.whites,
-        PresentationScope::qualifiedExclusive, {strength}));
+        PresentationScope::qualifiedExclusive, configuration));
     FO4HDR_CHECK(fixture.renderer.InvalidateScene(fixture.input));
     Pixels source;
     source.fill(sourceColor);
@@ -112,7 +114,12 @@ void VerifyGradeStrength(WeightedGradeInputs& inputs, PresentationPass& presenta
     inputs.Bind();
     FO4HDR_CHECK(DrawPass(fixture, 4, true) == SceneDrawOutcome::replaced);
     inputs.Check();
-    const auto expected = fo4hdr::test::SampleOperatorLut(table, ExpectedGrade(inputs, strength));
+    const auto grade = ExpectedGrade(inputs, strength);
+    SelectiveColorPrepared prepared;
+    FO4HDR_CHECK(PrepareSelectiveColor(selective, prepared));
+    const auto adjusted = ApplySelectiveColor({grade.red, grade.green, grade.blue}, prepared);
+    const auto expected = fo4hdr::test::SampleOperatorLut(table,
+        {adjusted.red, adjusted.green, adjusted.blue});
     const auto output = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
     for (const auto pixel : output)
     {
@@ -137,7 +144,12 @@ void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
     FO4HDR_CHECK(presentation.Initialize(fixture.gpu.device.Get(), fixture.gpu.context.Get(), configuration));
     WeightedGradeInputs inputs(fixture);
     for (const float strength : {0.0f, 0.5f, 1.0f})
-        VerifyGradeStrength(inputs, presentation, table, strength);
+        VerifyGradeStrength(inputs, presentation, table, {strength});
+    SelectiveColorSettings selective;
+    selective.regions.fill({3, 125, 30});
+    VerifyGradeStrength(inputs, presentation, table, {0, {}, ColorGradingMethod::radial, selective});
+    selective.enabled = true;
+    VerifyGradeStrength(inputs, presentation, table, {0, {}, ColorGradingMethod::radial, selective});
     FO4HDR_CHECK(presentation.Retire());
 }
 

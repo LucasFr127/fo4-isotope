@@ -2,6 +2,7 @@
 #include "GradeTransfer.hlsli"
 #include "NativeReferenceGrade.hlsli"
 #include "ImageControls.hlsli"
+#include "SelectiveColor.hlsli"
 
 Texture2D<float4> SceneTexture : register(t0);
 SamplerState SceneSampler : register(s0);
@@ -15,6 +16,7 @@ void main(
     const float3 scene = Fo4HdrGradeCleanScene(source.rgb);
     float3 result = Fo4HdrNativeReferenceGrade(scene, VanillaColorGradingStrength);
     result = Fo4HdrApplyImageControls(result);
+    result = Fo4HdrApplySelectiveColor(result);
     [branch]
     if (OperatorMode != 0u)
         result = Fo4HdrSampleOperatorLut(result) / OperatorUiWhiteNits;

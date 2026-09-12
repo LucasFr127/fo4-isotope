@@ -44,13 +44,14 @@ struct SceneGradeConfiguration
     float vanillaColorGradingStrength{1.0F};
     HdrSettingsMath imageControls{};
     ColorGradingMethod method{ColorGradingMethod::radial};
+    SelectiveColorSettings selectiveColor{};
 
     [[nodiscard]] bool Valid() const noexcept
     {
         return (method == ColorGradingMethod::radial || method == ColorGradingMethod::nativeReference) &&
             std::isfinite(vanillaColorGradingStrength) &&
             vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F &&
-            ImageScalarsValid() && MatrixValid();
+            ImageScalarsValid() && MatrixValid() && ValidateSelectiveColorSettings(selectiveColor);
     }
 
 private:

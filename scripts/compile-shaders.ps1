@@ -87,7 +87,7 @@ function Get-ShaderInputs {
         if (-not $inputs.Contains($source)) { $inputs.Add($source) }
     }
     foreach ($include in @("shaders/fallout4/GradeTransfer.hlsli",
-        "shaders/fallout4/ImageControls.hlsli",
+        "shaders/fallout4/ImageControls.hlsli", "shaders/fallout4/SelectiveColor.hlsli",
         "shaders/fallout4/NativeReferenceGrade.hlsli",
         "shaders/fallout4/TemporalIntermediate.hlsli", "shaders/fallout4/ToneMapBypassCommon.hlsli",
         "shaders/output/DisplayMath.hlsli", "shaders/output/SceneLayers.hlsli",

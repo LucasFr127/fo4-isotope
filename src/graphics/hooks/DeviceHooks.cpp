@@ -366,7 +366,7 @@ ScenePassConfiguration InitialSceneConfiguration(const DXGI_SWAP_CHAIN_DESC& des
         static_cast<float>(display.videoWhiteNits)};
     configuration.operatorLut = &startup->prepared->data;
     configuration.sceneGrade = {static_cast<float>(display.vanillaColorGradingStrengthPercent / 100.0),
-        DeriveHdrSettingsMath(display), display.colorGradingMethod};
+        DeriveHdrSettingsMath(display), display.colorGradingMethod, display.selectiveColor};
     return configuration;
 }
 

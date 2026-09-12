@@ -219,6 +219,8 @@ HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noex
     if (settings.colorGradingMethod != ColorGradingMethod::radial &&
         settings.colorGradingMethod != ColorGradingMethod::nativeReference)
         return HdrSettingsValidationError::unsupportedColorGradingMethod;
+    if (!ValidateSelectiveColorSettings(settings.selectiveColor))
+        return HdrSettingsValidationError::selectiveColorOutOfRange;
     return ValidateImageSettings(settings);
 }
 

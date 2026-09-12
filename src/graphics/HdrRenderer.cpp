@@ -332,12 +332,38 @@ std::uint32_t OperatorMode(OperatorLutAlgorithm algorithm) noexcept
     }
 }
 
+bool PackSelectiveVector(const std::array<double, 3>& source,
+    std::array<float, 4>& target) noexcept
+{
+    for (std::size_t index = 0; index < source.size(); ++index)
+    {
+        target[index] = static_cast<float>(source[index]);
+        if (!std::isfinite(target[index])) return false;
+    }
+    target[3] = 0.0F;
+    return true;
+}
+
+bool PrepareSelectiveConstants(const SelectiveColorSettings& settings,
+    OperatorConstants& values) noexcept
+{
+    SelectiveColorPrepared prepared;
+    if (!PrepareSelectiveColor(settings, prepared)) return false;
+    values.selectiveColorActive = prepared.effectiveActive ? 1u : 0u;
+    for (std::size_t index = 0; index < prepared.regions.size(); ++index)
+        if (!PackSelectiveVector(prepared.regions[index], values.selectiveColorRegions[index]))
+            return false;
+    return PackSelectiveVector(prepared.planeA, values.selectiveColorPlaneA) &&
+        PackSelectiveVector(prepared.planeB, values.selectiveColorPlaneB);
+}
+
 bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration& config,
     PreparedOperator& prepared) noexcept
 {
     OperatorConstants values{};
     values.uiWhiteNits = config.whites.uiWhiteNits;
     values.SetGrade(config.sceneGrade.vanillaColorGradingStrength, config.sceneGrade.imageControls);
+    if (!PrepareSelectiveConstants(config.sceneGrade.selectiveColor, values)) return false;
     if (const auto* table = config.operatorLut)
     {
         values.mode = OperatorMode(table->algorithm);

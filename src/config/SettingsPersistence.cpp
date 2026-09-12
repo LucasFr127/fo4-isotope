@@ -19,17 +19,33 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 23> kKeys{
+constexpr std::array<std::string_view, 46> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
     "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
     "Contrast", "Blacks", "Highlights", "Shadows", "Saturation", "Temperature", "Tint",
-    "Exposure", "BloomStrength", "LookStrength", "ColorGradingMethod"};
-constexpr std::array<std::string_view, 23> kSections{
+    "Exposure", "BloomStrength", "LookStrength", "ColorGradingMethod",
+    "Enabled", "Amount", "RedHue",
+    "RedSaturation", "RedBrightness", "OrangeHue",
+    "OrangeSaturation", "OrangeBrightness", "YellowHue",
+    "YellowSaturation", "YellowBrightness", "GreenHue",
+    "GreenSaturation", "GreenBrightness", "CyanHue",
+    "CyanSaturation", "CyanBrightness", "BlueHue",
+    "BlueSaturation", "BlueBrightness", "MagentaHue",
+    "MagentaSaturation", "MagentaBrightness"};
+constexpr std::array<std::string_view, 46> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
     "GT7", "GT7", "GT7", "Effects",
     "Image", "Image", "Image", "Image", "Image", "Image", "Image",
-    "Image", "Effects", "ACES2LMT", "Image"};
+    "Image", "Effects", "ACES2LMT", "Image",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor", "SelectiveColor",
+    "SelectiveColor", "SelectiveColor"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -47,10 +63,10 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 23> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 46> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
-    return {FormatNumber(value.display.displayPeakNits),
+    std::array<std::string, 46> values{FormatNumber(value.display.displayPeakNits),
         FormatNumber(value.display.uiPaperWhiteNits), FormatNumber(value.display.videoWhiteNits),
         std::string(ToString(value.algorithm)), FormatNumber(parameters.agxMiddleGrayEv),
         FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
@@ -63,6 +79,17 @@ std::array<std::string, 23> OwnedValues(const PluginConfiguration& value)
         FormatNumber(value.display.tint), FormatNumber(value.display.exposureEv),
         FormatNumber(value.display.bloomStrengthPercent), FormatNumber(parameters.acesLookStrength),
         std::string(ToString(value.display.colorGradingMethod))};
+    const auto& selective = value.display.selectiveColor;
+    values[23] = selective.enabled ? "1" : "0";
+    values[24] = FormatNumber(selective.amountPercent);
+    for (std::size_t index = 0; index < selective.regions.size(); ++index)
+    {
+        const auto& region = selective.regions[index];
+        values[25 + index * 3] = FormatNumber(region.hueDegrees);
+        values[26 + index * 3] = FormatNumber(region.saturationPercent);
+        values[27 + index * 3] = FormatNumber(region.brightness);
+    }
+    return values;
 }
 
 std::string_view ValueSuffix(std::string_view raw, std::size_t equals) noexcept
@@ -99,6 +126,7 @@ public:
         AppendMissing("ACES2LMT");
         AppendMissing("Effects");
         AppendMissing("Image");
+        AppendMissing("SelectiveColor");
         return std::move(result_);
     }
 
@@ -160,8 +188,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 23> values_;
-    std::array<bool, 23> seen_{};
+    std::array<std::string, 46> values_;
+    std::array<bool, 46> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

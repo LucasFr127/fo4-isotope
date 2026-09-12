@@ -32,6 +32,12 @@ struct alignas(16) OperatorConstants
     std::array<float, 4> colorBalanceRow1{0.0F, 1.0F, 0.0F, 0.0F};
     std::array<float, 4> colorBalanceRow2{0.0F, 0.0F, 1.0F, 0.0F};
 
+    std::uint32_t selectiveColorActive{};
+    std::array<std::uint32_t, 3> selectiveColorPadding{};
+    std::array<std::array<float, 4>, kSelectiveColorRegionCount> selectiveColorRegions{};
+    std::array<float, 4> selectiveColorPlaneA{};
+    std::array<float, 4> selectiveColorPlaneB{};
+
     // The cold caller validates derived values before packing the shader layout.
     void SetGrade(float strength, const HdrSettingsMath& image) noexcept
     {
@@ -50,7 +56,7 @@ struct alignas(16) OperatorConstants
             static_cast<float>(matrix[8]), 0.0F};
     }
 };
-static_assert(sizeof(OperatorConstants) == 112);
+static_assert(sizeof(OperatorConstants) == 272);
 static_assert(offsetof(OperatorConstants, inputDomain) == 12);
 static_assert(offsetof(OperatorConstants, shaper) == 16);
 static_assert(offsetof(OperatorConstants, vanillaColorGradingStrength) == 32);
@@ -62,5 +68,11 @@ static_assert(offsetof(OperatorConstants, saturationScale) == 52);
 static_assert(offsetof(OperatorConstants, colorBalanceRow0) == 64);
 static_assert(offsetof(OperatorConstants, colorBalanceRow1) == 80);
 static_assert(offsetof(OperatorConstants, colorBalanceRow2) == 96);
+
+static_assert(offsetof(OperatorConstants, selectiveColorActive) == 112);
+static_assert(offsetof(OperatorConstants, selectiveColorPadding) == 116);
+static_assert(offsetof(OperatorConstants, selectiveColorRegions) == 128);
+static_assert(offsetof(OperatorConstants, selectiveColorPlaneA) == 240);
+static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) == 256);
 
 }  // namespace fo4hdr

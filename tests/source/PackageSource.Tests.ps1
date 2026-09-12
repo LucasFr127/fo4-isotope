@@ -160,6 +160,8 @@ $expected = [string[]]@(
     "tests/support/reference/Aces2LmtSourceOracle.cpp",
     "include/Fallout4HDR/output/SelectiveColor.hpp",
     "src/output/SelectiveColor.cpp",
+    "shaders/fallout4/SelectiveColor.hlsli",
+    "tests/unit/config/HdrSelectiveColorTests.cpp",
     "tests/support/reference/SelectiveColorSourceOracle.hpp",
     "tests/support/reference/SelectiveColorSourceOracle.cpp",
     "third_party/selective-color/UPSTREAM.lock.json",
