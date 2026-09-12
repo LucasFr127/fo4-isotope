@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2023 Thatcher Freeman
+// Test-only source oracle.
+// Upstream: thatcherfreeman/utility-dctls@a495531de3e4704a0a6e0113daa69be303172ed0/Effects/Smooth Tetra Skin.dctl
+// The upstream cylindrical conversion is attributed there to Juan Pablo
+// Zambrano. This oracle intentionally retains separate interpolation passes
+// and a per-evaluation plane fit so it remains independent of the optimized
+// production preparation path.
+// MIT License
+//
+// Copyright (c) 2023 Thatcher Freeman
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#pragma once
+
+#include "Fallout4HDR/output/SelectiveColor.hpp"
+
+namespace fo4hdr::tests::smooth_tetra_oracle {
+
+[[nodiscard]] SelectiveColorRgb Apply(
+    SelectiveColorRgb input,
+    const SelectiveColorPrepared& prepared) noexcept;
+
+} // namespace fo4hdr::tests::smooth_tetra_oracle

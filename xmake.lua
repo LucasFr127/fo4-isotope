@@ -168,6 +168,7 @@ for _, fixture in ipairs({
             "src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
             "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/Aces2Lmt.cpp", "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp", "tests/unit/tonemap/ToneMappingTests.cpp", "tests/support/reference/Aces2LmtSourceOracle.cpp",
+            "src/output/SelectiveColor.cpp", "tests/support/reference/SelectiveColorSourceOracle.cpp",
             "tests/unit/tonemap/AgxTests.cpp",
             "src/tonemap/OperatorLut.cpp", "src/graphics/OperatorLutWorker.cpp",
             "tests/support/reference/OperatorLutTestSupport.cpp",

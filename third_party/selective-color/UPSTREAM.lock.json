@@ -1,0 +1,19 @@
+{
+  "sourceRepository": "https://github.com/thatcherfreeman/utility-dctls.git",
+  "sourceCommit": "a495531de3e4704a0a6e0113daa69be303172ed0",
+  "sourceFiles": [
+    {
+      "path": "Effects/Smooth Tetra Skin.dctl",
+      "sha256": "3ab675ed68e3e2ea3f8d92dbeeb271a09b03183d303d5bc302ab37202a090497"
+    }
+  ],
+  "license": "MIT",
+  "notice": "THIRD_PARTY_NOTICES.md#smooth-tetra-selective-color",
+  "adaptedSources": [
+    "include/Fallout4HDR/output/SelectiveColor.hpp",
+    "src/output/SelectiveColor.cpp",
+    "tests/support/reference/SelectiveColorSourceOracle.hpp",
+    "tests/support/reference/SelectiveColorSourceOracle.cpp"
+  ],
+  "licenseSha256": "3b78284da28dedb1c33ff27961a9dede3e030bc3fdfeae2400afe4b22e6f87aa"
+}
