@@ -4,6 +4,10 @@
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
+#include <Windows.h>
+#include <array>
+#include <cstring>
+#include <limits>
 #include <barrier>
 #include <cstdint>
 #include <thread>
@@ -258,6 +262,84 @@ void TestCollectedPublication()
     FO4HDR_CHECK(snapshot.messagingAvailable);
 }
 
+void TestCopiedRendererResources()
+{
+    fo4hdr::GameHdrSnapshot observed{};
+    observed.rendererObserved = true;
+    observed.rendererInitialized = true;
+    observed.renderTargetManagerAvailable = true;
+    observed.rendererWindowCount = 1;
+    observed.rendererWindows[31] = {17, 23, 31, -10, 20, 1920, 1080, true};
+    observed.populatedRenderTargetCount = 1;
+    observed.renderTargets[100] = {29, 31, 37, 41, 100, true};
+    observed.populatedDepthTargetCount = 13;
+    observed.populatedCubeTargetCount = 2;
+    fo4hdr::GameSnapshotStore store;
+    store.Update([&](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
+        fo4hdr::CopyObservedRenderer(snapshot, observed);
+    });
+    observed.rendererWindows[31].windowIdentity = 0;
+    const auto copy = store.Read();
+    FO4HDR_CHECK(copy.rendererObserved && copy.renderTargetManagerAvailable);
+    FO4HDR_CHECK(copy.rendererWindowCount == 1 && copy.rendererWindows[31].windowIdentity == 17);
+    FO4HDR_CHECK(copy.rendererWindows[31].width == 1920);
+    FO4HDR_CHECK(copy.renderTargets[100].unorderedAccessViewIdentity == 41);
+    FO4HDR_CHECK(copy.populatedRenderTargetCount == 1 && copy.populatedDepthTargetCount == 13);
+    FO4HDR_CHECK(copy.populatedCubeTargetCount == 2);
+    FO4HDR_CHECK(copy.renderWidth == 0 && copy.dynamicWidthRatio == 0.0F);
+    store.Update([](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
+        fo4hdr::ApplyGameLifecycleTransition(snapshot, fo4hdr::GameLifecycleEvent::PreLoadGame, true, 0);
+    });
+    const auto retired = store.Read();
+    FO4HDR_CHECK(!retired.rendererObserved && !retired.renderTargetManagerAvailable);
+    FO4HDR_CHECK(retired.rendererWindowCount == 0 && retired.rendererWindows[31].windowIdentity == 0);
+    FO4HDR_CHECK(retired.renderTargets[100].textureIdentity == 0);
+    FO4HDR_CHECK(retired.populatedDepthTargetCount == 0 && retired.populatedCubeTargetCount == 0);
+}
+
+void TestCopiedImageSpaceAndDrawScope()
+{
+    std::array<std::byte, 48> bytes{};
+    std::array<std::size_t, 12> offsets{};
+    for (std::size_t index = 0; index < offsets.size(); ++index)
+    {
+        offsets[index] = index * sizeof(float);
+        const float value = static_cast<float>(index + 1);
+        std::memcpy(bytes.data() + offsets[index], &value, sizeof(value));
+    }
+    fo4hdr::ImageSpaceActiveData active{};
+    FO4HDR_CHECK(fo4hdr::DecodeImageSpaceActiveData(bytes, offsets, active));
+    FO4HDR_CHECK(active.eyeAdaptSpeed == 1.0F && active.cinematicContrast == 12.0F);
+    offsets.back() = bytes.size();
+    FO4HDR_CHECK(!fo4hdr::DecodeImageSpaceActiveData(bytes, offsets, active));
+    FO4HDR_CHECK(active.cinematicContrast == 12.0F);
+    offsets.back() = bytes.size() - sizeof(float);
+    const float invalid = std::numeric_limits<float>::infinity();
+    std::memcpy(bytes.data(), &invalid, sizeof(invalid));
+    FO4HDR_CHECK(!fo4hdr::DecodeImageSpaceActiveData(bytes, offsets, active));
+
+    fo4hdr::NativeLutObservation observed{};
+    observed.threadId = ::GetCurrentThreadId();
+    observed.resourceGeneration = 7;
+    observed.validSlots = 1;
+    fo4hdr::ResetNativeLutObservation(7);
+    fo4hdr::NativeLutObservation copy{};
+    {
+        const fo4hdr::NativeLutScope scope(observed);
+        FO4HDR_CHECK(fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+        FO4HDR_CHECK(copy.serial != 0 && copy.validSlots == 1);
+        {
+            const fo4hdr::NativeLutScope nested(observed);
+            FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+        }
+        FO4HDR_CHECK(fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+        fo4hdr::ResetNativeLutObservation(8);
+        FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+    }
+    FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(8, copy));
+    fo4hdr::ResetNativeLutObservation(0);
+}
+
 }  // namespace
 
 namespace fo4hdr::tests {
@@ -273,6 +355,8 @@ void RunGameSnapshotStoreTests()
     TestLifecycleTransitions();
     TestGraphicsLifecyclePublication();
     TestCollectedPublication();
+    TestCopiedImageSpaceAndDrawScope();
+    TestCopiedRendererResources();
 }
 
 }  // namespace fo4hdr::tests

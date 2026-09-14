@@ -25,6 +25,8 @@ auto SettingBits(const HdrSettings& value)
         std::bit_cast<std::uint64_t>(value.uiPaperWhiteNits),
         std::bit_cast<std::uint64_t>(value.videoWhiteNits),
         std::bit_cast<std::uint64_t>(value.vanillaColorGradingStrengthPercent),
+        std::bit_cast<std::uint64_t>(value.vanillaGradeLuminancePercent),
+        std::bit_cast<std::uint64_t>(value.vanillaGradeColorPercent),
         std::bit_cast<std::uint64_t>(value.contrast), std::bit_cast<std::uint64_t>(value.blacks),
         std::bit_cast<std::uint64_t>(value.highlights), std::bit_cast<std::uint64_t>(value.shadows),
         std::bit_cast<std::uint64_t>(value.saturationPercent), std::bit_cast<std::uint64_t>(value.temperature),
@@ -40,6 +42,8 @@ void TestSettingsDefaults()
     FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
     FO4HDR_CHECK(defaults.videoWhiteNits == 203.0);
     FO4HDR_CHECK(defaults.vanillaColorGradingStrengthPercent == 100.0);
+    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 100.0);
+    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 100.0);
     FO4HDR_CHECK(defaults.exposureEv == 0);
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 100);
     FO4HDR_CHECK(fo4hdr::kSceneReferenceWhiteNits == 203.0);
@@ -60,6 +64,8 @@ void TestSettingsRanges()
         Range{&HdrSettings::uiPaperWhiteNits, 100.0, 300.0, Error::uiPaperWhiteOutOfRange},
         Range{&HdrSettings::videoWhiteNits, 100.0, 300.0, Error::videoWhiteOutOfRange},
         Range{&HdrSettings::vanillaColorGradingStrengthPercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
+        Range{&HdrSettings::vanillaGradeLuminancePercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
+        Range{&HdrSettings::vanillaGradeColorPercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
         Range{&HdrSettings::contrast, -100.0, 100.0, Error::contrastOutOfRange},
         Range{&HdrSettings::blacks, -100.0, 100.0, Error::blacksOutOfRange},
         Range{&HdrSettings::highlights, -100.0, 100.0, Error::highlightsOutOfRange},
@@ -162,6 +168,19 @@ void TestToneMapperEffectiveParameters()
     FO4HDR_CHECK(gt7.agxContrast == defaults.agxContrast);
 }
 
+void TestVanillaGradeRemovalMath()
+{
+    HdrSettings settings;
+    const auto defaults = fo4hdr::DeriveHdrSettingsMath(settings);
+    FO4HDR_CHECK(defaults.vanillaGradeLuminanceRemoval == 0);
+    FO4HDR_CHECK(defaults.vanillaGradeColorRemoval == 0);
+    settings.vanillaGradeLuminancePercent = 65;
+    settings.vanillaGradeColorPercent = 20;
+    const auto derived = fo4hdr::DeriveHdrSettingsMath(settings);
+    FO4HDR_CHECK(std::abs(derived.vanillaGradeLuminanceRemoval - 0.35) <= 1.0e-14);
+    FO4HDR_CHECK(std::abs(derived.vanillaGradeColorRemoval - 0.8) <= 1.0e-14);
+}
+
 void TestToneMapperPersistence()
 {
     constexpr auto original = "[Output]\nDisplayPeakNits=1000\nUiPaperWhiteNits=203\n"
@@ -174,6 +193,8 @@ void TestToneMapperPersistence()
     FO4HDR_CHECK(parsed.value.display.saturationPercent == 100);
     auto requested = parsed.value;
     requested.display.vanillaColorGradingStrengthPercent = 50.0;
+    requested.display.vanillaGradeLuminancePercent = 65.0;
+    requested.display.vanillaGradeColorPercent = 20.0;
     requested.display.exposureEv = 1;
     requested.display.bloomStrengthPercent = 50;
     requested.display.contrast = 25;
@@ -281,6 +302,7 @@ void RunHdrSettingsMathTests()
     TestToneMapperControlRanges();
     TestToneMapperEffectiveParameters();
     TestToneMapperPersistence();
+    TestVanillaGradeRemovalMath();
     TestNeutralImageMath();
     TestAdjustedImageMath();
     TestColorBalanceAnchor();

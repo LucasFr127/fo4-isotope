@@ -18,7 +18,7 @@ constexpr std::array<std::string_view, 4> kAlgorithms{"ACES2", "AgX", "GT7", "AC
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 46> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 48> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
@@ -52,7 +52,8 @@ std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexc
         {"SelectiveColor", "BlueBrightness"},
         {"SelectiveColor", "MagentaHue"},
         {"SelectiveColor", "MagentaSaturation"},
-        {"SelectiveColor", "MagentaBrightness"}}};
+        {"SelectiveColor", "MagentaBrightness"},
+        {"Effects", "VanillaGradeLuminance"}, {"Effects", "VanillaGradeColor"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -142,6 +143,12 @@ private:
         if (seen_[index]) return false;
         seen_[index] = true;
         if (index == 22) return SetGradingMethod(value);
+        if (index >= 46)
+        {
+            const std::array targets{&result_.value.display.vanillaGradeLuminancePercent,
+                &result_.value.display.vanillaGradeColorPercent};
+            return ParseNumber(value, *targets[index - 46]);
+        }
         if (index >= 23) return SetSelectiveValue(index, value);
         auto& settings = result_.value.display;
         auto& parameters = settings.toneMapperParameters;
@@ -189,7 +196,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 46> seen_{};
+    std::array<bool, 48> seen_{};
 };
 
 }  // namespace
@@ -201,12 +208,14 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
     if (display.selectiveColor != other.display.selectiveColor) return false;
     const std::array current{
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
-        display.vanillaColorGradingStrengthPercent, display.contrast, display.blacks,
+        display.vanillaColorGradingStrengthPercent, display.vanillaGradeLuminancePercent,
+        display.vanillaGradeColorPercent, display.contrast, display.blacks,
         display.highlights, display.shadows, display.saturationPercent,
         display.temperature, display.tint, display.exposureEv, display.bloomStrengthPercent};
     const std::array candidate{other.display.displayPeakNits,
         other.display.uiPaperWhiteNits, other.display.videoWhiteNits,
         other.display.vanillaColorGradingStrengthPercent,
+        other.display.vanillaGradeLuminancePercent, other.display.vanillaGradeColorPercent,
         other.display.contrast, other.display.blacks, other.display.highlights,
         other.display.shadows, other.display.saturationPercent,
         other.display.temperature, other.display.tint,

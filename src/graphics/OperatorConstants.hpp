@@ -35,6 +35,7 @@ struct alignas(16) OperatorConstants
     std::uint32_t selectiveColorActive{};
     std::array<std::uint32_t, 3> selectiveColorPadding{};
     std::array<std::array<float, 4>, kSelectiveColorRegionCount> selectiveColorRegions{};
+    // Plane xyz retains selective geometry; w carries global grade removal.
     std::array<float, 4> selectiveColorPlaneA{};
     std::array<float, 4> selectiveColorPlaneB{};
 

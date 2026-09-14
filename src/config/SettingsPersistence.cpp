@@ -19,7 +19,7 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 46> kKeys{
+constexpr std::array<std::string_view, 48> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
     "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
@@ -32,8 +32,9 @@ constexpr std::array<std::string_view, 46> kKeys{
     "GreenSaturation", "GreenBrightness", "CyanHue",
     "CyanSaturation", "CyanBrightness", "BlueHue",
     "BlueSaturation", "BlueBrightness", "MagentaHue",
-    "MagentaSaturation", "MagentaBrightness"};
-constexpr std::array<std::string_view, 46> kSections{
+    "MagentaSaturation", "MagentaBrightness",
+    "VanillaGradeLuminance", "VanillaGradeColor"};
+constexpr std::array<std::string_view, 48> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
     "GT7", "GT7", "GT7", "Effects",
     "Image", "Image", "Image", "Image", "Image", "Image", "Image",
@@ -45,7 +46,8 @@ constexpr std::array<std::string_view, 46> kSections{
     "SelectiveColor", "SelectiveColor", "SelectiveColor",
     "SelectiveColor", "SelectiveColor", "SelectiveColor",
     "SelectiveColor", "SelectiveColor", "SelectiveColor",
-    "SelectiveColor", "SelectiveColor"};
+    "SelectiveColor", "SelectiveColor",
+    "Effects", "Effects"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -63,10 +65,10 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 46> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 48> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
-    std::array<std::string, 46> values{FormatNumber(value.display.displayPeakNits),
+    std::array<std::string, 48> values{FormatNumber(value.display.displayPeakNits),
         FormatNumber(value.display.uiPaperWhiteNits), FormatNumber(value.display.videoWhiteNits),
         std::string(ToString(value.algorithm)), FormatNumber(parameters.agxMiddleGrayEv),
         FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
@@ -89,6 +91,8 @@ std::array<std::string, 46> OwnedValues(const PluginConfiguration& value)
         values[26 + index * 3] = FormatNumber(region.saturationPercent);
         values[27 + index * 3] = FormatNumber(region.brightness);
     }
+    values[46] = FormatNumber(value.display.vanillaGradeLuminancePercent);
+    values[47] = FormatNumber(value.display.vanillaGradeColorPercent);
     return values;
 }
 
@@ -188,8 +192,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 46> values_;
-    std::array<bool, 46> seen_{};
+    std::array<std::string, 48> values_;
+    std::array<bool, 48> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;

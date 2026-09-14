@@ -88,6 +88,25 @@ LinearRgb ExpectedGrade(const WeightedGradeInputs& inputs, float strength)
         std::lerp(static_cast<double>(sourceColor.blue), static_cast<double>(endpoint.blue), strength)};
 }
 
+LinearRgb ExpectedGradeRemoval(LinearRgb graded, const HdrSettingsMath& controls)
+{
+    if (controls.vanillaGradeLuminanceRemoval == 0 && controls.vanillaGradeColorRemoval == 0)
+        return graded;
+    // This positive fixture oracle independently separates scalar luma and normalized color.
+    constexpr std::array weights{0.2125, 0.7154, 0.0721};
+    const double originalLuma = sourceColor.red * weights[0] +
+        sourceColor.green * weights[1] + sourceColor.blue * weights[2];
+    const double gradedLuma = graded.red * weights[0] + graded.green * weights[1] + graded.blue * weights[2];
+    const double targetLuma = std::lerp(gradedLuma, originalLuma, controls.vanillaGradeLuminanceRemoval);
+    const std::array original{sourceColor.red, sourceColor.green, sourceColor.blue};
+    const std::array channels{graded.red, graded.green, graded.blue};
+    std::array<double, 3> result{};
+    for (std::size_t index = 0; index < result.size(); ++index)
+        result[index] = targetLuma * std::lerp(channels[index] / gradedLuma,
+            original[index] / originalLuma, controls.vanillaGradeColorRemoval);
+    return {result[0], result[1], result[2]};
+}
+
 void CheckGradeChannel(float actual, double expectedNits)
 {
     const auto expected = expectedNits / uiWhite;
@@ -114,7 +133,7 @@ void VerifyGradeStrength(WeightedGradeInputs& inputs, PresentationPass& presenta
     inputs.Bind();
     FO4HDR_CHECK(DrawPass(fixture, 4, true) == SceneDrawOutcome::replaced);
     inputs.Check();
-    const auto grade = ExpectedGrade(inputs, strength);
+    const auto grade = ExpectedGradeRemoval(ExpectedGrade(inputs, strength), configuration.imageControls);
     SelectiveColorPrepared prepared;
     FO4HDR_CHECK(PrepareSelectiveColor(selective, prepared));
     const auto adjusted = ApplySelectiveColor({grade.red, grade.green, grade.blue}, prepared);
@@ -150,6 +169,10 @@ void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
     VerifyGradeStrength(inputs, presentation, table, {0, {}, ColorGradingMethod::radial, selective});
     selective.enabled = true;
     VerifyGradeStrength(inputs, presentation, table, {0, {}, ColorGradingMethod::radial, selective});
+    SceneGradeConfiguration removal{0.5F};
+    removal.imageControls.vanillaGradeLuminanceRemoval = 0.35;
+    removal.imageControls.vanillaGradeColorRemoval = 0.8;
+    VerifyGradeStrength(inputs, presentation, table, removal);
     FO4HDR_CHECK(presentation.Retire());
 }
 

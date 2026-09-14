@@ -2,9 +2,11 @@
 
 #include "GameStateObserver.hpp"
 #include "GameSnapshotStore.hpp"
+#include "ImageSpaceObserver.hpp"
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #include <F4SE/F4SE.h>
+#include <RE/Fallout.h>
 #include <Windows.h>
 
 #include <array>
@@ -27,6 +29,7 @@ fo4hdr::GraphicsLifecyclePublisher graphicsLifecycle;
 fo4hdr::MenuEventQueue<256> menuEvents;
 std::atomic<InitializationState> initializationState{};
 std::atomic<bool> collectorFailed{};
+std::atomic<bool> gameDataReady{};
 std::atomic_flag collectionActive = ATOMIC_FLAG_INIT;
 const F4SE::TaskInterface* taskInterface{};
 
@@ -42,7 +45,22 @@ void DisableCollection() noexcept
     }
 }
 
-void RunCollectedRequest(std::uint64_t resourceGeneration) noexcept
+void ReadNativeSnapshot(std::uint64_t resourceGeneration, bool buildCatalog)
+{
+    if (buildCatalog) (void)fo4hdr::game::BuildImageSpaceCatalog(resourceGeneration);
+    fo4hdr::GameHdrSnapshot observed{};
+    (void)fo4hdr::game::ReadRendererSnapshot(observed);
+    if (gameDataReady.load(std::memory_order_acquire))
+        (void)fo4hdr::game::ObserveImageSpace(RE::ImageSpaceManager::GetSingleton(),
+            resourceGeneration, observed.imageSpace);
+    snapshotStore.Update([&](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
+        if (snapshot.collectorFailed || snapshot.resourceGeneration != resourceGeneration) return;
+        fo4hdr::CopyObservedRenderer(snapshot, observed);
+        snapshot.imageSpace = observed.imageSpace;
+    });
+}
+
+void RunCollectedRequest(std::uint64_t resourceGeneration, bool buildCatalog) noexcept
 {
     if (collectorFailed.load(std::memory_order_acquire))
     {
@@ -56,15 +74,17 @@ void RunCollectedRequest(std::uint64_t resourceGeneration) noexcept
     try
     {
         const auto threadId = GetCurrentThreadId();
-        snapshotStore.Update([resourceGeneration, threadId](
+        bool admitted{};
+        snapshotStore.Update([resourceGeneration, threadId, &admitted](
             fo4hdr::GameHdrSnapshot& snapshot) noexcept {
-            static_cast<void>(fo4hdr::CollectGameMenuSnapshot(
-                snapshot, menuEvents, resourceGeneration, threadId));
+            admitted = fo4hdr::CollectGameMenuSnapshot(
+                snapshot, menuEvents, resourceGeneration, threadId);
             if (snapshot.collectorFailed)
             {
                 collectorFailed.store(true, std::memory_order_release);
             }
         });
+        if (admitted) ReadNativeSnapshot(resourceGeneration, buildCatalog);
     }
     catch (...)
     {
@@ -76,26 +96,27 @@ void RunCollectedRequest(std::uint64_t resourceGeneration) noexcept
 class ObservationTask final : public F4SE::ITaskDelegate
 {
 public:
-    explicit ObservationTask(std::uint64_t resourceGeneration) noexcept :
-        resourceGeneration_(resourceGeneration)
+    ObservationTask(std::uint64_t resourceGeneration, bool buildCatalog) noexcept :
+        resourceGeneration_(resourceGeneration), buildCatalog_(buildCatalog)
     {}
 
     void Run() noexcept override
     {
-        RunCollectedRequest(resourceGeneration_);
+        RunCollectedRequest(resourceGeneration_, buildCatalog_);
     }
 
 private:
     std::uint64_t resourceGeneration_;
+    bool buildCatalog_;
 };
 
-void ScheduleCollectedRequest(std::uint64_t resourceGeneration)
+void ScheduleCollectedRequest(std::uint64_t resourceGeneration, bool buildCatalog)
 {
     if (taskInterface == nullptr || collectorFailed.load(std::memory_order_acquire))
     {
         return;
     }
-    auto task = std::make_unique<ObservationTask>(resourceGeneration);
+    auto task = std::make_unique<ObservationTask>(resourceGeneration, buildCatalog);
     taskInterface->AddTask(task.get());
     // Normal return transfers ownership; F4SE runs and deletes this delegate.
     static_cast<void>(task.release());
@@ -128,6 +149,15 @@ void ActivateSettingsInputAtLifecycle(fo4hdr::GameLifecycleEvent event, bool suc
     }
 }
 
+void ScheduleNativeObservation(fo4hdr::GameLifecycleEvent event,
+    bool outcome, std::uint64_t resourceGeneration)
+{
+    const bool dataReady = event == fo4hdr::GameLifecycleEvent::GameDataReady && outcome;
+    if (dataReady) gameDataReady.store(true, std::memory_order_release);
+    if (dataReady || fo4hdr::ShouldCollectGameSnapshotAtLifecycle(event, outcome))
+        ScheduleCollectedRequest(resourceGeneration, gameDataReady.load(std::memory_order_acquire));
+}
+
 void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexcept
 {
     try
@@ -152,11 +182,9 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
                 snapshot, event, succeeded, menuEvents.PublishedSequence());
             graphicsLifecycle.PublishTransition(event, succeeded);
             resourceGeneration = snapshot.resourceGeneration;
+            fo4hdr::ResetNativeLutObservation(resourceGeneration);
         });
-        if (fo4hdr::ShouldCollectGameSnapshotAtLifecycle(event, *outcome))
-        {
-            ScheduleCollectedRequest(resourceGeneration);
-        }
+        ScheduleNativeObservation(event, *outcome, resourceGeneration);
     }
     catch (...)
     {

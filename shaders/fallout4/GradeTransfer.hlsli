@@ -16,6 +16,37 @@ float3 Fo4HdrGradeCleanScene(float3 rgb)
     return rgb;
 }
 
+float3 Fo4HdrApplyVanillaGradeRemoval(float3 hdr, float3 graded,
+    float luminanceRemoval, float colorRemoval)
+{
+    if (!(luminanceRemoval > 0.0f || colorRemoval > 0.0f)) return graded;
+    if (luminanceRemoval >= 1.0f && colorRemoval >= 1.0f) return hdr;
+    if (all(hdr == graded)) return hdr;
+
+    static const float3 luminanceWeights =
+        float3(0.212500006f, 0.715399981f, 0.0720999986f);
+    const float hdrLuminance = dot(hdr, luminanceWeights);
+    const float gradedLuminance = dot(graded, luminanceWeights);
+    if (!(hdrLuminance > 0.0f || gradedLuminance > 0.0f)) return 0.0f;
+
+    float3 hdrChromaticity = 1.0f;
+    [branch] if (hdrLuminance > 0.0f)
+        hdrChromaticity = hdr / hdrLuminance;
+    float3 gradedChromaticity = hdrChromaticity;
+    [branch] if (gradedLuminance > 0.0f)
+        gradedChromaticity = graded / gradedLuminance;
+
+    const float targetLuminance = lerp(hdrLuminance, gradedLuminance,
+        1.0f - saturate(luminanceRemoval));
+    const float3 targetChromaticity = lerp(hdrChromaticity,
+        gradedChromaticity, 1.0f - saturate(colorRemoval));
+    const float3 adjusted = targetLuminance * targetChromaticity;
+    // Nondefault luma/chroma combinations can exceed the FP16 transport range.
+    const float scale = min(1.0f, 65504.0f /
+        max(Fo4HdrLargestGradeChannel(adjusted), 65504.0f));
+    return min(adjusted * scale, 65504.0f);
+}
+
 float Fo4HdrRadialCurve(float value)
 {
     // Factoring the native rational curve avoids cancellation at black.

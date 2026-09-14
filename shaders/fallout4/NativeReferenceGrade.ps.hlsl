@@ -15,6 +15,8 @@ void main(
     const float4 source = SceneTexture.Sample(SceneSampler, texcoord);
     const float3 scene = Fo4HdrGradeCleanScene(source.rgb);
     float3 result = Fo4HdrNativeReferenceGrade(scene, VanillaColorGradingStrength);
+    result = Fo4HdrApplyVanillaGradeRemoval(scene, result,
+        VanillaGradeLuminanceRemoval, VanillaGradeColorRemoval);
     result = Fo4HdrApplyImageControls(result);
     result = Fo4HdrApplySelectiveColor(result);
     [branch]

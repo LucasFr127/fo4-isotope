@@ -57,14 +57,16 @@ struct SceneGradeConfiguration
 private:
     [[nodiscard]] bool ImageScalarsValid() const noexcept
     {
-        const std::array<std::array<double, 3>, 7> ranges{{
+        const std::array<std::array<double, 3>, 9> ranges{{
             {imageControls.contrastSlope, 0.5, 2.0},
             {imageControls.blacksStrength, -0.75, 0.75},
             {imageControls.highlightsEv, -2.0, 2.0},
             {imageControls.shadowsEv, -2.0, 2.0},
             {imageControls.saturationScale, 0.0, 2.0},
             {imageControls.sceneExposureMultiplier, 0.0625, 16.0},
-            {imageControls.bloomMultiplier, 0.0, 2.0}}};
+            {imageControls.bloomMultiplier, 0.0, 2.0},
+            {imageControls.vanillaGradeLuminanceRemoval, 0.0, 1.0},
+            {imageControls.vanillaGradeColorRemoval, 0.0, 1.0}}};
         return std::all_of(ranges.begin(), ranges.end(), [](const auto& range) {
             return std::isfinite(range[0]) && range[0] >= range[1] && range[0] <= range[2];
         });

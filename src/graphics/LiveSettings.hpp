@@ -289,10 +289,12 @@ private:
         if (requested.colorGradingMethod != active.colorGradingMethod) return false;
         if (requested.selectiveColor != active.selectiveColor) return false;
         const std::array requestedImage{requested.vanillaColorGradingStrengthPercent,
+            requested.vanillaGradeLuminancePercent, requested.vanillaGradeColorPercent,
             requested.contrast, requested.blacks, requested.highlights, requested.shadows,
             requested.saturationPercent, requested.temperature, requested.tint,
             requested.exposureEv, requested.bloomStrengthPercent};
         const std::array activeImage{active.vanillaColorGradingStrengthPercent,
+            active.vanillaGradeLuminancePercent, active.vanillaGradeColorPercent,
             active.contrast, active.blacks, active.highlights, active.shadows,
             active.saturationPercent, active.temperature, active.tint,
             active.exposureEv, active.bloomStrengthPercent};

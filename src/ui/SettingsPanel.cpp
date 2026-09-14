@@ -101,6 +101,10 @@ bool DrawGrade(HdrSettings& settings) noexcept
     if (changed) settings.colorGradingMethod = static_cast<ColorGradingMethod>(method);
     changed |= DrawNumber("Grading strength", settings.vanillaColorGradingStrengthPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
+    changed |= DrawNumber("Native grade luminance", settings.vanillaGradeLuminancePercent,
+        {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
+    changed |= DrawNumber("Native grade color", settings.vanillaGradeColorPercent,
+        {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"});
     changed |= DrawNumber("Bloom strength", settings.bloomStrengthPercent,
         {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent, "%.0f%%"});
     return changed;

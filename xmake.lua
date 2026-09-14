@@ -91,6 +91,7 @@ target("Fallout4HDR")
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
         "src/game/ArmorUiObserver.cpp",
+        "src/game/RendererSnapshot.cpp", "src/game/ImageSpaceObserver.cpp", "src/game/NativeLutObserver.cpp",
         "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp",
         "src/graphics/GameDeviceGeneration.cpp", "src/graphics/DeviceCreationHook.cpp",
         "src/graphics/SwapChainObservation.cpp", "src/graphics/RendererLifetime.cpp",
@@ -102,6 +103,7 @@ target("Fallout4HDR")
         "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
         "src/graphics/resources/DeveloperExposureResources.cpp",
         "src/output/Hdr10Color.cpp", "src/output/SelectiveColor.cpp",
+        "src/output/NativeLutObservation.cpp",
         "src/tonemap/OperatorLut.cpp",
         "src/tonemap/Gt7.cpp",
         "src/tonemap/Agx.cpp",
@@ -161,6 +163,7 @@ for _, fixture in ipairs({
         add_syslinks("d3d11", "user32")
         add_files("src/config/HdrSettings.cpp", "src/output/Hdr10Color.cpp",
             "src/output/PerformanceStatistics.cpp",
+            "src/output/NativeLutObservation.cpp",
             "src/config/PluginConfiguration.cpp", "src/config/SettingsPersistence.cpp",
             "tests/unit/config/HdrPersistenceTests.cpp",
             "tests/unit/config/HdrConfigurationTests.cpp",

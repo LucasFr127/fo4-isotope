@@ -135,6 +135,15 @@ struct ImageRule
     HdrSettingsValidationError error;
 };
 
+bool ValidVanillaGradeControls(const HdrSettings& settings) noexcept
+{
+    const std::array values{settings.vanillaColorGradingStrengthPercent,
+        settings.vanillaGradeLuminancePercent, settings.vanillaGradeColorPercent};
+    return std::all_of(values.begin(), values.end(), [](double value) {
+        return InRange(value, kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent);
+    });
+}
+
 HdrSettingsValidationError ValidateImageSettings(const HdrSettings& settings) noexcept
 {
     constexpr ImageRule rules[]{
@@ -211,8 +220,7 @@ HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noex
     {
         return HdrSettingsValidationError::videoWhiteOutOfRange;
     }
-    if (!InRange(settings.vanillaColorGradingStrengthPercent,
-        kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent))
+    if (!ValidVanillaGradeControls(settings))
     {
         return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
     }
@@ -236,6 +244,8 @@ HdrSettingsMath DeriveHdrSettingsMath(const HdrSettings& settings) noexcept
     result.colorBalanceBt709 = BuildColorBalanceMatrix(settings.temperature, settings.tint);
     result.sceneExposureMultiplier = std::exp2(settings.exposureEv);
     result.bloomMultiplier = settings.bloomStrengthPercent / 100.0;
+    result.vanillaGradeLuminanceRemoval = 1.0 - settings.vanillaGradeLuminancePercent / 100.0;
+    result.vanillaGradeColorRemoval = 1.0 - settings.vanillaGradeColorPercent / 100.0;
     return result;
 }
 

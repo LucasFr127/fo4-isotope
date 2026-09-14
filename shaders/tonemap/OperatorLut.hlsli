@@ -28,8 +28,10 @@ cbuffer Fallout4OperatorConstants : register(b13)
     float4 Fo4HdrSelectiveCyan;
     float4 Fo4HdrSelectiveBlue;
     float4 Fo4HdrSelectiveMagenta;
-    float4 Fo4HdrSelectivePlaneA;
-    float4 Fo4HdrSelectivePlaneB;
+    float3 Fo4HdrSelectivePlaneA;
+    float VanillaGradeLuminanceRemoval;
+    float3 Fo4HdrSelectivePlaneB;
+    float VanillaGradeColorRemoval;
 }
 
 Texture3D<float4> OperatorLut : register(t7);

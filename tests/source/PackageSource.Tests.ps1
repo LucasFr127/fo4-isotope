@@ -228,7 +228,15 @@ $expected = [string[]]@(
     "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
     "shaders/fallout4/NativeReferenceGrade.ps.hlsl",
     "shaders/fallout4/NativeReferenceGrade.hlsli",
-    "tests/shader/NativeReferencePrepareTests.cpp"
+    "tests/shader/NativeReferencePrepareTests.cpp",
+    "include/Fallout4HDR/output/NativeLutObservation.hpp",
+    "src/game/GameObservationMemory.hpp",
+    "src/game/RendererSnapshot.cpp",
+    "src/game/ImageSpaceObserver.hpp",
+    "src/game/ImageSpaceObserver.cpp",
+    "src/game/NativeLutObserver.hpp",
+    "src/game/NativeLutObserver.cpp",
+    "src/output/NativeLutObservation.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

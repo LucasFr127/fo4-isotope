@@ -52,6 +52,8 @@ void main(
     if (VanillaColorGradingStrength > 0.0f)
         result = Fo4HdrTransferRadialGrade(scene, Fo4HdrSampleWeightedGrade(scene),
             VanillaColorGradingStrength);
+    result = Fo4HdrApplyVanillaGradeRemoval(scene, result,
+        VanillaGradeLuminanceRemoval, VanillaGradeColorRemoval);
     result = Fo4HdrApplyImageControls(result);
     result = Fo4HdrApplySelectiveColor(result);
     [branch]

@@ -97,6 +97,8 @@ struct HdrSettings
     double videoWhiteNits{kDefaultVideoWhiteNits};
     ToneMapperParameters toneMapperParameters;
     double vanillaColorGradingStrengthPercent{100.0};
+    double vanillaGradeLuminancePercent{100.0};
+    double vanillaGradeColorPercent{100.0};
     ColorGradingMethod colorGradingMethod{ColorGradingMethod::radial};
     double contrast{};
     double blacks{};
@@ -145,6 +147,8 @@ struct HdrSettingsMath
         1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     double sceneExposureMultiplier{1.0};
     double bloomMultiplier{1.0};
+    double vanillaGradeLuminanceRemoval{};
+    double vanillaGradeColorRemoval{};
 };
 
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(const HdrSettings& settings) noexcept;

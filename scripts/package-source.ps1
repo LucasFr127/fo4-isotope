@@ -245,7 +245,15 @@ $files = [string[]]@(
     "shaders/fallout4/NativeReferencePrepare.cs.hlsl",
     "shaders/fallout4/NativeReferenceGrade.ps.hlsl",
     "shaders/fallout4/NativeReferenceGrade.hlsli",
-    "tests/shader/NativeReferencePrepareTests.cpp"
+    "tests/shader/NativeReferencePrepareTests.cpp",
+    "include/Fallout4HDR/output/NativeLutObservation.hpp",
+    "src/game/GameObservationMemory.hpp",
+    "src/game/RendererSnapshot.cpp",
+    "src/game/ImageSpaceObserver.hpp",
+    "src/game/ImageSpaceObserver.cpp",
+    "src/game/NativeLutObserver.hpp",
+    "src/game/NativeLutObserver.cpp",
+    "src/output/NativeLutObservation.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

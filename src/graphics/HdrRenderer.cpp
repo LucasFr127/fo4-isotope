@@ -364,6 +364,8 @@ bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration
     values.uiWhiteNits = config.whites.uiWhiteNits;
     values.SetGrade(config.sceneGrade.vanillaColorGradingStrength, config.sceneGrade.imageControls);
     if (!PrepareSelectiveConstants(config.sceneGrade.selectiveColor, values)) return false;
+    values.selectiveColorPlaneA[3] = static_cast<float>(config.sceneGrade.imageControls.vanillaGradeLuminanceRemoval);
+    values.selectiveColorPlaneB[3] = static_cast<float>(config.sceneGrade.imageControls.vanillaGradeColorRemoval);
     if (const auto* table = config.operatorLut)
     {
         values.mode = OperatorMode(table->algorithm);

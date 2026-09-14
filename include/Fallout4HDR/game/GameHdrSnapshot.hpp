@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/output/NativeLutObservation.hpp"
+#include <array>
 #include <cstdint>
 #include <type_traits>
 
@@ -20,6 +22,28 @@ enum class GameLifecycleEvent : std::uint8_t
     NewGame,
     GameLoaded,
     GameDataReady
+};
+
+struct RendererWindowSnapshot
+{
+    std::uint64_t windowIdentity{};
+    std::uint64_t swapChainIdentity{};
+    std::uint32_t arrayIndex{};
+    std::int32_t x{};
+    std::int32_t y{};
+    std::int32_t width{};
+    std::int32_t height{};
+    bool present{};
+};
+
+struct EngineRenderTargetSnapshot
+{
+    std::uint64_t textureIdentity{};
+    std::uint64_t renderTargetViewIdentity{};
+    std::uint64_t shaderResourceViewIdentity{};
+    std::uint64_t unorderedAccessViewIdentity{};
+    std::uint32_t arrayIndex{};
+    bool resourcePresent{};
 };
 
 struct GameHdrSnapshot
@@ -51,6 +75,21 @@ struct GameHdrSnapshot
     // Opaque identities carry no ownership and must not be dereferenced.
     std::uint64_t rendererDeviceIdentity{};
     std::uint64_t rendererContextIdentity{};
+    bool rendererObserved{};
+    bool renderTargetManagerAvailable{};
+    std::uint32_t rendererWindowCount{};
+    std::uint32_t populatedRenderTargetCount{};
+    std::uint32_t populatedDepthTargetCount{};
+    std::uint32_t populatedCubeTargetCount{};
+    // Manager properties are not correlated with resource slots; these remain unobserved.
+    std::uint32_t renderWidth{};
+    std::uint32_t renderHeight{};
+    float dynamicWidthRatio{};
+    float dynamicHeightRatio{};
+    bool dynamicResolutionEnabled{};
+    std::array<RendererWindowSnapshot, 32> rendererWindows{};
+    std::array<EngineRenderTargetSnapshot, 101> renderTargets{};
+    ImageSpaceSnapshot imageSpace{};
 };
 
 static_assert(std::is_trivially_copyable_v<GameHdrSnapshot>);

@@ -112,6 +112,28 @@ private:
     return dataBits == 1;
 }
 
+constexpr void CopyObservedRenderer(GameHdrSnapshot& destination, const GameHdrSnapshot& observed) noexcept
+{
+    destination.rendererInitialized = observed.rendererInitialized;
+    destination.rendererBorderless = observed.rendererBorderless;
+    destination.rendererVsync = observed.rendererVsync;
+    destination.rendererDeviceIdentity = observed.rendererDeviceIdentity;
+    destination.rendererContextIdentity = observed.rendererContextIdentity;
+    destination.rendererObserved = observed.rendererObserved;
+    destination.renderTargetManagerAvailable = observed.renderTargetManagerAvailable;
+    destination.rendererWindowCount = observed.rendererWindowCount;
+    destination.populatedRenderTargetCount = observed.populatedRenderTargetCount;
+    destination.populatedDepthTargetCount = observed.populatedDepthTargetCount;
+    destination.populatedCubeTargetCount = observed.populatedCubeTargetCount;
+    destination.renderWidth = observed.renderWidth;
+    destination.renderHeight = observed.renderHeight;
+    destination.dynamicWidthRatio = observed.dynamicWidthRatio;
+    destination.dynamicHeightRatio = observed.dynamicHeightRatio;
+    destination.dynamicResolutionEnabled = observed.dynamicResolutionEnabled;
+    destination.rendererWindows = observed.rendererWindows;
+    destination.renderTargets = observed.renderTargets;
+}
+
 constexpr void ApplyGameLifecycleTransition(
     GameHdrSnapshot& snapshot, GameLifecycleEvent event, bool succeeded,
     std::uint64_t menuPublication) noexcept
@@ -124,11 +146,8 @@ constexpr void ApplyGameLifecycleTransition(
         ++snapshot.resourceGeneration;
         // NewGame precedes load completion; this event cannot establish world readiness.
         snapshot.loading = true;
-        snapshot.rendererInitialized = false;
-        snapshot.rendererBorderless = false;
-        snapshot.rendererVsync = false;
-        snapshot.rendererDeviceIdentity = 0;
-        snapshot.rendererContextIdentity = 0;
+        CopyObservedRenderer(snapshot, {});
+        snapshot.imageSpace = {};
         // This floor separates copied publications, not the source event's world lifetime.
         snapshot.menuResetFloor = menuPublication;
         snapshot.menuEventAvailable = false;
