@@ -3,6 +3,7 @@
 #include "NativeLutObserver.hpp"
 #include "GameObservationMemory.hpp"
 #include "ImageSpaceObserver.hpp"
+#include "Fallout4HDR/config/HdrSettings.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -25,7 +26,7 @@ bool CopyPath(const char* text, fo4hdr::LutSnapshot& destination) noexcept
     std::array<char, 260> bytes{};
     if (!ReadBoundedText(text, bytes)) return false;
     const std::string_view path(bytes.data());
-    if (!fo4hdr::game::NormalizeObservedLutPath(path, destination.utf8Path)) return false;
+    if (!fo4hdr::NormalizeLutGradePath(path, destination.utf8Path)) return false;
     destination.pathLength = static_cast<std::uint16_t>(path.size());
     return true;
 }
@@ -131,13 +132,17 @@ bool ObserveNativeLuts(const RE::ImageSpaceManager* manager,
     // This decoder supports only the inspected 1.10.163 override. A later
     // runtime cannot obtain identity by selecting an arbitrary texture offset.
     if (textureSrvOffset != 0) return false;
+    const auto epoch = NativeLutObservationGeneration();
     const auto* data = ActiveLut(manager);
     LutBytes bytes{};
     if (data == nullptr || !GuardedReadValue(data, bytes)) return false;
     auto candidate = CopyLutSlots(bytes);
+    candidate.generation = epoch;
     if (!LutUnchanged(manager, data, bytes)) return false;
     candidate.threadId = ::GetCurrentThreadId();
     candidate.resourceGeneration = resourceGeneration;
+    AttachImageSpaceObservation(manager, data, candidate);
+    if (NativeLutObservationGeneration() != epoch) return false;
     destination = candidate;
     return true;
 }

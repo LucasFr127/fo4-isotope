@@ -53,7 +53,7 @@ bool NativeSettingsHost::PrepareWindow(UINT width, UINT height) noexcept
     if (!input) return false;
     return window_.Initialize(configuration_.device, configuration_.context,
         {configuration_.window, width, height, input,
-            &live_, &persistence_});
+            &live_, &persistence_, configuration_.presentation});
 }
 
 bool NativeSettingsHost::PrepareOwners(std::unique_ptr<OperatorLutBuildResult>& prepared) noexcept

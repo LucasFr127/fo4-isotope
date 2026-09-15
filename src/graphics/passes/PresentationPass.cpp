@@ -622,6 +622,12 @@ bool PresentationPass::Initialize(ID3D11Device* device,
     return true;
 }
 
+LutProfileDrawSnapshot PresentationPass::CopyLutInspector() const noexcept
+{
+    if (!Active() || !configuration_.scenes) return {};
+    return configuration_.scenes->CopyLutInspector();
+}
+
 bool PresentationPass::OnOwnerThread() const noexcept
 {
     return ownerThread_ == std::this_thread::get_id();

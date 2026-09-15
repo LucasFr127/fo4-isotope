@@ -236,7 +236,8 @@ $expected = [string[]]@(
     "src/game/ImageSpaceObserver.cpp",
     "src/game/NativeLutObserver.hpp",
     "src/game/NativeLutObserver.cpp",
-    "src/output/NativeLutObservation.cpp"
+    "src/output/NativeLutObservation.cpp",
+    "src/game/ImageSpaceState.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

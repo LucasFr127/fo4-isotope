@@ -206,6 +206,7 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
     if (algorithm != other.algorithm) return false;
     if (display.colorGradingMethod != other.display.colorGradingMethod) return false;
     if (display.selectiveColor != other.display.selectiveColor) return false;
+    if (display.lutGradeProfiles != other.display.lutGradeProfiles) return false;
     const std::array current{
         display.displayPeakNits, display.uiPaperWhiteNits, display.videoWhiteNits,
         display.vanillaColorGradingStrengthPercent, display.vanillaGradeLuminancePercent,

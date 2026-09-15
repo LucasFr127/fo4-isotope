@@ -75,6 +75,7 @@ public:
         PresentationScope scope) noexcept;
     [[nodiscard]] bool Active() const noexcept;
     [[nodiscard]] GpuPerformanceSnapshot Performance() const noexcept;
+    [[nodiscard]] LutProfileDrawSnapshot CopyLutInspector() const noexcept;
     void PollPerformance(PresentationScope scope) noexcept;
     // Read-only qualification for closed-frame commits that need no native change.
     [[nodiscard]] bool CanApplySettings(PresentationScope scope) const noexcept;

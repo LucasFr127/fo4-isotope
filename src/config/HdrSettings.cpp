@@ -206,6 +206,232 @@ bool ValidateToneMapperParameters(
     return false;
 }
 
+
+namespace {
+namespace detail {
+
+bool ValidProfileValues(const LutGradeProfile& profile) noexcept
+{
+    return (profile.overrideLuminance || profile.overrideColor) &&
+        std::isfinite(profile.luminancePercent) && profile.luminancePercent >= 0.0 &&
+        profile.luminancePercent <= 100.0 && std::isfinite(profile.colorPercent) &&
+        profile.colorPercent >= 0.0 && profile.colorPercent <= 100.0;
+}
+
+std::size_t Utf8SequenceLength(unsigned char lead) noexcept
+{
+    if (lead >= 0xC2U && lead <= 0xDFU) return 2;
+    if (lead >= 0xE0U && lead <= 0xEFU) return 3;
+    if (lead >= 0xF0U && lead <= 0xF4U) return 4;
+    return 0;
+}
+
+bool ValidUtf8Second(unsigned char lead, unsigned char second) noexcept
+{
+    unsigned char minimum = 0x80U;
+    unsigned char maximum = 0xBFU;
+    switch (lead)
+    {
+    case 0xE0U: minimum = 0xA0U; break;
+    case 0xEDU: maximum = 0x9FU; break;
+    case 0xF0U: minimum = 0x90U; break;
+    case 0xF4U: maximum = 0x8FU; break;
+    default: break;
+    }
+    return second >= minimum && second <= maximum;
+}
+
+std::size_t ValidUtf8Prefix(std::string_view text) noexcept
+{
+    const auto lead = static_cast<unsigned char>(text.front());
+    const auto length = Utf8SequenceLength(lead);
+    if (length == 0 || length > text.size()) return 0;
+    if (!ValidUtf8Second(lead, static_cast<unsigned char>(text[1]))) return 0;
+    const auto tail = text.substr(2, length - 2);
+    if (!std::ranges::all_of(tail, [](unsigned char byte) {
+            return (byte & 0xC0U) == 0x80U;
+        })) return 0;
+    return length;
+}
+
+char NormalizeGradeAscii(unsigned char byte) noexcept
+{
+    if (byte < 0x20U || byte == 0x7FU) return '\0';
+    if (byte == '[' || byte == ']') return '\0';
+    if (byte == '\\') return '/';
+    if (byte >= 'A' && byte <= 'Z') return static_cast<char>(byte - 'A' + 'a');
+    return static_cast<char>(byte);
+}
+
+bool ValidGradePathBounds(std::string_view path) noexcept
+{
+    if (path.empty() || path.size() > kMaximumLutGradePathLength) return false;
+    return path.front() != ' ' && path.back() != ' ';
+}
+
+bool ValidGradePlugin(std::string_view plugin) noexcept
+{
+    if (plugin.empty()) return false;
+    if (plugin.back() == ' ' || plugin.back() == '.') return false;
+    constexpr std::array extensions{std::string_view{".esm"},
+        std::string_view{".esp"}, std::string_view{".esl"}};
+    if (!std::ranges::any_of(extensions, [plugin](auto extension) {
+            return plugin.ends_with(extension);
+        })) return false;
+    return plugin.find_first_of("<>:\"/\\|?*") == std::string_view::npos;
+}
+
+bool ValidGradeFormId(std::string_view value) noexcept
+{
+    constexpr std::string_view digits{"0123456789abcdef"};
+    return value.find_first_not_of(digits) == std::string_view::npos &&
+        value.find_first_not_of('0') != std::string_view::npos;
+}
+
+bool NormalizeProfileKey(GradeProfileKind kind, std::string_view path,
+    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept
+{
+    if (kind == GradeProfileKind::lutAsset) return NormalizeLutGradePath(path, normalized);
+    return kind == GradeProfileKind::imageSpace && NormalizeImageSpaceGradeKey(path, normalized);
+}
+
+const LutGradeProfile* FindGradeProfile(const LutGradeProfiles& profiles,
+    GradeProfileKind kind,
+    const std::array<char, kMaximumLutGradePathLength + 1>& key) noexcept
+{
+    const auto count = std::min(profiles.count, profiles.entries.size());
+    const auto end = profiles.entries.begin() + count;
+    const auto found = std::find_if(profiles.entries.begin(), end,
+        [&](const auto& profile) { return profile.kind == kind && profile.path == key; });
+    return found == end ? nullptr : &*found;
+}
+
+const LutGradeProfile* FindProfileByKey(const LutGradeProfiles& profiles,
+    GradeProfileKind kind, std::string_view key) noexcept
+{
+    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
+    if (!NormalizeProfileKey(kind, key, normalized)) return nullptr;
+    return FindGradeProfile(profiles, kind, normalized);
+}
+
+ResolvedLutGrade ApplyGradeProfile(const LutGradeProfile* profile,
+    ResolvedLutGrade result) noexcept
+{
+    if (profile == nullptr) return result;
+    if (profile->overrideLuminance) result.luminancePercent = profile->luminancePercent;
+    if (profile->overrideColor) result.colorPercent = profile->colorPercent;
+    return result;
+}
+
+bool ValidateGradeProfile(const LutGradeProfile& profile) noexcept
+{
+    if (!ValidProfileValues(profile)) return false;
+    const auto terminator = std::find(profile.path.begin(), profile.path.end(), '\0');
+    if (terminator == profile.path.end()) return false;
+    const std::string_view path(profile.path.data(),
+        static_cast<std::size_t>(terminator - profile.path.begin()));
+    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
+    return NormalizeProfileKey(profile.kind, path, normalized) && normalized == profile.path;
+}
+
+}  // namespace detail
+}  // namespace
+
+[[nodiscard]] bool NormalizeLutGradePath(
+    std::string_view path,
+    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept
+{
+    normalized.fill('\0');
+    if (!detail::ValidGradePathBounds(path)) return false;
+    for (std::size_t index = 0; index < path.size();)
+    {
+        const auto byte = static_cast<unsigned char>(path[index]);
+        if (byte <= 0x7FU)
+        {
+            const auto character = detail::NormalizeGradeAscii(byte);
+            if (character == '\0') return false;
+            normalized[index++] = character;
+            continue;
+        }
+        const auto length = detail::ValidUtf8Prefix(path.substr(index));
+        if (length == 0) return false;
+        std::copy_n(path.data() + index, length, normalized.data() + index);
+        index += length;
+    }
+    return true;
+}
+
+[[nodiscard]] bool NormalizeImageSpaceGradeKey(
+    std::string_view key,
+    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept
+{
+    if (!NormalizeLutGradePath(key, normalized) || key.size() < 12) return false;
+    const std::string_view value(normalized.data(), key.size());
+    const auto separator = value.size() - 7;
+    if (value[separator] != '|') return false;
+    return detail::ValidGradePlugin(value.substr(0, separator)) &&
+        detail::ValidGradeFormId(value.substr(separator + 1));
+}
+
+[[nodiscard]] const LutGradeProfile* FindLutGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view path) noexcept
+{
+    return detail::FindProfileByKey(profiles, GradeProfileKind::lutAsset, path);
+}
+
+[[nodiscard]] const LutGradeProfile* FindImageSpaceGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view key) noexcept
+{
+    return detail::FindProfileByKey(profiles, GradeProfileKind::imageSpace, key);
+}
+
+[[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view path,
+    double globalLuminancePercent, double globalColorPercent) noexcept
+{
+    const ResolvedLutGrade global{globalLuminancePercent, globalColorPercent};
+    if (!profiles.enabled) return global;
+    return detail::ApplyGradeProfile(FindLutGradeProfile(profiles, path), global);
+}
+
+[[nodiscard]] ResolvedLutGrade ResolveImageSpaceGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view lutPath,
+    std::string_view imageSpaceKey, ResolvedLutGrade global) noexcept
+{
+    const auto result = ResolveLutGradeProfile(profiles, lutPath,
+        global.luminancePercent, global.colorPercent);
+    if (!profiles.enabled) return result;
+    return detail::ApplyGradeProfile(FindImageSpaceGradeProfile(profiles, imageSpaceKey), result);
+}
+
+[[nodiscard]] bool ValidateLutGradeProfiles(const LutGradeProfiles& profiles) noexcept
+{
+    if (profiles.count > profiles.entries.size()) return false;
+    for (std::size_t index = 0; index < profiles.count; ++index)
+    {
+        const auto& profile = profiles.entries[index];
+        if (!detail::ValidateGradeProfile(profile)) return false;
+        if (detail::FindGradeProfile(profiles, profile.kind, profile.path) != &profile) return false;
+    }
+    return true;
+}
+
+namespace {
+
+HdrSettingsValidationError ValidateColorGradingSettings(const HdrSettings& settings) noexcept
+{
+    if (settings.colorGradingMethod != ColorGradingMethod::radial &&
+        settings.colorGradingMethod != ColorGradingMethod::nativeReference)
+        return HdrSettingsValidationError::unsupportedColorGradingMethod;
+    if (!ValidateSelectiveColorSettings(settings.selectiveColor))
+        return HdrSettingsValidationError::selectiveColorOutOfRange;
+    if (!ValidateLutGradeProfiles(settings.lutGradeProfiles))
+        return HdrSettingsValidationError::invalidLutGradeProfiles;
+    return HdrSettingsValidationError::none;
+}
+
+}  // namespace
+
 HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noexcept
 {
     if (!InRange(settings.displayPeakNits, kMinimumDisplayPeakNits, kMaximumDisplayPeakNits))
@@ -224,11 +450,8 @@ HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noex
     {
         return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
     }
-    if (settings.colorGradingMethod != ColorGradingMethod::radial &&
-        settings.colorGradingMethod != ColorGradingMethod::nativeReference)
-        return HdrSettingsValidationError::unsupportedColorGradingMethod;
-    if (!ValidateSelectiveColorSettings(settings.selectiveColor))
-        return HdrSettingsValidationError::selectiveColorOutOfRange;
+    const auto gradeError = ValidateColorGradingSettings(settings);
+    if (gradeError != HdrSettingsValidationError::none) return gradeError;
     return ValidateImageSettings(settings);
 }
 

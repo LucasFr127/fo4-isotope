@@ -4,9 +4,64 @@
 #include "Fallout4HDR/output/SelectiveColor.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace fo4hdr {
+
+inline constexpr std::size_t kMaximumLutGradeProfiles{64};
+inline constexpr std::size_t kMaximumLutGradePathLength{259};
+
+enum class GradeProfileKind : std::uint8_t
+{
+    lutAsset,
+    imageSpace
+};
+
+struct LutGradeProfile
+{
+    std::array<char, kMaximumLutGradePathLength + 1> path{};
+    double luminancePercent{100.0};
+    double colorPercent{100.0};
+    bool overrideLuminance{};
+    bool overrideColor{};
+    GradeProfileKind kind{GradeProfileKind::lutAsset};
+    [[nodiscard]] constexpr bool operator==(const LutGradeProfile&) const noexcept = default;
+};
+
+struct LutGradeProfiles
+{
+    std::array<LutGradeProfile, kMaximumLutGradeProfiles> entries{};
+    std::size_t count{};
+    bool enabled{true};
+    [[nodiscard]] constexpr bool operator==(const LutGradeProfiles&) const noexcept = default;
+};
+
+struct ResolvedLutGrade
+{
+    double luminancePercent{100.0};
+    double colorPercent{100.0};
+    [[nodiscard]] constexpr bool operator==(const ResolvedLutGrade&) const noexcept = default;
+};
+
+[[nodiscard]] bool NormalizeLutGradePath(
+    std::string_view path,
+    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept;
+[[nodiscard]] bool NormalizeImageSpaceGradeKey(
+    std::string_view key,
+    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept;
+[[nodiscard]] const LutGradeProfile* FindLutGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view path) noexcept;
+[[nodiscard]] const LutGradeProfile* FindImageSpaceGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view key) noexcept;
+[[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view path,
+    double globalLuminancePercent, double globalColorPercent) noexcept;
+[[nodiscard]] ResolvedLutGrade ResolveImageSpaceGradeProfile(
+    const LutGradeProfiles& profiles, std::string_view lutPath,
+    std::string_view imageSpaceKey, ResolvedLutGrade global) noexcept;
+[[nodiscard]] bool ValidateLutGradeProfiles(const LutGradeProfiles& profiles) noexcept;
 
 inline constexpr double kDefaultUiPaperWhiteNits{203.0};
 inline constexpr double kDefaultVideoWhiteNits{203.0};
@@ -110,6 +165,7 @@ struct HdrSettings
     double exposureEv{};
     double bloomStrengthPercent{100.0};
     SelectiveColorSettings selectiveColor{};
+    LutGradeProfiles lutGradeProfiles{};
 };
 
 enum class HdrSettingsValidationError : std::uint8_t
@@ -129,7 +185,8 @@ enum class HdrSettingsValidationError : std::uint8_t
     tintOutOfRange,
     exposureOutOfRange,
     bloomStrengthOutOfRange,
-    selectiveColorOutOfRange
+    selectiveColorOutOfRange,
+    invalidLutGradeProfiles
 };
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(

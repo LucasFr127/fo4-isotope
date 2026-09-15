@@ -5,6 +5,7 @@
 #include "DisplayCalibrationPanel.hpp"
 #include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
+#include "passes/PresentationPass.hpp"
 
 #include <imgui.h>
 #include <backends/imgui_impl_dx11.h>
@@ -19,6 +20,21 @@
 
 namespace fo4hdr {
 namespace {
+
+void DrawLutInspector(PresentationPass* presentation)
+{
+    if (!ImGui::CollapsingHeader("Native grading inputs")) return;
+    const auto observation = presentation ? presentation->CopyLutInspector() : LutProfileDrawSnapshot{};
+    ImGui::Text("LUT qualification: %s", observation.status);
+    ImGui::Text("ImageSpace qualification: %s", observation.imageSpaceStatus);
+    for (std::size_t slot = 0; slot < observation.currentLuts.size(); ++slot)
+    {
+        const auto& lut = observation.currentLuts[slot];
+        const bool validated = (observation.validatedSlots & (1u << slot)) != 0;
+        ImGui::Text("Slot %u: %s", static_cast<unsigned>(slot),
+            validated ? lut.utf8Path.data() : "Unavailable");
+    }
+}
 
 using Microsoft::WRL::ComPtr;
 constexpr UINT outputCount = 8;
@@ -569,6 +585,7 @@ struct SettingsWindow::State
         if (ImGui::Begin("Fallout4HDR", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
         {
             actions = DrawSettingsPanel(editable, snapshot);
+            DrawLutInspector(configuration.presentation);
             if (ImGui::CollapsingHeader("Display calibration"))
             {
                 const auto display = displayDiscovery.Refresh(configuration.window);

@@ -2,6 +2,7 @@
 
 #include "ShippingPixelShaderTests.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
+#include "Fallout4HDR/output/NativeLutObservation.hpp"
 #include "passes/PresentationPass.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
 #include "TestHarness.hpp"
@@ -150,6 +151,69 @@ void VerifyGradeStrength(WeightedGradeInputs& inputs, PresentationPass& presenta
     if (strength == 0) FO4HDR_CHECK(std::abs(output.front().green - sourceColor.green) > 0.1f);
 }
 
+enum class ProfileDrawCase { matched, unmatched, revoked };
+
+void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentation,
+    const OperatorLutData& table)
+{
+    auto& fixture = inputs.fixture;
+    SceneGradeConfiguration configuration{0.5F};
+    configuration.imageControls.vanillaGradeLuminanceRemoval = 0.35;
+    configuration.imageControls.vanillaGradeColorRemoval = 0.8;
+    auto& profiles = configuration.lutGradeProfiles;
+    profiles.count = 1;
+    auto& profile = profiles.entries[0];
+    constexpr std::string_view path{"textures/luts/authored-profile.dds"};
+    FO4HDR_CHECK(NormalizeLutGradePath(path, profile.path));
+    profile.luminancePercent = profile.colorPercent = 0;
+    profile.overrideLuminance = profile.overrideColor = true;
+    FO4HDR_CHECK(presentation.ApplySettings(table, fixture.whites,
+        PresentationScope::qualifiedExclusive, configuration));
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(fixture.input));
+    Pixels source;
+    source.fill(sourceColor);
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, source);
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    for (const auto test : {ProfileDrawCase::matched, ProfileDrawCase::unmatched, ProfileDrawCase::revoked})
+    {
+        inputs.Bind();
+        NativeLutObservation observation;
+        observation.resourceGeneration = NativeLutResourceGeneration();
+        observation.generation = NativeLutObservationGeneration();
+        observation.threadId = GetCurrentThreadId();
+        observation.validSlots = 1;
+        observation.luts[0].utf8Path = profile.path;
+        observation.luts[0].pathLength = static_cast<std::uint16_t>(path.size());
+        observation.luts[0].weight = 0.25F;
+        observation.expectedShaderViews[0] = reinterpret_cast<std::uintptr_t>(
+            inputs.luts[test == ProfileDrawCase::unmatched ? 1 : 0].Get());
+        NativeLutScope scope(observation);
+        if (test == ProfileDrawCase::revoked) RevokeNativeLutObservation();
+        FO4HDR_CHECK(DrawPass(fixture, 4, true) == SceneDrawOutcome::replaced);
+        inputs.Check();
+        const auto copied = fixture.renderer.CopyLutInspector();
+        FO4HDR_CHECK(copied.validatedSlots == (test == ProfileDrawCase::matched ? 1u : 0u));
+        auto controls = configuration.imageControls;
+        if (test == ProfileDrawCase::matched)
+        {
+            // Actual native weights sum to 1.625; only slot zero overrides globals.
+            controls.vanillaGradeLuminanceRemoval = (0.25 + 1.375 * 0.35) / 1.625;
+            controls.vanillaGradeColorRemoval = (0.25 + 1.375 * 0.8) / 1.625;
+        }
+        const auto graded = ExpectedGradeRemoval(ExpectedGrade(inputs, 0.5F), controls);
+        const auto expected = fo4hdr::test::SampleOperatorLut(table, graded);
+        const auto output = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+        for (const auto pixel : output)
+        {
+            CheckGradeChannel(pixel.red, expected.red);
+            CheckGradeChannel(pixel.green, expected.green);
+            CheckGradeChannel(pixel.blue, expected.blue);
+            FO4HDR_CHECK(pixel.alpha == sourceColor.alpha);
+        }
+    }
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+}
+
 }  // namespace
 
 void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
@@ -173,6 +237,7 @@ void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
     removal.imageControls.vanillaGradeLuminanceRemoval = 0.35;
     removal.imageControls.vanillaGradeColorRemoval = 0.8;
     VerifyGradeStrength(inputs, presentation, table, removal);
+    VerifyLutProfiles(inputs, presentation, table);
     FO4HDR_CHECK(presentation.Retire());
 }
 

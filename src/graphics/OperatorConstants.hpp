@@ -39,6 +39,11 @@ struct alignas(16) OperatorConstants
     std::array<float, 4> selectiveColorPlaneA{};
     std::array<float, 4> selectiveColorPlaneB{};
 
+    std::array<float, 4> lutProfileLuminanceRemoval{};
+    std::array<float, 4> lutProfileColorRemoval{};
+    std::uint32_t lutProfilesActive{};
+    std::array<std::uint32_t, 3> lutProfilePadding{};
+
     // The cold caller validates derived values before packing the shader layout.
     void SetGrade(float strength, const HdrSettingsMath& image) noexcept
     {
@@ -57,7 +62,7 @@ struct alignas(16) OperatorConstants
             static_cast<float>(matrix[8]), 0.0F};
     }
 };
-static_assert(sizeof(OperatorConstants) == 272);
+static_assert(sizeof(OperatorConstants) == 320);
 static_assert(offsetof(OperatorConstants, inputDomain) == 12);
 static_assert(offsetof(OperatorConstants, shaper) == 16);
 static_assert(offsetof(OperatorConstants, vanillaColorGradingStrength) == 32);
@@ -75,5 +80,10 @@ static_assert(offsetof(OperatorConstants, selectiveColorPadding) == 116);
 static_assert(offsetof(OperatorConstants, selectiveColorRegions) == 128);
 static_assert(offsetof(OperatorConstants, selectiveColorPlaneA) == 240);
 static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) == 256);
+
+static_assert(offsetof(OperatorConstants, lutProfileLuminanceRemoval) == 272);
+static_assert(offsetof(OperatorConstants, lutProfileColorRemoval) == 288);
+static_assert(offsetof(OperatorConstants, lutProfilesActive) == 304);
+static_assert(offsetof(OperatorConstants, lutProfilePadding) == 308);
 
 }  // namespace fo4hdr

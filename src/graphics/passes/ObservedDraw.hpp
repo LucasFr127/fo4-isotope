@@ -8,6 +8,10 @@
 
 namespace fo4hdr {
 
+[[nodiscard]] bool PrepareLutProfileBuffer(ID3D11Device* device,
+    const LutGradeProfiles& profiles, Microsoft::WRL::ComPtr<ID3D11Buffer>& buffer) noexcept;
+
+
 class NativeUiCapture;
 class PresentationPass;
 class NativePresentationProxy;

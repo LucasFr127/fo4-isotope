@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ObservedDraw.hpp"
+#include "NativeReferenceGradePass.hpp"
 #include "../resources/NativePresentationProxy.hpp"
 
 #include <algorithm>
@@ -647,6 +648,193 @@ ID3D11ShaderResourceView* CompletedNativeUiLayers::Backdrop() const noexcept
 ID3D11ShaderResourceView* CompletedNativeUiLayers::Hud() const noexcept
 {
     return owner_ != nullptr && ReadyFor(frame_, owner_->scenes_) ? owner_->CompletedSource(1) : nullptr;
+}
+
+namespace {
+
+bool MatchesProfileLook(const NativeLutObservation& observation,
+    std::size_t slot, ID3D11ShaderResourceView* view) noexcept
+{
+    if ((observation.validSlots & (1u << slot)) == 0) return true;
+    const auto& lut = observation.luts[slot];
+    if (lut.pathLength == 0 || lut.pathLength >= lut.utf8Path.size()) return false;
+    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
+    if (!NormalizeLutGradePath({lut.utf8Path.data(), lut.pathLength}, normalized)) return false;
+    return normalized == lut.utf8Path && reinterpret_cast<std::uintptr_t>(view) ==
+        observation.expectedShaderViews[slot];
+}
+
+bool MatchesProfileInputs(const NativeLutObservation& observation,
+    const NativeReferenceInputs& inputs) noexcept
+{
+    for (std::size_t slot = 0; slot < inputs.looks.size(); ++slot)
+        if (!MatchesProfileLook(observation, slot, inputs.looks[slot].Get())) return false;
+    return true;
+}
+
+const char* ImageSpaceProfileStatus(ImageSpaceObservationStatus status) noexcept
+{
+    constexpr std::array statuses{
+        std::pair{ImageSpaceObservationStatus::unavailable, "Unavailable"},
+        std::pair{ImageSpaceObservationStatus::waiting, "Waiting"},
+        std::pair{ImageSpaceObservationStatus::matched, "Matched at draw"},
+        std::pair{ImageSpaceObservationStatus::catalogUnavailable, "Catalog unavailable"},
+        std::pair{ImageSpaceObservationStatus::differentThread, "Different thread"},
+        std::pair{ImageSpaceObservationStatus::unqualifiedSource, "Unqualified source"},
+        std::pair{ImageSpaceObservationStatus::overrideActive, "Override active"},
+        std::pair{ImageSpaceObservationStatus::stale, "Stale"},
+        std::pair{ImageSpaceObservationStatus::updating, "Updating"}};
+    const auto found = std::find_if(statuses.begin(), statuses.end(),
+        [status](const auto& item) { return item.first == status; });
+    return found == statuses.end() ? "Unavailable" : found->second;
+}
+
+std::string_view ImageSpaceProfileKey(const ImageSpaceIdentity& identity) noexcept
+{
+    const auto end = std::find(identity.key.begin(), identity.key.end(), '\0');
+    if (end == identity.key.end()) return {};
+    return {identity.key.data(), static_cast<std::size_t>(end - identity.key.begin())};
+}
+
+}  // namespace
+
+bool PrepareLutProfileBuffer(ID3D11Device* device,
+    const LutGradeProfiles& profiles, Microsoft::WRL::ComPtr<ID3D11Buffer>& buffer) noexcept
+{
+    if (!profiles.enabled || profiles.count == 0) return true;
+    D3D11_BUFFER_DESC description{};
+    description.ByteWidth = sizeof(OperatorConstants);
+    description.Usage = D3D11_USAGE_DYNAMIC;
+    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    description.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    return SUCCEEDED(device->CreateBuffer(&description, nullptr, &buffer)) && buffer != nullptr;
+}
+
+LutProfileDrawSnapshot ScenePassRenderer::CopyLutInspector() const noexcept
+{
+    if (!Active()) return {};
+    if (invoking_ || !frameOpen_) return {};
+    return lutInspector_.frame == frameGeneration_ ? lutInspector_ : LutProfileDrawSnapshot{};
+}
+
+bool ScenePassRenderer::CaptureLutProfileDraw(NativeLutObservation& observation) noexcept
+{
+    lutInspector_ = {};
+    lutInspector_.frame = frameGeneration_;
+    if (!ReadCurrentNativeLutObservation(NativeLutResourceGeneration(), observation)) return false;
+    if (!IsCurrentNativeLutObservation(observation, GetCurrentThreadId())) return false;
+    if ((observation.validSlots & ~15u) != 0) return false;
+    // Binding/range getters do not prove CPU weight contents; interpolation
+    // consumes the actual native b2 weights in the pixel shader.
+    NativeReferenceInputs inputs;
+    if (!CaptureNativeReferenceInputs(context_.Get(), inputs)) return false;
+    if (!MatchesProfileInputs(observation, inputs)) return false;
+    if (!IsCurrentNativeLutObservation(observation, GetCurrentThreadId())) return false;
+    lutInspector_.currentLuts = observation.luts;
+    lutInspector_.currentImageSpaces = observation.imageSpaces;
+    lutInspector_.validatedSlots = observation.validSlots;
+    lutInspector_.imageSpaceValidSlots = EligibleImageSpaceSlots(observation, observation.validSlots);
+    lutInspector_.observationSerial = observation.serial;
+    lutInspector_.status = "Matched at draw";
+    lutInspector_.imageSpaceStatus = ImageSpaceProfileStatus(observation.imageSpaceStatus);
+    return true;
+}
+
+void ScenePassRenderer::ResolveLutProfileConstants(const NativeLutObservation& observation,
+    OperatorConstants& values) noexcept
+{
+    const ResolvedLutGrade global{
+        (1.0 - static_cast<double>(values.selectiveColorPlaneA[3])) * 100.0,
+        (1.0 - static_cast<double>(values.selectiveColorPlaneB[3])) * 100.0};
+    const auto imageSpaceSlots = EligibleImageSpaceSlots(observation, observation.validSlots);
+    bool customized{};
+    for (std::size_t slot = 0; slot < observation.luts.size(); ++slot)
+    {
+        auto resolved = global;
+        if ((observation.validSlots & (1u << slot)) != 0)
+        {
+            const auto& lut = observation.luts[slot];
+            const std::string_view path(lut.utf8Path.data(), lut.pathLength);
+            const auto key = (imageSpaceSlots & (1u << slot)) != 0
+                ? ImageSpaceProfileKey(observation.imageSpaces[slot]) : std::string_view{};
+            resolved = ResolveImageSpaceGradeProfile(sceneGrade_.lutGradeProfiles, path, key, global);
+        }
+        values.lutProfileLuminanceRemoval[slot] = static_cast<float>(1.0 - resolved.luminancePercent / 100.0);
+        values.lutProfileColorRemoval[slot] = static_cast<float>(1.0 - resolved.colorPercent / 100.0);
+        customized |= resolved != global;
+    }
+    values.lutProfilesActive = customized ? 1u : 0u;
+}
+
+ID3D11Buffer* ScenePassRenderer::UploadLutProfileConstants(const OperatorConstants& values) noexcept
+{
+    if (lutProfileKeyReady_ && std::memcmp(&values, &lutProfileKey_, sizeof(values)) == 0)
+        return lutProfileConstants_.Get();
+    lutProfileKeyReady_ = false;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context_->Map(lutProfileConstants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+        return nullptr;
+    if (!mapped.pData)
+    {
+        context_->Unmap(lutProfileConstants_.Get(), 0);
+        return nullptr;
+    }
+    std::memcpy(mapped.pData, &values, sizeof(values));
+    context_->Unmap(lutProfileConstants_.Get(), 0);
+    lutProfileKey_ = values;
+    lutProfileKeyReady_ = true;
+    return lutProfileConstants_.Get();
+}
+
+ID3D11Buffer* ScenePassRenderer::PrepareLutProfileConstants(const DrawReplacement& replacement,
+    NativeLutObservation& observation) noexcept
+{
+    if (!replacement.grade) return nullptr;
+    if (!CaptureLutProfileDraw(observation)) return nullptr;
+    if (!lutProfileConstants_) return nullptr;
+    auto* global = replacement.operatorConstants;
+    const auto domain = global == operatorConstants_[0].Get() ? 0u : 1u;
+    if (global != operatorConstants_[domain].Get()) return nullptr;
+    auto values = operatorConstantValues_[domain];
+    ResolveLutProfileConstants(observation, values);
+    if (!values.lutProfilesActive) return nullptr;
+    if (!CurrentLutProfileDraw(observation)) return nullptr;
+    return UploadLutProfileConstants(values);
+}
+
+bool ScenePassRenderer::CurrentLutProfileDraw(const NativeLutObservation& observation) const noexcept
+{
+    return IsCurrentNativeLutObservation(observation, GetCurrentThreadId()) &&
+        EligibleImageSpaceSlots(observation, observation.validSlots) == lutInspector_.imageSpaceValidSlots;
+}
+
+void ScenePassRenderer::BindLutProfileConstants(ID3D11Buffer* constants,
+    const NativeLutObservation& observation) noexcept
+{
+    if (!constants || !CurrentLutProfileDraw(observation)) return;
+    context_->PSSetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
+}
+
+
+void ScenePassRenderer::ResetOperatorResources() noexcept
+{
+    for (auto& constants : operatorConstants_) constants.Reset();
+    lutProfileConstants_.Reset();
+    operatorConstantValues_ = {};
+    lutProfileKeyReady_ = false;
+    lutInspector_ = {};
+    operatorSampler_.Reset();
+    operatorSource_.Reset();
+    operatorTexture_.Reset();
+    operatorEnabled_ = false;
+}
+
+ID3D11Buffer* ScenePassRenderer::ConstantsForInput(SceneTextureHandle input) const noexcept
+{
+    const auto* source = Resolve(input);
+    if (source == nullptr) return nullptr;
+    const auto domain = static_cast<std::size_t>(source->domain);
+    return domain < operatorConstants_.size() ? operatorConstants_[domain].Get() : nullptr;
 }
 
 }  // namespace fo4hdr

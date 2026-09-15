@@ -208,7 +208,7 @@ private:
     {
         return {static_cast<float>(value.display.vanillaColorGradingStrengthPercent / 100.0),
             DeriveHdrSettingsMath(value.display), value.display.colorGradingMethod,
-            value.display.selectiveColor};
+            value.display.selectiveColor, value.display.lutGradeProfiles};
     }
 
     [[nodiscard]] static OperatorLutBuildRequest BuildRequest(const PluginConfiguration& value,
@@ -288,6 +288,7 @@ private:
         const auto& active = active_.display;
         if (requested.colorGradingMethod != active.colorGradingMethod) return false;
         if (requested.selectiveColor != active.selectiveColor) return false;
+        if (requested.lutGradeProfiles != active.lutGradeProfiles) return false;
         const std::array requestedImage{requested.vanillaColorGradingStrengthPercent,
             requested.vanillaGradeLuminancePercent, requested.vanillaGradeColorPercent,
             requested.contrast, requested.blacks, requested.highlights, requested.shadows,

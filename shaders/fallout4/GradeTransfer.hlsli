@@ -16,6 +16,37 @@ float3 Fo4HdrGradeCleanScene(float3 rgb)
     return rgb;
 }
 
+void Fo4HdrResolveVanillaGradeRemoval(float4 nativeWeights,
+    uint profilesActive, float globalLuminanceRemoval,
+    float globalColorRemoval, float4 profileLuminanceRemoval,
+    float4 profileColorRemoval, out float luminanceRemoval,
+    out float colorRemoval)
+{
+    luminanceRemoval = globalLuminanceRemoval;
+    colorRemoval = globalColorRemoval;
+    if (profilesActive == 0u) return;
+
+    const uint4 magnitudes = asuint(nativeWeights) & 0x7fffffffu;
+    if (any(magnitudes >= 0x7f800000u) || any(nativeWeights < 0.0f)) return;
+    const float maximum = max(max(nativeWeights.x, nativeWeights.y),
+        max(nativeWeights.z, nativeWeights.w));
+    if (!(maximum > 0.0f)) return;
+
+    // Keep both the scaled sum and its reciprocal normal. Dividing directly
+    // by FLT_MAX can compile to a subnormal reciprocal that hardware flushes
+    // to zero. The exact power-of-two scale puts maxima >= 1 near 2^64 while
+    // preserving every contribution large enough to affect an FP32 sum.
+    const uint maximumExponent = (asuint(maximum) >> 23u) & 0xffu;
+    const float normalizationScale = maximum >= 1.0f
+        ? asfloat((318u - maximumExponent) << 23u) : 1.0f;
+    precise float4 scaled = nativeWeights * normalizationScale;
+    precise float sum = dot(scaled, float4(1.0f, 1.0f, 1.0f, 1.0f));
+    if (!(sum > 0.0f)) return;
+    precise float4 normalized = scaled / sum;
+    luminanceRemoval = dot(normalized, profileLuminanceRemoval);
+    colorRemoval = dot(normalized, profileColorRemoval);
+}
+
 float3 Fo4HdrApplyVanillaGradeRemoval(float3 hdr, float3 graded,
     float luminanceRemoval, float colorRemoval)
 {

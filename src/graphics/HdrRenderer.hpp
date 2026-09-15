@@ -2,6 +2,7 @@
 #pragma once
 
 #include "DeveloperExposureLock.hpp"
+#include "OperatorConstants.hpp"
 #include "PipboyScreenObservation.hpp"
 #include "RendererLifetime.hpp"
 #include "resources/DeveloperExposureResources.hpp"
@@ -9,6 +10,7 @@
 #include "resources/NativeSceneAssociation.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "Fallout4HDR/output/NativeLutObservation.hpp"
 #include "Fallout4HDR/output/RenderPipelineContract.hpp"
 
 #include <d3d11_1.h>
@@ -30,6 +32,18 @@ class PresentationPass;
 struct OperatorLutData;
 class NativePresentationProxy;
 
+// Owned diagnostic copies; statuses refer only to static strings, not engine state.
+struct LutProfileDrawSnapshot
+{
+    std::array<LutSnapshot, 4> currentLuts{};
+    std::uint32_t validatedSlots{};
+    const char* status{"Unavailable"};
+    std::array<ImageSpaceIdentity, 4> currentImageSpaces{};
+    std::uint32_t imageSpaceValidSlots{};
+    const char* imageSpaceStatus{"Unavailable"};
+    std::uint64_t frame{}, observationSerial{};
+};
+
 struct LayerWhiteConfiguration
 {
     float uiWhiteNits{static_cast<float>(kSceneReferenceWhiteNits)};
@@ -45,16 +59,23 @@ struct SceneGradeConfiguration
     HdrSettingsMath imageControls{};
     ColorGradingMethod method{ColorGradingMethod::radial};
     SelectiveColorSettings selectiveColor{};
+    LutGradeProfiles lutGradeProfiles{};
 
     [[nodiscard]] bool Valid() const noexcept
     {
         return (method == ColorGradingMethod::radial || method == ColorGradingMethod::nativeReference) &&
             std::isfinite(vanillaColorGradingStrength) &&
             vanillaColorGradingStrength >= 0.0F && vanillaColorGradingStrength <= 1.0F &&
-            ImageScalarsValid() && MatrixValid() && ValidateSelectiveColorSettings(selectiveColor);
+            AdjustmentsValid();
     }
 
 private:
+    [[nodiscard]] bool AdjustmentsValid() const noexcept
+    {
+        return ImageScalarsValid() && MatrixValid() && ValidateSelectiveColorSettings(selectiveColor) &&
+            ValidateLutGradeProfiles(lutGradeProfiles);
+    }
+
     [[nodiscard]] bool ImageScalarsValid() const noexcept
     {
         const std::array<std::array<double, 3>, 9> ranges{{
@@ -248,6 +269,7 @@ public:
     [[nodiscard]] PipboyScreenObservation PipboyScreenSnapshot() const noexcept;
     // Query at consumption: retained handles remain storage-valid after lineage expires.
     [[nodiscard]] SceneTextureHandle CurrentScene() const noexcept;
+    [[nodiscard]] LutProfileDrawSnapshot CopyLutInspector() const noexcept;
     [[nodiscard]] SceneColorDomain CurrentSceneDomain() const noexcept;
     [[nodiscard]] bool CurrentSceneOperatorProduced() const noexcept;
     // Zero denotes a closed or unavailable frame; completed layers use this token.
@@ -342,6 +364,7 @@ private:
         ID3D11Buffer* operatorConstants{};
         ID3D11PixelShader* radialFallback{};
         bool prepareNativeReference{};
+        bool grade{};
         bool tone{};
         bool capture{};
         bool replay{};
@@ -406,6 +429,15 @@ private:
         SceneTextureHandle destination) const noexcept;
     [[nodiscard]] DrawResult InvokeDraw(DrawReplacement replacement,
         FiniteDrawInvocation invocation) noexcept;
+    [[nodiscard]] bool CaptureLutProfileDraw(NativeLutObservation& observation) noexcept;
+    [[nodiscard]] bool CurrentLutProfileDraw(const NativeLutObservation& observation) const noexcept;
+    void ResolveLutProfileConstants(const NativeLutObservation& observation,
+        OperatorConstants& values) noexcept;
+    [[nodiscard]] ID3D11Buffer* PrepareLutProfileConstants(const DrawReplacement& replacement,
+        NativeLutObservation& observation) noexcept;
+    void BindLutProfileConstants(ID3D11Buffer* constants,
+        const NativeLutObservation& observation) noexcept;
+    [[nodiscard]] ID3D11Buffer* UploadLutProfileConstants(const OperatorConstants& values) noexcept;
     void PrepareExposureReplacement(DrawReplacement& replacement,
         RenoDxShaderPass pass) const noexcept;
     [[nodiscard]] DrawResult PrepareExposureDraw(const DrawReplacement& replacement) noexcept;
@@ -434,6 +466,11 @@ private:
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> operatorSource_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> operatorSampler_;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 2> operatorConstants_;
+    std::array<OperatorConstants, 2> operatorConstantValues_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> lutProfileConstants_;
+    OperatorConstants lutProfileKey_;
+    bool lutProfileKeyReady_{};
+    LutProfileDrawSnapshot lutInspector_;
     bool operatorEnabled_{};
     LayerWhiteConfiguration whites_;
     std::array<Microsoft::WRL::ComPtr<ID3D11PixelShader>, replacementProgramCount> replacements_;

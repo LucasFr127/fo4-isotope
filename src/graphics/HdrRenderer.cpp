@@ -5,6 +5,7 @@
 #include "resources/NativePresentationProxy.hpp"
 #include "RenoDxShaderIdentity.hpp"
 #include "d3d11/ScopedD3D11PixelBindings.hpp"
+#include "passes/ObservedDraw.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
 #include <fo4hdr-shaders/ToneMapA.hpp>
@@ -21,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <utility>
@@ -270,6 +272,8 @@ struct PreparedOperator
     ComPtr<ID3D11ShaderResourceView> source;
     ComPtr<ID3D11SamplerState> sampler;
     std::array<ComPtr<ID3D11Buffer>, 2> constants;
+    std::array<OperatorConstants, 2> values;
+    ComPtr<ID3D11Buffer> profileConstants;
 };
 
 bool ValidOperatorTable(const OperatorLutData& table) noexcept
@@ -378,6 +382,7 @@ bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration
         const auto index = static_cast<std::size_t>(domain);
         if (index >= prepared.constants.size()) return false;
         values.inputDomain = static_cast<std::uint32_t>(domain);
+        prepared.values[index] = values;
         D3D11_BUFFER_DESC description{};
         description.ByteWidth = sizeof(values);
         description.Usage = D3D11_USAGE_IMMUTABLE;
@@ -398,7 +403,9 @@ bool PrepareOperator(ID3D11Device* device, const ScenePassConfiguration& configu
         if (!PrepareOperatorTexture(device, *table, prepared)) return false;
         if (!PrepareOperatorSampler(device, prepared)) return false;
     }
-    return PrepareOperatorConstants(device, configuration, prepared);
+    if (!PrepareOperatorConstants(device, configuration, prepared)) return false;
+    return PrepareLutProfileBuffer(device, configuration.sceneGrade.lutGradeProfiles,
+        prepared.profileConstants);
 }
 
 bool PrepareReplacementResources(ID3D11Device* device,
@@ -614,6 +621,10 @@ bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
     operatorSource_ = std::move(preparedOperator.source);
     operatorSampler_ = std::move(preparedOperator.sampler);
     operatorConstants_ = std::move(preparedOperator.constants);
+    operatorConstantValues_ = preparedOperator.values;
+    lutProfileConstants_ = std::move(preparedOperator.profileConstants);
+    lutProfileKeyReady_ = false;
+    lutInspector_ = {};
     operatorEnabled_ = configuration.operatorLut != nullptr;
     whites_ = configuration.whites;
     width_ = configuration.width;
@@ -646,6 +657,10 @@ bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
     operatorSource_ = std::move(preparedOperator.source);
     operatorSampler_ = std::move(preparedOperator.sampler);
     operatorConstants_ = std::move(preparedOperator.constants);
+    operatorConstantValues_ = preparedOperator.values;
+    lutProfileConstants_ = std::move(preparedOperator.profileConstants);
+    lutProfileKeyReady_ = false;
+    lutInspector_ = {};
     operatorEnabled_ = true;
     whites_ = whites;
     sceneGrade_ = sceneGrade;
@@ -908,15 +923,6 @@ ScenePassRenderer::OriginalContinuation ScenePassRenderer::QualifyOriginalContin
         ? OriginalContinuation::advance : OriginalContinuation::none;
 }
 
-void ScenePassRenderer::ResetOperatorResources() noexcept
-{
-    for (auto& constants : operatorConstants_) constants.Reset();
-    operatorSampler_.Reset();
-    operatorSource_.Reset();
-    operatorTexture_.Reset();
-    operatorEnabled_ = false;
-}
-
 void ScenePassRenderer::PublishOutputDomain(RenoDxShaderPass pass,
     SceneTextureHandle destination, const DrawLineage& lineage) noexcept
 {
@@ -1090,6 +1096,7 @@ ScenePassRenderer::DrawReplacement ScenePassRenderer::PrepareDrawReplacement(
     }
     if (descriptor->pass == RenoDxShaderPass::video)
         replacement.videoConstants = videoConstants_.Get();
+    replacement.grade = descriptor->pass == RenoDxShaderPass::lut;
     ConfigureNativeReferenceReplacement(replacement, descriptor->pass);
     replacement.tone = std::find(tonePasses.begin(), tonePasses.end(), descriptor->pass) != tonePasses.end();
     PrepareExposureReplacement(replacement, descriptor->pass);
@@ -1123,14 +1130,6 @@ void ScenePassRenderer::CompleteExposureDraw(const DrawResult& result, bool tone
     if (result.replayed) exposureLock_.Observe(frameGeneration_, exposureGeneration_);
 }
 
-ID3D11Buffer* ScenePassRenderer::ConstantsForInput(SceneTextureHandle input) const noexcept
-{
-    const auto* source = Resolve(input);
-    if (source == nullptr) return nullptr;
-    const auto domain = static_cast<std::size_t>(source->domain);
-    return domain < operatorConstants_.size() ? operatorConstants_[domain].Get() : nullptr;
-}
-
 ScenePassRenderer::DrawResult ScenePassRenderer::InvokeDraw(DrawReplacement replacement,
     FiniteDrawInvocation invocation) noexcept
 {
@@ -1146,9 +1145,12 @@ ScenePassRenderer::DrawResult ScenePassRenderer::InvokeDraw(DrawReplacement repl
     {
         const bool prepared = PrepareNativeReferenceDraw(replacement);
         pixelScope.UseFallbackIfRequired(prepared, replacement.radialFallback);
+        NativeLutObservation profileObservation;
+        auto* profileConstants = PrepareLutProfileConstants(replacement, profileObservation);
         nativeSource.Bind(NativeReferenceSourceForDraw(replacement, prepared));
         constantsScope.Bind();
         operatorScope.Bind(operatorSource_.Get(), operatorSampler_.Get());
+        BindLutProfileConstants(profileConstants, profileObservation);
         result = PrepareExposureDraw(replacement);
         exposureScope.Bind(exposureResources_.Selector(result.replayed),
             result.replayed ? exposureResources_.Snapshot() : nullptr);

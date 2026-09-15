@@ -12,6 +12,7 @@ namespace fo4hdr {
 
 class LiveSettings;
 class SettingsPersistence;
+class PresentationPass;
 
 enum class SettingsWindowScope { unavailable, qualifiedExclusive };
 
@@ -24,6 +25,8 @@ struct SettingsWindowConfiguration
     LiveSettings* live{};
     // Optional joined owner must outlive the window; retire the window before destroying it.
     SettingsPersistence* persistence{};
+    // Optional renderer-thread owner outlives this window; only copied diagnostics escape.
+    PresentationPass* presentation{};
 };
 
 struct SettingsWindowOverlay
