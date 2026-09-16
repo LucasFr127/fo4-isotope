@@ -19,7 +19,7 @@ namespace fo4hdr {
 namespace {
 
 constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-constexpr std::array<std::string_view, 48> kKeys{
+constexpr std::array<std::string_view, 49> kKeys{
     "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits", "Algorithm",
     "MiddleGray", "Contrast", "HdrPurity", "ShoulderPower",
     "ToeStrength", "ShoulderStart", "ColorBlend", "VanillaColorGradingStrength",
@@ -33,8 +33,8 @@ constexpr std::array<std::string_view, 48> kKeys{
     "CyanSaturation", "CyanBrightness", "BlueHue",
     "BlueSaturation", "BlueBrightness", "MagentaHue",
     "MagentaSaturation", "MagentaBrightness",
-    "VanillaGradeLuminance", "VanillaGradeColor"};
-constexpr std::array<std::string_view, 48> kSections{
+    "VanillaGradeLuminance", "VanillaGradeColor", "LutProfilesEnabled"};
+constexpr std::array<std::string_view, 49> kSections{
     "Output", "Output", "Output", "ToneMapper", "AgX", "AgX", "AgX", "AgX",
     "GT7", "GT7", "GT7", "Effects",
     "Image", "Image", "Image", "Image", "Image", "Image", "Image",
@@ -47,7 +47,7 @@ constexpr std::array<std::string_view, 48> kSections{
     "SelectiveColor", "SelectiveColor", "SelectiveColor",
     "SelectiveColor", "SelectiveColor", "SelectiveColor",
     "SelectiveColor", "SelectiveColor",
-    "Effects", "Effects"};
+    "Effects", "Effects", "Effects"};
 
 constexpr std::string_view Trim(std::string_view value) noexcept
 {
@@ -65,10 +65,10 @@ std::string FormatNumber(double value)
     return {buffer.data(), result.ptr};
 }
 
-std::array<std::string, 48> OwnedValues(const PluginConfiguration& value)
+std::array<std::string, 49> OwnedValues(const PluginConfiguration& value)
 {
     const auto& parameters = value.display.toneMapperParameters;
-    std::array<std::string, 48> values{FormatNumber(value.display.displayPeakNits),
+    std::array<std::string, 49> values{FormatNumber(value.display.displayPeakNits),
         FormatNumber(value.display.uiPaperWhiteNits), FormatNumber(value.display.videoWhiteNits),
         std::string(ToString(value.algorithm)), FormatNumber(parameters.agxMiddleGrayEv),
         FormatNumber(parameters.agxContrast), FormatNumber(parameters.agxHdrPurity),
@@ -93,6 +93,7 @@ std::array<std::string, 48> OwnedValues(const PluginConfiguration& value)
     }
     values[46] = FormatNumber(value.display.vanillaGradeLuminancePercent);
     values[47] = FormatNumber(value.display.vanillaGradeColorPercent);
+    values[48] = value.display.lutGradeProfiles.enabled ? "1" : "0";
     return values;
 }
 
@@ -192,8 +193,8 @@ private:
                 result_.append(kKeys[index]).append("=").append(values_[index]).append(newline_);
     }
 
-    std::array<std::string, 48> values_;
-    std::array<bool, 48> seen_{};
+    std::array<std::string, 49> values_;
+    std::array<bool, 49> seen_{};
     std::string result_;
     std::string_view section_;
     std::string_view newline_;
@@ -240,6 +241,108 @@ struct IniLine
 void FinishIniLine(std::string& result, std::string_view newline)
 {
     if (!result.empty() && !result.ends_with(newline)) result.append(newline);
+}
+
+const LutGradeProfile* FindMatchingProfile(
+    const LutGradeProfiles& profiles,
+    const LutGradeProfile& profile) noexcept
+{
+    return profile.kind == GradeProfileKind::lutAsset ?
+        FindLutGradeProfile(profiles, profile.path.data()) :
+        FindImageSpaceGradeProfile(profiles, profile.path.data());
+}
+
+[[nodiscard]] bool SameProfileValues(
+    const LutGradeProfile& left,
+    const LutGradeProfile& right) noexcept
+{
+    return left.kind == right.kind && left.path == right.path &&
+        left.overrideColor == right.overrideColor &&
+        left.overrideLuminance == right.overrideLuminance &&
+        (!left.overrideColor || left.colorPercent == right.colorPercent) &&
+        (!left.overrideLuminance ||
+            left.luminancePercent == right.luminancePercent);
+}
+
+class GradeProfileIniWriter
+{
+public:
+    [[nodiscard]] std::string Rewrite(std::string_view original,
+        const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+    {
+        const auto hasBom = original.starts_with(kUtf8Bom);
+        if (hasBom) original.remove_prefix(kUtf8Bom.size());
+        newline_ = IniNewline(original);
+        result_.reserve(original.size() + kUtf8Bom.size() +
+            (profiles.count + distributedProfiles.count) * 320);
+        if (hasBom) result_.append(kUtf8Bom);
+        CopyOtherSections(original);
+        FinishIniLine(result_, newline_);
+        AppendOverrides(profiles, distributedProfiles);
+        AppendInherited(profiles, distributedProfiles);
+        return std::move(result_);
+    }
+
+private:
+    void CopyOtherSections(std::string_view original)
+    {
+        bool gradeProfileSection{};
+        while (!original.empty())
+        {
+            const auto line = TakeIniLine(original);
+            if (line.IsSection())
+            {
+                const auto section = Trim(line.trimmed.substr(1, line.trimmed.size() - 2));
+                gradeProfileSection = section.starts_with("LUT:") || section.starts_with("IMGS:");
+            }
+            if (gradeProfileSection) continue;
+            result_.append(line.full);
+        }
+    }
+
+    void AppendProfile(const LutGradeProfile& profile, bool inherit)
+    {
+        result_.append(profile.kind == GradeProfileKind::imageSpace ? "[IMGS:" : "[LUT:")
+            .append(profile.path.data()).append("]").append(newline_);
+        if (inherit)
+        {
+            result_.append("Inherit=1").append(newline_);
+            return;
+        }
+        if (profile.overrideColor)
+            result_.append("Color=").append(FormatNumber(profile.colorPercent)).append(newline_);
+        if (profile.overrideLuminance)
+            result_.append("Luminance=").append(FormatNumber(profile.luminancePercent)).append(newline_);
+    }
+
+    void AppendOverrides(const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+    {
+        for (std::size_t index = 0; index < profiles.count; ++index)
+        {
+            const auto& profile = profiles.entries[index];
+            const auto* distributed = FindMatchingProfile(distributedProfiles, profile);
+            if (distributed == nullptr || !SameProfileValues(profile, *distributed))
+                AppendProfile(profile, false);
+        }
+    }
+
+    void AppendInherited(const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+    {
+        for (std::size_t index = 0; index < distributedProfiles.count; ++index)
+        {
+            const auto& profile = distributedProfiles.entries[index];
+            if (FindMatchingProfile(profiles, profile) == nullptr) AppendProfile(profile, true);
+        }
+    }
+
+    std::string result_;
+    std::string_view newline_;
+};
+
+[[nodiscard]] std::string RewriteGradeProfileSections(std::string_view original,
+    const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+{
+    return GradeProfileIniWriter{}.Rewrite(original, profiles, distributedProfiles);
 }
 
 constexpr std::array<std::string_view, 3> kDisplayCalibrationKeys{
@@ -492,13 +595,32 @@ bool ReplaceFile(const std::filesystem::path& path, std::string_view contents)
     return replaced;
 }
 
-bool Save(const std::filesystem::path& path, const PluginConfiguration& value) noexcept
+bool SavePersonalProfiles(const std::filesystem::path& path,
+    const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+{
+    std::error_code error;
+    std::filesystem::create_directories(path.parent_path(), error);
+    if (error) return false;
+    std::string original;
+    if (!ReadLatest(path, original)) return false;
+    const auto updated = RewriteGradeProfilesIni(original, profiles, distributedProfiles);
+    if (ParseGradeProfileConfiguration(updated).status != PluginConfigurationStatus::loaded) return false;
+    return ReplaceFile(path, updated);
+}
+
+bool Save(const std::filesystem::path& path, const std::filesystem::path& personalPath,
+    const PluginConfiguration& value, const LutGradeProfiles& distributedProfiles) noexcept
 {
     try
     {
+        // Personal overrides commit first; each file replacement is atomic, not the pair.
+        if (!SavePersonalProfiles(personalPath, value.display.lutGradeProfiles, distributedProfiles))
+            return false;
         std::string original;
         if (!ReadLatest(path, original)) return false;
-        const auto updated = RewritePluginConfigurationIni(original, value);
+        auto main = value;
+        main.display.lutGradeProfiles.count = 0;
+        const auto updated = RewritePluginConfigurationIni(original, main);
         if (ParsePluginConfiguration(updated).status != PluginConfigurationStatus::loaded)
             return false;
         return ReplaceFile(path, updated);
@@ -543,7 +665,16 @@ std::string RewritePluginConfigurationIni(
     std::string_view original, const PluginConfiguration& value)
 {
     if (!ValidatePluginConfiguration(value)) return std::string(original);
-    return IniWriter{value}.Rewrite(original);
+    return RewriteGradeProfileSections(IniWriter{value}.Rewrite(original),
+        value.display.lutGradeProfiles, {});
+}
+
+std::string RewriteGradeProfilesIni(std::string_view original,
+    const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
+{
+    if (!ValidateLutGradeProfiles(profiles) || !ValidateLutGradeProfiles(distributedProfiles))
+        return std::string(original);
+    return RewriteGradeProfileSections(original, profiles, distributedProfiles);
 }
 
 SettingsPersistence::~SettingsPersistence() noexcept
@@ -556,14 +687,17 @@ SettingsPersistence::~SettingsPersistence() noexcept
     if (thread_.joinable()) thread_.join();
 }
 
-bool SettingsPersistence::Initialize(const std::filesystem::path& path) noexcept
+bool SettingsPersistence::Initialize(const std::filesystem::path& path,
+    const LutGradeProfiles& distributedProfiles) noexcept
 {
-    if (path.empty()) return false;
+    if (path.empty() || !ValidateLutGradeProfiles(distributedProfiles)) return false;
     try
     {
         const auto absolute = std::filesystem::absolute(path);
-        if (thread_.joinable()) return path_ == absolute;
+        if (thread_.joinable()) return path_ == absolute && distributedProfiles_ == distributedProfiles;
         path_ = absolute;
+        personalPath_ = absolute.parent_path() / absolute.stem() / L"Personal.ini";
+        distributedProfiles_ = distributedProfiles;
         thread_ = std::thread{&SettingsPersistence::Run, this};
         snapshot_.state = SettingsPersistenceState::idle;
         profileSnapshot_.state = SettingsPersistenceState::idle;
@@ -675,7 +809,7 @@ void SettingsPersistence::Run() noexcept
         const auto request = *pending_;
         pending_.reset();
         lock.unlock();
-        Publish(request.generation, Save(path_, request.value));
+        Publish(request.generation, Save(path_, personalPath_, request.value, distributedProfiles_));
     }
 }
 

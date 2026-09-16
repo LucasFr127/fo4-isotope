@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string_view>
+#include <vector>
 
 namespace fo4hdr {
 
@@ -25,15 +26,26 @@ enum class PluginConfigurationStatus : std::uint8_t
     ioError
 };
 
+struct GradeProfileFileIssue
+{
+    std::filesystem::path path;
+    PluginConfigurationStatus status{PluginConfigurationStatus::invalid};
+    std::size_t line{};
+};
+
 struct PluginConfigurationResult
 {
     PluginConfiguration value;
     PluginConfigurationStatus status{PluginConfigurationStatus::invalid};
     std::size_t line{};
+    LutGradeProfiles profileInheritances;
+    LutGradeProfiles distributedProfiles;
+    std::vector<GradeProfileFileIssue> profileIssues;
 };
 
 [[nodiscard]] bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept;
 [[nodiscard]] PluginConfigurationResult ParsePluginConfiguration(std::string_view text) noexcept;
+[[nodiscard]] PluginConfigurationResult ParseGradeProfileConfiguration(std::string_view text) noexcept;
 [[nodiscard]] PluginConfigurationResult LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;
 [[nodiscard]] std::string_view ToString(OperatorLutAlgorithm algorithm) noexcept;

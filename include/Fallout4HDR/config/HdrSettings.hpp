@@ -38,6 +38,14 @@ struct LutGradeProfiles
     [[nodiscard]] constexpr bool operator==(const LutGradeProfiles&) const noexcept = default;
 };
 
+struct LutGradeOverride
+{
+    double luminancePercent;
+    bool overrideLuminance;
+    double colorPercent;
+    bool overrideColor;
+};
+
 struct ResolvedLutGrade
 {
     double luminancePercent{100.0};
@@ -55,6 +63,18 @@ struct ResolvedLutGrade
     const LutGradeProfiles& profiles, std::string_view path) noexcept;
 [[nodiscard]] const LutGradeProfile* FindImageSpaceGradeProfile(
     const LutGradeProfiles& profiles, std::string_view key) noexcept;
+[[nodiscard]] LutGradeProfile* FindLutGradeProfile(
+    LutGradeProfiles& profiles, std::string_view path) noexcept;
+[[nodiscard]] LutGradeProfile* FindImageSpaceGradeProfile(
+    LutGradeProfiles& profiles, std::string_view key) noexcept;
+[[nodiscard]] bool SetLutGradeProfile(LutGradeProfiles& profiles,
+    std::string_view path, LutGradeOverride value) noexcept;
+[[nodiscard]] bool SetImageSpaceGradeProfile(LutGradeProfiles& profiles,
+    std::string_view key, LutGradeOverride value) noexcept;
+[[nodiscard]] bool RemoveLutGradeProfile(
+    LutGradeProfiles& profiles, std::string_view path) noexcept;
+[[nodiscard]] bool RemoveImageSpaceGradeProfile(
+    LutGradeProfiles& profiles, std::string_view key) noexcept;
 [[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(
     const LutGradeProfiles& profiles, std::string_view path,
     double globalLuminancePercent, double globalColorPercent) noexcept;

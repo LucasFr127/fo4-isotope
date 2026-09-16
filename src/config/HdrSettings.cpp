@@ -314,6 +314,43 @@ const LutGradeProfile* FindProfileByKey(const LutGradeProfiles& profiles,
     return FindGradeProfile(profiles, kind, normalized);
 }
 
+bool SetGradeProfile(LutGradeProfiles& profiles, LutGradeProfile profile) noexcept
+{
+    if (profiles.count > profiles.entries.size()) return false;
+    if (!ValidProfileValues(profile)) return false;
+    auto* existing = const_cast<LutGradeProfile*>(FindGradeProfile(profiles, profile.kind, profile.path));
+    if (existing == nullptr)
+    {
+        if (profiles.count >= profiles.entries.size()) return false;
+        existing = &profiles.entries[profiles.count++];
+    }
+    *existing = profile;
+    return true;
+}
+
+bool SetProfileByKey(LutGradeProfiles& profiles, GradeProfileKind kind,
+    std::string_view key, LutGradeOverride value) noexcept
+{
+    LutGradeProfile profile{.luminancePercent = value.luminancePercent,
+        .colorPercent = value.colorPercent, .overrideLuminance = value.overrideLuminance,
+        .overrideColor = value.overrideColor, .kind = kind};
+    if (!NormalizeProfileKey(kind, key, profile.path)) return false;
+    return SetGradeProfile(profiles, profile);
+}
+
+bool RemoveGradeProfile(LutGradeProfiles& profiles,
+    GradeProfileKind kind, std::string_view key) noexcept
+{
+    if (profiles.count > profiles.entries.size()) return false;
+    const auto* profile = FindProfileByKey(profiles, kind, key);
+    if (profile == nullptr) return false;
+    const auto index = static_cast<std::size_t>(profile - profiles.entries.data());
+    for (std::size_t current = index + 1; current < profiles.count; ++current)
+        profiles.entries[current - 1] = profiles.entries[current];
+    profiles.entries[--profiles.count] = {};
+    return true;
+}
+
 ResolvedLutGrade ApplyGradeProfile(const LutGradeProfile* profile,
     ResolvedLutGrade result) noexcept
 {
@@ -383,6 +420,42 @@ bool ValidateGradeProfile(const LutGradeProfile& profile) noexcept
     const LutGradeProfiles& profiles, std::string_view key) noexcept
 {
     return detail::FindProfileByKey(profiles, GradeProfileKind::imageSpace, key);
+}
+
+[[nodiscard]] LutGradeProfile* FindLutGradeProfile(
+    LutGradeProfiles& profiles, std::string_view path) noexcept
+{
+    return const_cast<LutGradeProfile*>(FindLutGradeProfile(static_cast<const LutGradeProfiles&>(profiles), path));
+}
+
+[[nodiscard]] LutGradeProfile* FindImageSpaceGradeProfile(
+    LutGradeProfiles& profiles, std::string_view key) noexcept
+{
+    return const_cast<LutGradeProfile*>(FindImageSpaceGradeProfile(static_cast<const LutGradeProfiles&>(profiles), key));
+}
+
+[[nodiscard]] bool SetLutGradeProfile(LutGradeProfiles& profiles,
+    std::string_view path, LutGradeOverride value) noexcept
+{
+    return detail::SetProfileByKey(profiles, GradeProfileKind::lutAsset, path, value);
+}
+
+[[nodiscard]] bool SetImageSpaceGradeProfile(LutGradeProfiles& profiles,
+    std::string_view key, LutGradeOverride value) noexcept
+{
+    return detail::SetProfileByKey(profiles, GradeProfileKind::imageSpace, key, value);
+}
+
+[[nodiscard]] bool RemoveLutGradeProfile(LutGradeProfiles& profiles,
+    std::string_view path) noexcept
+{
+    return detail::RemoveGradeProfile(profiles, GradeProfileKind::lutAsset, path);
+}
+
+[[nodiscard]] bool RemoveImageSpaceGradeProfile(LutGradeProfiles& profiles,
+    std::string_view key) noexcept
+{
+    return detail::RemoveGradeProfile(profiles, GradeProfileKind::imageSpace, key);
 }
 
 [[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(

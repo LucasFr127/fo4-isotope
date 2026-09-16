@@ -3,6 +3,7 @@
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "SettingsPanel.hpp"
 #include "DisplayCalibrationPanel.hpp"
+#include "LutProfilesPanel.hpp"
 #include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
 #include "passes/PresentationPass.hpp"
@@ -20,21 +21,6 @@
 
 namespace fo4hdr {
 namespace {
-
-void DrawLutInspector(PresentationPass* presentation)
-{
-    if (!ImGui::CollapsingHeader("Native grading inputs")) return;
-    const auto observation = presentation ? presentation->CopyLutInspector() : LutProfileDrawSnapshot{};
-    ImGui::Text("LUT qualification: %s", observation.status);
-    ImGui::Text("ImageSpace qualification: %s", observation.imageSpaceStatus);
-    for (std::size_t slot = 0; slot < observation.currentLuts.size(); ++slot)
-    {
-        const auto& lut = observation.currentLuts[slot];
-        const bool validated = (observation.validatedSlots & (1u << slot)) != 0;
-        ImGui::Text("Slot %u: %s", static_cast<unsigned>(slot),
-            validated ? lut.utf8Path.data() : "Unavailable");
-    }
-}
 
 using Microsoft::WRL::ComPtr;
 constexpr UINT outputCount = 8;
@@ -373,6 +359,7 @@ struct SettingsWindow::State
     ComPtr<ID3D11ShaderResourceView> source;
     ImGuiContext* imgui{};
     PluginConfiguration editable;
+    GradeProfileSelection gradeProfileSelection;
     LARGE_INTEGER frequency{};
     LARGE_INTEGER previous{};
     std::uint64_t frame{};
@@ -571,6 +558,14 @@ struct SettingsWindow::State
         }
     }
 
+    bool DrawGradeProfiles()
+    {
+        if (!ImGui::CollapsingHeader("LUT and ImageSpace profiles")) return false;
+        const auto observation = configuration.presentation ?
+            configuration.presentation->CopyLutInspector() : LutProfileDrawSnapshot{};
+        return DrawLutProfilesPanel(editable.display, observation, gradeProfileSelection);
+    }
+
     void DrawPanel()
     {
         const auto snapshot = configuration.live->Snapshot();
@@ -585,7 +580,7 @@ struct SettingsWindow::State
         if (ImGui::Begin("Fallout4HDR", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
         {
             actions = DrawSettingsPanel(editable, snapshot);
-            DrawLutInspector(configuration.presentation);
+            actions.request |= DrawGradeProfiles();
             if (ImGui::CollapsingHeader("Display calibration"))
             {
                 const auto display = displayDiscovery.Refresh(configuration.window);

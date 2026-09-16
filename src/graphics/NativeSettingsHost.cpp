@@ -4,6 +4,22 @@
 
 namespace fo4hdr {
 
+namespace {
+
+bool PreparePersistence(SettingsPersistence& persistence,
+    const NativeSettingsHostConfiguration& configuration) noexcept
+{
+    const auto loaded = LoadPluginConfiguration(configuration.persistencePath);
+    if (loaded.status == PluginConfigurationStatus::missing)
+        return persistence.Initialize(configuration.persistencePath);
+    if (loaded.status != PluginConfigurationStatus::loaded) return false;
+    // The retained baseline must belong to the tuple whose operator table was prepared.
+    if (!(loaded.value == configuration.initial)) return false;
+    return persistence.Initialize(configuration.persistencePath, loaded.distributedProfiles);
+}
+
+}  // namespace
+
 bool NativeSettingsHost::OnOwnerThread() const noexcept
 {
     return GetCurrentThreadId() == ownerThread_;
@@ -58,7 +74,7 @@ bool NativeSettingsHost::PrepareWindow(UINT width, UINT height) noexcept
 
 bool NativeSettingsHost::PrepareOwners(std::unique_ptr<OperatorLutBuildResult>& prepared) noexcept
 {
-    return persistence_.Initialize(configuration_.persistencePath) && worker_.Initialize() &&
+    return PreparePersistence(persistence_, configuration_) && worker_.Initialize() &&
         live_.Initialize(configuration_.initial, prepared,
             {worker_, *configuration_.presentation, persistence_}, configuration_.scope);
 }

@@ -56,6 +56,10 @@ struct SettingsPersistenceSnapshot
 [[nodiscard]] std::string RewritePluginConfigurationIni(
     std::string_view original, const PluginConfiguration& value);
 
+[[nodiscard]] std::string RewriteGradeProfilesIni(
+    std::string_view original, const LutGradeProfiles& profiles,
+    const LutGradeProfiles& distributedProfiles = {});
+
 // Initialize/destruction are cold and externally serialized against callers.
 // Requests/snapshots share one lock with the worker. Destruction drains accepted
 // pending work and joins; no caller may retain this owner during destruction.
@@ -67,7 +71,8 @@ public:
     SettingsPersistence(const SettingsPersistence&) = delete;
     SettingsPersistence& operator=(const SettingsPersistence&) = delete;
 
-    [[nodiscard]] bool Initialize(const std::filesystem::path& path) noexcept;
+    [[nodiscard]] bool Initialize(const std::filesystem::path& path,
+        const LutGradeProfiles& distributedProfiles = {}) noexcept;
     // One try-lock replaces the pending slot; tokens must be nonzero/increasing.
     [[nodiscard]] bool RequestSave(
         const PluginConfiguration& value, std::uint64_t generation) noexcept;
@@ -97,6 +102,8 @@ private:
     void Publish(std::uint64_t generation, bool saved) noexcept;
 
     std::filesystem::path path_;
+    std::filesystem::path personalPath_;
+    LutGradeProfiles distributedProfiles_;
     mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::thread thread_;

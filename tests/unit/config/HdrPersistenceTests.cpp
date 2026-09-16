@@ -208,12 +208,77 @@ void CheckDisplayProfiles()
     CheckProfileFailures(persistence, profile, path);
 }
 
+void SeedGradeProfiles(const std::filesystem::path& path)
+{
+    WriteFile(path, std::string(kOriginal) +
+        "[LUT:textures/lut/shared.dds]\nColor=30\n"
+        "[LUT:textures/lut/main.dds]\nLuminance=60\n");
+    const auto packs = path.parent_path() / path.stem();
+    if (!std::filesystem::create_directory(packs))
+        throw std::runtime_error("Grade profile directory already exists");
+    WriteFile(packs / "Distributed.ini", "[LUT:textures/lut/shared.dds]\nColor=10\n"
+        "[LUT:textures/lut/pack.dds]\nColor=20\n");
+    WriteFile(packs / "Personal.ini", "[Other]\nRetained=yes\n"
+        "[LUT:textures/lut/shared.dds]\nColor=80\n"
+        "[LUT:textures/lut/main.dds]\nInherit=1\n");
+}
+
+void AddImageSpaceProfile(LutGradeProfiles& profiles)
+{
+    if (!SetImageSpaceGradeProfile(profiles, "Example.esp|000123", {40, true, 100, false}))
+        throw std::runtime_error("ImageSpace grade creation rejected");
+    auto* imageSpace = FindImageSpaceGradeProfile(profiles, "example.esp|000123");
+    if (!imageSpace) throw std::runtime_error("ImageSpace grade missing");
+    FO4HDR_CHECK(imageSpace->luminancePercent == 40 && !imageSpace->overrideColor);
+}
+
+void EditGradeProfiles(PluginConfiguration& value)
+{
+    auto& profiles = value.display.lutGradeProfiles;
+    auto* shared = FindLutGradeProfile(profiles, "Textures\\LUT\\Shared.dds");
+    if (!shared) throw std::runtime_error("Personal grade override missing");
+    FO4HDR_CHECK(shared->colorPercent == 80);
+    FO4HDR_CHECK(FindLutGradeProfile(profiles, "textures/lut/main.dds") == nullptr);
+    shared->colorPercent = 75;
+    AddImageSpaceProfile(profiles);
+    if (!RemoveLutGradeProfile(profiles, "textures/lut/pack.dds"))
+        throw std::runtime_error("Distributed grade removal rejected");
+}
+
+void CheckGradeProfileRoundTrip()
+{
+    const TemporaryDirectory directory;
+    const auto path = directory.IniPath();
+    SeedGradeProfiles(path);
+    const auto loaded = LoadPluginConfiguration(path);
+    if (loaded.status != PluginConfigurationStatus::loaded || !loaded.profileIssues.empty())
+        throw std::runtime_error("Grade profile configuration rejected");
+    FO4HDR_CHECK(loaded.distributedProfiles.count == 2);
+    auto requested = loaded.value;
+    EditGradeProfiles(requested);
+    {
+        SettingsPersistence persistence;
+        if (!persistence.Initialize(path, loaded.distributedProfiles) || !QueueSave(persistence, requested))
+            throw std::runtime_error("Grade profile save rejected");
+    }
+    const auto reloaded = LoadPluginConfiguration(path);
+    FO4HDR_CHECK(reloaded.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(reloaded.value == requested);
+    const auto personal = ReadFile(path.parent_path() / path.stem() / "Personal.ini");
+    FO4HDR_CHECK(personal.find("[Other]\nRetained=yes\n") != std::string::npos);
+    const auto saved = ParseGradeProfileConfiguration(personal);
+    FO4HDR_CHECK(saved.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(FindLutGradeProfile(saved.profileInheritances, "textures/lut/pack.dds") != nullptr);
+    FO4HDR_CHECK(ReadFile(path).find("UnknownOutput=kept") != std::string::npos);
+}
+
 }  // namespace
 
 void RunHdrPersistenceTests()
 {
     CheckRoundTrip();
     CheckDisplayProfiles();
+    CheckGradeProfileRoundTrip();
 }
 
 }  // namespace fo4hdr::tests
