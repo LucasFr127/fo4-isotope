@@ -256,7 +256,10 @@ $files = [string[]]@(
     "src/output/NativeLutObservation.cpp",
     "src/game/ImageSpaceState.cpp",
     "src/ui/LutProfilesPanel.hpp",
-    "src/ui/LutProfilesPanel.cpp"
+    "src/ui/LutProfilesPanel.cpp",
+    "tests/unit/config/HdrGradeProfileTests.cpp",
+    "tests/unit/game/ImageSpaceProvenanceTests.cpp",
+    "tests/unit/ui/LutProfilesPanelTests.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

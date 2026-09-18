@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ShippingPixelShaderTests.hpp"
+#include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "Fallout4HDR/tonemap/Gt7.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "TestHarness.hpp"
@@ -17,11 +18,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -335,7 +338,7 @@ struct SamplingResources
     ComPtr<ID3D11ComputeShader> shader;
     ComPtr<ID3D11SamplerState> sampler;
 
-    SamplingResources(ID3D11Device& device, const std::filesystem::path& directory, const BatchPixels& pixels)
+    SamplingResources(ID3D11Device& device, const std::filesystem::path& shaderPath, const BatchPixels& pixels)
     {
         auto description = SceneDescription(batchWidth, batchHeight);
         description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -354,7 +357,7 @@ struct SamplingResources
         CheckHresult(device.CreateTexture2D(&description, nullptr, &staging), "Operator batch staging");
         const BatchDimensions size;
         dimensions = ImmutableConstants(device, &size, sizeof(size));
-        const auto bytecode = ReadShader(directory / "OperatorLut.dxbc");
+        const auto bytecode = ReadShader(shaderPath);
         CheckHresult(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
             "Operator batch shader");
         D3D11_SAMPLER_DESC filter{};
@@ -391,7 +394,7 @@ struct SamplingTable
     }
 };
 
-void DispatchSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
+void BindSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
 {
     auto* dimensions = resources.dimensions.Get();
     auto* constants = table.constants.Get();
@@ -406,6 +409,11 @@ void DispatchSampling(ID3D11DeviceContext& context, const SamplingResources& res
     context.CSSetShaderResources(kProductionOperatorLutSlot, 1, &coefficients);
     context.CSSetSamplers(kProductionOperatorSamplerSlot, 1, &sampler);
     context.CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+}
+
+void DispatchSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
+{
+    BindSampling(context, resources, table);
     context.Dispatch(1, batchHeight, 1);
     // This context is owned by the batch; clear aliases before staging readback.
     context.ClearState();
@@ -465,7 +473,7 @@ void VerifySamplingBatch(const std::filesystem::path& directory, const OperatorL
 {
     const auto device = CreateWarpDevice();
     const auto inputs = SamplingInputs();
-    const SamplingResources resources(*device.device.Get(), directory, inputs);
+    const SamplingResources resources(*device.device.Get(), directory / "OperatorLut.dxbc", inputs);
     for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX, OperatorLutAlgorithm::gt7})
     {
         const auto generated = algorithm == OperatorLutAlgorithm::gt7 ?
@@ -479,6 +487,93 @@ void VerifySamplingBatch(const std::filesystem::path& directory, const OperatorL
     }
 }
 
+
+using SamplingClock = std::chrono::steady_clock;
+constexpr UINT samplingRepetitions = 128;
+
+ComPtr<ID3D11Query> SamplingQuery(ID3D11Device& device, D3D11_QUERY kind)
+{
+    const D3D11_QUERY_DESC description{kind, 0};
+    ComPtr<ID3D11Query> query;
+    CheckHresult(device.CreateQuery(&description, &query), "Operator timing query");
+    if (!query) throw std::runtime_error("Missing operator timing query");
+    return query;
+}
+
+template <class T>
+T ReadSamplingQuery(ID3D11DeviceContext& context, ID3D11Query& query, SamplingClock::time_point deadline)
+{
+    T value{};
+    for (;;)
+    {
+        const auto result = context.GetData(&query, &value, static_cast<UINT>(sizeof(value)),
+            D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (result == S_OK) return value;
+        if (result != S_FALSE) throw std::runtime_error("Operator timing query failed");
+        if (SamplingClock::now() >= deadline)
+            throw std::runtime_error("Operator timing query exceeded five seconds");
+        std::this_thread::yield();
+    }
+}
+
+double ReadSamplingMilliseconds(ID3D11DeviceContext& context, ID3D11Query& disjoint,
+    ID3D11Query& start, ID3D11Query& end)
+{
+    const auto deadline = SamplingClock::now() + std::chrono::seconds(5);
+    const auto frequency = ReadSamplingQuery<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT>(context, disjoint, deadline);
+    if (frequency.Disjoint || frequency.Frequency == 0)
+        throw std::runtime_error("Invalid operator timing frequency");
+    const auto first = ReadSamplingQuery<UINT64>(context, start, deadline);
+    const auto last = ReadSamplingQuery<UINT64>(context, end, deadline);
+    if (last < first) throw std::runtime_error("Reversed operator timestamps");
+    const double milliseconds = static_cast<double>(last - first) * 1000.0 /
+        static_cast<double>(frequency.Frequency) / samplingRepetitions;
+    if (!std::isfinite(milliseconds)) throw std::runtime_error("Nonfinite operator timing");
+    return milliseconds;
+}
+
+double MeasureSamplingDispatches(ID3D11Device& device, ID3D11DeviceContext& context)
+{
+    const auto disjoint = SamplingQuery(device, D3D11_QUERY_TIMESTAMP_DISJOINT);
+    const auto start = SamplingQuery(device, D3D11_QUERY_TIMESTAMP);
+    const auto end = SamplingQuery(device, D3D11_QUERY_TIMESTAMP);
+    for (UINT warmup = 0; warmup < 4; ++warmup) context.Dispatch(1, batchHeight, 1);
+    context.Begin(disjoint.Get());
+    context.End(start.Get());
+    for (UINT iteration = 0; iteration < samplingRepetitions; ++iteration) context.Dispatch(1, batchHeight, 1);
+    context.End(end.Get());
+    context.End(disjoint.Get());
+    context.Flush();
+    return ReadSamplingMilliseconds(context, *disjoint.Get(), *start.Get(), *end.Get());
+}
+
+double SamplingMilliseconds(SamplingClock::time_point first, SamplingClock::time_point last)
+{
+    return std::chrono::duration<double, std::milli>(last - first).count();
+}
+
+void BenchmarkSamplingCase(const Device& device, const SamplingResources& resources,
+    const BatchPixels& inputs, OperatorLutAlgorithm algorithm)
+{
+    const auto bakeStart = SamplingClock::now();
+    const auto table = BuildOperatorLut(algorithm, peakNits);
+    const auto bakeEnd = SamplingClock::now();
+    FO4HDR_CHECK(table.IsValid());
+    if (!table.IsValid()) return;
+    const auto uploadStart = SamplingClock::now();
+    const SamplingTable uploaded(*device.device.Get(), table);
+    const auto uploadEnd = SamplingClock::now();
+    BindSampling(*device.context.Get(), resources, uploaded);
+    const auto gpuMilliseconds = MeasureSamplingDispatches(*device.device.Get(), *device.context.Get());
+    device.context->ClearState();
+    CheckSampling(table, inputs, ReadSampling(*device.context.Get(), resources));
+    // This measures the isolated wrapper and input/output traffic, not gameplay.
+    std::cout << "Isolated WARP operator=" << ToString(algorithm) << " peak=" << peakNits
+              << " colors=16 batch=4x4 warmup=4 repetitions=128 bake_cpu_ms="
+              << SamplingMilliseconds(bakeStart, bakeEnd) << " upload_api_cpu_ms="
+              << SamplingMilliseconds(uploadStart, uploadEnd) << " isolated_warp_batch_ms_per_dispatch="
+              << gpuMilliseconds << '\n';
+}
 
 class LiveConfigurationFile
 {
@@ -678,6 +773,15 @@ void VerifyLiveSettings(const std::filesystem::path& directory, const OperatorLu
 }
 
 }  // namespace
+
+void BenchmarkOperatorLut(const std::filesystem::path& bytecodePath)
+{
+    const auto device = CreateWarpDevice();
+    const auto inputs = SamplingInputs();
+    const SamplingResources resources(*device.device.Get(), bytecodePath, inputs);
+    for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX, OperatorLutAlgorithm::gt7})
+        BenchmarkSamplingCase(device, resources, inputs, algorithm);
+}
 
 void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory)
 {

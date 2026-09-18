@@ -83,6 +83,14 @@ int RunGt7Reference(const std::filesystem::path& shaderPath)
     return EXIT_SUCCESS;
 }
 
+int RunOperatorBenchmark(const std::filesystem::path& shaderPath)
+{
+    fo4hdr::tests::gpu::BenchmarkOperatorLut(shaderPath);
+    if (fo4hdr::test::failures != 0) return EXIT_FAILURE;
+    std::cout << "PASS isolated WARP operator sampling benchmark (not gameplay cost)\n";
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int wmain(int argc, wchar_t** argv)
@@ -92,9 +100,11 @@ int wmain(int argc, wchar_t** argv)
         const auto options = fo4hdr::tests::gpu::ParseShaderTestOptions(argc, argv);
         if (options.mode == fo4hdr::tests::gpu::ShaderTestMode::gt7Reference)
             return RunGt7Reference(std::filesystem::path{options.bytecodePath});
+        if (options.mode == fo4hdr::tests::gpu::ShaderTestMode::operatorLutBenchmark)
+            return RunOperatorBenchmark(std::filesystem::path{options.bytecodePath});
         if (options.mode == fo4hdr::tests::gpu::ShaderTestMode::invalid)
         {
-            throw std::runtime_error("Usage: fo4hdr-shader-tests <TransferEvaluation.dxbc> | --gt7-reference <Gt7Evaluation.dxbc>");
+            throw std::runtime_error("Usage: fo4hdr-shader-tests <TransferEvaluation.dxbc> | --gt7-reference <Gt7Evaluation.dxbc> | --operator-lut-benchmark <OperatorLut.dxbc>");
         }
         const std::filesystem::path shaderPath{options.bytecodePath};
         const auto input = TransferInputs();
@@ -112,6 +122,7 @@ int wmain(int argc, wchar_t** argv)
             shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyDisplayCalibration(shaderPath.parent_path());
         fo4hdr::tests::RunSettingsPanelTests();
+        fo4hdr::tests::RunLutProfilesPanelTests();
         if (fo4hdr::test::failures != 0)
         {
             return EXIT_FAILURE;

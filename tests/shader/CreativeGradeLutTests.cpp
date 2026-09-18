@@ -6,9 +6,16 @@
 #include "passes/PresentationPass.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
 #include "TestHarness.hpp"
+#include "RenoDxShaderIdentity.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <span>
+#include <stdexcept>
+#include <vector>
 
 namespace fo4hdr::tests::gpu {
 namespace {
@@ -153,10 +160,48 @@ void VerifyGradeStrength(WeightedGradeInputs& inputs, PresentationPass& presenta
 
 enum class ProfileDrawCase { matched, unmatched, revoked };
 
+ComPtr<ID3D11ShaderResourceView> CodedProfileLook(ID3D11Device* device,
+    std::span<const std::uint32_t> codes)
+{
+    if (codes.size() != 16 * 16 * 16) throw std::runtime_error("Invalid profile look extent");
+    D3D11_TEXTURE3D_DESC description{};
+    description.Width = description.Height = description.Depth = 16;
+    description.MipLevels = 1;
+    description.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    description.Usage = D3D11_USAGE_IMMUTABLE;
+    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    const D3D11_SUBRESOURCE_DATA initial{codes.data(), 16 * sizeof(std::uint32_t), 256 * sizeof(std::uint32_t)};
+    ComPtr<ID3D11Texture3D> texture;
+    ComPtr<ID3D11ShaderResourceView> source;
+    CheckHresult(device->CreateTexture3D(&description, &initial, &texture), "Profile coded look");
+    CheckHresult(device->CreateShaderResourceView(texture.Get(), nullptr, &source), "Profile coded look view");
+    return source;
+}
+
+ComPtr<ID3D11ShaderResourceView> QuantizedProfileLook(ID3D11Device* device, LutPixels& pixels)
+{
+    std::vector<std::uint32_t> codes(pixels.size());
+    for (std::size_t index = 0; index < pixels.size(); ++index)
+    {
+        auto& pixel = pixels[index];
+        const std::array channels{&pixel.red, &pixel.green, &pixel.blue, &pixel.alpha};
+        for (std::size_t channel = 0; channel < channels.size(); ++channel)
+        {
+            const auto code = static_cast<std::uint32_t>(std::lround(std::clamp(*channels[channel], 0.0F, 1.0F) * 255));
+            codes[index] |= code << (8 * channel);
+            // The independent interpolation oracle uses the actually uploaded UNORM nodes.
+            *channels[channel] = static_cast<float>(code) / 255;
+        }
+    }
+    return CodedProfileLook(device, codes);
+}
+
 void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentation,
     const OperatorLutData& table)
 {
     auto& fixture = inputs.fixture;
+    for (std::size_t slot = 0; slot < inputs.luts.size(); ++slot)
+        inputs.luts[slot] = QuantizedProfileLook(fixture.gpu.device.Get(), inputs.pixels[slot]);
     SceneGradeConfiguration configuration{0.5F};
     configuration.imageControls.vanillaGradeLuminanceRemoval = 0.35;
     configuration.imageControls.vanillaGradeColorRemoval = 0.8;
@@ -214,6 +259,164 @@ void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentati
     FO4HDR_CHECK(fixture.renderer.EndFrame());
 }
 
+ComPtr<ID3D11ShaderResourceView> ProfileFidelityLook(ID3D11Device* device)
+{
+    std::array<std::uint32_t, 16 * 16 * 16> codes{};
+    codes.fill(0xFF604020);
+    return CodedProfileLook(device, codes);
+}
+
+struct ProfileFidelityCase
+{
+    Float4 weights;
+    double luminanceRemoval;
+    double colorRemoval;
+    float strength{0.5F};
+};
+
+struct ProfileFidelityDraw
+{
+    UINT calls{};
+    UINT lookWidth{};
+
+    static void Draw(ID3D11DeviceContext* context, void* argument)
+    {
+        auto& evidence = *static_cast<ProfileFidelityDraw*>(argument);
+        ++evidence.calls;
+        ComPtr<ID3D11ShaderResourceView> source;
+        context->PSGetShaderResources(3, 1, &source);
+        if (!source) throw std::runtime_error("Missing fidelity look at draw");
+        ComPtr<ID3D11Resource> resource;
+        source->GetResource(&resource);
+        ComPtr<ID3D11Texture3D> texture;
+        CheckHresult(resource.As(&texture), "Profile draw look texture");
+        D3D11_TEXTURE3D_DESC description{};
+        texture->GetDesc(&description);
+        evidence.lookWidth = description.Width;
+        context->Draw(3, 0);
+    }
+};
+
+SceneGradeConfiguration FidelityConfiguration(ColorGradingMethod method, const ProfileFidelityCase& test,
+    bool profilesActive)
+{
+    SceneGradeConfiguration configuration{test.strength};
+    configuration.method = method;
+    auto& controls = configuration.imageControls;
+    controls.vanillaGradeLuminanceRemoval = profilesActive ? 0.35 : test.luminanceRemoval;
+    controls.vanillaGradeColorRemoval = profilesActive ? 0.8 : test.colorRemoval;
+    if (!profilesActive) return configuration;
+    auto& profiles = configuration.lutGradeProfiles;
+    profiles.count = 1;
+    auto& profile = profiles.entries[0];
+    FO4HDR_CHECK(NormalizeLutGradePath("textures/luts/profile-fidelity.dds", profile.path));
+    profile.luminancePercent = profile.colorPercent = 0;
+    profile.overrideLuminance = profile.overrideColor = true;
+    return configuration;
+}
+
+NativeLutObservation FidelityObservation(const WeightedGradeInputs& inputs)
+{
+    NativeLutObservation observation;
+    observation.resourceGeneration = NativeLutResourceGeneration();
+    observation.generation = NativeLutObservationGeneration();
+    observation.threadId = GetCurrentThreadId();
+    observation.validSlots = 1;
+    constexpr std::string_view path{"textures/luts/profile-fidelity.dds"};
+    FO4HDR_CHECK(NormalizeLutGradePath(path, observation.luts[0].utf8Path));
+    observation.luts[0].pathLength = static_cast<std::uint16_t>(path.size());
+    observation.expectedShaderViews[0] = reinterpret_cast<std::uintptr_t>(inputs.luts[0].Get());
+    return observation;
+}
+
+void BindFidelityWeights(WeightedGradeInputs& inputs, Float4 weights)
+{
+    std::array<Float4, 32> values{};
+    values[17] = weights;
+    inputs.nativeConstants = ConstantBuffer(inputs.fixture.gpu.device.Get(), values);
+    inputs.Bind();
+    auto* buffer = inputs.nativeConstants.Get();
+    constexpr UINT first = 16;
+    constexpr UINT count = 16;
+    inputs.context->PSSetConstantBuffers1(2, 1, &buffer, &first, &count);
+}
+
+void CheckFidelityWeights(const WeightedGradeInputs& inputs)
+{
+    UINT first{};
+    UINT count{};
+    inputs.context->PSGetConstantBuffers1(2, 1, nullptr, &first, &count);
+    FO4HDR_CHECK(first == 16 && count == 16);
+}
+
+std::vector<Float4> RenderProfileFidelity(const std::filesystem::path& directory,
+    ColorGradingMethod method, const ProfileFidelityCase& test, bool profilesActive)
+{
+    const auto configuration = FidelityConfiguration(method, test, profilesActive);
+    PixelFixture fixture(directory, width, height, {}, nullptr, configuration);
+    WeightedGradeInputs inputs(fixture);
+    for (auto& look : inputs.luts) look = ProfileFidelityLook(fixture.gpu.device.Get());
+    Pixels scene;
+    scene.fill(sourceColor);
+    FO4HDR_CHECK(fixture.renderer.InvalidateScene(fixture.input));
+    UploadScene(fixture.gpu.context.Get(), fixture.renderer.Views(fixture.input).texture, scene);
+    FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    BindFidelityWeights(inputs, test.weights);
+    const NativeLutScope scope(FidelityObservation(inputs));
+    ProfileFidelityDraw draw;
+    FO4HDR_CHECK(fixture.renderer.Execute(kRenoDxFallout4Shaders[4], fixture.input, fixture.destination,
+        {ProfileFidelityDraw::Draw, &draw}) == SceneDrawOutcome::replaced);
+    FO4HDR_CHECK(draw.calls == 1);
+    const bool prepared = method == ColorGradingMethod::nativeReference && test.strength > 0;
+    FO4HDR_CHECK(draw.lookWidth == (prepared ? 20u : 16u));
+    fixture.CheckRestored(true);
+    inputs.Check();
+    CheckFidelityWeights(inputs);
+    FO4HDR_CHECK(fixture.renderer.CopyLutInspector().validatedSlots == 1);
+    const auto output = ReadScene(fixture.gpu, fixture.renderer.Views(fixture.destination).texture);
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
+    return output;
+}
+
+void CheckProfileFidelity(const std::vector<Float4>& actual, const std::vector<Float4>& reference,
+    float strength)
+{
+    FO4HDR_CHECK(actual.size() == width * height && reference.size() == actual.size());
+    if (actual.size() != width * height || reference.size() != actual.size()) return;
+    for (std::size_t index = 0; index < actual.size(); ++index)
+    {
+        // Same-shader comparison retains the existing FP16 integration boundary.
+        CheckPixel(actual[index], reference[index]);
+        FO4HDR_CHECK(actual[index].alpha == sourceColor.alpha);
+        if (strength == 0)
+        {
+            FO4HDR_CHECK(actual[index].red == sourceColor.red);
+            FO4HDR_CHECK(actual[index].green == sourceColor.green);
+            FO4HDR_CHECK(actual[index].blue == sourceColor.blue);
+        }
+    }
+}
+
+void VerifyProfileFidelity(const std::filesystem::path& directory)
+{
+    const auto nan = std::numeric_limits<float>::quiet_NaN();
+    // Only slot zero overrides globals; native weights sum to 1.625.
+    constexpr double luminance = (0.25 + 1.375 * 0.35) / 1.625;
+    constexpr double color = (0.25 + 1.375 * 0.8) / 1.625;
+    const std::array cases{
+        ProfileFidelityCase{{0.25F, 0.5F, 0.75F, 0.125F}, luminance, color},
+        ProfileFidelityCase{{}, 0.35, 0.8},
+        ProfileFidelityCase{{nan, 0.5F, 0.75F, 0.125F}, 0.35, 0.8},
+        ProfileFidelityCase{{0.25F, 0.5F, 0.75F, 0.125F}, luminance, color, 0}};
+    for (const auto method : {ColorGradingMethod::radial, ColorGradingMethod::nativeReference})
+        for (const auto& test : cases)
+        {
+            const auto actual = RenderProfileFidelity(directory, method, test, true);
+            const auto reference = RenderProfileFidelity(directory, method, test, false);
+            CheckProfileFidelity(actual, reference, test.strength);
+        }
+}
+
 }  // namespace
 
 void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
@@ -239,6 +442,7 @@ void VerifyCreativeGradeLut(const std::filesystem::path& fixtureDirectory)
     VerifyGradeStrength(inputs, presentation, table, removal);
     VerifyLutProfiles(inputs, presentation, table);
     FO4HDR_CHECK(presentation.Retire());
+    VerifyProfileFidelity(fixtureDirectory);
 }
 
 }  // namespace fo4hdr::tests::gpu

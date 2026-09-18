@@ -24,6 +24,12 @@ void CheckAcceptedForms()
     FO4HDR_CHECK(second.mode == gpu::ShaderTestMode::gt7Reference);
     FO4HDR_CHECK(second.bytecodePath == reference[2]);
     FO4HDR_CHECK(second.bytecodePath.data() == reference[2]);
+
+    const wchar_t* benchmark[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", L"OperatorLut.dxbc"};
+    const auto third = gpu::ParseShaderTestOptions(3, benchmark);
+    FO4HDR_CHECK(third.mode == gpu::ShaderTestMode::operatorLutBenchmark);
+    FO4HDR_CHECK(third.bytecodePath == benchmark[2]);
+    FO4HDR_CHECK(third.bytecodePath.data() == benchmark[2]);
 }
 
 void CheckRejected(std::span<const wchar_t* const> arguments)

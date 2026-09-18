@@ -30,8 +30,12 @@ ShaderTestOptions ParseShaderTestOptions(
     if (arguments[1] == nullptr) return {};
     if (argumentCount == 2)
         return WithBytecodePath(ShaderTestMode::transfer, arguments[1]);
-    if (std::wstring_view{arguments[1]} != L"--gt7-reference") return {};
-    return WithBytecodePath(ShaderTestMode::gt7Reference, arguments[2]);
+    const std::wstring_view flag{arguments[1]};
+    if (flag == L"--gt7-reference")
+        return WithBytecodePath(ShaderTestMode::gt7Reference, arguments[2]);
+    if (flag == L"--operator-lut-benchmark")
+        return WithBytecodePath(ShaderTestMode::operatorLutBenchmark, arguments[2]);
+    return {};
 }
 
 }  // namespace fo4hdr::tests::gpu

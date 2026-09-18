@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GameSnapshotStore.hpp"
-#include "ImageSpaceObserver.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
@@ -342,31 +341,6 @@ void TestCopiedImageSpaceAndDrawScope()
     fo4hdr::ResetNativeLutObservation(0);
 }
 
-void TestImageSpacePublication()
-{
-    namespace provenance = fo4hdr::game::imagespace_detail;
-    provenance::Publication publication;
-    provenance::Provenance candidate{}, copy{};
-    candidate.status = provenance::Status::matched;
-    candidate.validSlots = 1;
-    candidate.generation = 7;
-    auto first = publication.Begin();
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::updating);
-    auto overlapping = publication.Begin();
-    FO4HDR_CHECK(!publication.Finish(first, candidate));
-    FO4HDR_CHECK(!publication.Finish(overlapping, candidate));
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::stale);
-    auto exclusive = publication.Begin();
-    FO4HDR_CHECK(publication.Finish(exclusive, candidate));
-    FO4HDR_CHECK(publication.TryRead(copy));
-    FO4HDR_CHECK(copy.validSlots == 1 && copy.generation == 7);
-    publication.Invalidate();
-    FO4HDR_CHECK(!publication.IsCurrent(copy.revision));
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::stale);
-}
 
 }  // namespace
 
@@ -385,7 +359,6 @@ void RunGameSnapshotStoreTests()
     TestCollectedPublication();
     TestCopiedImageSpaceAndDrawScope();
     TestCopiedRendererResources();
-    TestImageSpacePublication();
 }
 
 }  // namespace fo4hdr::tests

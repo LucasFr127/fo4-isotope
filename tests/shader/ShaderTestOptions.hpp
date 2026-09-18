@@ -10,7 +10,8 @@ enum class ShaderTestMode : std::uint8_t
 {
     invalid,
     transfer,
-    gt7Reference
+    gt7Reference,
+    operatorLutBenchmark
 };
 
 struct ShaderTestOptions
