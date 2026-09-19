@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "NativeLutObserver.hpp"
+#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 #include "GameObservationMemory.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
@@ -16,8 +17,8 @@
 namespace {
 using namespace fo4hdr::game::observation;
 using LutBytes = std::array<std::byte, sizeof(RE::ImageSpaceLUTData)>;
-static_assert(sizeof(RE::ImageSpaceLUTData) == 0x70);
-static_assert(offsetof(RE::ImageSpaceLUTData, texture) == 0x50);
+static_assert(sizeof(RE::ImageSpaceLUTData) == fo4hdr::generated::kImageSpaceLutDataSize);
+static_assert(offsetof(RE::ImageSpaceLUTData, texture) == fo4hdr::generated::kImageSpaceLutTextureOffset);
 static_assert(offsetof(RE::NiTexture, name) == 0x10);
 static_assert(offsetof(RE::NiTexture, rendererTexture) == 0x38);
 
@@ -131,7 +132,7 @@ bool ObserveNativeLuts(const RE::ImageSpaceManager* manager,
     destination = {};
     // This decoder supports only the inspected 1.10.163 override. A later
     // runtime cannot obtain identity by selecting an arbitrary texture offset.
-    if (textureSrvOffset != 0) return false;
+    if (textureSrvOffset != generated::kNativeLutTextureSrvOffset) return false;
     const auto epoch = NativeLutObservationGeneration();
     const auto* data = ActiveLut(manager);
     LutBytes bytes{};

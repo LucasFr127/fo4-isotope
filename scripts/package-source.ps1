@@ -7,6 +7,7 @@ param([string]$Destination, [string]$SpdlogArchive = $env:FO4HDR_SPDLOG_ARCHIVE,
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.Formats.Tar
+. ([IO.Path]::Combine($PSScriptRoot, "internal/Project.Source.ps1"))
 
 $root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, ".."))
 $files = [string[]]@(
@@ -259,7 +260,44 @@ $files = [string[]]@(
     "src/ui/LutProfilesPanel.cpp",
     "tests/unit/config/HdrGradeProfileTests.cpp",
     "tests/unit/game/ImageSpaceProvenanceTests.cpp",
-    "tests/unit/ui/LutProfilesPanelTests.cpp"
+    "tests/unit/ui/LutProfilesPanelTests.cpp",
+    "runtime/1.10.163/PluginVersion.cpp",
+    "runtime/1.10.163/RuntimeIdentity.generated.hpp",
+    "runtime/1.10.163/manifest.json",
+    "runtime/1.10.984/PluginVersion.cpp",
+    "runtime/1.10.984/manifest.json",
+    "runtime/1.11.221/PluginVersion.cpp",
+    "runtime/1.11.221/manifest.json",
+    "schemas/runtime-manifest.schema.json",
+    "schemas/versions-lock.schema.json",
+    "schemas/xmake-source-manifest.schema.json",
+    "scripts/add-commonlib.ps1",
+    "scripts/bootstrap.ps1",
+    "scripts/build.ps1",
+    "scripts/configure.ps1",
+    "scripts/deploy.ps1",
+    "scripts/generate-runtime-identity.ps1",
+    "scripts/internal/CommonLibIntegrity.ps1",
+    "scripts/internal/Project.Common.ps1",
+    "scripts/internal/Project.Files.ps1",
+    "scripts/internal/Project.Runtime.Binary.ps1",
+    "scripts/internal/Project.Runtime.Profiles.ps1",
+    "scripts/internal/Project.Runtime.ps1",
+    "scripts/internal/Project.Toolchain.ps1",
+    "scripts/pin-toolchain.ps1",
+    "scripts/query-commonlib-head.ps1",
+    "scripts/validate-manifests.ps1",
+    "scripts/validate-runtime.ps1",
+    "scripts/verify-plugin-metadata.ps1",
+    "src/plugin/PluginPch.hpp",
+    "tests/runtime/AddressLibraryV0.Tests.ps1",
+    "tests/runtime/CommonLibIntegrity.Tests.ps1",
+    "tests/runtime/CommonLibRelocationProfile.Tests.ps1",
+    "tests/runtime/RuntimeStatusPolicy.Tests.ps1",
+    "tests/source/ToolchainPolicy.Tests.ps1",
+    "third_party/xmake-source-manifest.json",
+    "versions.lock.json",
+    "xmake-requires.lock"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {
@@ -302,8 +340,9 @@ $temporary = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-dependenc
 [IO.Directory]::CreateDirectory($temporary) | Out-Null
 try {
     $dependencies = @(
-        @{ Path = "lib/commonlibf4"; Commit = "8c734d1ec8fc16977004cd42a0242d4805efd633" },
-        @{ Path = "lib/commonlibf4/lib/commonlib-shared"; Commit = "ed737c04811bf7c998f5a80340fd4ba5f9d3546b" }
+        @{ Path = "lib/commonlibf4"; Commit = "491a09a0bc71847ee509e3953621a804c468cb17" },
+        @{ Path = "lib/commonlibf4/lib/commonlib-shared"; Commit = "ca0e527c5af60d48497f02197c3c4c436d683387" },
+        @{ Path = "lib/commonlibf4/lib/dearmoddingui-api"; Commit = "9cfc0790a8d319cff798655a3b7f5f05a06a40c9" }
     )
     foreach ($dependency in $dependencies) {
         $directory = [IO.Path]::Combine($root, $dependency.Path)
@@ -311,8 +350,10 @@ try {
         if ($LASTEXITCODE -ne 0 -or $head -cne $dependency.Commit) {
             throw "Unexpected dependency commit: $($dependency.Path)"
         }
-        $selection = @("include", "src", "LICENSE")
-        if ($dependency.Path.EndsWith("commonlib-shared")) { $selection += "EXCEPTIONS" }
+        $selection = @("include", "LICENSE", "xmake.lua")
+        if (-not $dependency.Path.EndsWith("dearmoddingui-api")) {
+            $selection += @("src", "res", "EXCEPTIONS")
+        }
         $changes = & git -C $directory status --porcelain --untracked-files=all -- $selection
         if ($LASTEXITCODE -ne 0 -or $changes) {
             throw "Dependency source is changed: $($dependency.Path)"
@@ -335,6 +376,9 @@ try {
                 foreach ($entry in $archive.Entries) {
                     $name = $entry.FullName
                     if ($name -cne "LICENSE" -and $name -cne "EXCEPTIONS" -and
+                        $name -cne "xmake.lua" -and $name -cne "res/license/MIT" -and
+                        $name -cne "res/commonlibf4.natvis" -and
+                        $name -cnotmatch '^res/[^/]+\.(rc|cpp)\.in$' -and
                         $name -cnotmatch '^include/.+\.h$' -and $name -cnotmatch '^src/.+\.cpp$' -and
                         $name -cne "src/REX/PCH.h") { continue }
                     if ($name -match '(^|/)(\.git|\.\.)($|/)' -or $name.Contains("\")) {
@@ -429,6 +473,9 @@ finally {
 }
 
 [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Destination)) | Out-Null
+Add-Fo4HdrLockedPackageArchives -Root $root -Sources $sources `
+    -SpdlogArchive $SpdlogArchive -ImguiArchive $ImguiArchive
+
 $timestamp = [DateTimeOffset]::new(1980, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 $stream = [IO.File]::Open($Destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 $complete = $false

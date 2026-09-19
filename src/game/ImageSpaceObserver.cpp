@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ImageSpaceObserver.hpp"
+#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 #include "DirectCallPatch.hpp"
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -21,6 +22,11 @@
 #include <vector>
 
 namespace {
+
+static_assert(fo4hdr::generated::ImageSpaceEffectEnumMatches<RE::ImageSpaceManager::ImageSpaceEffectEnum>());
+static_assert(sizeof(RE::ImageSpaceManager) == fo4hdr::generated::kImageSpaceManagerSize);
+static_assert(offsetof(RE::ImageSpaceManager, lutData) == fo4hdr::generated::kImageSpaceLutDataOffset);
+static_assert(offsetof(RE::ImageSpaceManager, overrideLUTData) == fo4hdr::generated::kImageSpaceOverrideLutDataOffset);
 
 constexpr std::size_t kMaximumImageSpaces{8192};
 constexpr std::size_t kMaximumEditorIdEntries{1U << 20U};

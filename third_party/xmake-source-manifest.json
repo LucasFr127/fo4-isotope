@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "complete": true,
+  "packages": [
+    {
+      "name": "spdlog",
+      "version": "v1.16.0",
+      "repository": "https://github.com/gabime/spdlog.git",
+      "sourceRevision": "v1.16.0",
+      "sourceCacheFile": "spdlog-v1.16.0.zip",
+      "sourceArchiveFormat": "zip",
+      "sourceSha256": "3d25808d2fc4db86621a46855800c99ab5734999b61c4cbf9470edf631555397",
+      "recipeRepository": "https://github.com/xmake-io/xmake-repo.git",
+      "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+      "recipeTreeSha1": "f5d1a017ba91f3c730f0e787cc6e954fc87b4b01",
+      "recipeCacheFile": "xmake-recipe-spdlog-eae3fab4e0c58f19dca872427a660d33ddfdb2d0.zip",
+      "recipeSha256": "59353fc2684f2907cba4c5a3ef2134029581d82062a92cd81746813829c1b900",
+      "license": "MIT",
+      "licenseFiles": [
+        "spdlog-1.16.0/LICENSE"
+      ],
+      "licenseSha256": "4ccecab18d1ff0b61174fe3d6c430541625d3ddb865b0d5887db296f883c76e7"
+    },
+    {
+      "name": "imgui",
+      "version": "v1.92.6-docking",
+      "repository": "https://github.com/ocornut/imgui.git",
+      "sourceRevision": "2a1b69f05748ad909f03acf4533447cac1331611",
+      "sourceCacheFile": "imgui-v1.92.6-docking.tar.gz",
+      "sourceArchiveFormat": "tar.gz",
+      "sourceSha256": "5e84cdaa6a6041586a0d11a3071b749734a0439d66fdbdad37ae5b27e37d396c",
+      "recipeRepository": "https://github.com/xmake-io/xmake-repo.git",
+      "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+      "recipeTreeSha1": "7d5c8c9a8ea338975afb8a7ca203a788a6f79e5f",
+      "recipeCacheFile": "xmake-recipe-imgui-eae3fab4e0c58f19dca872427a660d33ddfdb2d0.zip",
+      "recipeSha256": "7b54981beca4ce0f56d105e2e14044cdf302753b0778576462849b8def4d1d4b",
+      "license": "MIT",
+      "licenseFiles": [
+        "imgui-1.92.6-docking/LICENSE.txt"
+      ],
+      "licenseSha256": "173506a2d6f7fb67990d257fb2507f188690eca39060c39469ae7bef43aae2a3"
+    }
+  ]
+}

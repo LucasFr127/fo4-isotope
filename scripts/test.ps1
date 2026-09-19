@@ -58,6 +58,12 @@ function Invoke-SourceChecks {
         [IO.Path]::Combine($root, 'tests/source/SourceArchive.Tests.ps1'))
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/StagePolicy.Tests.ps1'), '-Mode', $Mode)
+    foreach ($check in @('tests/runtime/CommonLibIntegrity.Tests.ps1',
+        'tests/runtime/CommonLibRelocationProfile.Tests.ps1', 'tests/runtime/RuntimeStatusPolicy.Tests.ps1',
+        'tests/runtime/AddressLibraryV0.Tests.ps1', 'tests/source/ToolchainPolicy.Tests.ps1')) {
+        Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
+            [IO.Path]::Combine($root, $check))
+    }
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
         [IO.Path]::Combine($root, 'tests/source/TestProcess.Tests.ps1'))
     Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',

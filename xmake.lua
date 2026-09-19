@@ -1,8 +1,5 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 
-set_project("Fallout4HDR")
-set_license("GPL-3.0-or-later")
-set_languages("c++23")
 set_toolchains("msvc")
 set_allowedplats("windows")
 set_allowedarchs("windows|x64")
@@ -21,73 +18,63 @@ else
     set_runtimes("MT")
 end
 
-local dependency_profile = {
-    spdlog_source = os.getenv("FO4HDR_SPDLOG_SOURCE") or "lib/spdlog",
-    imgui_source = os.getenv("FO4HDR_IMGUI_SOURCE") or "lib/imgui",
-    commonlib_source = "lib/commonlibf4",
-    runtime_count = 3
-}
-dependency_profile.shared_source = path.join(dependency_profile.commonlib_source, "lib/commonlib-shared")
-local commonlib_runtime_define = "COMMONLIB_RUNTIMECOUNT=" .. dependency_profile.runtime_count
+set_xmakever("3.0.0")
+set_policy("package.requires_lock", true)
+set_policy("package.precompiled", false)
+includes("lib/commonlibf4")
 
-target("spdlog")
-    set_kind("static")
-    add_includedirs(path.join(dependency_profile.spdlog_source, "include"), { public = true })
-    -- CommonLib file sinks receive std::string paths.
-    add_defines("SPDLOG_COMPILED_LIB", "SPDLOG_USE_STD_FORMAT",
-        "SPDLOG_WCHAR_TO_UTF8_SUPPORT", { public = true })
-    add_files(path.join(dependency_profile.spdlog_source, "src/spdlog.cpp"),
-        path.join(dependency_profile.spdlog_source, "src/stdout_sinks.cpp"),
-        path.join(dependency_profile.spdlog_source, "src/color_sinks.cpp"),
-        path.join(dependency_profile.spdlog_source, "src/file_sinks.cpp"),
-        path.join(dependency_profile.spdlog_source, "src/async.cpp"),
-        path.join(dependency_profile.spdlog_source, "src/cfg.cpp"))
-target_end()
+set_project("Fallout4HDR")
+set_version("0.0.0")
+set_license("GPL-3.0-or-later")
+set_languages("c++23")
+add_requires("imgui v1.92.6-docking", {
+    configs = { shared = false, dx11 = true, win32 = true,
+        no_demo_windows = true, no_debug_tools = true }
+})
 
-target("imgui-core")
-    set_kind("static")
+option("fo4hdr_runtime")
+    set_default("1.10.163")
+    set_values("1.10.163", "1.10.984", "1.11.221")
+option_end()
+option("fo4hdr_allow_unvalidated_runtime")
     set_default(false)
-    add_includedirs(dependency_profile.imgui_source, { public = true })
-    add_files(path.join(dependency_profile.imgui_source, "imgui.cpp"),
-        path.join(dependency_profile.imgui_source, "imgui_draw.cpp"),
-        path.join(dependency_profile.imgui_source, "imgui_tables.cpp"),
-        path.join(dependency_profile.imgui_source, "imgui_widgets.cpp"),
-        path.join(dependency_profile.imgui_source, "backends/imgui_impl_dx11.cpp"),
-        path.join(dependency_profile.imgui_source, "backends/imgui_impl_win32.cpp"))
-    add_syslinks("user32", "kernel32", "shell32", "imm32", "d3d11", "d3dcompiler",
-        "gdi32", "dwmapi", { public = true })
-target_end()
+option_end()
+option("fo4hdr_use_pch")
+    set_default(true)
+option_end()
+option("fo4hdr_build_tests")
+    set_default(true)
+option_end()
 
-target("commonlib-shared")
-    set_kind("static")
-    add_deps("spdlog", { public = true })
-    add_includedirs(path.join(dependency_profile.shared_source, "include"), { public = true })
-    add_defines(commonlib_runtime_define, { public = true })
-    add_files(path.join(dependency_profile.shared_source, "src/**.cpp"))
-    set_pcxxheader(path.join(dependency_profile.shared_source, "src/REX/PCH.h"))
-    add_cxxflags("/EHsc", "/permissive-", "cl::/bigobj", "cl::/cgthreads8",
-        "cl::/diagnostics:caret", "cl::/external:W0", "cl::/fp:contract",
-        "cl::/fp:except-", "cl::/guard:cf-", "cl::/Zc:enumTypes",
-        "cl::/Zc:preprocessor", "cl::/Zc:templateScope", "cl::/wd4200",
-        "cl::/wd4201", "cl::/wd4324", "cl::/we4715", { public = true })
-    add_syslinks("advapi32", "bcrypt", "d3d11", "d3dcompiler", "dbghelp", "dxgi",
-        "ole32", "shell32", "user32", "version", "ws2_32", { public = true })
-target_end()
+rule("fo4hdr.plugin")
+    add_deps("commonlib.plugin")
+    on_load(function(target)
+        target:data_set("commonlib.plugin.config", target:extraconf("rules", "fo4hdr.plugin"))
+    end)
+rule_end()
 
-target("commonlibf4")
-    set_kind("static")
-    add_deps("commonlib-shared", { public = true })
-    add_includedirs(path.join(dependency_profile.commonlib_source, "include"), { public = true })
-    add_defines(commonlib_runtime_define, { public = true })
-    add_files(path.join(dependency_profile.commonlib_source, "src/**.cpp"))
-    set_pcxxheader(path.join(dependency_profile.commonlib_source, "include/F4SE/Impl/PCH.h"))
-target_end()
+local selected_runtime = get_config("fo4hdr_runtime") or "1.10.163"
+if selected_runtime ~= "1.10.163" and not has_config("fo4hdr_allow_unvalidated_runtime") then
+    os.raise("Planned runtime requires --fo4hdr_allow_unvalidated_runtime=y")
+end
+local commonlib_runtime_define = "COMMONLIB_RUNTIMECOUNT=3"
 
 target("Fallout4HDR")
-    set_kind("shared")
-    add_deps("commonlibf4", "imgui-core", "fo4hdr-shaders")
+    add_rules("fo4hdr.plugin", { name = "Fallout4HDR", author = "Fallout4HDR contributors",
+        description = "CommonLibF4 HDR output plugin for Fallout 4" })
+    add_deps("commonlibf4", "fo4hdr-shaders")
+    add_packages("imgui")
+    if has_config("fo4hdr_use_pch") then
+        set_pcxxheader("src/plugin/PluginPch.hpp")
+    end
+    add_files(path.join("runtime", selected_runtime, "PluginVersion.cpp"))
     add_includedirs("include", "src/runtime", "src/graphics", "src/ui", "build/include")
     add_defines(commonlib_runtime_define)
+    if selected_runtime == "1.10.163" then
+        add_defines("FO4HDR_RUNTIME_1_10_163=1")
+    else
+        add_defines("FO4HDR_RUNTIME_PLANNED=1")
+    end
     add_files("src/plugin/PluginMain.cpp", "src/runtime/RuntimeIdentityFiles.cpp",
         "src/runtime/RuntimeValidation.cpp", "src/game/GameStateObserver.cpp",
         "src/game/ArmorUiObserver.cpp",
@@ -132,26 +119,37 @@ target("Fallout4HDR")
     add_files("src/graphics/passes/ArmorEncodedComposition.cpp")
     add_syslinks("version")
     on_install(function(target)
-        local stage = path.join(os.projectdir(), "dist/1.10.163/Data/F4SE/Plugins")
+        local stage = path.join(os.projectdir(), "dist", selected_runtime, "Data/F4SE/Plugins")
+        local manifestdir = path.join(stage, "Fallout4HDR")
+        local manifest = path.join(os.projectdir(), "runtime", selected_runtime, "manifest.json")
         assert(target:symbolfile(), "Missing plugin symbol file path")
         local files = { target:targetfile(), target:symbolfile(),
             path.join(os.projectdir(), "config/Fallout4HDR.ini") }
         local allowed = { ["Fallout4HDR.dll"] = true, ["Fallout4HDR.pdb"] = true,
             ["Fallout4HDR.ini"] = true }
-        for _, file in ipairs(files) do
+        for _, file in ipairs(table.join(files, { manifest })) do
             assert(os.isfile(file), "Missing staging input: " .. file)
         end
         for _, file in ipairs(os.files(path.join(stage, "*"))) do
             assert(allowed[path.filename(file)], "Unexpected staging file: " .. file)
         end
-        assert(#os.dirs(path.join(stage, "*")) == 0, "Unexpected staging directory")
-        os.mkdir(stage)
+        for _, directory in ipairs(os.dirs(path.join(stage, "*"))) do
+            assert(directory == manifestdir, "Unexpected staging directory: " .. directory)
+        end
+        local manifestname = "runtime-" .. selected_runtime .. ".json"
+        for _, file in ipairs(os.files(path.join(manifestdir, "*"))) do
+            assert(path.filename(file) == manifestname, "Unexpected manifest staging file: " .. file)
+        end
+        assert(#os.dirs(path.join(manifestdir, "*")) == 0, "Unexpected manifest staging directory")
+        os.mkdir(manifestdir)
         for _, file in ipairs(files) do
             os.cp(file, path.join(stage, path.filename(file)))
         end
+        os.cp(manifest, path.join(manifestdir, manifestname))
     end)
 target_end()
 
+if has_config("fo4hdr_build_tests") then
 for _, fixture in ipairs({
     { name = "fo4hdr-tests", build = 0 },
     { name = "fo4hdr-tests-executable-mismatch", build = 1 }
@@ -204,6 +202,8 @@ for _, fixture in ipairs({
     target_end()
 end
 
+end
+
 target("fo4hdr-shaders")
     set_kind("phony")
     set_default(false)
@@ -243,10 +243,12 @@ target("fo4hdr-shaders")
     end)
 target_end()
 
+if has_config("fo4hdr_build_tests") then
 target("fo4hdr-shader-tests")
     set_kind("binary")
     set_default(false)
-    add_deps("imgui-core", "fo4hdr-shaders")
+    add_deps("fo4hdr-shaders")
+    add_packages("imgui")
     add_includedirs("include", "src/graphics", "src/ui", "tests/support", "tests/unit", "build/include")
     add_syslinks("d3d11", "dxgi", "user32")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
@@ -291,3 +293,4 @@ target("fo4hdr-shader-tests")
         "src/tonemap/OperatorLut.cpp", "src/tonemap/Agx.cpp", "src/tonemap/Aces2.cpp", "src/tonemap/Aces2Lmt.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp", "src/tonemap/aces2/Aces2Tables.cpp")
 target_end()
+end

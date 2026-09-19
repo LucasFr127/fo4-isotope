@@ -20,7 +20,7 @@
 namespace {
 
 constexpr char pluginName[] = "Fallout4HDR";
-constexpr REL::Version pluginVersion{0, 1, 0, 0};
+constexpr REL::Version pluginVersion{0, 0, 0, 0};
 std::once_flag startup;
 std::atomic<bool> graphicsInstallationAttempted{};
 
@@ -31,6 +31,11 @@ std::atomic<bool> graphicsInstallationAttempted{};
 
 [[nodiscard]] bool ValidateStartup(const F4SE::QueryInterface* f4se) noexcept
 {
+    // Planned ports carry metadata only; they cannot use the primary runtime path.
+#if defined(FO4HDR_RUNTIME_PLANNED)
+    (void)f4se;
+    return false;
+#else
     if (f4se == nullptr || f4se->IsEditor())
     {
         return false;
@@ -44,6 +49,7 @@ std::atomic<bool> graphicsInstallationAttempted{};
     }
     const auto executable = fo4hdr::ReadCurrentExecutableVersion();
     return executable && *executable == reported.runtimeVersion;
+#endif
 }
 
 std::optional<fo4hdr::GraphicsStartupConfiguration> ReadStartupSettings()
@@ -96,16 +102,6 @@ void InstallStartupGraphics(const fo4hdr::GraphicsStartupConfiguration& configur
 
 }  // namespace
 
-F4SE_PLUGIN_VERSION = []() constexpr {
-    F4SE::PluginVersionData data{};
-    data.PluginVersion(pluginVersion);
-    data.PluginName(pluginName);
-    data.HasNoStructUse(false);
-    data.CompatibleVersions({REL::Version{1, 10, 163, 0}});
-    data.MinimumRequiredXSEVersion(REL::Version{0, 6, 23, 0});
-    return data;
-}();
-
 F4SE_EXPORT bool F4SEAPI F4SEPlugin_Query(
     const F4SE::QueryInterface* f4se, F4SE::PluginInfo* info) noexcept
 {
@@ -136,7 +132,7 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
         }
         std::call_once(startup, [] {
             const auto settings = ReadStartupSettings();
-            spdlog::info("Fallout4HDR 0.1.0 loaded: runtime 1.10.163, F4SE 0.6.23");
+            spdlog::info("Fallout4HDR 0.0.0 loaded: runtime 1.10.163, F4SE 0.6.23");
             if (settings) InstallStartupGraphics(*settings);
         });
         fo4hdr::game::InitializeGameStateObserver(f4se);

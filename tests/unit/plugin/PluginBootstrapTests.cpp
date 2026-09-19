@@ -256,12 +256,13 @@ void CheckObserverIntegration(Load load)
 void CheckVersionData(const PluginVersionData& data)
 {
     constexpr char expectedName[256] = "Fallout4HDR";
+    constexpr char expectedAuthor[256] = "Fallout4HDR contributors";
     FO4HDR_CHECK(data.dataVersion == 1);
-    FO4HDR_CHECK(data.pluginVersion == 0x00010000);
+    FO4HDR_CHECK(data.pluginVersion == 0);
     FO4HDR_CHECK(std::ranges::equal(data.pluginName, expectedName));
-    FO4HDR_CHECK(std::ranges::all_of(data.author, [](char value) { return value == 0; }));
-    FO4HDR_CHECK(data.addressIndependence == 0);
-    FO4HDR_CHECK(data.structureIndependence == 0);
+    FO4HDR_CHECK(std::ranges::equal(data.author, expectedAuthor));
+    FO4HDR_CHECK(data.addressIndependence == 4);
+    FO4HDR_CHECK(data.structureIndependence == 4);
     FO4HDR_CHECK(data.compatibleVersions[0] == supportedF4se.runtimeVersion);
     FO4HDR_CHECK(std::ranges::all_of(std::span{data.compatibleVersions}.subspan(1),
         [](std::uint32_t value) { return value == 0; }));
@@ -277,7 +278,7 @@ void CheckQueryInfo(Query query)
     PluginInfo info{};
     FO4HDR_CHECK(query(&supportedF4se, &info) == executableMatches);
     FO4HDR_CHECK(info.infoVersion == 1);
-    FO4HDR_CHECK(info.version == 0x00010000);
+    FO4HDR_CHECK(info.version == 0);
     FO4HDR_CHECK(info.name != nullptr);
     if (info.name != nullptr)
     {

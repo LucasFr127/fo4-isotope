@@ -1,0 +1,775 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fallout4HDR versions lock",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "project",
+    "toolchain",
+    "commonlib",
+    "xmake",
+    "runtimes",
+    "aces2",
+    "agx",
+    "gt7",
+    "smoothTetraSelectiveColor"
+  ],
+  "definitions": {
+    "sha256OrPlaceholder": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{64}|FILL_LOCAL|FILL_AFTER_ADD_COMMONLIB|FILL_AFTER_FIRST_CONFIGURE|FILL_AFTER_CAPTURE|FILL_DURING_SOURCE_PACKAGING|FILL_AFTER_INDEPENDENT_REVIEW|UNVALIDATED)$"
+    },
+    "commitOrPlaceholder": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-fA-F]{40}|FILL_AFTER_ADD_COMMONLIB)$"
+    },
+    "runtimeEntry": {
+      "type": "object",
+      "required": [
+        "status",
+        "platform",
+        "f4seVersion",
+        "exeSha256",
+        "f4seLoaderSha256",
+        "f4seRuntimeDllSha256",
+        "addressLibraryFile",
+        "addressLibrarySha256",
+        "shaderManifestSha256",
+        "observedAtUtc"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "primary-uninitialized",
+            "planned",
+            "runtime-pinned-unvalidated",
+            "capture-complete",
+            "release-approved"
+          ]
+        },
+        "platform": {
+          "enum": [
+            "steam",
+            "gog",
+            "unvalidated"
+          ]
+        },
+        "f4seVersion": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+        },
+        "exeSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "f4seLoaderSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "f4seRuntimeDllSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "addressLibraryFile": {
+          "type": "string",
+          "pattern": "^version-[0-9-]+\\.bin$"
+        },
+        "addressLibrarySha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "runtimeManifestCanonicalSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "shaderManifestSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "observedAtUtc": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "planned"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "platform": {
+                "const": "unvalidated"
+              },
+              "exeSha256": {
+                "const": "UNVALIDATED"
+              },
+              "f4seLoaderSha256": {
+                "const": "UNVALIDATED"
+              },
+              "f4seRuntimeDllSha256": {
+                "const": "UNVALIDATED"
+              },
+              "addressLibrarySha256": {
+                "const": "UNVALIDATED"
+              },
+              "runtimeManifestCanonicalSha256": {
+                "const": "UNVALIDATED"
+              },
+              "shaderManifestSha256": {
+                "const": "UNVALIDATED"
+              },
+              "observedAtUtc": {
+                "const": null
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "runtime-pinned-unvalidated",
+                  "capture-complete",
+                  "release-approved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "runtimeManifestCanonicalSha256"
+            ],
+            "properties": {
+              "platform": {
+                "enum": [
+                  "steam",
+                  "gog"
+                ]
+              },
+              "exeSha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "f4seLoaderSha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "f4seRuntimeDllSha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "addressLibrarySha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "runtimeManifestCanonicalSha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              },
+              "observedAtUtc": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "capture-complete",
+                  "release-approved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "shaderManifestSha256": {
+                "pattern": "^[0-9a-fA-F]{64}$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "license"
+      ],
+      "properties": {
+        "name": {
+          "const": "Fallout4HDR"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "license": {
+          "const": "GPL-3.0-or-later"
+        }
+      },
+      "additionalProperties": false
+    },
+    "toolchain": {
+      "type": "object",
+      "required": [
+        "requirements",
+        "observed"
+      ],
+      "properties": {
+        "requirements": {
+          "type": "object",
+          "required": [
+            "platform",
+            "architecture",
+            "cppStandard",
+            "msvcRuntime"
+          ],
+          "properties": {
+            "platform": {
+              "const": "windows"
+            },
+            "architecture": {
+              "const": "x64"
+            },
+            "cppStandard": {
+              "const": "c++23"
+            },
+            "msvcRuntime": {
+              "type": "object",
+              "required": [
+                "debug",
+                "releasedbg"
+              ],
+              "properties": {
+                "debug": {
+                  "const": "MTd"
+                },
+                "releasedbg": {
+                  "const": "MT"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "observed": {
+          "type": "object",
+          "required": [
+            "visualStudio",
+            "msvc",
+            "windowsSdk",
+            "xmake",
+            "powerShell",
+            "git"
+          ],
+          "properties": {
+            "visualStudio": {
+              "type": "object",
+              "required": [
+                "productLine",
+                "installationVersion"
+              ],
+              "properties": {
+                "productLine": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "installationVersion": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "msvc": {
+              "type": "object",
+              "required": [
+                "compilerVersion",
+                "toolsVersion",
+                "hostArchitecture",
+                "targetArchitecture"
+              ],
+              "properties": {
+                "compilerVersion": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "toolsVersion": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "hostArchitecture": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "targetArchitecture": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "windowsSdk": {
+              "type": "object",
+              "required": [
+                "version"
+              ],
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "xmake": {
+              "type": "string",
+              "minLength": 1
+            },
+            "powerShell": {
+              "type": "string",
+              "minLength": 1
+            },
+            "git": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "commonlib": {
+      "type": "object",
+      "required": [
+        "repository",
+        "commit",
+        "licenseSha256",
+        "exceptionsSha256",
+        "originalMitLicenseSha256",
+        "commonlibSharedRepository",
+        "commonlibSharedCommit",
+        "commonlibSharedLicenseSha256",
+        "commonlibSharedExceptionsSha256",
+        "dearModdingUiApiRepository",
+        "dearModdingUiApiCommit",
+        "dearModdingUiApiLicenseSha256"
+      ],
+      "properties": {
+        "repository": {
+          "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
+        },
+        "commit": {
+          "$ref": "#/definitions/commitOrPlaceholder"
+        },
+        "licenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "exceptionsSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "originalMitLicenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "commonlibSharedRepository": {
+          "const": "https://github.com/Dear-Modding-FO4/commonlib-shared.git"
+        },
+        "commonlibSharedCommit": {
+          "$ref": "#/definitions/commitOrPlaceholder"
+        },
+        "commonlibSharedLicenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "commonlibSharedExceptionsSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "dearModdingUiApiRepository": {
+          "const": "https://github.com/Dear-Modding-FO4/DearModdingUI-API.git"
+        },
+        "dearModdingUiApiCommit": {
+          "$ref": "#/definitions/commitOrPlaceholder"
+        },
+        "dearModdingUiApiLicenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        }
+      },
+      "additionalProperties": false
+    },
+    "xmake": {
+      "type": "object",
+      "required": [
+        "requiresLockSha256",
+        "packages"
+      ],
+      "properties": {
+        "requiresLockSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "packages": {
+          "type": "object",
+          "required": [
+            "spdlog",
+            "imgui"
+          ],
+          "properties": {
+            "spdlog": {
+              "type": "object",
+              "required": [
+                "version",
+                "sourceSha256",
+                "recipeCommit",
+                "recipeTreeSha1",
+                "recipeSha256",
+                "licenseSha256"
+              ],
+              "properties": {
+                "version": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sourceSha256": {
+                  "$ref": "#/definitions/sha256OrPlaceholder"
+                },
+                "recipeCommit": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "recipeTreeSha1": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "recipeSha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                },
+                "licenseSha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "imgui": {
+              "type": "object",
+              "required": [
+                "version",
+                "tagObject",
+                "commit",
+                "sourceSha256",
+                "recipeCommit",
+                "recipeTreeSha1",
+                "recipeSha256",
+                "licenseSha256"
+              ],
+              "properties": {
+                "version": {
+                  "const": "v1.92.6-docking"
+                },
+                "tagObject": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "commit": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "sourceSha256": {
+                  "$ref": "#/definitions/sha256OrPlaceholder"
+                },
+                "recipeCommit": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "recipeTreeSha1": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{40}$"
+                },
+                "recipeSha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                },
+                "licenseSha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtimes": {
+      "type": "object",
+      "required": [
+        "1.10.163",
+        "1.10.984",
+        "1.11.221"
+      ],
+      "properties": {
+        "1.10.163": {
+          "$ref": "#/definitions/runtimeEntry"
+        },
+        "1.10.984": {
+          "$ref": "#/definitions/runtimeEntry"
+        },
+        "1.11.221": {
+          "$ref": "#/definitions/runtimeEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "aces2": {
+      "type": "object",
+      "required": [
+        "status",
+        "aggregateVersion",
+        "acesCoreRepository",
+        "acesCoreCommit",
+        "acesOutputRepository",
+        "acesOutputCommit",
+        "licenseSha256",
+        "contrastLmt"
+      ],
+      "properties": {
+        "status": {
+          "const": "adapted"
+        },
+        "aggregateVersion": {
+          "const": "v2.0.0+2025.04.04"
+        },
+        "acesCoreRepository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "acesCoreCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        },
+        "acesOutputRepository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "acesOutputCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        },
+        "licenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "contrastLmt": {
+          "type": "object",
+          "required": [
+            "status",
+            "sourceRepository",
+            "sourceBranch",
+            "sourceCommit",
+            "sourcePath",
+            "sourceSha256",
+            "license",
+            "licensePath",
+            "licenseSha256",
+            "selectedVariant",
+            "inputShaperCenter",
+            "inputShaperWidth"
+          ],
+          "properties": {
+            "status": {
+              "const": "adapted"
+            },
+            "sourceRepository": {
+              "const": "https://github.com/scottdyer/aces-look.git"
+            },
+            "sourceBranch": {
+              "const": "dctl-contrast-lmt"
+            },
+            "sourceCommit": {
+              "const": "dc79dd74554e73a9e1518ec5f00ae0c1725f1686"
+            },
+            "sourcePath": {
+              "const": "contrast/LMT_Test_OCIO_options.dctl"
+            },
+            "sourceSha256": {
+              "const": "b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f"
+            },
+            "license": {
+              "const": "Apache-2.0"
+            },
+            "licensePath": {
+              "const": "LICENSE"
+            },
+            "licenseSha256": {
+              "const": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+            },
+            "selectedVariant": {
+              "const": "J curve 2 + M curve 2"
+            },
+            "inputShaperCenter": {
+              "const": 2.4
+            },
+            "inputShaperWidth": {
+              "const": 3
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "agx": {
+      "type": "object",
+      "required": [
+        "status",
+        "sourceRepository",
+        "sourceTag",
+        "sourceCommit",
+        "sourceFiles"
+      ],
+      "properties": {
+        "status": {
+          "const": "adapted"
+        },
+        "sourceRepository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sourceTag": {
+          "const": "1.2.4"
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        },
+        "sourceFiles": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "gitBlobSha1"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "gitBlobSha1": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{40}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "gt7": {
+      "type": "object",
+      "required": [
+        "status",
+        "sourceUrl",
+        "expectedSha256",
+        "importedSha256"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not-fetched",
+            "reviewed",
+            "imported"
+          ]
+        },
+        "sourceUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "expectedSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "importedSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "smoothTetraSelectiveColor": {
+      "type": "object",
+      "required": [
+        "status",
+        "sourceRepository",
+        "sourceCommit",
+        "license",
+        "licensePath",
+        "licenseSha256",
+        "sourceFiles"
+      ],
+      "properties": {
+        "status": {
+          "const": "adapted"
+        },
+        "sourceRepository": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sourceCommit": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$"
+        },
+        "license": {
+          "const": "MIT"
+        },
+        "licensePath": {
+          "const": "LICENSE"
+        },
+        "licenseSha256": {
+          "$ref": "#/definitions/sha256OrPlaceholder"
+        },
+        "sourceFiles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "const": "Effects/Smooth Tetra Skin.dctl"
+              },
+              "sha256": {
+                "$ref": "#/definitions/sha256OrPlaceholder"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

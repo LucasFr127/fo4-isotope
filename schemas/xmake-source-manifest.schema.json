@@ -1,0 +1,128 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fallout4HDR XMake source manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "complete",
+    "packages"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "version",
+          "repository",
+          "sourceRevision",
+          "sourceCacheFile",
+          "sourceArchiveFormat",
+          "sourceSha256",
+          "recipeRepository",
+          "recipeCommit",
+          "recipeTreeSha1",
+          "recipeCacheFile",
+          "recipeSha256",
+          "license",
+          "licenseFiles",
+          "licenseSha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "repository": {
+            "type": "string",
+            "format": "uri"
+          },
+          "sourceRevision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceCacheFile": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/\\\\]+$"
+          },
+          "sourceArchiveFormat": {
+            "enum": ["zip", "tar.gz"]
+          },
+          "sourceSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          },
+          "recipeRepository": {
+            "type": "string",
+            "format": "uri"
+          },
+          "recipeCommit": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{40}$"
+          },
+          "recipeTreeSha1": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{40}$"
+          },
+          "recipeCacheFile": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^/\\\\]+$"
+          },
+          "recipeSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          },
+          "license": {
+            "type": "string",
+            "minLength": 1
+          },
+          "licenseFiles": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "licenseSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "complete": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "packages": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ]
+}

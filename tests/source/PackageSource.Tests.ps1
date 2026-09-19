@@ -242,12 +242,204 @@ $expected = [string[]]@(
     "src/ui/LutProfilesPanel.cpp",
     "tests/unit/config/HdrGradeProfileTests.cpp",
     "tests/unit/game/ImageSpaceProvenanceTests.cpp",
-    "tests/unit/ui/LutProfilesPanelTests.cpp"
+    "tests/unit/ui/LutProfilesPanelTests.cpp",
+    "runtime/1.10.163/PluginVersion.cpp",
+    "runtime/1.10.163/RuntimeIdentity.generated.hpp",
+    "runtime/1.10.163/manifest.json",
+    "runtime/1.10.984/PluginVersion.cpp",
+    "runtime/1.10.984/manifest.json",
+    "runtime/1.11.221/PluginVersion.cpp",
+    "runtime/1.11.221/manifest.json",
+    "schemas/runtime-manifest.schema.json",
+    "schemas/versions-lock.schema.json",
+    "schemas/xmake-source-manifest.schema.json",
+    "scripts/add-commonlib.ps1",
+    "scripts/bootstrap.ps1",
+    "scripts/build.ps1",
+    "scripts/configure.ps1",
+    "scripts/deploy.ps1",
+    "scripts/generate-runtime-identity.ps1",
+    "scripts/internal/CommonLibIntegrity.ps1",
+    "scripts/internal/Project.Common.ps1",
+    "scripts/internal/Project.Files.ps1",
+    "scripts/internal/Project.Runtime.Binary.ps1",
+    "scripts/internal/Project.Runtime.Profiles.ps1",
+    "scripts/internal/Project.Runtime.ps1",
+    "scripts/internal/Project.Toolchain.ps1",
+    "scripts/pin-toolchain.ps1",
+    "scripts/query-commonlib-head.ps1",
+    "scripts/validate-manifests.ps1",
+    "scripts/validate-runtime.ps1",
+    "scripts/verify-plugin-metadata.ps1",
+    "src/plugin/PluginPch.hpp",
+    "tests/runtime/AddressLibraryV0.Tests.ps1",
+    "tests/runtime/CommonLibIntegrity.Tests.ps1",
+    "tests/runtime/CommonLibRelocationProfile.Tests.ps1",
+    "tests/runtime/RuntimeStatusPolicy.Tests.ps1",
+    "tests/source/ToolchainPolicy.Tests.ps1",
+    "third_party/xmake-source-manifest.json",
+    "versions.lock.json",
+    "xmake-requires.lock"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",
     "imstb_truetype.h", "LICENSE.txt", "backends/imgui_impl_dx11.cpp",
     "backends/imgui_impl_dx11.h", "backends/imgui_impl_win32.cpp", "backends/imgui_impl_win32.h")
+function Get-LockedPackageArtifactPath {
+    param([string]$Name)
+
+    $filename = $Name.Substring('third_party/xmake-package-sources/'.Length)
+    $manifest = Get-Content -LiteralPath ([IO.Path]::Combine($root,
+        'third_party/xmake-source-manifest.json')) -Raw | ConvertFrom-Json
+    foreach ($package in $manifest.packages) {
+        if ($filename -ceq $package.sourceCacheFile) {
+            return $(if ($package.name -ceq 'spdlog') { $env:FO4HDR_SPDLOG_ARCHIVE } else { $env:FO4HDR_IMGUI_ARCHIVE })
+        }
+        if ($filename -ceq $package.recipeCacheFile) {
+            return [IO.Path]::Combine($env:FO4HDR_SOURCE_CACHE, $filename)
+        }
+    }
+    throw 'Unselected package source artifact.'
+}
+
+function Get-SourceEntryRole {
+    param([string]$Name)
+
+    $sourcePath = [IO.Path]::Combine($root, $name)
+    if ($expected -ccontains $name) {
+        return @{ kind = 'Project'; path = $sourcePath; canonical = $false }
+    }
+    foreach ($role in @(
+        @{ kind = 'Shared'; pattern = '^lib/commonlibf4/lib/commonlib-shared/(include/.+\.h|src/.+\.cpp|src/REX/PCH\.h|LICENSE|EXCEPTIONS|xmake\.lua|res/[^/]+\.(rc|cpp)\.in)$' },
+        @{ kind = 'UiApi'; pattern = '^lib/commonlibf4/lib/dearmoddingui-api/(include/.+\.h|LICENSE|xmake\.lua)$' },
+        @{ kind = 'Root'; pattern = '^lib/commonlibf4/(include/.+\.h|src/.+\.cpp|LICENSE|EXCEPTIONS|res/license/MIT|res/commonlibf4\.natvis|xmake\.lua|res/[^/]+\.(rc|cpp)\.in)$' }
+    )) {
+        if ($name -cmatch $role.pattern) {
+            return @{ kind = $role.kind; path = $sourcePath; canonical = $true }
+        }
+    }
+    return Get-PackageEntryRole $name
+}
+
+function Get-PackageEntryRole {
+    param([string]$Name)
+
+    if ($name.StartsWith('third_party/xmake-package-sources/', [StringComparison]::Ordinal)) {
+        return @{ kind = 'PackageArtifacts'; path = (Get-LockedPackageArtifactPath $name); canonical = $false }
+    }
+    if ($name -cmatch '^lib/spdlog/(include/spdlog/.+\.h|src/(spdlog|stdout_sinks|color_sinks|file_sinks|async|cfg)\.cpp|LICENSE)$' -and
+        -not $name.StartsWith("lib/spdlog/include/spdlog/fmt/bundled/")) {
+        $source = Get-PackageSourceRoot 'FO4HDR_SPDLOG_SOURCE' 'lib/spdlog'
+        return @{ kind = 'Spdlog'; path = [IO.Path]::Combine($source, $name.Substring("lib/spdlog/".Length)); canonical = $false }
+    }
+    if ($name.StartsWith("lib/imgui/", [StringComparison]::Ordinal) -and
+        $imguiFiles -ccontains $name.Substring("lib/imgui/".Length)) {
+        $source = Get-PackageSourceRoot 'FO4HDR_IMGUI_SOURCE' 'lib/imgui'
+        return @{ kind = 'ImGui'; path = [IO.Path]::Combine($source, $name.Substring("lib/imgui/".Length)); canonical = $false }
+    }
+    throw "Unselected source entry: $name"
+}
+
+function Get-PackageSourceRoot {
+    param([string]$Variable, [string]$Fallback)
+
+    $source = [Environment]::GetEnvironmentVariable($Variable)
+    if ($source) { return $source }
+    return [IO.Path]::Combine($root, $Fallback)
+}
+
+function Assert-EntryCounts {
+    param([hashtable]$Counts)
+
+    $required = @{ Project = $expected.Length; Root = 1800; Shared = 127; UiApi = 16;
+        PackageArtifacts = 4; Spdlog = 97; ImGui = 15 }
+    foreach ($kind in $required.Keys) {
+        if ($Counts[$kind] -ne $required[$kind]) { throw "Incomplete exact source closure: $kind" }
+    }
+}
+
+function Assert-SourceEntryBytes {
+    param([byte[]]$Actual, [byte[]]$Source, [bool]$Canonical, [string]$Name)
+
+    if ($canonical) {
+        $actualText = [Text.Encoding]::UTF8.GetString($actual).Replace("`r`n", "`n")
+        $sourceText = [Text.Encoding]::UTF8.GetString($source).Replace("`r`n", "`n")
+        if ($actualText -cne $sourceText) { throw "Canonical source differs: $name" }
+    }
+    elseif ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($source)) {
+        throw "Entry bytes differ: $name"
+    }
+}
+
+function Assert-ArchiveEntryHeader {
+    param($Entry, [string]$Previous)
+
+    $name = $Entry.FullName
+    if ([StringComparer]::Ordinal.Compare($previous, $name) -ge 0) {
+        throw "Unexpected entry order: $name"
+    }
+    if ($name -match '(^|/)(\.git|\.\.)($|/)' -or $name.Contains("\")) {
+        throw "Unsafe source entry: $name"
+    }
+    if ($entry.LastWriteTime.DateTime -ne [DateTime]::new(1980, 1, 1)) {
+        throw "Unexpected timestamp: $name"
+    }
+}
+
+function Assert-RequiredArchiveInputs {
+    param($Zip)
+
+    foreach ($required in @("lib/commonlibf4/include/F4SE/Impl/PCH.h",
+        "lib/commonlibf4/lib/commonlib-shared/src/REX/PCH.h",
+        "lib/commonlibf4/LICENSE", "lib/commonlibf4/EXCEPTIONS", "lib/commonlibf4/res/license/MIT",
+        "lib/commonlibf4/res/commonlibf4.natvis", "lib/commonlibf4/xmake.lua", "lib/commonlibf4/lib/commonlib-shared/xmake.lua",
+        "lib/commonlibf4/lib/commonlib-shared/res/commonlib-plugin.rc.in",
+        "lib/commonlibf4/lib/dearmoddingui-api/xmake.lua",
+        "lib/commonlibf4/lib/dearmoddingui-api/LICENSE",
+        "lib/commonlibf4/lib/commonlib-shared/LICENSE",
+        "lib/commonlibf4/lib/commonlib-shared/EXCEPTIONS", "lib/spdlog/LICENSE",
+        "lib/imgui/LICENSE.txt")) {
+        if (-not $zip.GetEntry($required)) { throw "Missing build or license input: $required" }
+    }
+}
+
+function Assert-SourceArchive {
+    param([string]$First)
+
+    $stream = [IO.File]::OpenRead($first)
+    try {
+        $zip = Open-Fo4HdrValidatedZipArchive $first
+        try {
+            $counts = @{ Root = 0; Shared = 0; UiApi = 0; PackageArtifacts = 0; Spdlog = 0; ImGui = 0; Project = 0 }
+            $previous = ""
+            foreach ($entry in $zip.Entries) {
+                $name = $entry.FullName
+                Assert-ArchiveEntryHeader $entry $previous
+                $previous = $name
+                $role = Get-SourceEntryRole $name
+                ++$counts[$role.kind]
+                $sourcePath = $role.path
+                $canonical = $role.canonical
+
+                $entryStream = $entry.Open()
+                $memory = [IO.MemoryStream]::new()
+                try {
+                    $entryStream.CopyTo($memory)
+                    $actual = $memory.ToArray()
+                    $source = [IO.File]::ReadAllBytes($sourcePath)
+                    Assert-SourceEntryBytes $actual $source $canonical $name
+                }
+                finally { $memory.Dispose(); $entryStream.Dispose() }
+            }
+            Assert-EntryCounts $counts
+            Assert-RequiredArchiveInputs $zip
+        }
+        finally { $zip.Dispose() }
+    }
+    finally { $stream.Dispose() }
+
+}
+
 $temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-source-" + [Guid]::NewGuid())
 [IO.Directory]::CreateDirectory($temp) | Out-Null
 $untracked = [IO.Path]::Combine($root, "lib/commonlibf4/src/PackageSourceUntracked-" + [Guid]::NewGuid() + ".cpp")
@@ -269,81 +461,7 @@ try {
         throw "Existing destination was not preserved."
     }
 
-    $stream = [IO.File]::OpenRead($first)
-    try {
-        $zip = Open-Fo4HdrValidatedZipArchive $first
-        try {
-            $counts = @{ Root = 0; Shared = 0; Spdlog = 0; ImGui = 0; Project = 0 }
-            $previous = ""
-            foreach ($entry in $zip.Entries) {
-                $name = $entry.FullName
-                if ([StringComparer]::Ordinal.Compare($previous, $name) -ge 0 -or
-                    $name -match '(^|/)(\.git|\.\.)($|/)' -or $name.Contains("\")) {
-                    throw "Unexpected entry or order: $name"
-                }
-                $previous = $name
-                if ($entry.LastWriteTime.DateTime -ne [DateTime]::new(1980, 1, 1)) {
-                    throw "Unexpected timestamp: $name"
-                }
-                $sourcePath = [IO.Path]::Combine($root, $name)
-                $canonical = $false
-                if ($expected -ccontains $name) { ++$counts.Project }
-                elseif ($name -cmatch '^lib/commonlibf4/lib/commonlib-shared/(include/.+\.h|src/.+\.cpp|src/REX/PCH\.h|LICENSE|EXCEPTIONS)$') {
-                    ++$counts.Shared
-                    $canonical = $true
-                }
-                elseif ($name -cmatch '^lib/commonlibf4/(include/.+\.h|src/.+\.cpp|LICENSE)$') {
-                    ++$counts.Root
-                    $canonical = $true
-                }
-                elseif ($name -cmatch '^lib/spdlog/(include/spdlog/.+\.h|src/(spdlog|stdout_sinks|color_sinks|file_sinks|async|cfg)\.cpp|LICENSE)$' -and
-                    -not $name.StartsWith("lib/spdlog/include/spdlog/fmt/bundled/")) {
-                    ++$counts.Spdlog
-                    $spdlogSource = if ($env:FO4HDR_SPDLOG_SOURCE) { $env:FO4HDR_SPDLOG_SOURCE }
-                        else { [IO.Path]::Combine($root, "lib/spdlog") }
-                    $sourcePath = [IO.Path]::Combine($spdlogSource, $name.Substring("lib/spdlog/".Length))
-                }
-                elseif ($name.StartsWith("lib/imgui/", [StringComparison]::Ordinal) -and
-                    $imguiFiles -ccontains $name.Substring("lib/imgui/".Length)) {
-                    ++$counts.ImGui
-                    $imguiSource = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
-                        else { [IO.Path]::Combine($root, "lib/imgui") }
-                    $sourcePath = [IO.Path]::Combine($imguiSource, $name.Substring("lib/imgui/".Length))
-                }
-                else { throw "Unselected source entry: $name" }
-
-                $entryStream = $entry.Open()
-                $memory = [IO.MemoryStream]::new()
-                try {
-                    $entryStream.CopyTo($memory)
-                    $actual = $memory.ToArray()
-                    $source = [IO.File]::ReadAllBytes($sourcePath)
-                    if ($canonical) {
-                        $actualText = [Text.Encoding]::UTF8.GetString($actual).Replace("`r`n", "`n")
-                        $sourceText = [Text.Encoding]::UTF8.GetString($source).Replace("`r`n", "`n")
-                        if ($actualText -cne $sourceText) { throw "Canonical source differs: $name" }
-                    }
-                    elseif ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($source)) {
-                        throw "Entry bytes differ: $name"
-                    }
-                }
-                finally { $memory.Dispose(); $entryStream.Dispose() }
-            }
-            if ($counts.Project -ne $expected.Length -or $counts.Root -ne 1584 -or
-                $counts.Shared -ne 110 -or $counts.Spdlog -ne 97 -or $counts.ImGui -ne 15) {
-                throw "Incomplete exact source closure."
-            }
-            foreach ($required in @("lib/commonlibf4/include/F4SE/Impl/PCH.h",
-                "lib/commonlibf4/lib/commonlib-shared/src/REX/PCH.h",
-                "lib/commonlibf4/LICENSE", "lib/commonlibf4/lib/commonlib-shared/LICENSE",
-                "lib/commonlibf4/lib/commonlib-shared/EXCEPTIONS", "lib/spdlog/LICENSE",
-                "lib/imgui/LICENSE.txt")) {
-                if (-not $zip.GetEntry($required)) { throw "Missing build or license input: $required" }
-            }
-        }
-        finally { $zip.Dispose() }
-    }
-    finally { $stream.Dispose() }
+    Assert-SourceArchive $first
 
     [IO.File]::WriteAllText($untracked, "Untracked source must not enter a corresponding source archive.")
     $refused = $false

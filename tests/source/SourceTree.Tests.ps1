@@ -129,6 +129,7 @@ function Get-DependencyRoots {
     return @{
         commonlib = $commonlib
         shared = [IO.Path]::Combine($commonlib, 'lib/commonlib-shared')
+        uiapi = [IO.Path]::Combine($commonlib, 'lib/dearmoddingui-api')
         spdlog = if ($env:FO4HDR_SPDLOG_SOURCE) { $env:FO4HDR_SPDLOG_SOURCE }
             else { [IO.Path]::Combine($root, 'lib/spdlog') }
         imgui = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
@@ -152,7 +153,8 @@ function Assert-DependencyTerms {
     param([hashtable]$Roots)
 
     foreach ($entry in @(@('commonlib', 'LICENSE'), @('shared', 'LICENSE'),
-        @('shared', 'EXCEPTIONS'), @('spdlog', 'LICENSE'), @('imgui', 'LICENSE.txt'))) {
+        @('shared', 'EXCEPTIONS'), @('commonlib', 'EXCEPTIONS'),
+        @('commonlib', 'res/license/MIT'), @('uiapi', 'LICENSE'), @('spdlog', 'LICENSE'), @('imgui', 'LICENSE.txt'))) {
         if (-not [IO.File]::Exists([IO.Path]::Combine($roots[$entry[0]], $entry[1]))) {
             throw "Missing dependency terms: $($entry[0])/$($entry[1])"
         }
@@ -167,6 +169,11 @@ function Assert-DependencyInputs {
         'path\.join\(dependency_profile\.(commonlib|shared|spdlog|imgui)_source, "([^"]+)"\)')) {
         Assert-DependencyPath ([IO.Path]::Combine(
             $roots[$input.Groups[1].Value], $input.Groups[2].Value))
+    }
+    foreach ($input in @(@('commonlib', 'xmake.lua'), @('shared', 'xmake.lua'),
+        @('uiapi', 'xmake.lua'), @('commonlib', 'res/commonlibf4.natvis'),
+        @('shared', 'res/commonlib-plugin.rc.in'))) {
+        Assert-DependencyPath ([IO.Path]::Combine($roots[$input[0]], $input[1]))
     }
     Assert-DependencyTerms $roots
 }

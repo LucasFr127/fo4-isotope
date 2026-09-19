@@ -1,0 +1,636 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Fallout4HDR runtime manifest",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runtime",
+    "shaderSetId",
+    "semanticStages",
+    "shaders",
+    "resourceRules",
+    "manualValidation"
+  ],
+  "definitions": {
+    "observerAddress": {
+      "type": "object", "required": ["addressLibraryId", "rva"],
+      "properties": {
+        "addressLibraryId": { "type": "integer", "minimum": 1 },
+        "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" }
+      }, "additionalProperties": false
+    },
+    "approvedHash": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
+    "hashOrPlaceholder": {
+      "anyOf": [
+        { "$ref": "#/definitions/approvedHash" },
+        { "enum": ["FILL_LOCAL", "UNVALIDATED"] }
+      ]
+    }
+  },
+  "properties": {
+    "imageSpaceObserver": {
+      "type": "object",
+      "required": ["status", "scope", "authorityGap", "lifetime", "thread", "globals", "targets", "calls"],
+      "properties": {
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "weather-imagespace-provenance" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
+        "globals": {
+          "type": "object", "required": ["lut", "base"],
+          "properties": {
+            "lut": { "$ref": "#/definitions/observerAddress" },
+            "base": { "$ref": "#/definitions/observerAddress" }
+          }, "additionalProperties": false
+        },
+        "targets": {
+          "type": "array", "minItems": 4, "maxItems": 4,
+          "items": {
+            "type": "object", "required": ["name", "addressLibraryId", "rva", "abi", "expectedBytes"],
+            "properties": {
+              "name": { "enum": ["Weather", "Accumulate", "RoomBlend", "SetLut"] },
+              "addressLibraryId": { "type": "integer", "minimum": 1 },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "abi": { "type": "string", "minLength": 1 },
+              "expectedBytes": {
+                "type": "array", "minItems": 1, "maxItems": 32,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }, "additionalProperties": false
+          }
+        },
+        "calls": {
+          "type": "array", "minItems": 11, "maxItems": 11,
+          "items": {
+            "type": "object", "required": ["callerAddressLibraryId", "callerRva", "rva", "targetIndex", "expectedBytes"],
+            "properties": {
+              "callerAddressLibraryId": { "type": "integer", "minimum": 1 },
+              "callerRva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "targetIndex": { "type": "integer", "minimum": 0, "maximum": 3 },
+              "expectedBytes": {
+                "type": "array", "minItems": 5, "maxItems": 5,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }, "additionalProperties": false
+          }
+        }
+      }, "additionalProperties": false
+    },
+    "nativeLutObserver": {
+      "type": "object",
+      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "textureSrvOffset", "target"],
+      "properties": {
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "synchronous-gamma-correct-lut-render" },
+        "abi": { "const": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "effectSubobjectOffset": { "const": 280 },
+        "textureSrvOffset": { "const": 0 },
+        "target": {
+          "type": "object",
+          "required": ["addressLibraryId", "rva", "expectedBytes"],
+          "properties": {
+            "addressLibraryId": { "type": "integer", "minimum": 1 },
+            "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+            "expectedBytes": {
+              "type": "array", "minItems": 25, "maxItems": 25,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "experimentalArmorUiObserver": {
+      "type": "object",
+      "required": [
+        "status",
+        "scope",
+        "abi",
+        "lifetime",
+        "thread",
+        "authorityGap",
+        "target",
+        "calls"
+      ],
+      "properties": {
+        "status": {
+          "const": "unvalidated"
+        },
+        "scope": {
+          "const": "power-armor-encoded-peak-composition"
+        },
+        "abi": {
+          "const": "void(Renderer*,uint32_t)"
+        },
+        "lifetime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thread": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorityGap": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "addressLibraryId",
+            "rva",
+            "expectedBytes"
+          ],
+          "properties": {
+            "addressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "expectedBytes": {
+              "type": "array",
+              "minItems": 23,
+              "maxItems": 23,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "calls": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "required": [
+              "callerAddressLibraryId",
+              "callerRva",
+              "rva",
+              "expectedBytes"
+            ],
+            "properties": {
+              "callerAddressLibraryId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "callerRva": {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{8}$"
+              },
+              "rva": {
+                "type": "string",
+                "pattern": "^0x[0-9a-fA-F]{8}$"
+              },
+              "expectedBytes": {
+                "type": "array",
+                "minItems": 5,
+                "maxItems": 5,
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "schemaVersion": { "const": 1 },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "version",
+        "f4seVersion",
+        "platform",
+        "exeSha256",
+        "addressLibraryFile",
+        "status"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^1\\.(10|11)\\.[0-9]+\\.0$"
+        },
+        "f4seVersion": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+        },
+        "platform": { "enum": ["steam", "gog", "unvalidated"] },
+        "exeSha256": { "$ref": "#/definitions/hashOrPlaceholder" },
+        "addressLibraryFile": {
+          "type": "string",
+          "pattern": "^version-[0-9-]+\\.bin$"
+        },
+        "status": {
+          "enum": [
+            "primary-uninitialized",
+            "planned",
+            "runtime-pinned-unvalidated",
+            "capture-complete",
+            "release-approved"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "planned" } } },
+          "then": {
+            "properties": {
+              "platform": { "const": "unvalidated" },
+              "exeSha256": { "const": "UNVALIDATED" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "runtime-pinned-unvalidated",
+                  "capture-complete",
+                  "release-approved"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "platform": { "enum": ["steam", "gog"] },
+              "exeSha256": { "$ref": "#/definitions/approvedHash" }
+            }
+          }
+        }
+      ]
+    },
+    "shaderSetId": { "type": "string", "minLength": 1 },
+    "semanticStages": { "type": "array", "items": { "type": "object" } },
+    "shaders": { "type": "array", "items": { "type": "object" } },
+    "resourceRules": { "type": "array", "items": { "type": "object" } },
+    "commonlibObservation": {
+      "type": "object",
+      "required": [
+        "status",
+        "relocationSource",
+        "relocations",
+        "imageSpaceProfile"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "implementation-pending-runtime-validation",
+            "runtime-validated"
+          ]
+        },
+        "relocationSource": {
+          "type": "object",
+          "required": ["repository", "commit", "path"],
+          "properties": {
+            "repository": {
+              "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
+            },
+            "commit": {
+              "const": "491a09a0bc71847ee509e3953621a804c468cb17"
+            },
+            "path": { "const": "include/RE/IDs.h" }
+          },
+          "additionalProperties": false
+        },
+        "relocations": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": [
+              "provider",
+              "id",
+              "rva",
+              "kind",
+              "commonlibSymbol"
+            ],
+            "properties": {
+              "provider": {
+                "type": "string",
+                "pattern": "^[a-z0-9-]+$"
+              },
+              "id": { "type": "integer", "minimum": 1 },
+              "rva": { "type": "integer", "minimum": 1 },
+              "kind": {
+                "enum": [
+                  "pointer-storage",
+                  "direct-object",
+                  "function"
+                ]
+              },
+              "commonlibSymbol": { "type": "string", "minLength": 1 }
+            },
+            "oneOf": [
+              {
+                "properties": {
+                  "provider": { "const": "image-space-manager" },
+                  "kind": { "const": "pointer-storage" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::ImageSpaceManager::Singleton"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "renderer-data" },
+                  "kind": { "const": "pointer-storage" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::BSGraphics::GetRendererData"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "render-target-manager" },
+                  "kind": { "const": "direct-object" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::BSGraphics::RenderTargetManager::Singleton"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "ui" },
+                  "kind": { "const": "pointer-storage" },
+                  "commonlibSymbol": { "const": "RE::ID::UI::Singleton" }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "ui-event-spin-lock" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": { "const": "RE::ID::BSSpinLock::lock" }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "ui-event-memory-manager" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::MemoryManager::Singleton"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "ui-event-memory-allocate" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::MemoryManager::Allocate"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "ui-event-memory-deallocate" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::MemoryManager::Deallocate"
+                  }
+                }
+              }
+            ],
+            "additionalProperties": false
+          }
+        },
+        "imageSpaceProfile": {
+          "type": "object",
+          "required": [
+            "sources",
+            "managerSize",
+            "currentEofDataOffset",
+            "layout",
+            "topLevelEffectCount",
+            "effects",
+            "activeData"
+          ],
+          "properties": {
+            "sources": {
+              "type": "object",
+              "required": ["commonlib", "xeditFieldAliases"],
+              "properties": {
+                "commonlib": {
+                  "type": "object",
+                  "required": ["repository", "commit", "paths"],
+                  "properties": {
+                    "repository": {
+                      "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
+                    },
+                    "commit": {
+                      "const": "491a09a0bc71847ee509e3953621a804c468cb17"
+                    },
+                    "paths": {
+                      "const": [
+                        "include/RE/I/ImageSpaceManager.h",
+                        "include/RE/I/ImageSpaceBaseData.h",
+                        "include/RE/I/ImageSpaceData.h",
+                        "include/RE/I/ImageSpaceEffect.h",
+                        "include/RE/I/ImageSpaceLUTData.h",
+                        "include/RE/N/NiTArray.h"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "xeditFieldAliases": {
+                  "type": "object",
+                  "required": ["repository", "commit", "path"],
+                  "properties": {
+                    "repository": {
+                      "const": "https://github.com/TES5Edit/TES5Edit.git"
+                    },
+                    "commit": {
+                      "const": "ca51ca1b67c2e84965c56d9163cec2acf20d6722"
+                    },
+                    "path": { "const": "wbDefinitionsFO4.pas" }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "managerSize": { "const": 440 },
+            "currentEofDataOffset": { "const": 128 },
+            "layout": {
+              "type": "object",
+              "required": ["manager", "primitiveArray", "effect", "lut"],
+              "properties": {
+                "manager": {
+                  "type": "object",
+                  "required": [
+                    "effectListOffset",
+                    "baseDataOffset",
+                    "overrideBaseDataOffset",
+                    "underwaterBaseDataOffset",
+                    "consoleBaseDataOffset",
+                    "lutDataOffset",
+                    "overrideLutDataOffset",
+                    "readyOffset"
+                  ],
+                  "properties": {
+                    "effectListOffset": { "const": 16 },
+                    "baseDataOffset": { "const": 96 },
+                    "overrideBaseDataOffset": { "const": 104 },
+                    "underwaterBaseDataOffset": { "const": 112 },
+                    "consoleBaseDataOffset": { "const": 120 },
+                    "lutDataOffset": { "const": 304 },
+                    "overrideLutDataOffset": { "const": 416 },
+                    "readyOffset": { "const": 436 }
+                  },
+                  "additionalProperties": false
+                },
+                "primitiveArray": {
+                  "type": "object",
+                  "required": [
+                    "size",
+                    "dataOffset",
+                    "capacityOffset",
+                    "freeIndexOffset",
+                    "sizeOffset"
+                  ],
+                  "properties": {
+                    "size": { "const": 24 },
+                    "dataOffset": { "const": 8 },
+                    "capacityOffset": { "const": 16 },
+                    "freeIndexOffset": { "const": 18 },
+                    "sizeOffset": { "const": 20 }
+                  },
+                  "additionalProperties": false
+                },
+                "effect": {
+                  "type": "object",
+                  "required": ["storedActiveOffset"],
+                  "properties": {
+                    "storedActiveOffset": { "const": 8 }
+                  },
+                  "additionalProperties": false
+                },
+                "lut": {
+                  "type": "object",
+                  "required": ["size", "entryCount", "weightOffset", "textureOffset"],
+                  "properties": {
+                    "size": { "const": 112 },
+                    "entryCount": { "const": 4 },
+                    "weightOffset": { "const": 32 },
+                    "textureOffset": { "const": 80 }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "topLevelEffectCount": { "const": 72 },
+            "effects": {
+              "type": "array",
+              "minItems": 72,
+              "maxItems": 72,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": ["index", "symbol"],
+                "properties": {
+                  "index": { "type": "integer", "minimum": 0, "maximum": 71 },
+                  "symbol": {
+                    "type": "string",
+                    "pattern": "^EFFECT_[A-Z0-9_x]+$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "activeData": {
+              "type": "array",
+              "minItems": 12,
+              "maxItems": 12,
+              "uniqueItems": true,
+              "items": {
+                "type": "object",
+                "required": ["field", "offset"],
+                "properties": {
+                  "field": {
+                    "enum": [
+                      "eyeAdaptSpeed",
+                      "bloomBlurRadius",
+                      "bloomThreshold",
+                      "bloomScale",
+                      "receiveBloomThreshold",
+                      "white",
+                      "sunlightScale",
+                      "skyScale",
+                      "eyeAdaptStrength",
+                      "cinematicSaturation",
+                      "cinematicBrightness",
+                      "cinematicContrast"
+                    ]
+                  },
+                  "offset": { "type": "integer", "minimum": 0, "maximum": 436 },
+                  "xeditAlias": {
+                    "enum": [
+                      "Tonemap E",
+                      "Auto Exposure Max",
+                      "Auto Exposure Min",
+                      "Middle Gray"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "manualValidation": {
+      "type": "object",
+      "description": "Deprecated schema-v1 validation placeholder.",
+      "required": ["scope", "complete", "report"],
+      "properties": {
+        "scope": { "const": "milestone-1-runtime-load" },
+        "complete": { "const": false },
+        "report": { "type": "null" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "properties": { "version": { "const": "1.10.163.0" } },
+            "required": ["version"]
+          }
+        },
+        "required": ["runtime"]
+      },
+      "then": { "required": ["commonlibObservation"] }
+    }
+  ]
+}

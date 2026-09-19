@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 2,
+  "project": {
+    "name": "Fallout4HDR",
+    "version": "0.0.0-dev",
+    "license": "GPL-3.0-or-later"
+  },
+  "toolchain": {
+    "requirements": {
+      "platform": "windows",
+      "architecture": "x64",
+      "cppStandard": "c++23",
+      "msvcRuntime": {
+        "debug": "MTd",
+        "releasedbg": "MT"
+      }
+    },
+    "observed": {
+      "visualStudio": {
+        "productLine": "18",
+        "installationVersion": "18.10.12210.168"
+      },
+      "msvc": {
+        "compilerVersion": "19.51.36257",
+        "toolsVersion": "14.51.36231",
+        "hostArchitecture": "x64",
+        "targetArchitecture": "x64"
+      },
+      "windowsSdk": {
+        "version": "10.0.26100.0"
+      },
+      "xmake": "3.0.9",
+      "powerShell": "7.6.5",
+      "git": "2.55.0.windows.3"
+    }
+  },
+  "commonlib": {
+    "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
+    "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+    "licenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "exceptionsSha256": "27a35e0c9d21cab2f07081660c9389c6bb990c210341aedbd2980de272e4893d",
+    "originalMitLicenseSha256": "7cf6f29361588eb812200ef1ae1926e774d36ec2d288fbae5ccc7bc6189c7b86",
+    "commonlibSharedRepository": "https://github.com/Dear-Modding-FO4/commonlib-shared.git",
+    "commonlibSharedCommit": "ca0e527c5af60d48497f02197c3c4c436d683387",
+    "commonlibSharedLicenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "commonlibSharedExceptionsSha256": "27a35e0c9d21cab2f07081660c9389c6bb990c210341aedbd2980de272e4893d",
+    "dearModdingUiApiRepository": "https://github.com/Dear-Modding-FO4/DearModdingUI-API.git",
+    "dearModdingUiApiCommit": "9cfc0790a8d319cff798655a3b7f5f05a06a40c9",
+    "dearModdingUiApiLicenseSha256": "605e9047a563c5c8396ffb18232aa4304ec56586aee537c45064c6fb425e44ad"
+  },
+  "xmake": {
+    "requiresLockSha256": "38f74adb952a5bb0bcc2f694999fc33185fe6f41b270dfd5808b74cc4d9a83d5",
+    "packages": {
+      "spdlog": {
+        "version": "v1.16.0",
+        "sourceSha256": "3d25808d2fc4db86621a46855800c99ab5734999b61c4cbf9470edf631555397",
+        "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+        "recipeTreeSha1": "f5d1a017ba91f3c730f0e787cc6e954fc87b4b01",
+        "recipeSha256": "59353fc2684f2907cba4c5a3ef2134029581d82062a92cd81746813829c1b900",
+        "licenseSha256": "4ccecab18d1ff0b61174fe3d6c430541625d3ddb865b0d5887db296f883c76e7"
+      },
+      "imgui": {
+        "version": "v1.92.6-docking",
+        "tagObject": "7a6efe395d18d9cb37cea397f63ce0d39824dc72",
+        "commit": "2a1b69f05748ad909f03acf4533447cac1331611",
+        "sourceSha256": "5e84cdaa6a6041586a0d11a3071b749734a0439d66fdbdad37ae5b27e37d396c",
+        "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+        "recipeTreeSha1": "7d5c8c9a8ea338975afb8a7ca203a788a6f79e5f",
+        "recipeSha256": "7b54981beca4ce0f56d105e2e14044cdf302753b0778576462849b8def4d1d4b",
+        "licenseSha256": "173506a2d6f7fb67990d257fb2507f188690eca39060c39469ae7bef43aae2a3"
+      }
+    }
+  },
+  "runtimes": {
+    "1.10.163": {
+      "status": "runtime-pinned-unvalidated",
+      "platform": "steam",
+      "f4seVersion": "0.6.23",
+      "exeSha256": "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36",
+      "f4seLoaderSha256": "f41d4065a1da80d4490be0baeee91985d2b10b3746ec708b91dc82a64ec1e2a6",
+      "f4seRuntimeDllSha256": "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd",
+      "addressLibraryFile": "version-1-10-163-0.bin",
+      "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
+      "runtimeManifestCanonicalSha256": "beba5caaceeebedacbecc1cc97f7a1e1e22a0094356c1a25492efe6acf35d251",
+      "shaderManifestSha256": "FILL_AFTER_CAPTURE",
+      "observedAtUtc": "2026-08-09T21:33:23.9297903Z"
+    },
+    "1.10.984": {
+      "status": "planned",
+      "platform": "unvalidated",
+      "f4seVersion": "0.7.2",
+      "exeSha256": "UNVALIDATED",
+      "f4seLoaderSha256": "UNVALIDATED",
+      "f4seRuntimeDllSha256": "UNVALIDATED",
+      "addressLibraryFile": "version-1-10-984-0.bin",
+      "addressLibrarySha256": "UNVALIDATED",
+      "shaderManifestSha256": "UNVALIDATED",
+      "observedAtUtc": null
+    },
+    "1.11.221": {
+      "status": "planned",
+      "platform": "unvalidated",
+      "f4seVersion": "0.7.8",
+      "exeSha256": "UNVALIDATED",
+      "f4seLoaderSha256": "UNVALIDATED",
+      "f4seRuntimeDllSha256": "UNVALIDATED",
+      "addressLibraryFile": "version-1-11-221-0.bin",
+      "addressLibrarySha256": "UNVALIDATED",
+      "shaderManifestSha256": "UNVALIDATED",
+      "observedAtUtc": null
+    }
+  },
+  "aces2": {
+    "status": "adapted",
+    "aggregateVersion": "v2.0.0+2025.04.04",
+    "acesCoreRepository": "https://github.com/aces-aswf/aces-core.git",
+    "acesCoreCommit": "ee380496a201fd008841ff9399b29241bcd27a3a",
+    "acesOutputRepository": "https://github.com/aces-aswf/aces-output.git",
+    "acesOutputCommit": "90cadee61547c006ba8fad320ffacc171095bfad",
+    "licenseSha256": "5ad8c213095c573921d7388edf93f6a9f54490b8ebf3b165ae8ef1947cf70846",
+    "contrastLmt": {
+      "status": "adapted",
+      "sourceRepository": "https://github.com/scottdyer/aces-look.git",
+      "sourceBranch": "dctl-contrast-lmt",
+      "sourceCommit": "dc79dd74554e73a9e1518ec5f00ae0c1725f1686",
+      "sourcePath": "contrast/LMT_Test_OCIO_options.dctl",
+      "sourceSha256": "b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f",
+      "license": "Apache-2.0",
+      "licensePath": "LICENSE",
+      "licenseSha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "selectedVariant": "J curve 2 + M curve 2",
+      "inputShaperCenter": 2.4,
+      "inputShaperWidth": 3
+    }
+  },
+  "agx": {
+    "status": "adapted",
+    "sourceRepository": "https://github.com/aki-null/CustomToneMappingURP.git",
+    "sourceTag": "1.2.4",
+    "sourceCommit": "ba6c68b5deafe4896115500d12cf976169d402ff",
+    "sourceFiles": [
+      {
+        "path": "Runtime/Baker/AgX/AgXToneMapping.cs",
+        "gitBlobSha1": "f061e30054fcc24f149844ad7f863ba9e65cb903"
+      },
+      {
+        "path": "Runtime/Baker/AgX/AgXConstants.cs",
+        "gitBlobSha1": "a418ed74a31780284f162477ce238b12412ddbb9"
+      },
+      {
+        "path": "Runtime/Baker/AgX/Sigmoid.cs",
+        "gitBlobSha1": "64e64537c4fed400e71b404dfd2df53caac8149f"
+      },
+      {
+        "path": "Runtime/Baker/ColorUtility.cs",
+        "gitBlobSha1": "533b91c279e8929cc9f2097edd647568de4e0685"
+      }
+    ]
+  },
+  "gt7": {
+    "status": "imported",
+    "sourceUrl": "https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp",
+    "expectedSha256": "94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822",
+    "importedSha256": "94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822"
+  },
+  "smoothTetraSelectiveColor": {
+    "status": "adapted",
+    "sourceRepository": "https://github.com/thatcherfreeman/utility-dctls.git",
+    "sourceCommit": "a495531de3e4704a0a6e0113daa69be303172ed0",
+    "license": "MIT",
+    "licensePath": "LICENSE",
+    "licenseSha256": "3b78284da28dedb1c33ff27961a9dede3e030bc3fdfeae2400afe4b22e6f87aa",
+    "sourceFiles": [
+      {
+        "path": "Effects/Smooth Tetra Skin.dctl",
+        "sha256": "3ab675ed68e3e2ea3f8d92dbeeb271a09b03183d303d5bc302ab37202a090497"
+      }
+    ]
+  }
+}

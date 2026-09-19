@@ -57,10 +57,8 @@ void CountAuxiliaryTargets(const RE::BSGraphics::RendererData& renderer, GameHdr
 
 bool TargetManagerAvailable()
 {
-    // The accessor returns a value; inspect only the declared singleton pointer.
-    REL::Relocation<RE::BSGraphics::RenderTargetManager*> manager{
-        RE::ID::BSGraphics::RenderTargetManager::Singleton};
-    return observation::IsReadableMemory(manager.get(), sizeof(RE::BSGraphics::RenderTargetManager));
+    const auto* manager = RE::BSGraphics::RenderTargetManager::GetSingleton();
+    return observation::IsReadableMemory(manager, sizeof(RE::BSGraphics::RenderTargetManager));
 }
 
 class RendererLock

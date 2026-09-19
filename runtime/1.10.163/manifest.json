@@ -1,0 +1,863 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "version": "1.10.163.0",
+    "f4seVersion": "0.6.23",
+    "platform": "steam",
+    "exeSha256": "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36",
+    "addressLibraryFile": "version-1-10-163-0.bin",
+    "status": "runtime-pinned-unvalidated"
+  },
+  "experimentalArmorUiObserver": {
+    "status": "unvalidated",
+    "scope": "power-armor-encoded-peak-composition",
+    "abi": "void(Renderer*,uint32_t)",
+    "lifetime": "native-caller-registry-read-lock; passed-renderer-fields-only; no-root-dereference",
+    "thread": "observed-current-thread; synchronous-scope; context-type-unverified",
+    "authorityGap": "Pinned CommonLibF4 has Renderer layout but no named mapping for these two screen-submission calls or their callee.",
+    "target": {
+      "addressLibraryId": 495082,
+      "rva": "0x00AE8780",
+      "expectedBytes": [
+        72,
+        137,
+        108,
+        36,
+        24,
+        87,
+        72,
+        131,
+        236,
+        80,
+        72,
+        131,
+        185,
+        128,
+        0,
+        0,
+        0,
+        0,
+        139,
+        234,
+        72,
+        139,
+        249
+      ]
+    },
+    "calls": [
+      {
+        "callerAddressLibraryId": 1030129,
+        "callerRva": "0x00AE7FB0",
+        "rva": "0x00AE804D",
+        "expectedBytes": [
+          232,
+          46,
+          7,
+          0,
+          0
+        ]
+      },
+      {
+        "callerAddressLibraryId": 718960,
+        "callerRva": "0x00AEAEC0",
+        "rva": "0x00AEAF4A",
+        "expectedBytes": [
+          232,
+          49,
+          216,
+          255,
+          255
+        ]
+      }
+    ]
+  },
+  "nativeLutObserver": {
+    "status": "unvalidated",
+    "scope": "synchronous-gamma-correct-lut-render",
+    "abi": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)",
+    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable and ImageSpaceEffect Render ABI but omits the Render target mapping, secondary-base offset and BSGraphics::Texture SRV layout.",
+    "lifetime": "native synchronous Render scope; bounded guarded copies; filename and NiTexture name plus rendererTexture agreement; same-draw SRV comparison required",
+    "effectSubobjectOffset": 280,
+    "textureSrvOffset": 0,
+    "target": {
+      "addressLibraryId": 1388477,
+      "rva": "0x028C8B30",
+      "expectedBytes": [
+        72,
+        137,
+        92,
+        36,
+        16,
+        72,
+        137,
+        108,
+        36,
+        24,
+        86,
+        87,
+        65,
+        84,
+        65,
+        86,
+        65,
+        87,
+        72,
+        129,
+        236,
+        160,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "imageSpaceObserver": {
+    "status": "unvalidated",
+    "scope": "weather-imagespace-provenance",
+    "authorityGap": "Pinned CommonLibF4 exposes ImageSpace records and LUT data but omits the weather accumulation, room overwrite and manager transfer call mappings.",
+    "lifetime": "Immutable game-data catalog owns record identities and normalized native LUT paths; invocation-local collection and fixed synchronized publication own all copied values.",
+    "thread": "Producer, transfer and Gamma callbacks may use different threads. Scoped writer counts and revisions reject overlapping or stale publications; payload copies use one try-lock attempt. Room mutation spans the blend call through its LUT setter.",
+    "globals": {
+      "lut": {
+        "addressLibraryId": 635754,
+        "rva": "0x059D9710"
+      },
+      "base": {
+        "addressLibraryId": 1167557,
+        "rva": "0x059D96B0"
+      }
+    },
+    "targets": [
+      {
+        "name": "Weather",
+        "addressLibraryId": 684671,
+        "rva": "0x00651D00",
+        "abi": "void(Sky*)",
+        "expectedBytes": [
+          64,
+          86,
+          72,
+          129,
+          236,
+          224,
+          0,
+          0,
+          0,
+          72,
+          139,
+          241
+        ]
+      },
+      {
+        "name": "Accumulate",
+        "addressLibraryId": 1348012,
+        "rva": "0x0284C700",
+        "abi": "void(ImageSpaceBaseData*,const ImageSpaceBaseData*,float)",
+        "expectedBytes": [
+          15,
+          40,
+          194,
+          15,
+          40,
+          202,
+          76,
+          139,
+          193,
+          243,
+          15,
+          89,
+          2
+        ]
+      },
+      {
+        "name": "RoomBlend",
+        "addressLibraryId": 1413726,
+        "rva": "0x0284C8D0",
+        "abi": "void(ImageSpaceBaseData*,const ImageSpaceBaseData*,const ImageSpaceBaseData*,float)",
+        "expectedBytes": [
+          243,
+          15,
+          16,
+          37,
+          136,
+          196,
+          63,
+          0,
+          15,
+          40,
+          195,
+          243,
+          15,
+          92,
+          227,
+          243
+        ]
+      },
+      {
+        "name": "SetLut",
+        "addressLibraryId": 1331100,
+        "rva": "0x027DAD70",
+        "abi": "void(ImageSpaceManager*,const ImageSpaceLUTData*)",
+        "expectedBytes": [
+          72,
+          133,
+          210,
+          116,
+          12,
+          72,
+          129,
+          193,
+          48,
+          1,
+          0,
+          0,
+          233,
+          143,
+          103,
+          0,
+          0
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "callerAddressLibraryId": 1060086,
+        "callerRva": "0x0064D320",
+        "rva": "0x0064D4B5",
+        "targetIndex": 0,
+        "expectedBytes": [
+          232,
+          70,
+          72,
+          0,
+          0
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1278859,
+        "callerRva": "0x0064E530",
+        "rva": "0x0064EA6D",
+        "targetIndex": 0,
+        "expectedBytes": [
+          232,
+          142,
+          50,
+          0,
+          0
+        ]
+      },
+      {
+        "callerAddressLibraryId": 6511,
+        "callerRva": "0x00651AE0",
+        "rva": "0x00651BAB",
+        "targetIndex": 0,
+        "expectedBytes": [
+          232,
+          80,
+          1,
+          0,
+          0
+        ]
+      },
+      {
+        "callerAddressLibraryId": 684671,
+        "callerRva": "0x00651D00",
+        "rva": "0x0065202C",
+        "targetIndex": 1,
+        "expectedBytes": [
+          232,
+          207,
+          166,
+          31,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 684671,
+        "callerRva": "0x00651D00",
+        "rva": "0x006520ED",
+        "targetIndex": 1,
+        "expectedBytes": [
+          232,
+          14,
+          166,
+          31,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 684671,
+        "callerRva": "0x00651D00",
+        "rva": "0x006521B4",
+        "targetIndex": 1,
+        "expectedBytes": [
+          232,
+          71,
+          165,
+          31,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 684671,
+        "callerRva": "0x00651D00",
+        "rva": "0x00652273",
+        "targetIndex": 1,
+        "expectedBytes": [
+          232,
+          136,
+          164,
+          31,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1322941,
+        "callerRva": "0x0064DA60",
+        "rva": "0x0064DF53",
+        "targetIndex": 2,
+        "expectedBytes": [
+          232,
+          120,
+          233,
+          31,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1322941,
+        "callerRva": "0x0064DA60",
+        "rva": "0x0064DDDF",
+        "targetIndex": 3,
+        "expectedBytes": [
+          232,
+          140,
+          207,
+          24,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1322941,
+        "callerRva": "0x0064DA60",
+        "rva": "0x0064DFDA",
+        "targetIndex": 3,
+        "expectedBytes": [
+          232,
+          145,
+          205,
+          24,
+          2
+        ]
+      },
+      {
+        "callerAddressLibraryId": 526713,
+        "callerRva": "0x00840E60",
+        "rva": "0x00840F59",
+        "targetIndex": 3,
+        "expectedBytes": [
+          232,
+          18,
+          158,
+          249,
+          1
+        ]
+      }
+    ]
+  },
+  "shaderSetId": "fo4-1.10.163-uninitialized",
+  "semanticStages": [],
+  "shaders": [
+    {
+      "name": "late-game-ui-composite",
+      "stage": "pixel",
+      "dxbcHash": "525eaea9-af037d1b-3ca0d381-8531a8b3",
+      "signal": "straight-srgb-rgba",
+      "sourceTexture": {
+        "format": "R8G8B8A8_UNORM",
+        "extent": "presentation"
+      },
+      "role": "final-native-ui-composite"
+    },
+    {
+      "name": "late-game-ui-gamma-backdrop",
+      "stage": "pixel",
+      "dxbcHash": "b939134c-c0f28bac-1a7e28c1-f4aff2fe",
+      "signal": "sdr-display-code-rgb-with-coverage-alpha",
+      "draw": {
+        "kind": "indexed",
+        "indexCount": 6,
+        "depth": "none"
+      },
+      "role": "late-native-ui-gamma-backdrop"
+    }
+  ],
+  "resourceRules": [],
+  "commonlibObservation": {
+    "status": "implementation-pending-runtime-validation",
+    "relocationSource": {
+      "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
+      "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+      "path": "include/RE/IDs.h"
+    },
+    "imageSpaceProfile": {
+      "sources": {
+        "commonlib": {
+          "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
+          "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+          "paths": [
+            "include/RE/I/ImageSpaceManager.h",
+            "include/RE/I/ImageSpaceBaseData.h",
+            "include/RE/I/ImageSpaceData.h",
+            "include/RE/I/ImageSpaceEffect.h",
+            "include/RE/I/ImageSpaceLUTData.h",
+            "include/RE/N/NiTArray.h"
+          ]
+        },
+        "xeditFieldAliases": {
+          "repository": "https://github.com/TES5Edit/TES5Edit.git",
+          "commit": "ca51ca1b67c2e84965c56d9163cec2acf20d6722",
+          "path": "wbDefinitionsFO4.pas"
+        }
+      },
+      "managerSize": 440,
+      "currentEofDataOffset": 128,
+      "layout": {
+        "manager": {
+          "effectListOffset": 16,
+          "baseDataOffset": 96,
+          "overrideBaseDataOffset": 104,
+          "underwaterBaseDataOffset": 112,
+          "consoleBaseDataOffset": 120,
+          "lutDataOffset": 304,
+          "overrideLutDataOffset": 416,
+          "readyOffset": 436
+        },
+        "primitiveArray": {
+          "size": 24,
+          "dataOffset": 8,
+          "capacityOffset": 16,
+          "freeIndexOffset": 18,
+          "sizeOffset": 20
+        },
+        "effect": {
+          "storedActiveOffset": 8
+        },
+        "lut": {
+          "size": 112,
+          "entryCount": 4,
+          "weightOffset": 32,
+          "textureOffset": 80
+        }
+      },
+      "topLevelEffectCount": 72,
+      "effects": [
+        {
+          "index": 0,
+          "symbol": "EFFECT_WORLD_CAMERA"
+        },
+        {
+          "index": 1,
+          "symbol": "EFFECT_TEMPORAL_AA_PRE_HDR"
+        },
+        {
+          "index": 2,
+          "symbol": "EFFECT_SUNBEAMS"
+        },
+        {
+          "index": 3,
+          "symbol": "EFFECT_HDR"
+        },
+        {
+          "index": 4,
+          "symbol": "EFFECT_HDR_CS"
+        },
+        {
+          "index": 5,
+          "symbol": "EFFECT_REFRACTION"
+        },
+        {
+          "index": 6,
+          "symbol": "EFFECT_DEPTH_OF_FIELD"
+        },
+        {
+          "index": 7,
+          "symbol": "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN"
+        },
+        {
+          "index": 8,
+          "symbol": "EFFECT_RADIAL_BLUR"
+        },
+        {
+          "index": 9,
+          "symbol": "EFFECT_FULLSCREEN_BLUR"
+        },
+        {
+          "index": 10,
+          "symbol": "EFFECT_MOTIONBLUR"
+        },
+        {
+          "index": 11,
+          "symbol": "EFFECT_GETHIT"
+        },
+        {
+          "index": 12,
+          "symbol": "EFFECT_VATS_TARGET"
+        },
+        {
+          "index": 13,
+          "symbol": "EFFECT_FULLSCREEN_COLOR"
+        },
+        {
+          "index": 14,
+          "symbol": "EFFECT_SHADER_GAMMA_CORRECT"
+        },
+        {
+          "index": 15,
+          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_LUT"
+        },
+        {
+          "index": 16,
+          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_RESIZE"
+        },
+        {
+          "index": 17,
+          "symbol": "EFFECT_SHADER_FXAA"
+        },
+        {
+          "index": 18,
+          "symbol": "EFFECT_TEMPORAL_AA"
+        },
+        {
+          "index": 19,
+          "symbol": "EFFECT_TEMPORAL_OLD_AA"
+        },
+        {
+          "index": 20,
+          "symbol": "EFFECT_BOKEH_DEPTH_OF_FIELD"
+        },
+        {
+          "index": 21,
+          "symbol": "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION"
+        },
+        {
+          "index": 22,
+          "symbol": "EFFECT_MAP"
+        },
+        {
+          "index": 23,
+          "symbol": "EFFECT_BLUR3"
+        },
+        {
+          "index": 24,
+          "symbol": "EFFECT_BLUR5"
+        },
+        {
+          "index": 25,
+          "symbol": "EFFECT_BLUR7"
+        },
+        {
+          "index": 26,
+          "symbol": "EFFECT_BLUR9"
+        },
+        {
+          "index": 27,
+          "symbol": "EFFECT_BLUR11"
+        },
+        {
+          "index": 28,
+          "symbol": "EFFECT_BLUR13"
+        },
+        {
+          "index": 29,
+          "symbol": "EFFECT_BLUR15"
+        },
+        {
+          "index": 30,
+          "symbol": "EFFECT_NONHDR_BLUR3"
+        },
+        {
+          "index": 31,
+          "symbol": "EFFECT_NONHDR_BLUR5"
+        },
+        {
+          "index": 32,
+          "symbol": "EFFECT_NONHDR_BLUR7"
+        },
+        {
+          "index": 33,
+          "symbol": "EFFECT_NONHDR_BLUR9"
+        },
+        {
+          "index": 34,
+          "symbol": "EFFECT_NONHDR_BLUR11"
+        },
+        {
+          "index": 35,
+          "symbol": "EFFECT_NONHDR_BLUR13"
+        },
+        {
+          "index": 36,
+          "symbol": "EFFECT_NONHDR_BLUR15"
+        },
+        {
+          "index": 37,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR3"
+        },
+        {
+          "index": 38,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR5"
+        },
+        {
+          "index": 39,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR7"
+        },
+        {
+          "index": 40,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR9"
+        },
+        {
+          "index": 41,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR11"
+        },
+        {
+          "index": 42,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR13"
+        },
+        {
+          "index": 43,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR15"
+        },
+        {
+          "index": 44,
+          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS"
+        },
+        {
+          "index": 45,
+          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS"
+        },
+        {
+          "index": 46,
+          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS"
+        },
+        {
+          "index": 47,
+          "symbol": "EFFECT_BLUR3_480x270CS"
+        },
+        {
+          "index": 48,
+          "symbol": "EFFECT_BLUR5_480x270CS"
+        },
+        {
+          "index": 49,
+          "symbol": "EFFECT_BLUR7_480x270CS"
+        },
+        {
+          "index": 50,
+          "symbol": "EFFECT_BLUR9_480x270CS"
+        },
+        {
+          "index": 51,
+          "symbol": "EFFECT_BLUR11_480x270CS"
+        },
+        {
+          "index": 52,
+          "symbol": "EFFECT_BLUR13_480x270CS"
+        },
+        {
+          "index": 53,
+          "symbol": "EFFECT_BLUR15_480x270CS"
+        },
+        {
+          "index": 54,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR3_480x270CS"
+        },
+        {
+          "index": 55,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR5_480x270CS"
+        },
+        {
+          "index": 56,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR7_480x270CS"
+        },
+        {
+          "index": 57,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR9_480x270CS"
+        },
+        {
+          "index": 58,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR11_480x270CS"
+        },
+        {
+          "index": 59,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR13_480x270CS"
+        },
+        {
+          "index": 60,
+          "symbol": "EFFECT_BRIGHTPASS_BLUR15_480x270CS"
+        },
+        {
+          "index": 61,
+          "symbol": "EFFECT_WATER_DISPLACEMENT"
+        },
+        {
+          "index": 62,
+          "symbol": "EFFECT_NOISE"
+        },
+        {
+          "index": 63,
+          "symbol": "EFFECT_RAINSPLASH"
+        },
+        {
+          "index": 64,
+          "symbol": "EFFECT_VLS_LIGHT"
+        },
+        {
+          "index": 65,
+          "symbol": "EFFECT_VLS"
+        },
+        {
+          "index": 66,
+          "symbol": "EFFECT_PIPBOY_SCREEN"
+        },
+        {
+          "index": 67,
+          "symbol": "EFFECT_HUD_GLASS"
+        },
+        {
+          "index": 68,
+          "symbol": "EFFECT_MOD_MENU"
+        },
+        {
+          "index": 69,
+          "symbol": "EFFECT_AO"
+        },
+        {
+          "index": 70,
+          "symbol": "EFFECT_SAO"
+        },
+        {
+          "index": 71,
+          "symbol": "EFFECT_SAO_CS"
+        }
+      ],
+      "activeData": [
+        {
+          "field": "eyeAdaptSpeed",
+          "offset": 128
+        },
+        {
+          "field": "bloomBlurRadius",
+          "offset": 132,
+          "xeditAlias": "Tonemap E"
+        },
+        {
+          "field": "bloomThreshold",
+          "offset": 136
+        },
+        {
+          "field": "bloomScale",
+          "offset": 140
+        },
+        {
+          "field": "receiveBloomThreshold",
+          "offset": 144,
+          "xeditAlias": "Auto Exposure Max"
+        },
+        {
+          "field": "white",
+          "offset": 148,
+          "xeditAlias": "Auto Exposure Min"
+        },
+        {
+          "field": "sunlightScale",
+          "offset": 152
+        },
+        {
+          "field": "skyScale",
+          "offset": 156
+        },
+        {
+          "field": "eyeAdaptStrength",
+          "offset": 160,
+          "xeditAlias": "Middle Gray"
+        },
+        {
+          "field": "cinematicSaturation",
+          "offset": 164
+        },
+        {
+          "field": "cinematicBrightness",
+          "offset": 168
+        },
+        {
+          "field": "cinematicContrast",
+          "offset": 172
+        }
+      ]
+    },
+    "relocations": [
+      {
+        "provider": "image-space-manager",
+        "id": 161743,
+        "rva": 108142824,
+        "kind": "pointer-storage",
+        "commonlibSymbol": "RE::ID::ImageSpaceManager::Singleton"
+      },
+      {
+        "provider": "renderer-data",
+        "id": 1235449,
+        "rva": 101302144,
+        "kind": "pointer-storage",
+        "commonlibSymbol": "RE::ID::BSGraphics::GetRendererData"
+      },
+      {
+        "provider": "render-target-manager",
+        "id": 1508457,
+        "rva": 59047216,
+        "kind": "direct-object",
+        "commonlibSymbol": "RE::ID::BSGraphics::RenderTargetManager::Singleton"
+      },
+      {
+        "provider": "ui",
+        "id": 548587,
+        "rva": 93128856,
+        "kind": "pointer-storage",
+        "commonlibSymbol": "RE::ID::UI::Singleton"
+      },
+      {
+        "provider": "ui-event-spin-lock",
+        "id": 1425657,
+        "rva": 148688,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::BSSpinLock::lock"
+      },
+      {
+        "provider": "ui-event-memory-manager",
+        "id": 343176,
+        "rva": 18592,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::MemoryManager::Singleton"
+      },
+      {
+        "provider": "ui-event-memory-allocate",
+        "id": 652767,
+        "rva": 28372944,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::MemoryManager::Allocate"
+      },
+      {
+        "provider": "ui-event-memory-deallocate",
+        "id": 1582181,
+        "rva": 28373728,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::MemoryManager::Deallocate"
+      }
+    ]
+  },
+  "manualValidation": {
+    "scope": "milestone-1-runtime-load",
+    "complete": false,
+    "report": null
+  }
+}

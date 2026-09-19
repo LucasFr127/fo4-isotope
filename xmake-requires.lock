@@ -1,0 +1,39 @@
+{
+    __meta__ = {
+        version = "1.0"
+    },
+    ["windows|x64"] = {
+        ["cmake#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+                url = "https://github.com/xmake-io/xmake-repo.git"
+            },
+            version = "4.3.4"
+        },
+        ["imgui v1.92.6-docking#cc617af3"] = {
+            repo = {
+                branch = "master",
+                commit = "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+                url = "https://github.com/xmake-io/xmake-repo.git"
+            },
+            version = "v1.92.6-docking"
+        },
+        ["ninja#f56260b5"] = {
+            repo = {
+                branch = "master",
+                commit = "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+                url = "https://github.com/xmake-io/xmake-repo.git"
+            },
+            version = "v1.13.2"
+        },
+        ["spdlog v1.16.0#09c8c173"] = {
+            repo = {
+                branch = "master",
+                commit = "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+                url = "https://github.com/xmake-io/xmake-repo.git"
+            },
+            version = "v1.16.0"
+        }
+    }
+}

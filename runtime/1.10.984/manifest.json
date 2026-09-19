@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "version": "1.10.984.0",
+    "f4seVersion": "0.7.2",
+    "platform": "unvalidated",
+    "exeSha256": "UNVALIDATED",
+    "addressLibraryFile": "version-1-10-984-0.bin",
+    "status": "planned"
+  },
+  "shaderSetId": "fo4-1.10.984-uninitialized",
+  "semanticStages": [],
+  "shaders": [],
+  "resourceRules": [],
+  "manualValidation": {
+    "scope": "milestone-1-runtime-load",
+    "complete": false,
+    "report": null
+  }
+}
