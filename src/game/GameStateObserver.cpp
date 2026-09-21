@@ -3,6 +3,7 @@
 #include "GameStateObserver.hpp"
 #include "GameSnapshotStore.hpp"
 #include "ImageSpaceObserver.hpp"
+#include "NativeLutObserver.hpp"
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
 #include <F4SE/F4SE.h>
@@ -47,7 +48,7 @@ void DisableCollection() noexcept
 
 void ReadNativeSnapshot(std::uint64_t resourceGeneration, bool buildCatalog)
 {
-    if (buildCatalog) (void)fo4hdr::game::BuildImageSpaceCatalog(resourceGeneration);
+    if (buildCatalog) (void)fo4hdr::game::BuildImageSpaceCatalog();
     fo4hdr::GameHdrSnapshot observed{};
     (void)fo4hdr::game::ReadRendererSnapshot(observed);
     if (gameDataReady.load(std::memory_order_acquire))
@@ -182,7 +183,7 @@ void F4SEAPI ObserveLifecycle(F4SE::MessagingInterface::Message* message) noexce
                 snapshot, event, succeeded, menuEvents.PublishedSequence());
             graphicsLifecycle.PublishTransition(event, succeeded);
             resourceGeneration = snapshot.resourceGeneration;
-            fo4hdr::ResetNativeLutObservation(resourceGeneration);
+            fo4hdr::ResetNativeLutObservation();
         });
         ScheduleNativeObservation(event, *outcome, resourceGeneration);
     }
@@ -237,7 +238,7 @@ void PublishObserverAvailability() noexcept
     }
 }
 
-[[nodiscard]] bool TryInitializeObserver(const F4SE::LoadInterface* f4se)
+[[nodiscard]] bool TryInitializeObserver(const F4SE::LoadInterface* f4se, bool gradingObservationRequested)
 {
     const auto& load = reinterpret_cast<const F4SE::Impl::F4SEInterface&>(*f4se);
     if (load.QueryInterface == nullptr || load.GetPluginHandle == nullptr)
@@ -265,6 +266,9 @@ void PublishObserverAvailability() noexcept
     }
     initializationState.store(InitializationState::Active, std::memory_order_release);
     PublishObserverAvailability();
+    (void)fo4hdr::game::InitializeNativeLutObserver(gradingObservationRequested);
+    (void)fo4hdr::game::InitializeImageSpaceObserver(gradingObservationRequested,
+        load.QueryInterface(F4SE::LoadInterface::kTrampoline), handle);
     return true;
 }
 
@@ -272,7 +276,8 @@ void PublishObserverAvailability() noexcept
 
 namespace fo4hdr::game {
 
-void InitializeGameStateObserver(const F4SE::LoadInterface* f4se) noexcept
+void InitializeGameStateObserver(const F4SE::LoadInterface* f4se,
+    bool gradingObservationRequested) noexcept
 {
     if (f4se == nullptr)
     {
@@ -286,7 +291,7 @@ void InitializeGameStateObserver(const F4SE::LoadInterface* f4se) noexcept
     }
     try
     {
-        if (!TryInitializeObserver(f4se))
+        if (!TryInitializeObserver(f4se, gradingObservationRequested))
         {
             initializationState.store(InitializationState::Uninitialized, std::memory_order_release);
         }

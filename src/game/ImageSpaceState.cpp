@@ -2,33 +2,46 @@
 
 #include "ImageSpaceObserver.hpp"
 
-namespace fo4hdr::game::imagespace_detail {
+#include <cmath>
+#include <cstring>
 
-std::uint64_t Publication::AdvanceRevision() noexcept
+namespace fo4hdr {
+
+bool DecodeImageSpaceActiveData(std::span<const std::byte> source,
+    const std::array<std::size_t, kImageSpaceActiveDataFieldCount>& offsets,
+    ImageSpaceActiveData& destination) noexcept
 {
-    auto previous = revision_.load(std::memory_order_relaxed);
-    if (previous == UINT64_MAX) return 0;
-    if (revision_.compare_exchange_strong(previous, previous + 1,
-            std::memory_order_acq_rel, std::memory_order_relaxed)) return previous + 1;
-    // Collision retires the publication instead of trusting the other writer.
-    revision_.store(UINT64_MAX, std::memory_order_release);
-    return 0;
+    std::array<float, kImageSpaceActiveDataFieldCount> values{};
+    for (std::size_t index = 0; index < values.size(); ++index)
+    {
+        const auto offset = offsets[index];
+        if (offset > source.size() || sizeof(float) > source.size() - offset) return false;
+        std::memcpy(&values[index], source.data() + offset, sizeof(float));
+        if (!std::isfinite(values[index])) return false;
+    }
+    destination = {values[0], values[1], values[2], values[3], values[4], values[5],
+        values[6], values[7], values[8], values[9], values[10], values[11]};
+    return true;
 }
+
+}  // namespace fo4hdr
+
+namespace fo4hdr::game::imagespace_detail {
 
 Publication::Token Publication::Begin() noexcept
 {
     const auto active = active_.fetch_add(1, std::memory_order_acq_rel);
-    return {AdvanceRevision(), active == 0, true};
+    return {revision_.fetch_add(1, std::memory_order_acq_rel) + 1, active == 0};
 }
 
 void Publication::Invalidate() noexcept
 {
-    (void)AdvanceRevision();
+    revision_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 bool Publication::Finish(Token& token, const Provenance& candidate) noexcept
 {
-    if (!token.entered) return false;
+    if (!token.revision) return false;
     bool published{};
     {
         TryPublicationGuard guard(flag_);
@@ -64,7 +77,7 @@ bool Publication::TryRead(Provenance& result) noexcept
     if (!IsCurrent(revision) || result.revision != revision)
     {
         result = {};
-        result.status = active_.load(std::memory_order_acquire) ? Status::updating : Status::stale;
+        if (active_.load(std::memory_order_acquire)) result.status = Status::updating;
         return false;
     }
     return true;
@@ -72,13 +85,13 @@ bool Publication::TryRead(Provenance& result) noexcept
 
 bool Publication::IsCurrent(std::uint64_t revision) const noexcept
 {
-    return revision != 0 && revision != UINT64_MAX && !active_.load(std::memory_order_acquire) &&
+    return revision != 0 && !active_.load(std::memory_order_acquire) &&
         revision_.load(std::memory_order_acquire) == revision;
 }
 
 bool Publication::CanPublish(const Token& token) const noexcept
 {
-    return token.revision != 0 && token.revision != UINT64_MAX && token.exclusive &&
+    return token.exclusive &&
         active_.load(std::memory_order_acquire) == 1 &&
         revision_.load(std::memory_order_acquire) == token.revision;
 }

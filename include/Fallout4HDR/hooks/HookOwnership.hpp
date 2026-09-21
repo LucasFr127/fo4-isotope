@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace fo4hdr {
 
@@ -73,5 +74,44 @@ private:
     void* replacement_{};
     std::atomic<HookOwnershipState> state_{HookOwnershipState::empty};
 };
+
+struct VtablePatch
+{
+    std::size_t index{};
+    void* replacement{};
+};
+
+class ObjectGenerationIdentity
+{
+public:
+    // The owning registry serializes publishers. Publish writes generation
+    // before release-publishing object; Matches/Object acquire that publication.
+    // Final-release retirement uses a generation-matched compare/exchange, and
+    // readers never dereference the stored identity.
+    [[nodiscard]] bool Publish(void* object, std::uint64_t generation) noexcept;
+    [[nodiscard]] bool Matches(void* object) const noexcept;
+    [[nodiscard]] bool Retire(void* object, std::uint64_t generation) noexcept;
+    [[nodiscard]] void* Object() const noexcept
+    {
+        return object_.load(std::memory_order_acquire);
+    }
+    [[nodiscard]] std::uint64_t Generation() const noexcept
+    {
+        return generation_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<void*> object_{};
+    std::atomic<std::uint64_t> generation_{};
+};
+
+[[nodiscard]] bool PrepareShadowVtable(
+    std::span<void* const> current,
+    std::span<void*> shadow,
+    std::span<const VtablePatch> patches) noexcept;
+
+
+[[nodiscard]] std::size_t DiscoverCallableVtableSlots(void* const* table,
+    std::size_t minimum, std::size_t maximum) noexcept;
 
 }  // namespace fo4hdr

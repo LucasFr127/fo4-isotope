@@ -44,11 +44,41 @@ void CheckParser()
     FO4HDR_CHECK(RewritePluginConfigurationIni(kOriginal, requested) == kOriginal);
 }
 
+void CheckColdSelection()
+{
+    const auto original = ParsePluginConfiguration(kOriginal);
+    FO4HDR_CHECK(!original.value.measurePerformance && !original.value.enabled);
+    const auto text = std::string(kOriginal) +
+        "[General]\nEnabled=1\nDeveloperMode=1\n[Debug]\nTraceRenderPipeline=1\n"
+        "MeasurePerformance=1\nDeveloperHdr10Reference=1\nShowDeveloperOverlay=1\n"
+        "ForceHdrSwapChainFailure=1\nKeep=note\n";
+    const auto parsed = ParsePluginConfiguration(text);
+    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(parsed.value.measurePerformance && parsed.value.enabled && parsed.value.developerMode);
+    FO4HDR_CHECK(parsed.value.traceRenderPipeline && parsed.value.developerHdr10Reference);
+    FO4HDR_CHECK(parsed.value.showDeveloperOverlay && parsed.value.forceHdrSwapChainFailure);
+    auto requested = parsed.value;
+    requested.display.uiPaperWhiteNits = 250;
+    const auto rewritten = RewritePluginConfigurationIni(text, requested);
+    FO4HDR_CHECK(rewritten.find("MeasurePerformance=1") != std::string::npos);
+    FO4HDR_CHECK(rewritten.find("Keep=note") != std::string::npos);
+    FO4HDR_CHECK(ParsePluginConfiguration(rewritten).value == requested);
+    FO4HDR_CHECK(ParsePluginConfiguration(std::string(kOriginal) +
+        "[Debug]\nMeasurePerformance=2\n").status == PluginConfigurationStatus::invalid);
+    requested.developerMode = false;
+    FO4HDR_CHECK(!ValidatePluginConfiguration(requested));
+    requested = original.value;
+    requested.developerMode = true;
+    requested.showDeveloperOverlay = true;
+    FO4HDR_CHECK(!ValidatePluginConfiguration(requested));
+}
+
 }  // namespace
 
 void RunHdrConfigurationTests()
 {
     CheckParser();
+    CheckColdSelection();
 }
 
 }  // namespace fo4hdr::tests

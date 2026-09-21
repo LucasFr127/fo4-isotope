@@ -20,16 +20,18 @@ using Microsoft::WRL::ComPtr;
 enum class QueryKind
 {
     unknown,
+    untracked,
     scoped,
     endOnly
 };
 
 QueryKind ClassifyQuery(D3D11_QUERY kind) noexcept
 {
+    if (kind == D3D11_QUERY_TIMESTAMP_DISJOINT) return QueryKind::untracked;
     if (kind == D3D11_QUERY_EVENT || kind == D3D11_QUERY_TIMESTAMP)
         return QueryKind::endOnly;
     constexpr std::array scoped{
-        D3D11_QUERY_OCCLUSION, D3D11_QUERY_TIMESTAMP_DISJOINT, D3D11_QUERY_PIPELINE_STATISTICS,
+        D3D11_QUERY_OCCLUSION, D3D11_QUERY_PIPELINE_STATISTICS,
         D3D11_QUERY_OCCLUSION_PREDICATE, D3D11_QUERY_SO_STATISTICS,
         D3D11_QUERY_SO_OVERFLOW_PREDICATE, D3D11_QUERY_SO_STATISTICS_STREAM0,
         D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM0, D3D11_QUERY_SO_STATISTICS_STREAM1,
@@ -188,7 +190,10 @@ bool ContextQueryObserver::Enter(ID3D11DeviceContext* context) noexcept
 
 void ContextQueryObserver::ObserveBegin(ID3D11Asynchronous* asynchronous) noexcept
 {
-    if (Classify(asynchronous) != QueryKind::scoped) { queries_.unknown = true; return; }
+    const auto kind = Classify(asynchronous);
+    // Timing queries include private work; only count/statistics scopes inhibit it.
+    if (kind == QueryKind::untracked) return;
+    if (kind != QueryKind::scoped) { queries_.unknown = true; return; }
     queries_.Begin(asynchronous);
 }
 
@@ -226,7 +231,7 @@ void ContextQueryObserver::FinishCommandList(bool entered, bool completed,
     if (entered) queries_.LeaveCommandList();
     if (restoreState && completed) return;
     // FALSE resets bindings; retained scene publication must not outlive that reset.
-    if (renderer_ != nullptr) static_cast<void>(renderer_->EndFrame());
+    if (renderer_ != nullptr) static_cast<void>(renderer_->InvalidateObservedBindings());
 }
 
 void ContextQueryObserver::ExecuteCommandList(ID3D11DeviceContext* context,
@@ -246,9 +251,9 @@ namespace {
 bool EnterRouting(ContextHookRecord& context) noexcept
 {
     if (GetCurrentThreadId() != context.thread) { RevokeNativeRouting(); return false; }
-    if (context.internalWork) return false;
+    if (ActiveNativeOwner().internalWork) return false;
     if (context.busy.test_and_set(std::memory_order_acquire)) { RevokeNativeRouting(); return false; }
-    if (NativeRoutingOwned()) return true;
+    if (NativeRoutingOwned() && NativeActiveOwnerMatches(context.owned, context.generation)) return true;
     RevokeNativeRouting();
     context.busy.clear(std::memory_order_release);
     return false;
@@ -277,16 +282,14 @@ namespace {
 class InternalRoutingWork
 {
 public:
-    explicit InternalRoutingWork(ContextHookRecord& record) noexcept : record_(record)
+    InternalRoutingWork() noexcept
     {
-        record_.internalWork = true;
+        ActiveNativeOwner().internalWork = true;
     }
-    ~InternalRoutingWork() noexcept { record_.internalWork = false; }
+    ~InternalRoutingWork() noexcept { ActiveNativeOwner().internalWork = false; }
     InternalRoutingWork(const InternalRoutingWork&) = delete;
     InternalRoutingWork& operator=(const InternalRoutingWork&) = delete;
 
-private:
-    ContextHookRecord& record_;
 };
 
 class NativeCallbackWork
@@ -295,12 +298,12 @@ public:
     explicit NativeCallbackWork(ContextHookRecord* record) noexcept : record_(record)
     {
         if (record_ == nullptr) return;
-        previous_ = record_->internalWork;
-        record_->internalWork = false;
+        previous_ = ActiveNativeOwner().internalWork;
+        ActiveNativeOwner().internalWork = false;
     }
     ~NativeCallbackWork() noexcept
     {
-        if (record_ != nullptr) record_->internalWork = previous_;
+        if (record_ != nullptr) ActiveNativeOwner().internalWork = previous_;
     }
     NativeCallbackWork(const NativeCallbackWork&) = delete;
     NativeCallbackWork& operator=(const NativeCallbackWork&) = delete;
@@ -326,28 +329,28 @@ void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... argume
     if (record != nullptr && context == record->owned) RevokeNativeRouting();
 }
 
-void PublishPresentationUi(ContextHookRecord& record) noexcept
+void PublishPresentationUi() noexcept
 {
-    record.uiCapture.WithdrawLostPresentationScene();
-    if (!record.hdrPrepared) return;
-    const auto status = record.uiCapture.Status();
+    ActiveNativeOwner().uiCapture.WithdrawLostPresentationScene();
+    if (!ActiveNativeOwner().hdrPrepared) return;
+    const auto status = ActiveNativeOwner().uiCapture.Status();
     if (status != NativeUiFrameStatus::targetUnqualified && status != NativeUiFrameStatus::unprepared) return;
-    static_cast<void>(record.uiCapture.BeginPresentationFrame(record.presentationProxy,
-        record.renderer, NativeUiCaptureScope::qualifiedExclusive));
+    static_cast<void>(ActiveNativeOwner().uiCapture.BeginPresentationFrame(ActiveNativeOwner().presentationProxy,
+        ActiveNativeOwner().renderer, NativeUiCaptureScope::qualifiedExclusive));
 }
 
-void ObserveNativeScene(ContextHookRecord& record, FiniteDrawInvocation invocation) noexcept
+void ObserveNativeScene(FiniteDrawInvocation invocation) noexcept
 {
-    const auto scenes = record.renderer.BoundNativeSceneHandles();
-    const auto result = record.renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
+    const auto scenes = ActiveNativeOwner().renderer.BoundNativeSceneHandles();
+    const auto result = ActiveNativeOwner().renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
     if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
-    PublishPresentationUi(record);
+    PublishPresentationUi();
 }
 
 bool ContinueAfterUi(ContextHookRecord& record, SceneDrawOutcome captured) noexcept
 {
     if (!NativeRoutingOwned()) RevokeNativeRouting();
-    if (!record.queries.CanDispatch()) { record.uiCapture.CloseFrame(); return false; }
+    if (!record.queries.CanDispatch()) { ActiveNativeOwner().uiCapture.CloseFrame(); return false; }
     if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return false; }
     return captured != SceneDrawOutcome::replaced;
 }
@@ -356,16 +359,17 @@ void ObserveFiniteDraw(ContextHookRecord* record, NativeUiDrawKind kind,
     FiniteDrawInvocation invocation) noexcept
 {
     if (record == nullptr) return;
+    if (!ActiveNativeOwner().hdrPrepared) return;
     if (!record->queries.CanDispatch()) return;
-    const InternalRoutingWork internal{*record};
-    if (record->hdrPrepared && !NativeGameplayReady(*record)) return;
-    const auto captured = record->uiCapture.ExecuteObserved(record->renderer.FrameGeneration(), kind, invocation);
-    if (ContinueAfterUi(*record, captured)) ObserveNativeScene(*record, invocation);
+    const InternalRoutingWork internal;
+    if (ActiveNativeOwner().hdrPrepared && !NativeGameplayReady(*record)) return;
+    const auto captured = ActiveNativeOwner().uiCapture.ExecuteObserved(ActiveNativeOwner().renderer.FrameGeneration(), kind, invocation);
+    if (ContinueAfterUi(*record, captured)) ObserveNativeScene(invocation);
 }
 
 bool CanRedirect(ContextHookRecord* record, UINT count, ID3D11RenderTargetView* const* targets) noexcept
 {
-    if (record == nullptr || !record->hdrPrepared) return false;
+    if (record == nullptr || !ActiveNativeOwner().hdrPrepared) return false;
     if (count > D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT) return false;
     if (count != 0 && targets == nullptr) return false;
     return record->queries.CanDispatch() && NativeGameplayReady(*record);
@@ -378,14 +382,14 @@ bool RedirectTargets(ContextHookRecord* record, UINT count, ID3D11RenderTargetVi
     bool changed{};
     for (UINT index = 0; index < count; ++index)
     {
-        auto* replacement = record->presentationProxy.ResolveRenderTarget(targets[index]);
+        auto* replacement = ActiveNativeOwner().presentationProxy.ResolveRenderTarget(targets[index]);
         redirected[index] = replacement != nullptr ? replacement : targets[index];
         changed = changed || replacement != nullptr;
     }
     if (!changed) return false;
-    const InternalRoutingWork internal{*record};
-    if (!record->frameRedirected &&
-        !record->presentation.PrepareNativeRedirect(PresentationScope::qualifiedExclusive)) return false;
+    const InternalRoutingWork internal;
+    if (!ActiveNativeOwner().frameRedirected &&
+        !ActiveNativeOwner().presentation.PrepareNativeRedirect(PresentationScope::qualifiedExclusive)) return false;
     return true;
 }
 
@@ -420,17 +424,17 @@ void ForwardFiniteDraw(ID3D11DeviceContext* context, NativeUiDrawKind kind, Argu
 bool NativeGameplayReady(ContextHookRecord& record) noexcept
 {
     const auto lifecycle = ReadGraphicsLifecycle();
-    const bool changed = lifecycle.resetEpoch != record.lifecycleEpoch;
-    record.lifecycleEpoch = lifecycle.resetEpoch;
+    const bool changed = lifecycle.resetEpoch != ActiveNativeOwner().lifecycleEpoch;
+    ActiveNativeOwner().lifecycleEpoch = lifecycle.resetEpoch;
     if (changed || !lifecycle.gameplayReady)
     {
-        record.presentationProxy.InvalidateFrame();
-        record.uiCapture.CloseFrame();
-        static_cast<void>(record.renderer.EndFrame());
+        ActiveNativeOwner().presentationProxy.InvalidateFrame();
+        ActiveNativeOwner().uiCapture.CloseFrame();
+        static_cast<void>(ActiveNativeOwner().renderer.EndFrame());
     }
     if (!lifecycle.gameplayReady) return false;
-    if (record.renderer.FrameGeneration() == 0)
-        return record.presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive);
+    if (ActiveNativeOwner().renderer.FrameGeneration() == 0)
+        return ActiveNativeOwner().presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive);
     return true;
 }
 
@@ -486,7 +490,7 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(ID3D11DeviceContext* context, UINT
     auto* selected = changed ? redirected.data() : targets;
     const bool completed = CallCaptured(record->nextOmSetRenderTargets, context, count, selected, depth);
     if (!completed) RevokeNativeRouting();
-    else if (changed) scope.Record()->frameRedirected = true;
+    else if (changed) ActiveNativeOwner().frameRedirected = true;
 }
 
 void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* context, UINT count,
@@ -501,7 +505,7 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* contex
     if (RedirectTargets(scope.Record(), count, targets, redirected))
     {
         selected = redirected.data();
-        scope.Record()->frameRedirected = true;
+        ActiveNativeOwner().frameRedirected = true;
     }
     ForwardContext(record->nextOmSetRenderTargetsAndUavs, context, count, selected, depth,
         firstUav, uavCount, uavs, initialCounts);

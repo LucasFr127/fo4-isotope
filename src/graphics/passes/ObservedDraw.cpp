@@ -9,6 +9,16 @@
 #include <utility>
 
 namespace fo4hdr {
+
+bool ScenePassRenderer::InvalidateObservedBindings() noexcept
+{
+    if (!Active() || invoking_) return false;
+    ClearLineage();
+    lutInspector_ = {};
+    ResetExposurePolicy();
+    return true;
+}
+
 namespace {
 
 using Microsoft::WRL::ComPtr;
@@ -380,7 +390,7 @@ bool NativeUiCapture::CanUse() const noexcept
 }
 
 bool NativeUiCapture::Initialize(ID3D11Device* device, ID3D11DeviceContext* context,
-    ScenePassConfiguration configuration) noexcept
+    ScenePassConfiguration configuration, bool developerReference) noexcept
 {
     if (device_) return false;
     if (!ColdContext(device, context)) return false;
@@ -394,6 +404,7 @@ bool NativeUiCapture::Initialize(ID3D11Device* device, ID3D11DeviceContext* cont
     layers_ = std::move(layers);
     blend_ = std::move(blend);
     configuration_ = configuration;
+    developerReference_ = developerReference;
     thread_ = std::this_thread::get_id();
     ++epoch_;
     return true;
@@ -503,7 +514,7 @@ bool NativeUiCapture::BeginPresentationFrame(NativePresentationProxy& proxy,
 {
     const auto owned = proxy.SceneViews();
     const auto selected = scenes.Views(scenes.CurrentScene());
-    if (!scenes.CurrentSceneOperatorProduced()) return false;
+    if (!QualifiedPresentationScene(scenes)) return false;
     if (!SameObject(owned.texture, selected.texture)) return false;
     if (!SameDevice(owned.renderTarget, device_.Get())) return false;
     const NativeUiFrame frame{scenes.FrameGeneration(), owned.renderTarget, &scenes};
@@ -559,11 +570,18 @@ bool NativeUiCapture::QualifiedDraw(const QualifiedNativeUiDraw& draw) const noe
     return draw.kind == NativeUiDrawKind::indexedSix;
 }
 
+bool NativeUiCapture::QualifiedPresentationScene(const ScenePassRenderer& scenes) const noexcept
+{
+    const auto domain = scenes.CurrentSceneDomain();
+    if (developerReference_)
+        return domain == SceneColorDomain::bt709Scene || domain == SceneColorDomain::bt2020UiRelative;
+    return scenes.CurrentSceneOperatorProduced() && domain == SceneColorDomain::bt2020UiRelative;
+}
+
 bool NativeUiCapture::PresentationSceneCurrent() const noexcept
 {
     if (presentationProxy_ == nullptr) return true;
-    if (scenes_ == nullptr || !scenes_->CurrentSceneOperatorProduced()) return false;
-    if (scenes_->CurrentSceneDomain() != SceneColorDomain::bt2020UiRelative) return false;
+    if (scenes_ == nullptr || !QualifiedPresentationScene(*scenes_)) return false;
     const auto owned = presentationProxy_->SceneViews();
     const auto selected = scenes_->Views(scenes_->CurrentScene());
     return owned.texture != nullptr && SameObject(owned.texture, selected.texture) &&
@@ -721,7 +739,7 @@ bool ScenePassRenderer::CaptureLutProfileDraw(NativeLutObservation& observation)
 {
     lutInspector_ = {};
     lutInspector_.frame = frameGeneration_;
-    if (!ReadCurrentNativeLutObservation(NativeLutResourceGeneration(), observation)) return false;
+    observation = CurrentNativeLutObservation();
     if (!IsCurrentNativeLutObservation(observation, GetCurrentThreadId())) return false;
     if ((observation.validSlots & ~15u) != 0) return false;
     // Binding/range getters do not prove CPU weight contents; interpolation

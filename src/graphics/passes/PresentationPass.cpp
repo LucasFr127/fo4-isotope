@@ -22,15 +22,19 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 constexpr UINT outputCapacity = 8;
-constexpr UINT classCapacity = 256;
+constexpr UINT classCapacity = D3D11_SHADER_MAX_INTERFACES;
+constexpr UINT maximumUavs = D3D11_1_UAV_SLOT_COUNT;
 constexpr std::array supportedSceneDomains{
     SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
 constexpr std::array<UINT, 6> calibrationModes{0, 10, 11, 12, 13, 14};
 constexpr std::size_t variantsPerCalibration = supportedSceneDomains.size() * 2;
 constexpr std::array codedLayerFormats{DXGI_FORMAT_R8G8B8A8_UNORM,
     DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT};
-constexpr std::array<UINT, outputCapacity> preserveCounters{
-    UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1), UINT(-1)};
+constexpr auto preserveCounters = [] {
+    std::array<UINT, maximumUavs> values;
+    values.fill(UINT(-1));
+    return values;
+}();
 
 template<class Interface, std::size_t count>
 void ReleaseReferences(const std::array<Interface*, count>& references, UINT captured) noexcept
@@ -129,20 +133,20 @@ class OutputBindings
 public:
     explicit OutputBindings(ID3D11DeviceContext* context) noexcept
     {
+        ComPtr<ID3D11Device> device;
+        context->GetDevice(&device);
+        uavCount_ = device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_1 ? maximumUavs : outputCapacity;
         context->OMGetRenderTargets(outputCapacity, renderTargets_.data(), &depth_);
         context->OMGetRenderTargetsAndUnorderedAccessViews(
-            0, nullptr, nullptr, 0, outputCapacity, omTargets_.data());
-        context->CSGetUnorderedAccessViews(0, outputCapacity, csTargets_.data());
+            0, nullptr, nullptr, 0, uavCount_, omTargets_.data());
+        context->CSGetUnorderedAccessViews(0, uavCount_, csTargets_.data());
     }
 
     ~OutputBindings() noexcept
     {
-        for (UINT index = 0; index < outputCapacity; ++index)
-        {
-            if (renderTargets_[index] != nullptr) renderTargets_[index]->Release();
-            if (omTargets_[index] != nullptr) omTargets_[index]->Release();
-            if (csTargets_[index] != nullptr) csTargets_[index]->Release();
-        }
+        ReleaseReferences(renderTargets_, outputCapacity);
+        ReleaseReferences(omTargets_, uavCount_);
+        ReleaseReferences(csTargets_, uavCount_);
     }
 
     [[nodiscard]] UINT RenderTargetCount() const noexcept
@@ -167,47 +171,70 @@ public:
 
     void Unbind(ID3D11DeviceContext* context) const noexcept
     {
-        std::array<ID3D11UnorderedAccessView*, outputCapacity> empty{};
+        std::array<ID3D11UnorderedAccessView*, maximumUavs> empty{};
         context->OMSetRenderTargetsAndUnorderedAccessViews(
-            0, nullptr, nullptr, 0, outputCapacity, empty.data(), preserveCounters.data());
-        context->CSSetUnorderedAccessViews(0, outputCapacity, empty.data(), preserveCounters.data());
+            0, nullptr, nullptr, 0, uavCount_, empty.data(), preserveCounters.data());
+        context->CSSetUnorderedAccessViews(0, uavCount_, empty.data(), preserveCounters.data());
     }
 
     void Restore(ID3D11DeviceContext* context) const noexcept
     {
         const auto count = RenderTargetCount();
-        if (count == outputCapacity)
+        if (count == uavCount_)
             context->OMSetRenderTargets(outputCapacity, renderTargets_.data(), depth_.Get());
         else
             context->OMSetRenderTargetsAndUnorderedAccessViews(count, renderTargets_.data(),
-                depth_.Get(), count, outputCapacity - count,
+                depth_.Get(), count, uavCount_ - count,
                 omTargets_.data() + count, preserveCounters.data() + count);
         context->CSSetUnorderedAccessViews(
-            0, outputCapacity, csTargets_.data(), preserveCounters.data());
+            0, uavCount_, csTargets_.data(), preserveCounters.data());
     }
 
     [[nodiscard]] bool Exclude(ID3D11Texture2D* texture) noexcept
     {
         const auto owned = Identity(texture);
         if (!owned) return false;
-        for (UINT index = 0; index < outputCapacity; ++index)
-        {
-            if (!DropOwned(renderTargets_[index], owned.Get())) return false;
-            if (!DropOwned(omTargets_[index], owned.Get())) return false;
-            if (!DropOwned(csTargets_[index], owned.Get())) return false;
-        }
-        return true;
+        return ExcludeViews(renderTargets_, owned.Get(), outputCapacity) &&
+            ExcludeViews(omTargets_, owned.Get(), uavCount_) &&
+            ExcludeViews(csTargets_, owned.Get(), uavCount_);
     }
 
     OutputBindings(const OutputBindings&) = delete;
     OutputBindings& operator=(const OutputBindings&) = delete;
 
 private:
+    template<class View, std::size_t size>
+    static bool ExcludeViews(std::array<View*, size>& views, IUnknown* owned, UINT count) noexcept
+    {
+        for (UINT index = 0; index < count; ++index)
+            if (!DropOwned(views[index], owned)) return false;
+        return true;
+    }
+
     std::array<ID3D11RenderTargetView*, outputCapacity> renderTargets_{};
-    std::array<ID3D11UnorderedAccessView*, outputCapacity> omTargets_{};
-    std::array<ID3D11UnorderedAccessView*, outputCapacity> csTargets_{};
+    std::array<ID3D11UnorderedAccessView*, maximumUavs> omTargets_{};
+    std::array<ID3D11UnorderedAccessView*, maximumUavs> csTargets_{};
     ComPtr<ID3D11DepthStencilView> depth_;
+    UINT uavCount_{};
 };
+
+constexpr std::array getShaderInputs{
+    &ID3D11DeviceContext::VSGetShaderResources, &ID3D11DeviceContext::HSGetShaderResources,
+    &ID3D11DeviceContext::DSGetShaderResources, &ID3D11DeviceContext::GSGetShaderResources,
+    &ID3D11DeviceContext::PSGetShaderResources, &ID3D11DeviceContext::CSGetShaderResources};
+constexpr std::array setShaderInputs{
+    &ID3D11DeviceContext::VSSetShaderResources, &ID3D11DeviceContext::HSSetShaderResources,
+    &ID3D11DeviceContext::DSSetShaderResources, &ID3D11DeviceContext::GSSetShaderResources,
+    &ID3D11DeviceContext::PSSetShaderResources, &ID3D11DeviceContext::CSSetShaderResources};
+
+bool TargetMayHaveShaderInputs(ID3D11Resource* resource) noexcept
+{
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture))) || !texture) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    return (description.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
+}
 
 class ScopedComputeState
 {
@@ -227,11 +254,13 @@ public:
         const auto captured = classCount_ < classCapacity ? classCount_ : classCapacity;
         ReleaseReferences(classes_, captured);
         ReleaseReferences(inputs_, static_cast<UINT>(inputs_.size()));
+        if (aliasesCaptured_)
+            for (const auto& stage : aliases_)
+                ReleaseReferences(stage, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT);
     }
 
     [[nodiscard]] bool Ready() const noexcept
     {
-        if (classCount_ > classCapacity) return false;
         if (!constants_.Ready()) return false;
         return outputs_.Valid();
     }
@@ -254,6 +283,7 @@ public:
         const std::array<ID3D11ShaderResourceView*, 4>& inputs,
         ID3D11UnorderedAccessView* target) noexcept
     {
+        CaptureDestinationAliases(target);
         PrepareOutputs();
         context_->CSSetShaderResources(0, static_cast<UINT>(inputs.size()), inputs.data());
         context_->CSSetUnorderedAccessViews(0, 1, &target, preserveCounters.data());
@@ -265,6 +295,34 @@ public:
     ScopedComputeState& operator=(const ScopedComputeState&) = delete;
 
 private:
+    void RemoveDestinationAliases(UINT stage, ID3D11Resource* destination) noexcept
+    {
+        for (UINT slot = 0; slot < aliases_[stage].size(); ++slot)
+        {
+            auto* source = aliases_[stage][slot];
+            if (!source) continue;
+            ComPtr<ID3D11Resource> resource;
+            source->GetResource(&resource);
+            if (resource.Get() != destination) continue;
+            ID3D11ShaderResourceView* empty{};
+            (context_->*setShaderInputs[stage])(slot, 1, &empty);
+        }
+    }
+
+    void CaptureDestinationAliases(ID3D11UnorderedAccessView* target) noexcept
+    {
+        ComPtr<ID3D11Resource> destination;
+        target->GetResource(&destination);
+        if (!destination || !TargetMayHaveShaderInputs(destination.Get())) return;
+        aliasesCaptured_ = true;
+        for (UINT stage = 0; stage < aliases_.size(); ++stage)
+        {
+            (context_->*getShaderInputs[stage])(0,
+                D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, aliases_[stage].data());
+            RemoveDestinationAliases(stage, destination.Get());
+        }
+    }
+
     void Restore() noexcept
     {
         std::array<ID3D11ShaderResourceView*, 4> emptyInputs{};
@@ -273,6 +331,10 @@ private:
         context_->CSSetUnorderedAccessViews(0, 1, &emptyTarget, preserveCounters.data());
         outputs_.Restore(context_);
         context_->CSSetShaderResources(0, static_cast<UINT>(inputs_.size()), inputs_.data());
+        if (aliasesCaptured_)
+            for (UINT stage = 0; stage < aliases_.size(); ++stage)
+                (context_->*setShaderInputs[stage])(0,
+                    D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT, aliases_[stage].data());
         constants_.Restore();
         context_->CSSetShader(shader_.Get(), classes_.data(), classCount_);
         context_->SetPredication(predicate_.Get(), predicateValue_);
@@ -288,6 +350,9 @@ private:
     UINT classCount_{classCapacity};
     BOOL predicateValue_{};
     bool mutated_{};
+    std::array<std::array<ID3D11ShaderResourceView*,
+        D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT>, 6> aliases_{};
+    bool aliasesCaptured_{};
 };
 
 class ExecutionScope
@@ -325,7 +390,7 @@ bool TypedStoreSupported(ID3D11Device* device, DXGI_FORMAT format, UINT required
 
 bool PresentationDevice(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
 {
-    if (device->GetFeatureLevel() != D3D_FEATURE_LEVEL_11_0) return false;
+    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0) return false;
     if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
     D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
     if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS,

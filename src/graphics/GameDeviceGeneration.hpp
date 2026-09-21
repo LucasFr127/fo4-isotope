@@ -11,6 +11,7 @@ struct GraphicsStartupConfiguration
 {
     PluginConfiguration settings;
     std::filesystem::path persistencePath;
+    bool measurePerformance{};
 };
 
 enum class GraphicsDeviceBindingStatus

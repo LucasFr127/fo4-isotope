@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ImageSpaceObserver.hpp"
-#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 #include "DirectCallPatch.hpp"
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -20,6 +19,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+
+#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 
 namespace {
 
@@ -47,7 +48,7 @@ using Catalog = std::vector<CatalogEntry>;
 
 std::atomic<DWORD> g_ownerThread{};
 std::unique_ptr<const Catalog> g_catalog;
-std::uint64_t g_catalogGeneration{};
+std::atomic<bool> g_catalogAttempted{};
 std::atomic_flag g_catalogFlag = ATOMIC_FLAG_INIT;
 
 bool FormatKey(std::string_view basename, std::uint32_t localFormId,
@@ -242,28 +243,19 @@ std::unique_ptr<const Catalog> BuildCatalog()
 
 namespace fo4hdr::game {
 
-bool BuildImageSpaceCatalog(std::uint64_t resourceGeneration) noexcept
+bool BuildImageSpaceCatalog() noexcept
 {
     const auto thread = ::GetCurrentThreadId();
     DWORD expected{};
     if (!g_ownerThread.compare_exchange_strong(expected, thread) && expected != thread) return false;
-    {
-        imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-        if (!guard.OwnsLock()) return false;
-        g_catalogGeneration = UINT64_MAX;
-        // Readers cannot copy the retired catalog after its revision is revoked.
-        (void)InvalidateImageSpaceObservation();
-    }
+    if (g_catalogAttempted.exchange(true, std::memory_order_acq_rel)) return ImageSpaceCatalogReady();
     try
     {
         auto catalog = BuildCatalog();
         if (!catalog) return false;
         imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
         if (!guard.OwnsLock()) return false;
-        // Only the cold collector destroys the old vector, while readers refuse.
         g_catalog = std::move(catalog);
-        (void)InvalidateImageSpaceObservation();
-        g_catalogGeneration = resourceGeneration;
         return true;
     }
     catch (...) { return false; }
@@ -272,8 +264,7 @@ bool BuildImageSpaceCatalog(std::uint64_t resourceGeneration) noexcept
 bool ImageSpaceCatalogReady() noexcept
 {
     imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-    return guard.OwnsLock() && g_catalog != nullptr &&
-        g_catalogGeneration == NativeLutResourceGeneration();
+    return guard.OwnsLock() && g_catalog != nullptr;
 }
 
 bool LookupImageSpaceIdentity(
@@ -284,7 +275,7 @@ bool LookupImageSpaceIdentity(
     lutPath = {};
     if (data == nullptr) return false;
     imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-    if (!guard.OwnsLock() || g_catalogGeneration != NativeLutResourceGeneration()) return false;
+    if (!guard.OwnsLock()) return false;
     const auto* catalog = g_catalog.get();
     if (catalog == nullptr) return false;
     const auto identity = reinterpret_cast<std::uintptr_t>(data);
@@ -314,10 +305,10 @@ struct ManagerHeader
     }
 };
 
-bool CurrentCatalog(std::uint64_t resourceGeneration) noexcept
+bool CurrentCatalog() noexcept
 {
     if (::GetCurrentThreadId() != g_ownerThread.load()) return false;
-    return resourceGeneration == NativeLutResourceGeneration() && ImageSpaceCatalogReady();
+    return ImageSpaceCatalogReady();
 }
 
 bool ReadActiveData(std::span<const std::byte> bytes, ImageSpaceActiveData& result) noexcept
@@ -336,7 +327,7 @@ bool ObserveImageSpace(const RE::ImageSpaceManager* manager,
     std::uint64_t resourceGeneration, ImageSpaceSnapshot& destination) noexcept
 {
     destination = {};
-    if (!CurrentCatalog(resourceGeneration) || manager == nullptr) return false;
+    if (!CurrentCatalog() || manager == nullptr) return false;
     std::array<std::byte, sizeof(RE::ImageSpaceManager)> bytes{};
     if (!observation::GuardedReadValue(manager, bytes)) return false;
     ManagerHeader header{};
@@ -447,7 +438,8 @@ provenance::Status ManagerValues(const RE::ImageSpaceManager* manager,
 void DisableObservation() noexcept
 {
     g_installed.store(false, std::memory_order_release);
-    fo4hdr::RevokeNativeLutObservation();
+    fo4hdr::SetImageSpaceObservationReady(false);
+    fo4hdr::ResetNativeLutObservation();
     g_weatherPublication.Invalidate();
     g_transferPublication.Invalidate();
     g_nested = true;
@@ -562,7 +554,7 @@ void RoomBlendHook(RE::ImageSpaceBaseData* destination,
     if (!next || next == &RoomBlendHook) return;
     try {
         if (g_installed.load(std::memory_order_acquire)) {
-            if (g_roomToken.entered) DisableObservation();
+            if (g_roomToken.revision) DisableObservation();
             else {
                 // The caller writes LUT names/weights after this blend returns.
                 // Keep the transaction open through its corresponding setter.
@@ -871,6 +863,7 @@ class NativeProvenanceInstallation
         PatchBackend backend;
         if (!patch::InstallPair(sites, backend)) return false;
         g_installed.store(true, std::memory_order_release);
+        fo4hdr::SetImageSpaceObservationReady(true);
         return true;
     }
     bool Prepare(const fo4hdr::game::ImageSpaceInstallation& request)
@@ -942,16 +935,55 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     result.imageSpaceRevision = transfer.observationRevision;
 }
 
-bool InitializeImageSpaceObserver(const ImageSpaceInstallation& request) noexcept
+namespace {
+#if defined(FO4HDR_RUNTIME_1_10_163)
+ImageSpaceTargetFacts CopiedTarget(std::uint64_t id, std::uintptr_t rva,
+    std::span<const std::uint8_t> bytes) noexcept
 {
-    if (!request.Admitted()) return false;
-    if (g_attempted.exchange(true, std::memory_order_acq_rel)) return g_installed.load(std::memory_order_acquire);
+    ImageSpaceTargetFacts result{id, rva};
+    std::copy(bytes.begin(), bytes.end(), result.bytes.begin());
+    result.byteCount = static_cast<std::uint8_t>(bytes.size());
+    return result;
+}
+
+ImageSpaceRuntimeFacts DeclaredImageSpaceFacts() noexcept
+{
+    using namespace generated;
+    ImageSpaceRuntimeFacts facts;
+    facts.targets = {CopiedTarget(kImageSpaceWeatherId, kImageSpaceWeatherRva, kImageSpaceWeatherBytes),
+        CopiedTarget(kImageSpaceAccumulateId, kImageSpaceAccumulateRva, kImageSpaceAccumulateBytes),
+        CopiedTarget(kImageSpaceRoomBlendId, kImageSpaceRoomBlendRva, kImageSpaceRoomBlendBytes),
+        CopiedTarget(kImageSpaceSetLutId, kImageSpaceSetLutRva, kImageSpaceSetLutBytes)};
+    for (std::size_t index = 0; index < facts.calls.size(); ++index)
+        facts.calls[index] = {kImageSpaceCallerIds[index], kImageSpaceCallerRvas[index],
+            kImageSpaceCallRvas[index], kImageSpaceCallBytes[index],
+            static_cast<std::uint8_t>(kImageSpaceCallTargetIndices[index])};
+    facts.globalLutId = kImageSpaceGlobalLutId;
+    facts.globalBaseId = kImageSpaceGlobalBaseId;
+    facts.globalLutRva = kImageSpaceGlobalLutRva;
+    facts.globalBaseRva = kImageSpaceGlobalBaseRva;
+    return facts;
+}
+#endif
+}  // namespace
+
+bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept
+{
+    if (g_attempted.exchange(true, std::memory_order_acq_rel))
+        return g_installed.load(std::memory_order_acquire);
+    if (!requested) return false;
+#if !defined(FO4HDR_RUNTIME_1_10_163)
+    return false;
+#else
     try
     {
+        const ImageSpaceInstallation request{DeclaredImageSpaceFacts(), trampolineInterface, pluginHandle};
         NativeProvenanceInstallation installation(request.facts);
         return installation.Install(request);
     }
     catch (...) { return false; }
+#endif
 }
 
 }  // namespace fo4hdr::game

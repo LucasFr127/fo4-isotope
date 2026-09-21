@@ -50,8 +50,15 @@ if (-not $manifestDirectory.Exists -or
     throw 'Missing or redirected runtime manifest directory.'
 }
 $manifestEntries = @($manifestDirectory.EnumerateFileSystemInfos())
-if ($manifestEntries.Count -ne 1 -or $manifestEntries[0].Name -cne $manifestName) {
-    throw 'Unexpected runtime manifest staging entries.'
+$childNames = @($manifestName, 'Default.ini')
+if ($manifestEntries.Count -ne $childNames.Count) {
+    throw 'Unexpected plugin data staging entry count.'
+}
+foreach ($entry in $manifestEntries) {
+    if ($entry.Name -cnotin $childNames) {
+        throw 'Unexpected plugin data staging entry.'
+    }
 }
 Assert-StagedFile "Fallout4HDR/$manifestName" ([IO.Path]::Combine($root, "runtime/$Runtime/manifest.json"))
-Write-Host 'PASS staged plugin, symbols, canonical configuration, runtime manifest and exact file set'
+Assert-StagedFile 'Fallout4HDR/Default.ini' ([IO.Path]::Combine($root, 'config/Fallout4HDR/Default.ini'))
+Write-Host 'PASS staged plugin, symbols, canonical configuration, default profile pack, runtime manifest and exact file set'

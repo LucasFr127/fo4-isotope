@@ -2,10 +2,9 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <span>
-#include <type_traits>
 
 namespace fo4hdr {
 
@@ -20,6 +19,15 @@ inline constexpr std::size_t kImageSpaceActiveDataFieldCount{12};
 [[nodiscard]] bool DecodeImageSpaceActiveData(std::span<const std::byte> source,
     const std::array<std::size_t, kImageSpaceActiveDataFieldCount>& offsets,
     ImageSpaceActiveData& destination) noexcept;
+
+enum class NativeLutObserverStatus : std::uint8_t
+{
+    unavailable,
+    ready,
+    unsupportedRuntime,
+    invalidTarget,
+    conflictingHook
+};
 
 struct ImageSpaceIdentity
 {
@@ -49,25 +57,48 @@ struct ImageSpaceSnapshot
 
 enum class ImageSpaceObservationStatus : std::uint8_t
 {
-    unavailable, waiting, matched, catalogUnavailable, differentThread,
-    unqualifiedSource, overrideActive, stale, updating
+    unavailable,
+    waiting,
+    matched,
+    catalogUnavailable,
+    differentThread,
+    unqualifiedSource,
+    overrideActive,
+    stale,
+    updating
 };
 
 struct NativeLutObservation
 {
     std::array<LutSnapshot, 4> luts{};
     std::array<std::uint64_t, 4> expectedShaderViews{};
-    std::uint64_t resourceGeneration{}, serial{};
-    std::uint32_t threadId{}, validSlots{};
     std::array<ImageSpaceIdentity, 4> imageSpaces{};
     std::uint32_t imageSpaceValidSlots{};
     ImageSpaceObservationStatus imageSpaceStatus{ImageSpaceObservationStatus::unavailable};
-    std::uint64_t imageSpaceRevision{}, generation{};
+    std::uint32_t validSlots{};
+    std::uint32_t threadId{};
+    std::uint64_t serial{};
+    std::uint64_t generation{};
+    std::uint64_t imageSpaceRevision{};
 };
 
-// Only the current synchronous callback can read this scope. Nested or invalid
-// entries mask the outer value; copied identities never retain COM references.
-class NativeLutScope
+void SetNativeLutObserverStatus(NativeLutObserverStatus status) noexcept;
+[[nodiscard]] NativeLutObserverStatus GetNativeLutObserverStatus() noexcept;
+void ResetNativeLutObservation() noexcept;
+[[nodiscard]] std::uint64_t NativeLutObservationGeneration() noexcept;
+void SetImageSpaceObservationReady(bool ready) noexcept;
+[[nodiscard]] bool IsImageSpaceObservationReady() noexcept;
+[[nodiscard]] std::uint64_t CurrentImageSpaceObservationRevision() noexcept;
+[[nodiscard]] std::uint64_t InvalidateImageSpaceObservation() noexcept;
+[[nodiscard]] std::uint32_t EligibleImageSpaceSlots(
+    const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept;
+[[nodiscard]] const NativeLutObservation& CurrentNativeLutObservation() noexcept;
+[[nodiscard]] bool IsCurrentNativeLutObservation(
+    const NativeLutObservation& observation, std::uint32_t threadId) noexcept;
+
+// Names and identities are owned values, valid only within the native draw.
+// Invalid and nested entries mask the outer observation until they return.
+class NativeLutScope final
 {
 public:
     explicit NativeLutScope(const NativeLutObservation& observation) noexcept;
@@ -76,28 +107,7 @@ public:
     NativeLutScope& operator=(const NativeLutScope&) = delete;
 
 private:
-    const NativeLutObservation* previous_{};
-    NativeLutObservation observation_{};
+    NativeLutObservation previous_{};
 };
-
-[[nodiscard]] bool ReadCurrentNativeLutObservation(
-    std::uint64_t resourceGeneration, NativeLutObservation& result) noexcept;
-// Resource/load invalidation exchanges only a scalar, never engine payload.
-void ResetNativeLutObservation(std::uint64_t resourceGeneration) noexcept;
-[[nodiscard]] std::uint64_t NativeLutResourceGeneration() noexcept;
-
-// A copied token must still belong to the same current synchronous draw.
-[[nodiscard]] bool IsCurrentNativeLutObservation(
-    const NativeLutObservation& observation, std::uint32_t threadId) noexcept;
-[[nodiscard]] std::uint32_t EligibleImageSpaceSlots(
-    const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept;
-// Revocation is independent of the engine resource/load generation.
-void RevokeNativeLutObservation() noexcept;
-[[nodiscard]] std::uint64_t NativeLutObservationGeneration() noexcept;
-[[nodiscard]] std::uint64_t CurrentImageSpaceObservationRevision() noexcept;
-[[nodiscard]] std::uint64_t InvalidateImageSpaceObservation() noexcept;
-
-static_assert(std::is_trivially_copyable_v<ImageSpaceSnapshot>);
-static_assert(std::is_trivially_copyable_v<NativeLutObservation>);
 
 }  // namespace fo4hdr

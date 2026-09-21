@@ -71,7 +71,8 @@ void VerifyNativeBindings(PixelFixture& fixture, ScenePassRenderer& renderer,
     FO4HDR_CHECK(renderer.Views(renderer.BoundNativeSceneHandles().input).texture == nullptr);
     auto* unrelated = fixture.renderer.Views(fixture.input).shaderResource;
     fixture.gpu.context->PSSetShaderResources(descriptor.sceneInputSlot, 1, &unrelated);
-    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture == nullptr);
+    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture ==
+        fixture.renderer.Views(fixture.input).texture);
     fixture.gpu.context->PSSetShaderResources(descriptor.sceneInputSlot, 1, &source);
     UINT calls{};
     const FiniteDrawInvocation invocation{
@@ -88,7 +89,8 @@ void VerifyNativeBindings(PixelFixture& fixture, ScenePassRenderer& renderer,
     CheckHresult(input.texture->SetPrivateData(kNativeSceneAttributionGuid, 0, nullptr), "Clear native attribution");
     FO4HDR_CHECK(!ReadNativeSceneAttribution(fixture.gpu.device.Get(), input.texture.Get(), 1, marker));
     FO4HDR_CHECK(marker == NativeSceneAttribution{});
-    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture == nullptr);
+    // Typed FP16 observation is distinct from promotion attribution.
+    FO4HDR_CHECK(renderer.Views(renderer.ResolveNativeSceneBindings(descriptor).input).texture == input.texture.Get());
 }
 
 void VerifyBorrowedRouting(PixelFixture& fixture, const std::filesystem::path& directory)
@@ -195,7 +197,7 @@ void VerifyQueryAdapters(PixelFixture& fixture)
     FO4HDR_CHECK(observer.Prepare(fixture.gpu.context.Get(), 1, next, &fixture.renderer) ==
         ContextQueryPreparation::coverageUnobserved);
     ComPtr<ID3D11Query> scope, event;
-    const D3D11_QUERY_DESC scopedDescription{D3D11_QUERY_TIMESTAMP_DISJOINT, 0};
+    const D3D11_QUERY_DESC scopedDescription{D3D11_QUERY_OCCLUSION, 0};
     const D3D11_QUERY_DESC eventDescription{D3D11_QUERY_EVENT, 0};
     CheckHresult(fixture.gpu.device->CreateQuery(&scopedDescription, &scope), "Scoped query fixture");
     CheckHresult(fixture.gpu.device->CreateQuery(&eventDescription, &event), "End-only query fixture");
@@ -212,11 +214,13 @@ void VerifyQueryAdapters(PixelFixture& fixture)
     CheckHresult(fixture.gpu.device->CreateDeferredContext(0, &deferred), "Deferred list fixture");
     CheckHresult(deferred->FinishCommandList(FALSE, &commands), "Empty finished list fixture");
     FO4HDR_CHECK(fixture.renderer.BeginFrame());
+    const auto frame = fixture.renderer.FrameGeneration();
     observer.ExecuteCommandList(fixture.gpu.context.Get(), commands.Get(), FALSE);
     FO4HDR_CHECK(queryAdapterEvidence.lists == 1 && queryAdapterEvidence.listInsideScope);
-    FO4HDR_CHECK(fixture.renderer.FrameGeneration() == 0);
+    FO4HDR_CHECK(frame != 0 && fixture.renderer.FrameGeneration() == frame);
     FO4HDR_CHECK(!observer.CanDispatch());
     FO4HDR_CHECK(observer.Retire());
+    FO4HDR_CHECK(fixture.renderer.EndFrame());
     queryAdapterEvidence = {};
 }
 

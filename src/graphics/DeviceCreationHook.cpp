@@ -19,6 +19,7 @@ std::atomic<CreatedDeviceObserver> hdrObserver{};
 std::atomic<DiscardHdrCreation> discardHdrObserver{};
 std::atomic<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN> capturedNext{};
 std::atomic<bool> observationActive{};
+std::atomic<bool> hdrEnabled{true}, forceHdrFailure{};
 std::atomic_flag observationBusy = ATOMIC_FLAG_INIT;
 std::atomic_flag hdrAttemptClaim = ATOMIC_FLAG_INIT;
 
@@ -99,6 +100,8 @@ bool HdrCreationStorageLayout(const DXGI_SWAP_CHAIN_DESC& value) noexcept
 
 bool HdrCreationEligible(const CreationArguments& arguments) noexcept
 {
+    if (!hdrEnabled.load(std::memory_order_acquire) ||
+        forceHdrFailure.load(std::memory_order_acquire)) return false;
     if (arguments.description == nullptr) return false;
     return HdrCallbacksAvailable() && HasCreationOutputSlots(arguments) &&
         HdrCreationWindowLayout(*arguments.description) && HdrCreationStorageLayout(*arguments.description);
@@ -282,6 +285,8 @@ bool PrepareDeviceCreationObserver(DeviceCreationCallbacks callbacks) noexcept
     disabledObserver.store(callbacks.disabled, std::memory_order_release);
     hdrObserver.store(callbacks.hdrCreated, std::memory_order_release);
     discardHdrObserver.store(callbacks.discardHdr, std::memory_order_release);
+    hdrEnabled.store(callbacks.hdrEnabled, std::memory_order_release);
+    forceHdrFailure.store(callbacks.forceHdrFailure, std::memory_order_release);
     return true;
 }
 

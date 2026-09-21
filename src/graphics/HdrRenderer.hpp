@@ -245,12 +245,14 @@ public:
     HRESULT AdoptPresentationScene(NativePresentationProxy& proxy, SceneTextureHandle& handle) noexcept;
     // Explicit descriptor callers carry Execute's independent pass qualification.
     // Native callbacks instead use the observed-shader wrapper below.
-    [[nodiscard]] NativeSceneHandles ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) const noexcept;
-    [[nodiscard]] NativeSceneHandles BoundNativeSceneHandles() const noexcept;
+    [[nodiscard]] NativeSceneHandles ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) noexcept;
+    [[nodiscard]] NativeSceneHandles BoundNativeSceneHandles() noexcept;
     [[nodiscard]] SceneTextureViews Views(SceneTextureHandle handle) const noexcept;
 
     [[nodiscard]] bool BeginFrame() noexcept;
     [[nodiscard]] bool EndFrame() noexcept;
+    // Command-list state loss revokes attribution without closing the producer frame.
+    [[nodiscard]] bool InvalidateObservedBindings() noexcept;
     // Caller qualifies native look semantics and excludes active queries, command
     // lists and concurrent context mutation. The private result expires at close.
     [[nodiscard]] bool PrepareNativeReferenceLook(NativeReferencePreparationScope scope) noexcept;
@@ -330,6 +332,7 @@ private:
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> shaderResource;
         Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget;
         std::uint64_t nativeCreationGeneration{};
+        bool observedFp16{};
         const NativePresentationProxy* presentationProxy{};
         bool toneProduced{};
         bool operatorProduced{};
@@ -390,7 +393,8 @@ private:
     [[nodiscard]] const SceneTexture* Resolve(SceneTextureHandle handle) const noexcept;
     [[nodiscard]] const RenoDxShaderDescriptor* BoundDescriptor() const noexcept;
     [[nodiscard]] bool PromotableScene(const D3D11_TEXTURE2D_DESC& original) const noexcept;
-    [[nodiscard]] SceneTextureHandle NativeSceneForView(ID3D11View* view, bool input) const noexcept;
+    [[nodiscard]] SceneTextureHandle NativeSceneForView(ID3D11View* view, bool input) noexcept;
+    [[nodiscard]] SceneTextureHandle AcquireObservedScene(ID3D11View* view, bool input) noexcept;
     [[nodiscard]] bool PresentationStorageCurrent(const SceneTexture& scene) const noexcept;
     [[nodiscard]] bool PresentationViewsQualified(SceneTextureViews views) const noexcept;
     [[nodiscard]] bool NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept;

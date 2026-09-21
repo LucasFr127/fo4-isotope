@@ -63,17 +63,24 @@ void NativeSettingsHost::FailStartup() noexcept
     state_ = State::failed;
 }
 
+SettingsWindowConfiguration NativeSettingsHost::WindowConfiguration(UINT width, UINT height) noexcept
+{
+    return {configuration_.window, width, height, SettingsInputForGeneration(configuration_.generation),
+        reference_ ? nullptr : &live_, reference_ ? nullptr : &persistence_,
+        configuration_.presentation, configuration_.initial.showDeveloperOverlay};
+}
+
 bool NativeSettingsHost::PrepareWindow(UINT width, UINT height) noexcept
 {
+    if (reference_ && !configuration_.initial.showDeveloperOverlay) return true;
     auto* input = SettingsInputForGeneration(configuration_.generation);
     if (!input) return false;
-    return window_.Initialize(configuration_.device, configuration_.context,
-        {configuration_.window, width, height, input,
-            &live_, &persistence_, configuration_.presentation});
+    return window_.Initialize(configuration_.device, configuration_.context, WindowConfiguration(width, height));
 }
 
 bool NativeSettingsHost::PrepareOwners(std::unique_ptr<OperatorLutBuildResult>& prepared) noexcept
 {
+    if (reference_) return true;
     return PreparePersistence(persistence_, configuration_) && worker_.Initialize() &&
         live_.Initialize(configuration_.initial, prepared,
             {worker_, *configuration_.presentation, persistence_}, configuration_.scope);
@@ -82,7 +89,8 @@ bool NativeSettingsHost::PrepareOwners(std::unique_ptr<OperatorLutBuildResult>& 
 bool NativeSettingsHost::PublishSurface(UINT width, UINT height) noexcept
 {
     if (!PrepareWindow(width, height)) return false;
-    if (!SetSettingsInputHostConsumerReady(configuration_.generation, true))
+    const bool consumerReady = !reference_ || configuration_.initial.showDeveloperOverlay;
+    if (!SetSettingsInputHostConsumerReady(configuration_.generation, consumerReady))
     {
         (void)window_.Retire();
         return false;
@@ -110,6 +118,7 @@ bool NativeSettingsHost::InitializeCold(const NativeSettingsHostConfiguration& c
     try
     {
         configuration_ = configuration;
+        reference_ = configuration.initial.developerHdr10Reference;
         state_ = State::failed;
         if (!PrepareOwners(prepared)) return false;
         if (!ActivateInitialSurface())
@@ -130,6 +139,7 @@ bool NativeSettingsHost::CommitClosedFrame(PresentationScope scope) noexcept
 {
     if (!OnOwnerThread() || state_ != State::active) return false;
     if (publication_.load(std::memory_order_acquire) != Publication::ready) return false;
+    if (reference_) return configuration_.presentation->CanApplySettings(scope);
     return live_.CommitAtClosedFrame(scope);
 }
 
@@ -152,10 +162,15 @@ bool NativeSettingsHost::CanResume(UINT width, UINT height) const noexcept
         publication_.load(std::memory_order_acquire) == Publication::ready;
 }
 
+bool NativeSettingsHost::ReapplyOutput(PresentationScope scope) noexcept
+{
+    return reference_ || live_.ReapplyAfterResize(scope);
+}
+
 bool NativeSettingsHost::ResumeAfterResize(UINT width, UINT height, PresentationScope scope) noexcept
 {
     if (!CanResume(width, height)) return false;
-    if (!live_.ReapplyAfterResize(scope)) return false;
+    if (!ReapplyOutput(scope)) return false;
     return PublishSurface(width, height);
 }
 
@@ -164,11 +179,13 @@ bool NativeSettingsHost::ReadActiveOutputConfiguration(UINT width, UINT height,
 {
     if (!CanResume(width, height)) return false;
     const auto live = live_.Snapshot();
-    if (!live.available) return false;
-    const auto& display = live.active.display;
+    if (!reference_ && !live.available) return false;
+    const auto& display = reference_ ? configuration_.initial.display : live.active.display;
     output = {width, height, static_cast<float>(display.displayPeakNits), &scenes,
         {static_cast<float>(display.uiPaperWhiteNits), static_cast<float>(display.videoWhiteNits)},
         &window_};
+    if (reference_) output.whites = {};
+    output.measurePerformance = configuration_.initial.measurePerformance;
     return true;
 }
 
@@ -179,12 +196,18 @@ void NativeSettingsHost::Revoke() noexcept
     RevokeSettingsInputHost();
 }
 
+bool NativeSettingsHost::RetireLive() noexcept
+{
+    return reference_ || live_.Retire();
+}
+
 bool NativeSettingsHost::RetireCold() noexcept
 {
     if (!OnOwnerThread()) return false;
     if (state_ == State::retired) return true;
     if (state_ == State::active && !SuspendSurfaceForResize()) return false;
-    if (!window_.Retire() || !live_.Retire()) return false;
+    if (!window_.Retire()) return false;
+    if (!RetireLive()) return false;
     publication_.store(Publication::revoked, std::memory_order_release);
     state_ = State::retired;
     return true;

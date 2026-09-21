@@ -23,6 +23,7 @@ constexpr char pluginName[] = "Fallout4HDR";
 constexpr REL::Version pluginVersion{0, 0, 0, 0};
 std::once_flag startup;
 std::atomic<bool> graphicsInstallationAttempted{};
+std::atomic<bool> gradingObservationRequested{};
 
 [[nodiscard]] fo4hdr::RuntimeVersion PlainVersion(const REL::Version& version) noexcept
 {
@@ -70,7 +71,7 @@ std::optional<fo4hdr::GraphicsStartupConfiguration> ReadStartupSettings()
         spdlog::info("HDR settings file is absent; defaults apply");
         const fo4hdr::PluginConfiguration defaults;
         if (!fo4hdr::ValidatePluginConfiguration(defaults)) return std::nullopt;
-        return fo4hdr::GraphicsStartupConfiguration{defaults, settingsPath};
+        return fo4hdr::GraphicsStartupConfiguration{defaults, settingsPath, defaults.measurePerformance};
     }
     if (configuration.status != fo4hdr::PluginConfigurationStatus::loaded)
     {
@@ -82,13 +83,14 @@ std::optional<fo4hdr::GraphicsStartupConfiguration> ReadStartupSettings()
     spdlog::info("HDR settings: operator={}, peak={}, UI white={}, video white={}",
         fo4hdr::ToString(settings.algorithm), settings.display.displayPeakNits,
         settings.display.uiPaperWhiteNits, settings.display.videoWhiteNits);
-    return fo4hdr::GraphicsStartupConfiguration{settings, settingsPath};
+    return fo4hdr::GraphicsStartupConfiguration{settings, settingsPath, settings.measurePerformance};
 }
 
 void InstallStartupGraphics(const fo4hdr::GraphicsStartupConfiguration& configuration) noexcept
 {
     // A failed protected write can leave the callback reachable; never reject this
     // resident module after attempting installation merely because diagnostics fail.
+    gradingObservationRequested.store(configuration.settings.enabled, std::memory_order_release);
     graphicsInstallationAttempted.store(true, std::memory_order_release);
     const auto graphics = fo4hdr::InitializeGameDeviceGeneration(configuration);
     try
@@ -135,7 +137,8 @@ F4SE_EXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* f4se) noexce
             spdlog::info("Fallout4HDR 0.0.0 loaded: runtime 1.10.163, F4SE 0.6.23");
             if (settings) InstallStartupGraphics(*settings);
         });
-        fo4hdr::game::InitializeGameStateObserver(f4se);
+        fo4hdr::game::InitializeGameStateObserver(f4se,
+            gradingObservationRequested.load(std::memory_order_acquire));
         return true;
     }
     catch (...)

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "NativeLutObserver.hpp"
-#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 #include "GameObservationMemory.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "Fallout4HDR/config/HdrSettings.hpp"
@@ -13,6 +12,8 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+
+#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 
 namespace {
 using namespace fo4hdr::game::observation;
@@ -126,24 +127,20 @@ fo4hdr::NativeLutObservation CopyLutSlots(const LutBytes& bytes) noexcept
 namespace fo4hdr::game {
 
 bool ObserveNativeLuts(const RE::ImageSpaceManager* manager,
-    std::uint64_t resourceGeneration, std::size_t textureSrvOffset,
+    std::size_t textureSrvOffset,
     NativeLutObservation& destination) noexcept
 {
     destination = {};
     // This decoder supports only the inspected 1.10.163 override. A later
     // runtime cannot obtain identity by selecting an arbitrary texture offset.
     if (textureSrvOffset != generated::kNativeLutTextureSrvOffset) return false;
-    const auto epoch = NativeLutObservationGeneration();
     const auto* data = ActiveLut(manager);
     LutBytes bytes{};
     if (data == nullptr || !GuardedReadValue(data, bytes)) return false;
     auto candidate = CopyLutSlots(bytes);
-    candidate.generation = epoch;
     if (!LutUnchanged(manager, data, bytes)) return false;
     candidate.threadId = ::GetCurrentThreadId();
-    candidate.resourceGeneration = resourceGeneration;
     AttachImageSpaceObservation(manager, data, candidate);
-    if (NativeLutObservationGeneration() != epoch) return false;
     destination = candidate;
     return true;
 }
@@ -179,8 +176,7 @@ bool ReadObservedEffect(RE::ImageSpaceEffect* effect,
     if (!g_active.load(std::memory_order_acquire) || !EffectMatches(effect)) return false;
     RE::ImageSpaceManager* manager{};
     if (!GuardedReadValue(g_manager, manager)) return false;
-    return fo4hdr::game::ObserveNativeLuts(manager, fo4hdr::NativeLutResourceGeneration(),
-        g_facts.textureSrvOffset, candidate);
+    return fo4hdr::game::ObserveNativeLuts(manager, g_facts.textureSrvOffset, candidate);
 }
 
 void RenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
@@ -195,7 +191,11 @@ void RenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
         fo4hdr::NativeLutScope scope(candidate);
         next(effect, geometry, parameters);
     }
-    catch (...) { g_active.store(false, std::memory_order_release); }
+    catch (...)
+    {
+        g_active.store(false, std::memory_order_release);
+        fo4hdr::SetNativeLutObserverStatus(fo4hdr::NativeLutObserverStatus::invalidTarget);
+    }
 }
 std::uintptr_t Resolve(const REL::Offset2ID& mappings, std::uintptr_t base, std::uint64_t id)
 {
@@ -294,6 +294,7 @@ bool InstallQualifiedTarget(std::uintptr_t table, std::uintptr_t manager, std::u
     g_next.store(reinterpret_cast<Render>(target), std::memory_order_release);
     if (!InstallRenderSlot(slot, original)) return false;
     g_active.store(true, std::memory_order_release);
+    fo4hdr::SetNativeLutObserverStatus(fo4hdr::NativeLutObserverStatus::ready);
     return true;
 }
 bool ResolveAndInstall(const REX::FModule& module)
@@ -322,18 +323,29 @@ bool PinCallback(const REX::FModule& module)
 }  // namespace
 
 namespace fo4hdr::game {
-bool InitializeNativeLutObserver(const NativeLutInstallation& installation) noexcept
+bool InitializeNativeLutObserver(bool requested) noexcept
 {
-    if (!installation.Admitted()) return false;
-    if (installation.facts.textureSrvOffset != 0 || installation.facts.effectSubobjectOffset != 0x118) return false;
-    if (g_attempted.exchange(true, std::memory_order_acq_rel)) return g_active.load(std::memory_order_acquire);
+    using Status = NativeLutObserverStatus;
+    if (g_attempted.exchange(true, std::memory_order_acq_rel))
+        return GetNativeLutObserverStatus() == Status::ready;
+    if (!requested) return false;
+    SetNativeLutObserverStatus(Status::unsupportedRuntime);
+#if !defined(FO4HDR_RUNTIME_1_10_163)
+    return false;
+#else
     try
     {
+        using namespace generated;
         const auto module = REX::FModule::GetExecutingModule();
         if (!PinCallback(module)) return false;
-        g_facts = installation.facts;
+        g_facts = {kNativeLutRenderId, kNativeLutRenderRva, kNativeLutRenderBytes,
+            static_cast<std::uint32_t>(kNativeLutEffectSubobjectOffset),
+            static_cast<std::uint32_t>(kNativeLutTextureSrvOffset)};
+        SetNativeLutObserverStatus(Status::invalidTarget);
         return ResolveAndInstall(module);
     }
     catch (...) { return false; }
+#endif
 }
+
 }  // namespace fo4hdr::game

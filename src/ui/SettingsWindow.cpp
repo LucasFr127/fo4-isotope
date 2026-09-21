@@ -6,6 +6,7 @@
 #include "LutProfilesPanel.hpp"
 #include "DisplayDiscovery.hpp"
 #include "LiveSettings.hpp"
+#include "NativeActiveOwner.hpp"
 #include "passes/PresentationPass.hpp"
 
 #include <imgui.h>
@@ -323,7 +324,8 @@ void InputEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
 
 bool QualifiedConfiguration(const SettingsWindowConfiguration& configuration) noexcept
 {
-    if (!configuration.input || !configuration.live) return false;
+    if (!configuration.input) return false;
+    if (!configuration.live && !configuration.developerOverlay) return false;
     if (!configuration.width || !configuration.height) return false;
     constexpr auto maximum = D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
     if (configuration.width > maximum || configuration.height > maximum) return false;
@@ -566,6 +568,20 @@ struct SettingsWindow::State
         return DrawLutProfilesPanel(editable.display, observation, gradeProfileSelection);
     }
 
+    void DrawDeveloperPanel()
+    {
+        const auto evidence = ReadNativeDiagnosticProjection();
+        if (ImGui::Begin("Fallout4HDR diagnostics", nullptr, ImGuiWindowFlags_NoSavedSettings))
+        {
+            ImGui::TextUnformatted(evidence.referenceRequested ? "Native HDR10 reference" : "Production HDR");
+            ImGui::Text("Trace frames: %llu; HDR submissions: %llu",
+                static_cast<unsigned long long>(evidence.tracedFrames),
+                static_cast<unsigned long long>(evidence.hdrFrames));
+            ImGui::TextUnformatted(evidence.traceRequested ? "Pipeline trace enabled" : "Pipeline trace disabled");
+        }
+        ImGui::End();
+    }
+
     void DrawPanel()
     {
         const auto snapshot = configuration.live->Snapshot();
@@ -602,17 +618,33 @@ struct SettingsWindow::State
         if (actions.save) (void)configuration.live->RequestSave();
     }
 
+    void DrawPanels()
+    {
+        if (open && configuration.live) DrawPanel();
+        else
+        {
+            hideOverlay = false;
+            calibrationMode = 0;
+        }
+        if (configuration.developerOverlay) DrawDeveloperPanel();
+    }
+
+    bool HasVisiblePanel() const noexcept
+    {
+        return (open && configuration.live) || configuration.developerOverlay;
+    }
+
     SettingsWindowOverlay RenderFrame(std::uint64_t requestedFrame, bool& frameOpen)
     {
         DrainInput();
         if (!BeginFrame()) return {};
         frameOpen = true;
-        if (open) DrawPanel();
+        DrawPanels();
         ImGui::Render();
         frameOpen = false;
         const auto& io = ImGui::GetIO();
-        configuration.input->SetCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
-        if (!open)
+        configuration.input->SetCapture(HasVisiblePanel(), io.WantCaptureKeyboard, io.WantCaptureMouse);
+        if (!HasVisiblePanel())
         {
             calibrationMode = 0;
             return {};
@@ -646,7 +678,7 @@ bool SettingsWindow::Initialize(ID3D11Device* device, ID3D11DeviceContext1* cont
     {
         auto candidate = std::make_unique<State>();
         candidate->configuration = configuration;
-        candidate->editable = configuration.live->Snapshot().requested;
+        if (configuration.live) candidate->editable = configuration.live->Snapshot().requested;
         candidate->device = device;
         candidate->context = context;
         if (!candidate->Prepare()) return false;

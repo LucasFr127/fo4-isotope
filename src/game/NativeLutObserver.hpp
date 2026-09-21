@@ -18,26 +18,14 @@ struct NativeLutRuntimeFacts
     std::uint32_t effectSubobjectOffset{}, textureSrvOffset{};
 };
 
-struct NativeLutInstallation
-{
-    NativeLutRuntimeFacts facts;
-    // Matching code/table bytes do not supply these trusted caller facts.
-    bool runtimeAuthorized{}, preUseExclusive{}, abiAndRegistryLifetimeProven{};
-    bool addressLibraryAvailable{};
-
-    [[nodiscard]] bool Admitted() const noexcept
-    {
-        return runtimeAuthorized && preUseExclusive && abiAndRegistryLifetimeProven &&
-            addressLibraryAvailable;
-    }
-};
-
-[[nodiscard]] bool InitializeNativeLutObserver(const NativeLutInstallation& installation) noexcept;
+// Requested installation uses the generated exact-runtime map and checked target bytes.
+// These checks do not establish in-game pre-use exclusivity or registry lifetime.
+[[nodiscard]] bool InitializeNativeLutObserver(bool requested) noexcept;
 
 // The admitted synchronous Gamma Render caller owns manager/texture lifetimes.
 // The opaque SRV offset is a reviewed exact-runtime fact, not inferred from RE.
 [[nodiscard]] bool ObserveNativeLuts(const RE::ImageSpaceManager* manager,
-    std::uint64_t resourceGeneration, std::size_t textureSrvOffset,
+    std::size_t textureSrvOffset,
     NativeLutObservation& destination) noexcept;
 
 }  // namespace fo4hdr::game

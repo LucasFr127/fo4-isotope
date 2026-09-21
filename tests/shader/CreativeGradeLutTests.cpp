@@ -196,9 +196,24 @@ ComPtr<ID3D11ShaderResourceView> QuantizedProfileLook(ID3D11Device* device, LutP
     return CodedProfileLook(device, codes);
 }
 
+class ControlledLutObserverStatus final
+{
+public:
+    ControlledLutObserverStatus() noexcept : previous_(GetNativeLutObserverStatus())
+    {
+        // This fixture admits the plain scope, not a native hook or shader match.
+        SetNativeLutObserverStatus(NativeLutObserverStatus::ready);
+    }
+    ~ControlledLutObserverStatus() { SetNativeLutObserverStatus(previous_); }
+
+private:
+    NativeLutObserverStatus previous_;
+};
+
 void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentation,
     const OperatorLutData& table)
 {
+    const ControlledLutObserverStatus status;
     auto& fixture = inputs.fixture;
     for (std::size_t slot = 0; slot < inputs.luts.size(); ++slot)
         inputs.luts[slot] = QuantizedProfileLook(fixture.gpu.device.Get(), inputs.pixels[slot]);
@@ -223,7 +238,6 @@ void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentati
     {
         inputs.Bind();
         NativeLutObservation observation;
-        observation.resourceGeneration = NativeLutResourceGeneration();
         observation.generation = NativeLutObservationGeneration();
         observation.threadId = GetCurrentThreadId();
         observation.validSlots = 1;
@@ -233,7 +247,7 @@ void VerifyLutProfiles(WeightedGradeInputs& inputs, PresentationPass& presentati
         observation.expectedShaderViews[0] = reinterpret_cast<std::uintptr_t>(
             inputs.luts[test == ProfileDrawCase::unmatched ? 1 : 0].Get());
         NativeLutScope scope(observation);
-        if (test == ProfileDrawCase::revoked) RevokeNativeLutObservation();
+        if (test == ProfileDrawCase::revoked) ResetNativeLutObservation();
         FO4HDR_CHECK(DrawPass(fixture, 4, true) == SceneDrawOutcome::replaced);
         inputs.Check();
         const auto copied = fixture.renderer.CopyLutInspector();
@@ -318,7 +332,6 @@ SceneGradeConfiguration FidelityConfiguration(ColorGradingMethod method, const P
 NativeLutObservation FidelityObservation(const WeightedGradeInputs& inputs)
 {
     NativeLutObservation observation;
-    observation.resourceGeneration = NativeLutResourceGeneration();
     observation.generation = NativeLutObservationGeneration();
     observation.threadId = GetCurrentThreadId();
     observation.validSlots = 1;
@@ -352,6 +365,7 @@ void CheckFidelityWeights(const WeightedGradeInputs& inputs)
 std::vector<Float4> RenderProfileFidelity(const std::filesystem::path& directory,
     ColorGradingMethod method, const ProfileFidelityCase& test, bool profilesActive)
 {
+    const ControlledLutObserverStatus status;
     const auto configuration = FidelityConfiguration(method, test, profilesActive);
     PixelFixture fixture(directory, width, height, {}, nullptr, configuration);
     WeightedGradeInputs inputs(fixture);

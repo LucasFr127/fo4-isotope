@@ -85,7 +85,7 @@ class NativeUiCapture
 {
 public:
     [[nodiscard]] bool Initialize(ID3D11Device* device, ID3D11DeviceContext* context,
-        ScenePassConfiguration configuration) noexcept;
+        ScenePassConfiguration configuration, bool developerReference = false) noexcept;
     [[nodiscard]] bool Retire() noexcept;
     [[nodiscard]] bool ObserveCreatedPixelShader(std::span<const std::byte> bytecode,
         ID3D11PixelShader* shader) noexcept;
@@ -124,6 +124,7 @@ private:
     [[nodiscard]] bool CanBeginFrame(const NativeUiFrame& frame, NativeUiCaptureScope scope) const noexcept;
     [[nodiscard]] bool CommitFrame(const NativeUiFrame& frame) noexcept;
     [[nodiscard]] bool PresentationSceneCurrent() const noexcept;
+    [[nodiscard]] bool QualifiedPresentationScene(const ScenePassRenderer& scenes) const noexcept;
     [[nodiscard]] bool MissingRequiredLayer() const noexcept;
     [[nodiscard]] bool CanCapture(const QualifiedNativeUiDraw& draw) const noexcept;
     [[nodiscard]] bool OwnedLayerAlias(ID3D11Texture2D* texture) const noexcept;
@@ -153,6 +154,7 @@ private:
     std::array<bool, 2> captured_{};
     bool failed_{};
     bool invoking_{};
+    bool developerReference_{};
 };
 
 }  // namespace fo4hdr

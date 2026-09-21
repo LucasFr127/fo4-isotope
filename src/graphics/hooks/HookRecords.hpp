@@ -3,7 +3,7 @@
 
 #include "ContextHooks.hpp"
 #include "../HdrRenderer.hpp"
-#include "../NativeSettingsHost.hpp"
+#include "../NativeActiveOwner.hpp"
 #include "../passes/PresentationPass.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 #include "../passes/ObservedDraw.hpp"
@@ -15,6 +15,8 @@
 #include <cstdint>
 
 namespace fo4hdr {
+
+using NativeObjectRelease = ULONG(STDMETHODCALLTYPE*)(IUnknown*);
 
 using CreateTexture2D = HRESULT(STDMETHODCALLTYPE*)(ID3D11Device*,
     const D3D11_TEXTURE2D_DESC*, const D3D11_SUBRESOURCE_DATA*, ID3D11Texture2D**);
@@ -44,6 +46,10 @@ using SwapChainResize = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT,
 // rollback failure. Native predecessors are immutable and table-specific.
 struct DeviceHookRecord
 {
+    ObjectGenerationIdentity identity;
+    void** originalTable{};
+    std::array<void*, 256> shadow{};
+    NativeObjectRelease nextRelease{};
     ID3D11Device* owned{};
     void** table{};
     CreateTexture2D nextCreateTexture2D{};
@@ -58,6 +64,10 @@ struct DeviceHookRecord
 
 struct ContextHookRecord
 {
+    ObjectGenerationIdentity identity;
+    void** originalTable{};
+    std::array<void*, 256> shadow{};
+    NativeObjectRelease nextRelease{};
     ID3D11DeviceContext* owned{};
     void** table{};
     DWORD thread{};
@@ -76,24 +86,17 @@ struct ContextHookRecord
     std::array<void*, 10> originals{};
     std::array<DWORD, 10> slotProtection{};
     ContextQueryObserver queries;
-    ScenePassRenderer renderer;
-    NativeUiCapture uiCapture;
-    NativePresentationProxy presentationProxy;
-    PresentationPass presentation;
-    NativeSettingsHost settingsHost;
-    SceneTextureHandle presentationScene;
     std::atomic<bool> retainedReferences{};
-    std::uint64_t lifecycleEpoch{};
-    bool hdrPrepared{};
-    bool frameRedirected{};
     std::atomic<bool> admitted{};
     std::atomic_flag busy = ATOMIC_FLAG_INIT;
-    bool internalWork{};
-    bool resourcesRetired{};
 };
 
 struct SwapChainHookRecord
 {
+    ObjectGenerationIdentity identity;
+    void** originalTable{};
+    std::array<void*, 256> shadow{};
+    NativeObjectRelease nextRelease{};
     IDXGISwapChain* owned{};
     void** table{};
     SwapChainPresent nextPresent{};
@@ -110,6 +113,10 @@ struct SwapChainHookRecord
 extern std::atomic<DeviceHookRecord*> g_deviceHooks;
 extern std::atomic<ContextHookRecord*> g_contextHooks;
 extern std::atomic<SwapChainHookRecord*> g_swapChainHooks;
+
+ULONG STDMETHODCALLTYPE HookDeviceRelease(IUnknown* object) noexcept;
+ULONG STDMETHODCALLTYPE HookContextRelease(IUnknown* object) noexcept;
+ULONG STDMETHODCALLTYPE HookSwapChainRelease(IUnknown* object) noexcept;
 
 [[nodiscard]] bool NativeRoutingOwned() noexcept;
 [[nodiscard]] bool NativeChainOwned() noexcept;

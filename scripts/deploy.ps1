@@ -35,6 +35,7 @@ $expectedRelativeFiles = @(
     "F4SE\Plugins\Fallout4HDR.dll",
     "F4SE\Plugins\Fallout4HDR.pdb",
     "F4SE\Plugins\Fallout4HDR.ini",
+    "F4SE\Plugins\Fallout4HDR\Default.ini",
     "F4SE\Plugins\Fallout4HDR\runtime-$Runtime.json"
 )
 $actualRelativeFiles = @(

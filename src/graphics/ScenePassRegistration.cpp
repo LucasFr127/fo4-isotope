@@ -35,6 +35,16 @@ bool SameDevice(ID3D11DeviceChild* child, ID3D11Device* device) noexcept
     return SameIdentity(owner.Get(), device);
 }
 
+ComPtr<ID3D11Texture2D> ObservedSceneTexture(ID3D11View* view, ID3D11Device* device) noexcept
+{
+    if (!SameDevice(view, device)) return {};
+    ComPtr<ID3D11Resource> resource;
+    view->GetResource(&resource);
+    ComPtr<ID3D11Texture2D> texture;
+    if (!resource || FAILED(resource.As(&texture))) return {};
+    return texture;
+}
+
 HRESULT PrepareSceneViews(ID3D11Device* device, ID3D11Texture2D* texture,
     ComPtr<ID3D11ShaderResourceView>& shaderResource,
     ComPtr<ID3D11RenderTargetView>& renderTarget) noexcept
@@ -63,6 +73,16 @@ bool GpuSceneStorage(const D3D11_TEXTURE2D_DESC& description) noexcept
 bool SupportedSceneLayout(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
     return SingleSceneSubresource(description) && GpuSceneStorage(description);
+}
+
+bool ObservedFp16Layout(const D3D11_TEXTURE2D_DESC& description, UINT width, UINT height) noexcept
+{
+    if (description.Format != DXGI_FORMAT_R16G16B16A16_FLOAT) return false;
+    if (!SupportedSceneLayout(description)) return false;
+    const SceneResourceDescription footprint{SceneResourceFormat::r11g11b10Float,
+        description.Width, description.Height};
+    // Reuse the aspect/extent rule only; this is observed FP16, not proof of R11 origin.
+    return ShouldPromoteSceneResourceToFp16(footprint, width, height);
 }
 
 bool PipboyTextureMatches(const D3D11_TEXTURE2D_DESC& value) noexcept
@@ -236,7 +256,7 @@ bool ScenePassRenderer::PresentationStorageCurrent(const SceneTexture& scene) co
 bool ScenePassRenderer::NativeSceneViewMatches(const SceneTexture& scene, ID3D11View* view, bool input) const noexcept
 {
     if (!PresentationStorageCurrent(scene)) return false;
-    if (scene.presentationProxy == nullptr)
+    if (scene.presentationProxy == nullptr && !scene.observedFp16)
     {
         NativeSceneAttribution attribution{};
         if (!ReadNativeSceneAttribution(device_.Get(), scene.texture.Get(),
@@ -250,7 +270,31 @@ bool ScenePassRenderer::NativeSceneViewMatches(const SceneTexture& scene, ID3D11
                  : EquivalentSceneRtv(device_.Get(), scene.texture.Get(), target.Get());
 }
 
-SceneTextureHandle ScenePassRenderer::NativeSceneForView(ID3D11View* view, bool input) const noexcept
+SceneTextureHandle ScenePassRenderer::AcquireObservedScene(ID3D11View* view, bool input) noexcept
+{
+    if (!Active() || invoking_) return {};
+    if (sceneCount_ == scenes_.size()) return {};
+    const auto texture = ObservedSceneTexture(view, device_.Get());
+    if (!texture) return {};
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    if (!ObservedFp16Layout(description, width_, height_)) return {};
+    SceneTexture prepared;
+    prepared.texture = texture;
+    prepared.observedFp16 = true;
+    if (FAILED(PrepareSceneViews(device_.Get(), texture.Get(),
+            prepared.shaderResource, prepared.renderTarget))) return {};
+    if (!NativeSceneViewMatches(prepared, view, input)) return {};
+    const auto slot = sceneCount_++;
+    scenes_[slot] = std::move(prepared);
+    SceneTextureHandle handle;
+    handle.owner_ = this;
+    handle.epoch_ = lifetime_.CurrentEpoch();
+    handle.slot_ = slot;
+    return handle;
+}
+
+SceneTextureHandle ScenePassRenderer::NativeSceneForView(ID3D11View* view, bool input) noexcept
 {
     if (view == nullptr) return {};
     for (std::size_t slot = 0; slot < sceneCount_; ++slot)
@@ -262,10 +306,10 @@ SceneTextureHandle ScenePassRenderer::NativeSceneForView(ID3D11View* view, bool 
         handle.slot_ = slot;
         return handle;
     }
-    return {};
+    return AcquireObservedScene(view, input);
 }
 
-NativeSceneHandles ScenePassRenderer::BoundNativeSceneHandles() const noexcept
+NativeSceneHandles ScenePassRenderer::BoundNativeSceneHandles() noexcept
 {
     if (!Active() || invoking_) return {};
     const auto* descriptor = BoundDescriptor();
@@ -273,7 +317,7 @@ NativeSceneHandles ScenePassRenderer::BoundNativeSceneHandles() const noexcept
     return ResolveNativeSceneBindings(*descriptor);
 }
 
-NativeSceneHandles ScenePassRenderer::ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) const noexcept
+NativeSceneHandles ScenePassRenderer::ResolveNativeSceneBindings(const RenoDxShaderDescriptor& descriptor) noexcept
 {
     if (!Active() || invoking_) return {};
     if (FindRenoDxFallout4Shader(descriptor.crc32) != &descriptor) return {};

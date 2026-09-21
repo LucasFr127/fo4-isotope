@@ -194,7 +194,7 @@ void TestLifecycleTransitions()
     FO4HDR_CHECK(snapshot.lifecycleSucceeded);
     FO4HDR_CHECK(snapshot.resourceGeneration == 1);
     fo4hdr::ApplyGameLifecycleTransition(snapshot, Event::NewGame, true, 0);
-    FO4HDR_CHECK(snapshot.loading);
+    FO4HDR_CHECK(!snapshot.loading);
     FO4HDR_CHECK(snapshot.resourceGeneration == 2);
     FO4HDR_CHECK(snapshot.lifecycleGeneration == 4);
     FO4HDR_CHECK(snapshot.lifecycleEvent == Event::NewGame);
@@ -217,7 +217,7 @@ void TestGraphicsLifecyclePublication()
     publisher.PublishTransition(Event::PreSaveGame, true);
     FO4HDR_CHECK(publisher.Read().gameplayReady);
     publisher.PublishTransition(Event::NewGame, true);
-    FO4HDR_CHECK(!publisher.Read().gameplayReady);
+    FO4HDR_CHECK(publisher.Read().gameplayReady);
     FO4HDR_CHECK(publisher.Read().resetEpoch == 2);
     publisher.PublishTransition(Event::PostLoadGame, true);
     FO4HDR_CHECK(publisher.Read().gameplayReady);
@@ -320,25 +320,30 @@ void TestCopiedImageSpaceAndDrawScope()
 
     fo4hdr::NativeLutObservation observed{};
     observed.threadId = ::GetCurrentThreadId();
-    observed.resourceGeneration = 7;
     observed.validSlots = 1;
-    fo4hdr::ResetNativeLutObservation(7);
-    observed.generation = fo4hdr::NativeLutObservationGeneration();
+    // The controlled plain scope does not install or qualify a native observer.
+    const auto previousStatus = fo4hdr::GetNativeLutObserverStatus();
+    fo4hdr::SetNativeLutObserverStatus(fo4hdr::NativeLutObserverStatus::ready);
+    fo4hdr::ResetNativeLutObservation();
     fo4hdr::NativeLutObservation copy{};
     {
         const fo4hdr::NativeLutScope scope(observed);
-        FO4HDR_CHECK(fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+        copy = fo4hdr::CurrentNativeLutObservation();
+        FO4HDR_CHECK(fo4hdr::IsCurrentNativeLutObservation(copy, observed.threadId));
         FO4HDR_CHECK(copy.serial != 0 && copy.validSlots == 1);
         {
             const fo4hdr::NativeLutScope nested(observed);
-            FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+            copy = fo4hdr::CurrentNativeLutObservation();
+            FO4HDR_CHECK(fo4hdr::IsCurrentNativeLutObservation(copy, observed.threadId));
         }
-        FO4HDR_CHECK(fo4hdr::ReadCurrentNativeLutObservation(7, copy));
-        fo4hdr::ResetNativeLutObservation(8);
-        FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(7, copy));
+        copy = fo4hdr::CurrentNativeLutObservation();
+        FO4HDR_CHECK(fo4hdr::IsCurrentNativeLutObservation(copy, observed.threadId));
+        fo4hdr::ResetNativeLutObservation();
+        FO4HDR_CHECK(!fo4hdr::IsCurrentNativeLutObservation(copy, observed.threadId));
     }
-    FO4HDR_CHECK(!fo4hdr::ReadCurrentNativeLutObservation(8, copy));
-    fo4hdr::ResetNativeLutObservation(0);
+    copy = fo4hdr::CurrentNativeLutObservation();
+    FO4HDR_CHECK(!fo4hdr::IsCurrentNativeLutObservation(copy, observed.threadId));
+    fo4hdr::SetNativeLutObserverStatus(previousStatus);
 }
 
 

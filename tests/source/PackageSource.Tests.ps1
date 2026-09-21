@@ -279,7 +279,10 @@ $expected = [string[]]@(
     "tests/source/ToolchainPolicy.Tests.ps1",
     "third_party/xmake-source-manifest.json",
     "versions.lock.json",
-    "xmake-requires.lock"
+    "xmake-requires.lock",
+    "config/Fallout4HDR/Default.ini",
+    "src/graphics/NativeActiveOwner.hpp",
+    "src/graphics/NativeActiveOwner.cpp"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

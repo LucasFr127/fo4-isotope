@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "GameDeviceGeneration.hpp"
+#include "NativeActiveOwner.hpp"
 #include "DeviceCreationHook.hpp"
 #include "hooks/DeviceHooks.hpp"
 
@@ -80,8 +81,10 @@ bool PrepareStartupSettings(const GraphicsStartupConfiguration& configuration) n
     if (!ValidatePluginConfiguration(configuration.settings)) return false;
     try
     {
-        auto result = std::make_unique<OperatorLutBuildResult>();
+        startupConfiguration = configuration;
         const auto& value = configuration.settings;
+        if (!value.enabled || value.developerHdr10Reference) return true;
+        auto result = std::make_unique<OperatorLutBuildResult>();
         result->request = {value.algorithm, value.display.displayPeakNits, 1,
             ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters)};
         result->data = BuildOperatorLut(value.algorithm, value.display.displayPeakNits,
@@ -372,13 +375,26 @@ bool ResolveExpectedExport(void** slot) noexcept
     return AtomicPointerLoad(slot) == expectedExport;
 }
 
+bool HdrCreationRequested(const PluginConfiguration& settings) noexcept
+{
+    if (!settings.enabled) return false;
+    return !settings.developerHdr10Reference || settings.developerMode;
+}
+
+bool PrepareNativeCreationCallbacks() noexcept
+{
+    const auto& settings = startupConfiguration.settings;
+    return PrepareDeviceCreationObserver(DeviceCreationCallbacks{nullptr, ObserveDevice, DisableBinding,
+        ObserveHdrDevice, DiscardHdrDevice, HdrCreationRequested(settings), settings.forceHdrSwapChainFailure});
+}
+
 GraphicsDeviceBindingStatus InstallImport(std::span<std::byte> image) noexcept
 {
     const auto imported = FindPe32PlusIatSlot(image, "d3d11.dll", "D3D11CreateDeviceAndSwapChain");
     if (imported.status != PeIatStatus::success) return GraphicsDeviceBindingStatus::importUnavailable;
     if (!ResolveExpectedExport(imported.slot))
         return GraphicsDeviceBindingStatus::foreignPredecessor;
-    if (!PrepareDeviceCreationObserver(DeviceCreationCallbacks{nullptr, ObserveDevice, DisableBinding, ObserveHdrDevice, DiscardHdrDevice}))
+    if (!PrepareNativeCreationCallbacks())
         return GraphicsDeviceBindingStatus::installationFailed;
     const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
     if (!importOwner.Install(imported.slot, reinterpret_cast<void*>(&HookD3dCreate),
@@ -397,6 +413,9 @@ GraphicsDeviceBindingStatus InitializeGameDeviceGeneration(
 {
     if (initialization.test_and_set(std::memory_order_acq_rel))
         return GraphicsDeviceBindingStatus::alreadyInitialized;
+    SetNativePerformanceRequest(configuration.measurePerformance);
+    PublishNativePerformancePath(HdrCreationRequested(configuration.settings));
+    SetNativeDiagnosticRequest(configuration.settings);
     // CPU preparation precedes reachable native callbacks and starts no worker.
     if (!PrepareStartupSettings(configuration)) return GraphicsDeviceBindingStatus::settingsUnavailable;
     const auto image = MainImage();

@@ -83,6 +83,7 @@ target("Fallout4HDR")
         "src/config/PluginConfiguration.cpp", "src/config/HdrSettings.cpp",
         "src/graphics/GameDeviceGeneration.cpp", "src/graphics/DeviceCreationHook.cpp",
         "src/graphics/SwapChainObservation.cpp", "src/graphics/RendererLifetime.cpp",
+        "src/graphics/NativeActiveOwner.cpp",
         "src/hooks/PeIat.cpp", "src/hooks/HookOwnership.cpp")
     add_files("src/graphics/HdrRenderer.cpp",
         "src/graphics/ScenePassRegistration.cpp",
@@ -122,12 +123,13 @@ target("Fallout4HDR")
         local stage = path.join(os.projectdir(), "dist", selected_runtime, "Data/F4SE/Plugins")
         local manifestdir = path.join(stage, "Fallout4HDR")
         local manifest = path.join(os.projectdir(), "runtime", selected_runtime, "manifest.json")
+        local profilepack = path.join(os.projectdir(), "config/Fallout4HDR/Default.ini")
         assert(target:symbolfile(), "Missing plugin symbol file path")
         local files = { target:targetfile(), target:symbolfile(),
             path.join(os.projectdir(), "config/Fallout4HDR.ini") }
         local allowed = { ["Fallout4HDR.dll"] = true, ["Fallout4HDR.pdb"] = true,
             ["Fallout4HDR.ini"] = true }
-        for _, file in ipairs(table.join(files, { manifest })) do
+        for _, file in ipairs(table.join(files, { manifest, profilepack })) do
             assert(os.isfile(file), "Missing staging input: " .. file)
         end
         for _, file in ipairs(os.files(path.join(stage, "*"))) do
@@ -137,8 +139,9 @@ target("Fallout4HDR")
             assert(directory == manifestdir, "Unexpected staging directory: " .. directory)
         end
         local manifestname = "runtime-" .. selected_runtime .. ".json"
+        local childfiles = { [manifestname] = true, ["Default.ini"] = true }
         for _, file in ipairs(os.files(path.join(manifestdir, "*"))) do
-            assert(path.filename(file) == manifestname, "Unexpected manifest staging file: " .. file)
+            assert(childfiles[path.filename(file)], "Unexpected plugin data staging file: " .. file)
         end
         assert(#os.dirs(path.join(manifestdir, "*")) == 0, "Unexpected manifest staging directory")
         os.mkdir(manifestdir)
@@ -146,6 +149,7 @@ target("Fallout4HDR")
             os.cp(file, path.join(stage, path.filename(file)))
         end
         os.cp(manifest, path.join(manifestdir, manifestname))
+        os.cp(profilepack, path.join(manifestdir, "Default.ini"))
     end)
 target_end()
 
@@ -254,6 +258,7 @@ target("fo4hdr-shader-tests")
     add_files("src/tonemap/Gt7.cpp", "tests/unit/tonemap/Gt7Tests.cpp",
         "tests/shader/Gt7ReferenceTests.cpp",
         "src/output/Hdr10Color.cpp", "src/output/SelectiveColor.cpp", "src/graphics/HdrRenderer.cpp",
+        "src/output/NativeLutObservation.cpp",
         "src/graphics/ScenePassRegistration.cpp",
         "src/graphics/resources/NativeSceneAssociation.cpp",
         "src/graphics/resources/NativePresentationProxy.cpp",
@@ -272,7 +277,8 @@ target("fo4hdr-shader-tests")
         "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp",
         "src/graphics/resources/NativeReferenceResources.cpp",
         "src/graphics/passes/NativeReferenceGradePass.cpp",
-        "src/graphics/RendererLifetime.cpp", "tests/shader/main.cpp",
+        "src/graphics/RendererLifetime.cpp", "src/graphics/NativeActiveOwner.cpp",
+        "tests/shader/main.cpp",
         "tests/shader/ShaderTestOptions.cpp",
         "tests/shader/ShippingPixelShaderTests.cpp", "tests/shader/NativeReferencePrepareTests.cpp", "tests/shader/PresentationPassTests.cpp",
         "tests/shader/DisplayCalibrationTests.cpp",

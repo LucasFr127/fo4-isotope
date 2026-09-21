@@ -67,6 +67,9 @@ private:
     [[nodiscard]] bool QualifiedStartup(const NativeSettingsHostConfiguration& configuration) const noexcept;
     [[nodiscard]] bool PrepareWindow(UINT width, UINT height) noexcept;
     void FailStartup() noexcept;
+    [[nodiscard]] SettingsWindowConfiguration WindowConfiguration(UINT width, UINT height) noexcept;
+    [[nodiscard]] bool ReapplyOutput(PresentationScope scope) noexcept;
+    [[nodiscard]] bool RetireLive() noexcept;
 
     const DWORD ownerThread_{GetCurrentThreadId()};
     OperatorLutWorker worker_;
@@ -76,6 +79,7 @@ private:
     NativeSettingsHostConfiguration configuration_;
     std::atomic<Publication> publication_{Publication::cold};
     State state_{State::cold};
+    bool reference_{};
 };
 
 }  // namespace fo4hdr

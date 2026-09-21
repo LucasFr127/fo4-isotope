@@ -297,7 +297,10 @@ $files = [string[]]@(
     "tests/source/ToolchainPolicy.Tests.ps1",
     "third_party/xmake-source-manifest.json",
     "versions.lock.json",
-    "xmake-requires.lock"
+    "xmake-requires.lock",
+    "config/Fallout4HDR/Default.ini",
+    "src/graphics/NativeActiveOwner.hpp",
+    "src/graphics/NativeActiveOwner.cpp"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

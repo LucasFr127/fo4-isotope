@@ -27,6 +27,7 @@ struct SettingsWindowConfiguration
     SettingsPersistence* persistence{};
     // Optional renderer-thread owner outlives this window; only copied diagnostics escape.
     PresentationPass* presentation{};
+    bool developerOverlay{};
 };
 
 struct SettingsWindowOverlay

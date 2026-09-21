@@ -29,6 +29,8 @@ struct DeviceCreationCallbacks
     // fresh owned aliases/references and installed object hooks were retired safely.
     CreatedDeviceObserver hdrCreated{};
     DiscardHdrCreation discardHdr{};
+    bool hdrEnabled{true};
+    bool forceHdrFailure{};
 };
 
 // Returned interfaces are borrowed during delivery; a receiver owns any retained references.

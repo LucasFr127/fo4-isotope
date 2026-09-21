@@ -15,6 +15,13 @@ struct PluginConfiguration
 {
     HdrSettings display;
     OperatorLutAlgorithm algorithm{OperatorLutAlgorithm::aces2};
+    bool measurePerformance{};
+    bool enabled{};
+    bool developerMode{};
+    bool traceRenderPipeline{};
+    bool developerHdr10Reference{};
+    bool showDeveloperOverlay{};
+    bool forceHdrSwapChainFailure{};
     [[nodiscard]] bool operator==(const PluginConfiguration& other) const noexcept;
 };
 

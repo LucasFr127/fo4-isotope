@@ -13,9 +13,8 @@ namespace RE { class ImageSpaceManager; class ImageSpaceBaseData; class ImageSpa
 
 namespace fo4hdr::game {
 
-// The serialized collector alone builds and replaces the catalog; readers copy
-// immutable entries using one try-lock attempt and the current resource token.
-[[nodiscard]] bool BuildImageSpaceCatalog(std::uint64_t resourceGeneration) noexcept;
+// The serialized collector builds the immutable process-lifetime catalog once.
+[[nodiscard]] bool BuildImageSpaceCatalog() noexcept;
 [[nodiscard]] bool ObserveImageSpace(const RE::ImageSpaceManager* manager,
     std::uint64_t resourceGeneration, ImageSpaceSnapshot& destination) noexcept;
 
@@ -54,15 +53,10 @@ struct ImageSpaceInstallation
     ImageSpaceRuntimeFacts facts{};
     const void* trampolineInterface{};
     std::uint32_t pluginHandle{UINT32_MAX};
-    bool runtimeAuthorized{}, addressLibraryAvailable{}, preUseExclusive{}, abiAndRegistryLifetimeProven{};
-
-    [[nodiscard]] bool Admitted() const noexcept
-    {
-        return runtimeAuthorized && addressLibraryAvailable && preUseExclusive && abiAndRegistryLifetimeProven;
-    }
 };
 
-[[nodiscard]] bool InitializeImageSpaceObserver(const ImageSpaceInstallation& installation) noexcept;
+[[nodiscard]] bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept;
 
 }  // namespace fo4hdr::game
 
@@ -112,7 +106,7 @@ public:
     struct Token
     {
         std::uint64_t revision{};
-        bool exclusive{}, entered{};
+        bool exclusive{};
     };
 
     [[nodiscard]] Token Begin() noexcept;
@@ -123,7 +117,6 @@ public:
 
 private:
     [[nodiscard]] bool CanPublish(const Token& token) const noexcept;
-    [[nodiscard]] std::uint64_t AdvanceRevision() noexcept;
     std::atomic<std::uint32_t> active_{};
     std::atomic<std::uint64_t> revision_{};
     std::atomic_flag flag_ = ATOMIC_FLAG_INIT;

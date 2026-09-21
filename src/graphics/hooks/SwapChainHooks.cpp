@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <type_traits>
 #include <memory>
+#include <tuple>
 
 namespace fo4hdr {
 namespace {
@@ -19,18 +20,18 @@ bool DeviceLost(HRESULT result) noexcept
 
 bool SameChainLayout(const DXGI_SWAP_CHAIN_DESC& left, const DXGI_SWAP_CHAIN_DESC& right) noexcept
 {
-    return left.BufferDesc.Width == right.BufferDesc.Width &&
-        left.BufferDesc.Height == right.BufferDesc.Height &&
-        left.BufferDesc.Format == right.BufferDesc.Format &&
-        left.SampleDesc.Count == right.SampleDesc.Count &&
-        left.SampleDesc.Quality == right.SampleDesc.Quality;
+    return std::tie(left.BufferDesc.Width, left.BufferDesc.Height, left.BufferDesc.Format,
+               left.SampleDesc.Count, left.SampleDesc.Quality) ==
+        std::tie(right.BufferDesc.Width, right.BufferDesc.Height, right.BufferDesc.Format,
+            right.SampleDesc.Count, right.SampleDesc.Quality);
 }
 
 bool SameChainWindow(const DXGI_SWAP_CHAIN_DESC& left, const DXGI_SWAP_CHAIN_DESC& right) noexcept
 {
-    return left.OutputWindow == right.OutputWindow && left.Windowed == right.Windowed &&
-        left.BufferCount == right.BufferCount && left.SwapEffect == right.SwapEffect &&
-        left.BufferUsage == right.BufferUsage && left.Flags == right.Flags;
+    return std::tie(left.OutputWindow, left.Windowed, left.BufferCount, left.SwapEffect,
+               left.BufferUsage, left.Flags) ==
+        std::tie(right.OutputWindow, right.Windowed, right.BufferCount, right.SwapEffect,
+            right.BufferUsage, right.Flags);
 }
 
 bool CurrentChainDescription(SwapChainHookRecord& record) noexcept
@@ -72,16 +73,14 @@ private:
 class ChainResourcePreparation
 {
 public:
-    explicit ChainResourcePreparation(ContextHookRecord& context) noexcept : context_(context)
+    ChainResourcePreparation() noexcept
     {
-        context_.internalWork = true;
+        ActiveNativeOwner().internalWork = true;
     }
-    ~ChainResourcePreparation() noexcept { context_.internalWork = false; }
+    ~ChainResourcePreparation() noexcept { ActiveNativeOwner().internalWork = false; }
     ChainResourcePreparation(const ChainResourcePreparation&) = delete;
     ChainResourcePreparation& operator=(const ChainResourcePreparation&) = delete;
 
-private:
-    ContextHookRecord& context_;
 };
 
 template <class Call, class... Arguments>
@@ -91,29 +90,41 @@ HRESULT CallNative(Call next, Arguments... arguments) noexcept
     catch (...) { return E_FAIL; }
 }
 
+bool NativeSceneHdrReady(const ScenePassRenderer& renderer) noexcept
+{
+    if (!ReadNativeDiagnosticProjection().referenceRequested) return renderer.CurrentSceneOperatorProduced();
+    if (renderer.Views(renderer.CurrentScene()).texture == nullptr) return false;
+    const auto domain = renderer.CurrentSceneDomain();
+    constexpr std::array domains{SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
+    return std::find(domains.begin(), domains.end(), domain) != domains.end();
+}
+
 bool ComposeNativeOutput(ContextHookRecord& context) noexcept
 {
     const bool gameplay = NativeGameplayReady(context);
-    const auto packet = context.uiCapture.CompletedLayers();
-    const bool layers = context.presentation.PrepareNativeLayers(packet, PresentationScope::qualifiedExclusive);
-    static_cast<void>(context.presentation.PrepareNativeSdrHandoff(
-        context.presentationProxy.CompletedFrame(), PresentationScope::qualifiedExclusive));
-    const bool hdr = gameplay && context.renderer.CurrentSceneOperatorProduced() && layers;
-    return context.presentation.FinishNativeFrame(context.frameRedirected, hdr, PresentationScope::qualifiedExclusive);
+    const auto packet = ActiveNativeOwner().uiCapture.CompletedLayers();
+    const bool layers = ActiveNativeOwner().presentation.PrepareNativeLayers(packet, PresentationScope::qualifiedExclusive);
+    static_cast<void>(ActiveNativeOwner().presentation.PrepareNativeSdrHandoff(
+        ActiveNativeOwner().presentationProxy.CompletedFrame(), PresentationScope::qualifiedExclusive));
+    const bool hdr = gameplay && NativeSceneHdrReady(ActiveNativeOwner().renderer) && layers;
+    const bool completed = ActiveNativeOwner().presentation.FinishNativeFrame(
+        ActiveNativeOwner().frameRedirected, hdr, PresentationScope::qualifiedExclusive);
+    RecordNativeFrameTrace(hdr && completed);
+    return completed;
 }
 
 bool PresentQuerySafe(ContextHookRecord& context) noexcept
 {
     if (context.queries.CanDispatch()) return true;
-    static_cast<void>(context.renderer.EndFrame());
+    static_cast<void>(ActiveNativeOwner().renderer.EndFrame());
     RevokeNativeRouting();
     return false;
 }
 
-void CommitNativeSettings(ContextHookRecord& context, bool completed) noexcept
+void CommitNativeSettings(bool completed) noexcept
 {
-    if (!completed || !context.hdrPrepared) return;
-    static_cast<void>(context.settingsHost.CommitClosedFrame(PresentationScope::qualifiedExclusive));
+    if (!completed || !ActiveNativeOwner().hdrPrepared) return;
+    static_cast<void>(ActiveNativeOwner().settingsHost.CommitClosedFrame(PresentationScope::qualifiedExclusive));
 }
 
 bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
@@ -126,13 +137,14 @@ bool PreparePresent(SwapChainHookRecord& chain, UINT flags) noexcept
     if (admitted == nullptr) return false;
     if ((flags & DXGI_PRESENT_TEST) != 0) return true;
     if (!PresentQuerySafe(*admitted)) return false;
-    const ChainResourcePreparation preparation{*admitted};
-    const bool completed = admitted->hdrPrepared ? ComposeNativeOutput(*admitted)
-        : CloseNativePresentFrame(admitted->renderer, flags);
-    CommitNativeSettings(*admitted, completed);
-    admitted->presentationProxy.InvalidateFrame();
-    admitted->uiCapture.CloseFrame();
-    admitted->frameRedirected = false;
+    const ChainResourcePreparation preparation;
+    const bool completed = ActiveNativeOwner().hdrPrepared ? ComposeNativeOutput(*admitted)
+        : CloseNativePresentFrame(ActiveNativeOwner().renderer, flags);
+    if (!ActiveNativeOwner().hdrPrepared) RecordNativeFrameTrace(false);
+    CommitNativeSettings(completed);
+    ActiveNativeOwner().presentationProxy.InvalidateFrame();
+    ActiveNativeOwner().uiCapture.CloseFrame();
+    ActiveNativeOwner().frameRedirected = false;
     return completed;
 }
 
@@ -145,22 +157,22 @@ void CompletePresent(SwapChainHookRecord& chain, UINT flags, HRESULT result) noe
     if (admitted == nullptr) return;
     if (!admitted->queries.CanDispatch()) return;
     if ((flags & DXGI_PRESENT_TEST) != 0 || FAILED(result)) return;
-    const ChainResourcePreparation preparation{*admitted};
-    const bool opened = admitted->hdrPrepared
-        ? admitted->presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive)
-        : OpenNativePresentFrame(admitted->renderer, flags, result);
+    const ChainResourcePreparation preparation;
+    const bool opened = ActiveNativeOwner().hdrPrepared
+        ? ActiveNativeOwner().presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive)
+        : OpenNativePresentFrame(ActiveNativeOwner().renderer, flags, result);
     if (!opened) RevokeNativeRouting();
-    else admitted->uiCapture.AdvanceFrame(admitted->renderer.FrameGeneration());
+    else ActiveNativeOwner().uiCapture.AdvanceFrame(ActiveNativeOwner().renderer.FrameGeneration());
 }
 
-bool RetireChainResources(ContextHookRecord& context) noexcept
+bool RetireChainResources() noexcept
 {
-    const ChainResourcePreparation preparation{context};
-    if (context.hdrPrepared && !context.presentation.RestoreNativeSdrSpace()) return false;
-    if (!context.presentation.Retire()) return false;
-    if (!context.presentationProxy.Retire()) return false;
-    if (!context.uiCapture.Retire()) return false;
-    return context.renderer.RetireForResize();
+    const ChainResourcePreparation preparation;
+    if (ActiveNativeOwner().hdrPrepared && !ActiveNativeOwner().presentation.RestoreNativeSdrSpace()) return false;
+    if (!ActiveNativeOwner().presentation.Retire()) return false;
+    if (!ActiveNativeOwner().presentationProxy.Retire()) return false;
+    if (!ActiveNativeOwner().uiCapture.Retire()) return false;
+    return ActiveNativeOwner().renderer.RetireForResize();
 }
 
 bool PrepareResize(SwapChainHookRecord& chain) noexcept
@@ -171,10 +183,10 @@ bool PrepareResize(SwapChainHookRecord& chain) noexcept
     if (admitted == nullptr) return false;
     if (!admitted->queries.CanDispatch()) return false;
     // A held gesture or nested HWND callback refuses before any owner retirement.
-    if (!admitted->settingsHost.SuspendSurfaceForResize()) return false;
+    if (!ActiveNativeOwner().settingsHost.SuspendSurfaceForResize()) return false;
     chain.resourcesReady.store(false, std::memory_order_release);
-    admitted->presentationProxy.RevokePublication();
-    return RetireChainResources(*admitted);
+    ActiveNativeOwner().presentationProxy.RevokePublication();
+    return RetireChainResources();
 }
 
 bool ChainResourcesCurrent(const ContextHookRecord& context) noexcept
@@ -186,24 +198,25 @@ bool ChainResourcesCurrent(const ContextHookRecord& context) noexcept
 bool RebuildHdrOutput(ContextHookRecord& context, ID3D11Device* device,
     IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
 {
-    if (FAILED(context.renderer.AdoptPresentationScene(context.presentationProxy, context.presentationScene))) return false;
-    std::destroy_at(&context.presentation);
-    std::construct_at(&context.presentation);
+    if (FAILED(ActiveNativeOwner().renderer.AdoptPresentationScene(ActiveNativeOwner().presentationProxy, ActiveNativeOwner().presentationScene))) return false;
+    std::destroy_at(&ActiveNativeOwner().presentation);
+    std::construct_at(&ActiveNativeOwner().presentation);
     PresentationConfiguration output;
-    if (!context.settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
-            context.renderer, output)) return false;
-    if (!context.presentation.Initialize(device, context.owned, output)) return false;
-    if (FAILED(context.presentation.PrepareNativeChain(chain, true))) return false;
-    return context.settingsHost.ResumeAfterResize(configuration.width, configuration.height,
+    if (!ActiveNativeOwner().settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
+            ActiveNativeOwner().renderer, output)) return false;
+    output.measurePerformance = ReadNativePerformanceProjection().requested;
+    if (!ActiveNativeOwner().presentation.Initialize(device, context.owned, output)) return false;
+    if (FAILED(ActiveNativeOwner().presentation.PrepareNativeChain(chain, true))) return false;
+    return ActiveNativeOwner().settingsHost.ResumeAfterResize(configuration.width, configuration.height,
         PresentationScope::qualifiedExclusive);
 }
 
-bool ReadResizeWhites(ContextHookRecord& context, ScenePassConfiguration& configuration) noexcept
+bool ReadResizeWhites(ScenePassConfiguration& configuration) noexcept
 {
-    if (!context.hdrPrepared) return true;
+    if (!ActiveNativeOwner().hdrPrepared) return true;
     PresentationConfiguration active;
-    if (!context.settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
-            context.renderer, active)) return false;
+    if (!ActiveNativeOwner().settingsHost.ReadActiveOutputConfiguration(configuration.width, configuration.height,
+            ActiveNativeOwner().renderer, active)) return false;
     configuration.whites = active.whites;
     return true;
 }
@@ -211,19 +224,19 @@ bool ReadResizeWhites(ContextHookRecord& context, ScenePassConfiguration& config
 bool RebuildChainResources(ContextHookRecord& context, ID3D11Device* device,
     IDXGISwapChain* chain, ScenePassConfiguration configuration) noexcept
 {
-    const ChainResourcePreparation preparation{context};
-    if (!ReadResizeWhites(context, configuration)) return false;
-    if (!context.renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
-    const bool ui = context.uiCapture.Initialize(device, context.owned, configuration);
-    const bool proxy = context.presentationProxy.Prepare(device, context.owned, chain);
-    if (context.hdrPrepared)
+    const ChainResourcePreparation preparation;
+    if (!ReadResizeWhites(configuration)) return false;
+    if (!ActiveNativeOwner().renderer.ReinitializeBorrowed(device, context.owned, configuration)) return false;
+    const bool ui = ActiveNativeOwner().uiCapture.Initialize(device, context.owned, configuration, ReadNativeDiagnosticProjection().referenceRequested);
+    const bool proxy = ActiveNativeOwner().presentationProxy.Prepare(device, context.owned, chain);
+    if (ActiveNativeOwner().hdrPrepared)
     {
         if (!ui || !proxy) return false;
         if (!RebuildHdrOutput(context, device, chain, configuration)) return false;
     }
     if (!ChainResourcesCurrent(context))
     {
-        context.presentationProxy.RevokePublication();
+        ActiveNativeOwner().presentationProxy.RevokePublication();
         return false;
     }
     return true;
@@ -275,7 +288,7 @@ void PreserveHdrResize(NativeResizeRequest& request, bool retired) noexcept
 {
     const auto* context = g_contextHooks.load(std::memory_order_acquire);
     if (!retired || context == nullptr) return;
-    if (!context->hdrPrepared) return;
+    if (!ActiveNativeOwner().hdrPrepared) return;
     if (request.count != 0) request.count = 2;
     if (request.format != DXGI_FORMAT_UNKNOWN) request.format = DXGI_FORMAT_R10G10B10A2_UNORM;
 }
@@ -296,10 +309,11 @@ HRESULT ResizeOwnedChain(SwapChainHookRecord& record, NativeResizeRequest reques
 bool NativeChainOwned() noexcept
 {
     auto* record = g_swapChainHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return false;
+    if (record == nullptr || !record->identity.Matches(record->owned)) return false;
     const auto* context = g_contextHooks.load(std::memory_order_acquire);
     if (context == nullptr || !context->retainedReferences.load(std::memory_order_acquire)) return false;
     if (*reinterpret_cast<void***>(record->owned) != record->table) return false;
+    if (record->table[2] != reinterpret_cast<void*>(&HookSwapChainRelease)) return false;
     return std::all_of(record->owners.begin(), record->owners.end(),
         [](auto& slot) { return slot.Health() == HookOwnershipState::owned; });
 }

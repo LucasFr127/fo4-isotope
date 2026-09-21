@@ -32,6 +32,7 @@ foreach ($path in @(
     $stagedDll,
     (Join-Path $pluginRoot "Fallout4HDR.pdb"),
     (Join-Path $pluginRoot "Fallout4HDR.ini"),
+    (Join-Path $pluginRoot "Fallout4HDR\Default.ini"),
     $stagedManifest
 )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

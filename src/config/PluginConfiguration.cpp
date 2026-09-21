@@ -21,7 +21,7 @@ constexpr std::array<std::string_view, 4> kAlgorithms{"ACES2", "AgX", "GT7", "AC
 
 std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexcept
 {
-    constexpr std::array<std::array<std::string_view, 2>, 49> keys{{
+    constexpr std::array<std::array<std::string_view, 2>, 56> keys{{
         {"Output", "DisplayPeakNits"}, {"Output", "UiPaperWhiteNits"},
         {"Output", "VideoWhiteNits"}, {"ToneMapper", "Algorithm"},
         {"AgX", "MiddleGray"}, {"AgX", "Contrast"}, {"AgX", "HdrPurity"},
@@ -57,7 +57,10 @@ std::size_t OwnedKeyIndex(std::string_view section, std::string_view name) noexc
         {"SelectiveColor", "MagentaSaturation"},
         {"SelectiveColor", "MagentaBrightness"},
         {"Effects", "VanillaGradeLuminance"}, {"Effects", "VanillaGradeColor"},
-        {"Effects", "LutProfilesEnabled"}}};
+        {"Effects", "LutProfilesEnabled"}, {"Debug", "MeasurePerformance"},
+        {"General", "Enabled"}, {"General", "DeveloperMode"},
+        {"Debug", "TraceRenderPipeline"}, {"Debug", "DeveloperHdr10Reference"},
+        {"Debug", "ShowDeveloperOverlay"}, {"Debug", "ForceHdrSwapChainFailure"}}};
     const auto found = std::ranges::find_if(keys, [section, name](const auto& key) {
         return key[0] == section && key[1] == name;
     });
@@ -165,6 +168,18 @@ private:
         return true;
     }
 
+    bool SetColdFlag(std::size_t index, std::string_view value) noexcept
+    {
+        if (value != "0" && value != "1") return false;
+        auto& configuration = result_.value;
+        const std::array targets{&configuration.measurePerformance, &configuration.enabled,
+            &configuration.developerMode, &configuration.traceRenderPipeline,
+            &configuration.developerHdr10Reference, &configuration.showDeveloperOverlay,
+            &configuration.forceHdrSwapChainFailure};
+        *targets[index - 49] = value == "1";
+        return true;
+    }
+
     bool SetNumericValue(std::size_t index, std::string_view value) noexcept
     {
         if (index >= 46)
@@ -195,6 +210,7 @@ private:
         if (index == 3) return SetAlgorithm(value);
         if (index == 22) return SetGradingMethod(value);
         if (index == 48) return SetProfilesEnabled(value);
+        if (index >= 49) return SetColdFlag(index, value);
         return SetNumericValue(index, value);
     }
 
@@ -306,7 +322,7 @@ private:
 
     PluginConfigurationResult result_;
     std::string_view section_;
-    std::array<bool, 49> seen_{};
+    std::array<bool, 56> seen_{};
     bool profilesOnly_{};
     bool inherit_{};
     bool hasProfile_{};
@@ -457,11 +473,33 @@ bool MergePersonalProfiles(PluginConfigurationResult& result,
     return true;
 }
 
+bool ValidDiagnosticSelection(const PluginConfiguration& value) noexcept
+{
+    const std::array diagnostics{value.traceRenderPipeline, value.measurePerformance,
+        value.developerHdr10Reference, value.showDeveloperOverlay, value.forceHdrSwapChainFailure};
+    const std::array referenceFeatures{value.showDeveloperOverlay, value.forceHdrSwapChainFailure};
+    const std::array outputModes{value.enabled, value.developerHdr10Reference};
+    const auto selected = [](bool flag) { return flag; };
+    const std::array requirements{
+        std::pair{std::ranges::any_of(diagnostics, selected), value.developerMode},
+        std::pair{std::ranges::any_of(referenceFeatures, selected),
+            std::ranges::any_of(outputModes, selected)}};
+    return std::ranges::all_of(requirements, [](const auto& requirement) {
+        return !requirement.first || requirement.second;
+    });
+}
+
 }  // namespace
 
 bool PluginConfiguration::operator==(const PluginConfiguration& other) const noexcept
 {
     if (algorithm != other.algorithm) return false;
+    const std::array flags{enabled, developerMode, traceRenderPipeline, measurePerformance,
+        developerHdr10Reference, showDeveloperOverlay, forceHdrSwapChainFailure};
+    const std::array otherFlags{other.enabled, other.developerMode, other.traceRenderPipeline,
+        other.measurePerformance, other.developerHdr10Reference, other.showDeveloperOverlay,
+        other.forceHdrSwapChainFailure};
+    if (flags != otherFlags) return false;
     if (display.colorGradingMethod != other.display.colorGradingMethod) return false;
     if (display.selectiveColor != other.display.selectiveColor) return false;
     if (display.lutGradeProfiles != other.display.lutGradeProfiles) return false;
@@ -486,6 +524,7 @@ bool PluginConfiguration::operator==(const PluginConfiguration& other) const noe
 bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept
 {
     if (ValidateHdrSettings(value.display) != HdrSettingsValidationError::none) return false;
+    if (!ValidDiagnosticSelection(value)) return false;
     if (value.display.displayPeakNits < 400.0 || value.display.displayPeakNits > 2000.0) return false;
     // Saved inactive operator controls must remain valid when their operator is selected later.
     constexpr std::array algorithms{OperatorLutAlgorithm::aces2Lmt,

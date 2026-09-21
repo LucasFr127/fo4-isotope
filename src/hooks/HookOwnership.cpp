@@ -3,6 +3,7 @@
 #include "Fallout4HDR/hooks/HookOwnership.hpp"
 
 #include <Windows.h>
+#include <algorithm>
 
 namespace fo4hdr {
 namespace {
@@ -254,6 +255,99 @@ HookOwnershipState PointerHookOwnership::Health() noexcept
             HookOwnershipState::ownershipLost, std::memory_order_acq_rel));
     }
     return State();
+}
+
+bool ObjectGenerationIdentity::Publish(
+    void* object,
+    std::uint64_t generation) noexcept
+{
+    if (object == nullptr || generation == 0) return false;
+    if (object_.load(std::memory_order_acquire) != nullptr) return false;
+    auto expected = static_cast<void*>(nullptr);
+    generation_.store(generation, std::memory_order_relaxed);
+    return object_.compare_exchange_strong(
+        expected,
+        object,
+        std::memory_order_release,
+        std::memory_order_relaxed);
+}
+
+bool ObjectGenerationIdentity::Matches(void* object) const noexcept
+{
+    return object != nullptr &&
+           object_.load(std::memory_order_acquire) == object;
+}
+
+bool ObjectGenerationIdentity::Retire(
+    void* object,
+    std::uint64_t generation) noexcept
+{
+    if (object == nullptr || generation == 0) return false;
+    if (generation_.load(std::memory_order_acquire) != generation)
+        return false;
+    return object_.compare_exchange_strong(
+        object,
+        nullptr,
+        std::memory_order_acq_rel,
+        std::memory_order_relaxed);
+}
+
+bool PrepareShadowVtable(
+    std::span<void* const> current,
+    std::span<void*> shadow,
+    std::span<const VtablePatch> patches) noexcept
+{
+    if (current.empty() || patches.empty()) return false;
+    if (shadow.size() != current.size()) return false;
+    const auto canApply = [current](const VtablePatch& patch) noexcept {
+        return patch.index < current.size() && patch.replacement != nullptr &&
+            current[patch.index] != patch.replacement;
+    };
+    if (!std::all_of(patches.begin(), patches.end(), canApply))
+        return false;
+    std::copy(current.begin(), current.end(), shadow.begin());
+    for (const auto& patch : patches) shadow[patch.index] = patch.replacement;
+    return true;
+}
+
+
+namespace {
+bool CallableVtableSlot(void* const* slot) noexcept
+{
+    MEMORY_BASIC_INFORMATION page{};
+    if (!ReadPage(const_cast<void**>(slot), page)) return false;
+    const auto address = reinterpret_cast<std::uintptr_t>(slot);
+    const auto start = reinterpret_cast<std::uintptr_t>(page.BaseAddress);
+    if (address < start || address - start > page.RegionSize) return false;
+    if (sizeof(void*) > page.RegionSize - (address - start)) return false;
+    return IsExecutableHookTarget(AtomicPointerLoad(slot));
+}
+}  // namespace
+
+namespace {
+std::size_t CallableTailLength(void* const* table, std::size_t maximum) noexcept
+{
+    std::size_t count{};
+    for (; count < maximum; ++count)
+        if (!CallableVtableSlot(table + count)) break;
+    return count;
+}
+
+bool ValidVtableBounds(std::size_t minimum, std::size_t maximum) noexcept
+{
+    return minimum != 0 && minimum <= maximum;
+}
+}  // namespace
+
+std::size_t DiscoverCallableVtableSlots(void* const* table,
+    std::size_t minimum, std::size_t maximum) noexcept
+{
+    if (table == nullptr) return 0;
+    if (!ValidVtableBounds(minimum, maximum)) return 0;
+    const auto count = CallableTailLength(table, maximum);
+    // The callable tail is a driver-storage heuristic, not proof of private extent.
+    if (count == maximum && CallableVtableSlot(table + count)) return 0;
+    return count >= minimum ? count : 0;
 }
 
 }  // namespace fo4hdr

@@ -19,9 +19,13 @@ class GraphicsLifecyclePublisher
 public:
     void PublishTransition(GameLifecycleEvent event, bool succeeded) noexcept
     {
-        if (event == GameLifecycleEvent::PreLoadGame || event == GameLifecycleEvent::NewGame)
+        if (event == GameLifecycleEvent::PreLoadGame)
         {
             Publish(false, true);
+        }
+        else if (event == GameLifecycleEvent::NewGame)
+        {
+            Publish(true, true);
         }
         else if (event == GameLifecycleEvent::PostLoadGame && succeeded)
         {
@@ -144,8 +148,7 @@ constexpr void ApplyGameLifecycleTransition(
     if (event == GameLifecycleEvent::PreLoadGame || event == GameLifecycleEvent::NewGame)
     {
         ++snapshot.resourceGeneration;
-        // NewGame precedes load completion; this event cannot establish world readiness.
-        snapshot.loading = true;
+        snapshot.loading = event == GameLifecycleEvent::PreLoadGame;
         CopyObservedRenderer(snapshot, {});
         snapshot.imageSpace = {};
         // This floor separates copied publications, not the source event's world lifetime.
