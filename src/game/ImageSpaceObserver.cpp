@@ -2,10 +2,10 @@
 
 #include "ImageSpaceObserver.hpp"
 #include "DirectCallPatch.hpp"
-#include <REL/Offset2ID.h>
-#include <REX/FModule.h>
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include <RE/Fallout.h>
+#include <REL/Offset2ID.h>
+#include <REX/FModule.h>
 #include "GameObservationMemory.hpp"
 #include <Windows.h>
 #include <algorithm>
@@ -19,15 +19,11 @@
 #include <memory>
 #include <string_view>
 #include <vector>
-
+#if defined(FO4HDR_RUNTIME_1_10_163)
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
+#endif
 
 namespace {
-
-static_assert(fo4hdr::generated::ImageSpaceEffectEnumMatches<RE::ImageSpaceManager::ImageSpaceEffectEnum>());
-static_assert(sizeof(RE::ImageSpaceManager) == fo4hdr::generated::kImageSpaceManagerSize);
-static_assert(offsetof(RE::ImageSpaceManager, lutData) == fo4hdr::generated::kImageSpaceLutDataOffset);
-static_assert(offsetof(RE::ImageSpaceManager, overrideLUTData) == fo4hdr::generated::kImageSpaceOverrideLutDataOffset);
 
 constexpr std::size_t kMaximumImageSpaces{8192};
 constexpr std::size_t kMaximumEditorIdEntries{1U << 20U};
@@ -46,16 +42,14 @@ struct CatalogEntry
 
 using Catalog = std::vector<CatalogEntry>;
 
-std::atomic<DWORD> g_ownerThread{};
-std::unique_ptr<const Catalog> g_catalog;
-std::atomic<bool> g_catalogAttempted{};
-std::atomic_flag g_catalogFlag = ATOMIC_FLAG_INIT;
+std::atomic<bool> g_buildAttempted{};
+std::atomic<const Catalog*> g_catalog{};
 
 bool FormatKey(std::string_view basename, std::uint32_t localFormId,
     fo4hdr::ImageSpaceIdentity& identity)
 {
     constexpr std::size_t suffixLength{7};
-    std::array<char, 259 + 1> raw{};
+    std::array<char, fo4hdr::kMaximumLutGradePathLength + 1> raw{};
     std::copy(basename.begin(), basename.end(), raw.begin());
     raw[basename.size()] = '|';
     constexpr char hex[] = "0123456789abcdef";
@@ -79,8 +73,8 @@ std::string_view PluginBasename(const RE::TESFile& origin)
 bool ValidPluginBasename(std::string_view basename)
 {
     constexpr std::size_t suffixLength{7};
-    return !basename.empty() && basename.find_first_of("<>:\"/\\|?*") == std::string_view::npos &&
-        basename.size() + suffixLength <= 259;
+    return !basename.empty() && !basename.contains('|') &&
+        basename.size() + suffixLength <= fo4hdr::kMaximumLutGradePathLength;
 }
 
 bool BuildKey(RE::TESImageSpace& form, const RE::TESFile& origin,
@@ -89,7 +83,7 @@ bool BuildKey(RE::TESImageSpace& form, const RE::TESFile& origin,
     const auto basename = PluginBasename(origin);
     if (!ValidPluginBasename(basename)) return false;
     const auto localFormId = form.GetLocalFormID();
-    if (localFormId == 0 || localFormId > 0x00FFFFFFU) return false;
+    if (localFormId > 0x00FFFFFFU) return false;
 
     return FormatKey(basename, localFormId, identity);
 }
@@ -97,10 +91,9 @@ bool BuildKey(RE::TESImageSpace& form, const RE::TESFile& origin,
 bool CopyEditorId(const RE::BSFixedString& source,
     std::array<char, 128>& result) noexcept
 {
-    std::array<char, 128> bytes{};
-    if (!fo4hdr::game::observation::ReadBoundedText(source.c_str(), bytes)) return false;
-    const std::string_view value(bytes.data());
-    std::array<char, 259 + 1> validated{};
+    const std::string_view value = source;
+    if (value.empty() || value.size() >= result.size()) return false;
+    std::array<char, fo4hdr::kMaximumLutGradePathLength + 1> validated{};
     if (!fo4hdr::NormalizeLutGradePath(value, validated)) return false;
     std::copy(value.begin(), value.end(), result.begin());
     return true;
@@ -132,15 +125,6 @@ void EnrichEditorId(Catalog& catalog, const RE::TESForm* form, const RE::BSFixed
     MergeEditorId(*entry, editorId);
 }
 
-void ReadEditorMap(Catalog& catalog)
-{
-    auto [map, lock] = RE::TESForm::GetAllFormsByEditorID();
-    if (map == nullptr) return;
-    RE::BSAutoReadLock guard(lock.get());
-    if (map->size() > kMaximumEditorIdEntries) return;
-    for (const auto& mapped : *map) EnrichEditorId(catalog, mapped.second, mapped.first);
-}
-
 void EnrichEditorIds(Catalog& catalog) noexcept
 {
     try
@@ -149,7 +133,14 @@ void EnrichEditorIds(Catalog& catalog) noexcept
             [](const CatalogEntry& left, const CatalogEntry& right) {
                 return left.formIdentity < right.formIdentity;
             });
-        ReadEditorMap(catalog);
+        auto [map, lock] = RE::TESForm::GetAllFormsByEditorID();
+        if (map == nullptr) return;
+        RE::BSAutoReadLock guard(lock.get());
+        if (map->size() > kMaximumEditorIdEntries) return;
+        for (const auto& mapped : *map)
+        {
+            EnrichEditorId(catalog, mapped.second, mapped.first);
+        }
     }
     catch (...)
     {
@@ -162,7 +153,7 @@ void CopyLutPath(std::string_view textureNameSource, CatalogEntry& entry)
     const std::string_view textureName = textureNameSource;
     if (!textureName.empty() &&
         kNativeTexturePrefix.size() + textureName.size() <=
-            259)
+            fo4hdr::kMaximumLutGradePathLength)
     {
         std::array<char, 260> rawPath{};
         auto output = std::copy(kNativeTexturePrefix.begin(),
@@ -174,18 +165,12 @@ void CopyLutPath(std::string_view textureNameSource, CatalogEntry& entry)
     }
 }
 
-const RE::TESFile* OriginFile(RE::TESImageSpace* form)
-{
-    if (form == nullptr ||
-        !fo4hdr::game::observation::IsReadableMemory(form, sizeof(RE::TESImageSpace))) return nullptr;
-    const auto formId = form->GetFormID();
-    if ((formId >> 24U) == 0xFFU) return nullptr;
-    return form->GetFile(0);
-}
-
 void AddCatalogEntry(Catalog& catalog, RE::TESImageSpace* form)
 {
-    const auto* origin = OriginFile(form);
+    if (form == nullptr) return;
+    const auto formId = form->GetFormID();
+    if ((formId >> 24U) == 0xFFU) return;
+    const auto* origin = form->GetFile(0);
     if (origin == nullptr) return;
 
     CatalogEntry entry{
@@ -194,7 +179,7 @@ void AddCatalogEntry(Catalog& catalog, RE::TESImageSpace* form)
         .formIdentity = reinterpret_cast<std::uintptr_t>(form)};
     if (entry.dataIdentity == 0 || !BuildKey(*form, *origin, entry.identity))
         return;
-    entry.identity.formId = form->GetFormID();
+    entry.identity.formId = formId;
     CopyLutPath(form->lutTexture.textureName, entry);
     catalog.push_back(entry);
 }
@@ -205,29 +190,24 @@ bool SortUnique(Catalog& catalog, Projection project)
     std::ranges::sort(catalog, {}, project);
     return std::ranges::adjacent_find(catalog, {}, project) == catalog.end();
 }
-bool CollectCatalog(Catalog& catalog)
+bool BuildCatalog()
 {
     auto* dataHandler = RE::TESDataHandler::GetSingleton();
     if (dataHandler == nullptr) return false;
     auto& forms = dataHandler->GetFormArray<RE::TESImageSpace>();
     if (forms.size() > kMaximumImageSpaces) return false;
 
-    catalog.reserve(forms.size());
+    auto catalog = std::make_unique<Catalog>();
+    catalog->reserve(forms.size());
     for (auto* form : forms)
     {
-        AddCatalogEntry(catalog, form);
+        AddCatalogEntry(*catalog, form);
     }
-    return true;
-}
 
-std::unique_ptr<const Catalog> BuildCatalog()
-{
-    auto catalog = std::make_unique<Catalog>();
-    if (!CollectCatalog(*catalog)) return {};
-    if (!SortUnique(*catalog, [](const CatalogEntry& entry) { return entry.identity.key; })) return {};
+    if (!SortUnique(*catalog, [](const CatalogEntry& entry) { return entry.identity.key; })) return false;
 
     EnrichEditorIds(*catalog);
-    if (!SortUnique(*catalog, &CatalogEntry::dataIdentity)) return {};
+    if (!SortUnique(*catalog, &CatalogEntry::dataIdentity)) return false;
 
     for (auto& entry : *catalog)
     {
@@ -235,36 +215,34 @@ std::unique_ptr<const Catalog> BuildCatalog()
         entry.ambiguousEditorId = false;
     }
 
-    // Engine traversal stays on the collector; readers copy only immutable values.
-    return catalog;
+    // Published entries remain alive until process exit so render readers never
+    // race destruction or a rebuilt catalog.
+    g_catalog.store(catalog.release(), std::memory_order_release);
+    return true;
 }
 
 }  // namespace
 
 namespace fo4hdr::game {
 
-bool BuildImageSpaceCatalog() noexcept
+void BuildImageSpaceCatalog() noexcept
 {
-    const auto thread = ::GetCurrentThreadId();
-    DWORD expected{};
-    if (!g_ownerThread.compare_exchange_strong(expected, thread) && expected != thread) return false;
-    if (g_catalogAttempted.exchange(true, std::memory_order_acq_rel)) return ImageSpaceCatalogReady();
+    if (g_buildAttempted.exchange(true, std::memory_order_acq_rel)) return;
     try
     {
-        auto catalog = BuildCatalog();
-        if (!catalog) return false;
-        imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-        if (!guard.OwnsLock()) return false;
-        g_catalog = std::move(catalog);
-        return true;
+        (void)BuildCatalog();
     }
-    catch (...) { return false; }
+    catch (...)
+    {
+        ::OutputDebugStringA(
+            "Fallout4HDR: ImageSpace catalog construction raised an exception; "
+            "ImageSpace profiles remain unavailable.\n");
+    }
 }
 
 bool ImageSpaceCatalogReady() noexcept
 {
-    imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-    return guard.OwnsLock() && g_catalog != nullptr;
+    return g_catalog.load(std::memory_order_acquire) != nullptr;
 }
 
 bool LookupImageSpaceIdentity(
@@ -274,9 +252,7 @@ bool LookupImageSpaceIdentity(
     result = {};
     lutPath = {};
     if (data == nullptr) return false;
-    imagespace_detail::TryPublicationGuard guard(g_catalogFlag);
-    if (!guard.OwnsLock()) return false;
-    const auto* catalog = g_catalog.get();
+    const auto* catalog = g_catalog.load(std::memory_order_acquire);
     if (catalog == nullptr) return false;
     const auto identity = reinterpret_cast<std::uintptr_t>(data);
     const auto entry = std::lower_bound(catalog->begin(), catalog->end(), identity,
@@ -289,69 +265,11 @@ bool LookupImageSpaceIdentity(
     return true;
 }
 
-
-namespace {
-struct ManagerHeader
-{
-    std::uintptr_t base{}, overrideData{};
-
-    bool Read(std::span<const std::byte> bytes) noexcept
-    {
-        std::uint8_t ready{};
-        if (!observation::ReadSnapshotField(bytes, offsetof(RE::ImageSpaceManager, isReady), ready) ||
-            ready != 1) return false;
-        return observation::ReadSnapshotField(bytes, offsetof(RE::ImageSpaceManager, baseData), base) &&
-            observation::ReadSnapshotField(bytes, offsetof(RE::ImageSpaceManager, overRideBaseData), overrideData);
-    }
-};
-
-bool CurrentCatalog() noexcept
-{
-    if (::GetCurrentThreadId() != g_ownerThread.load()) return false;
-    return ImageSpaceCatalogReady();
-}
-
-bool ReadActiveData(std::span<const std::byte> bytes, ImageSpaceActiveData& result) noexcept
-{
-    constexpr auto data = offsetof(RE::ImageSpaceManager, currentEOFData) +
-        offsetof(RE::ImageSpaceData, baseData);
-    constexpr auto hdr = data + offsetof(RE::ImageSpaceBaseData, hdrData);
-    constexpr auto cinematic = data + offsetof(RE::ImageSpaceBaseData, cinematicData);
-    constexpr std::array<std::size_t, 12> offsets{hdr, hdr + 4, hdr + 8, hdr + 12,
-        hdr + 16, hdr + 20, hdr + 24, hdr + 28, hdr + 32, cinematic, cinematic + 4, cinematic + 8};
-    return DecodeImageSpaceActiveData(bytes, offsets, result);
-}
-}  // namespace
-
-bool ObserveImageSpace(const RE::ImageSpaceManager* manager,
-    std::uint64_t resourceGeneration, ImageSpaceSnapshot& destination) noexcept
-{
-    destination = {};
-    if (!CurrentCatalog() || manager == nullptr) return false;
-    std::array<std::byte, sizeof(RE::ImageSpaceManager)> bytes{};
-    if (!observation::GuardedReadValue(manager, bytes)) return false;
-    ManagerHeader header{};
-    if (!header.Read(bytes)) return false;
-    ImageSpaceSnapshot candidate{};
-    if (!ReadActiveData(bytes, candidate.active)) return false;
-    candidate.baseMatched = LookupImageSpaceIdentity(
-        reinterpret_cast<const RE::ImageSpaceBaseData*>(header.base), candidate.base, candidate.baseLutPath);
-    candidate.managerIdentity = reinterpret_cast<std::uintptr_t>(manager);
-    candidate.baseDataIdentity = header.base;
-    candidate.overrideActive = header.overrideData != 0;
-    candidate.threadId = ::GetCurrentThreadId();
-    candidate.resourceGeneration = resourceGeneration;
-    candidate.ready = true;
-    destination = candidate;
-    return true;
-}
-
 }  // namespace fo4hdr::game
 
 namespace {
 namespace provenance = fo4hdr::game::imagespace_detail;
 namespace patch = fo4hdr::game::direct_call_patch;
-using namespace fo4hdr::game::observation;
 using Weather = void (*)(RE::Sky*);
 using Accumulate = void (*)(RE::ImageSpaceBaseData*, const RE::ImageSpaceBaseData*, float);
 using Blend = void (*)(RE::ImageSpaceBaseData*, const RE::ImageSpaceBaseData*,
@@ -383,63 +301,52 @@ thread_local std::uint32_t g_count{};
 
 bool ReadPath(const char* text, float weight, std::array<char, 260>& result) noexcept
 {
-    if (!text) return weight == 0;
+    if (!text) return weight <= 0;
     std::array<char, 260> raw{};
-    if (!ReadBoundedText(text, raw)) return false;
-    if (!raw[0]) return weight == 0;
-    return fo4hdr::NormalizeLutGradePath(raw.data(), result);
+    for (std::size_t i = 0; i < raw.size(); ++i) {
+        raw[i] = text[i];
+        if (!raw[i]) {
+            if (!i) return weight <= 0;
+            return fo4hdr::NormalizeLutGradePath({raw.data(), i}, result);
+        }
+    }
+    return false;
 }
 
-bool ReadValueSlot(std::span<const std::byte> bytes, std::size_t slot,
+bool ReadSlot(const RE::ImageSpaceLUTData& data, std::size_t slot,
     provenance::LutValues& values) noexcept
 {
-    std::uintptr_t name{};
-    auto& weight = values.weights[slot];
-    if (!ReadSnapshotField(bytes, offsetof(RE::ImageSpaceLUTData, weight) + slot * 4, weight)) return false;
-    if (!ReadSnapshotField(bytes, offsetof(RE::ImageSpaceLUTData, filename) + slot * 8, name)) return false;
+    const auto weight = data.weight[slot];
     if (!std::isfinite(weight) || weight < 0) return false;
-    return ReadPath(reinterpret_cast<const char*>(name), weight, values.paths[slot]);
+    values.weights[slot] = weight;
+    return ReadPath(data.filename[slot].c_str(), weight, values.paths[slot]);
 }
 
 bool ReadValues(const RE::ImageSpaceLUTData* data, provenance::LutValues& values) noexcept
 {
-    std::array<std::byte, sizeof(RE::ImageSpaceLUTData)> bytes{};
-    if (!GuardedReadValue(data, bytes)) return false;
-    for (std::size_t slot = 0; slot < 4; ++slot)
-    {
-        if (!ReadValueSlot(bytes, slot, values)) return false;
-    }
-    std::array<std::byte, sizeof(RE::ImageSpaceLUTData)> after{};
-    return GuardedReadValue(data, after) && after == bytes;
+    __try {
+        if (!data) return false;
+        for (std::size_t slot = 0; slot < 4; ++slot)
+            if (!ReadSlot(*data, slot, values)) return false;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
-
-const RE::ImageSpaceLUTData* InlineLut(const RE::ImageSpaceManager* manager) noexcept
-{
-    const auto address = reinterpret_cast<std::uintptr_t>(manager);
-    return address != 0 && address <= UINTPTR_MAX - sizeof(RE::ImageSpaceManager) ?
-        reinterpret_cast<const RE::ImageSpaceLUTData*>(address + offsetof(RE::ImageSpaceManager, lutData)) : nullptr;
-}
-
 provenance::Status ManagerValues(const RE::ImageSpaceManager* manager,
     const RE::ImageSpaceLUTData* data, provenance::LutValues& values) noexcept
 {
-    std::array<std::byte, sizeof(RE::ImageSpaceManager)> bytes{};
-    if (!GuardedReadValue(manager, bytes)) return provenance::Status::unqualifiedSource;
-    std::uintptr_t overrideLut{};
-    std::uint8_t ready{};
-    if (!ReadSnapshotField(bytes, offsetof(RE::ImageSpaceManager, overrideLUTData), overrideLut) ||
-        !ReadSnapshotField(bytes, offsetof(RE::ImageSpaceManager, isReady), ready))
-        return provenance::Status::unqualifiedSource;
-    if (overrideLut) return provenance::Status::overrideActive;
-    if (ready != 1 || data != InlineLut(manager)) return provenance::Status::unqualifiedSource;
-    return ReadValues(data, values) ? provenance::Status::matched : provenance::Status::unqualifiedSource;
+    __try {
+        if (!manager) return provenance::Status::unqualifiedSource;
+        if (manager->overrideLUTData) return provenance::Status::overrideActive;
+        return data == &manager->lutData && ReadValues(data, values) ?
+            provenance::Status::matched : provenance::Status::unqualifiedSource;
+    } __except (EXCEPTION_EXECUTE_HANDLER) { return provenance::Status::unqualifiedSource; }
 }
 
 void DisableObservation() noexcept
 {
     g_installed.store(false, std::memory_order_release);
     fo4hdr::SetImageSpaceObservationReady(false);
-    fo4hdr::ResetNativeLutObservation();
+    (void)fo4hdr::InvalidateImageSpaceObservation();
     g_weatherPublication.Invalidate();
     g_transferPublication.Invalidate();
     g_nested = true;
@@ -451,8 +358,7 @@ bool WeatherComplete(const provenance::Provenance& candidate) noexcept
 {
     return SingleWeatherScope() &&
         candidate.generation == fo4hdr::NativeLutObservationGeneration() &&
-        candidate.status == provenance::Status::waiting && candidate.validSlots &&
-        candidate.observationRevision == fo4hdr::CurrentImageSpaceObservationRevision();
+        candidate.status == provenance::Status::waiting && candidate.validSlots;
 }
 void FinishWeather(provenance::Publication::Token& token) noexcept
 {
@@ -471,12 +377,9 @@ void FinishWeather(provenance::Publication::Token& token) noexcept
 provenance::Publication::Token BeginWeather() noexcept
 {
     auto token = g_weatherPublication.Begin();
-    g_transferPublication.Invalidate();
-    const auto revision = fo4hdr::InvalidateImageSpaceObservation();
     if (g_depth++ != 0) g_nested = true;
     g_weatherCandidate = {};
     g_weatherCandidate.generation = fo4hdr::NativeLutObservationGeneration();
-    g_weatherCandidate.observationRevision = revision;
     g_count = 0;
     return token;
 }
@@ -574,30 +477,21 @@ bool TransferMatches(RE::ImageSpaceManager* manager, const provenance::Provenanc
 {
     provenance::LutValues values{};
     return manager && g_weatherPublication.IsCurrent(candidate.revision) &&
-        ManagerValues(manager, InlineLut(manager), values) == provenance::Status::matched &&
+        ManagerValues(manager, &manager->lutData, values) == provenance::Status::matched &&
         candidate.Matches(values, fo4hdr::NativeLutObservationGeneration()) &&
         g_weatherPublication.IsCurrent(candidate.revision);
 }
 
-bool PrepareTransfer(const RE::ImageSpaceLUTData* source, std::uint64_t previousRevision,
-    provenance::Provenance& candidate) noexcept
+bool PrepareTransfer(const RE::ImageSpaceLUTData* source, provenance::Provenance& candidate) noexcept
 {
     return source == g_globalLut && g_weatherPublication.TryRead(candidate) &&
         candidate.status == provenance::Status::matched &&
-        candidate.observationRevision == previousRevision &&
         candidate.generation == fo4hdr::NativeLutObservationGeneration();
 }
-bool TransferRevisionMatches(bool prepared, std::uint64_t revision) noexcept
-{
-    if (!prepared || revision == 0) return false;
-    return revision == fo4hdr::CurrentImageSpaceObservationRevision();
-}
-
 void CompleteTransfer(RE::ImageSpaceManager* manager, bool prepared,
     std::uint64_t observationRevision, provenance::Provenance& candidate) noexcept
 {
-    if (TransferRevisionMatches(prepared, observationRevision) &&
-        TransferMatches(manager, candidate)) {
+    if (prepared && TransferMatches(manager, candidate)) {
         candidate.manager = reinterpret_cast<std::uintptr_t>(manager);
         candidate.observationRevision = observationRevision;
     } else if (candidate.status == provenance::Status::matched)
@@ -607,15 +501,14 @@ void CompleteTransfer(RE::ImageSpaceManager* manager, bool prepared,
 struct TransferStart
 {
     provenance::Publication::Token token{};
-    std::uint64_t revision{}, previousRevision{};
+    std::uint64_t revision{};
 };
 
 TransferStart BeginTransfer(bool observe) noexcept
 {
-    const auto previousRevision = fo4hdr::CurrentImageSpaceObservationRevision();
     auto token = observe ? g_transferPublication.Begin() : provenance::Publication::Token{};
     const auto revision = observe ? fo4hdr::InvalidateImageSpaceObservation() : 0;
-    return {token, revision, previousRevision};
+    return {token, revision};
 }
 void SetLutHook(RE::ImageSpaceManager* manager, const RE::ImageSpaceLUTData* source) noexcept
 {
@@ -626,7 +519,7 @@ void SetLutHook(RE::ImageSpaceManager* manager, const RE::ImageSpaceLUTData* sou
     provenance::Provenance candidate{};
     candidate.status = provenance::Status::unqualifiedSource;
     try {
-        const auto prepared = observe && PrepareTransfer(source, start.previousRevision, candidate);
+        const auto prepared = observe && PrepareTransfer(source, candidate);
         next(manager, source);
         if (observe) {
             CompleteTransfer(manager, prepared, start.revision, candidate);
@@ -678,7 +571,6 @@ bool CurrentTransfer(const RE::ImageSpaceManager* manager, const provenance::Lut
     return transfer.manager == reinterpret_cast<std::uintptr_t>(manager) &&
         transfer.Matches(values, fo4hdr::NativeLutObservationGeneration()) &&
         g_transferPublication.IsCurrent(transfer.revision) &&
-        transfer.observationRevision != 0 &&
         transfer.observationRevision == fo4hdr::CurrentImageSpaceObservationRevision();
 }
 bool Read(const void* source, void* destination, std::size_t size) noexcept
@@ -751,21 +643,29 @@ struct PatchBackend
             WriteBytes(site.address, replacement, site.protection);
     }
 };
-class NativeProvenanceInstallation
+#if defined(FO4HDR_RUNTIME_1_10_163)
+using namespace fo4hdr::generated;
+class ImageSpaceInstallation
 {
     REX::FModule module{REX::FModule::GetExecutingModule()};
     std::uintptr_t base{module.GetBaseAddress()};
     REL::Offset2ID mappings;
-    fo4hdr::game::ImageSpaceRuntimeFacts facts;
     TrampolineInterface allocator{};
     std::array<patch::Site, 11> sites{};
+    static constexpr std::array targetRvas{kImageSpaceWeatherRva, kImageSpaceAccumulateRva,
+        kImageSpaceRoomBlendRva, kImageSpaceSetLutRva};
+    static constexpr std::array targetIds{kImageSpaceWeatherId, kImageSpaceAccumulateId,
+        kImageSpaceRoomBlendId, kImageSpaceSetLutId};
+    static constexpr std::array<std::span<const std::uint8_t>, 4> targetBytes{
+        kImageSpaceWeatherBytes, kImageSpaceAccumulateBytes,
+        kImageSpaceRoomBlendBytes, kImageSpaceSetLutBytes};
     const std::array<std::uintptr_t, 6> hooks{
-        reinterpret_cast<std::uintptr_t>(&WeatherHook), reinterpret_cast<std::uintptr_t>(&AccumulateHook),
-        reinterpret_cast<std::uintptr_t>(&RoomBlendHook), reinterpret_cast<std::uintptr_t>(&SetLutHook),
-        reinterpret_cast<std::uintptr_t>(&RoomSetLutHook), reinterpret_cast<std::uintptr_t>(&UnqualifiedSetLutHook)};
-
-    std::uintptr_t Address(std::uintptr_t rva) const noexcept
-    { return rva <= UINTPTR_MAX - base ? base + rva : 0; }
+        reinterpret_cast<std::uintptr_t>(&WeatherHook),
+        reinterpret_cast<std::uintptr_t>(&AccumulateHook),
+        reinterpret_cast<std::uintptr_t>(&RoomBlendHook),
+        reinterpret_cast<std::uintptr_t>(&SetLutHook),
+        reinterpret_cast<std::uintptr_t>(&RoomSetLutHook),
+        reinterpret_cast<std::uintptr_t>(&UnqualifiedSetLutHook)};
 
     bool InSection(const char* name, std::uintptr_t address, std::size_t size) const
     {
@@ -777,130 +677,122 @@ class NativeProvenanceInstallation
     }
     bool Mapping(std::uint64_t id, std::uintptr_t rva) const
     {
-        return id != 0 && rva != 0 && std::any_of(mappings.begin(), mappings.end(), [&](const auto& entry) {
+        return std::any_of(mappings.begin(), mappings.end(), [&](const auto& entry) {
             return entry.id == id && entry.offset == rva;
         });
     }
-    bool TargetValid(const fo4hdr::game::ImageSpaceTargetFacts& target) const
+    bool TargetValid(std::size_t i) const
     {
-        if (target.byteCount == 0 || target.byteCount > target.bytes.size()) return false;
-        const auto address = Address(target.rva);
-        const std::span bytes(target.bytes.data(), target.byteCount);
-        return Mapping(target.id, target.rva) && InSection(".text", address, bytes.size()) &&
-            Executable(reinterpret_cast<void*>(address), bytes.size()) && MatchesBytes(address, bytes) &&
-            std::find(hooks.begin(), hooks.end(), address) == hooks.end();
+        return Mapping(targetIds[i], targetRvas[i]) &&
+            InSection(".text", base + targetRvas[i], targetBytes[i].size()) &&
+            Executable(reinterpret_cast<void*>(base + targetRvas[i]), targetBytes[i].size()) &&
+            MatchesBytes(base + targetRvas[i], targetBytes[i]) &&
+            std::find(hooks.begin(), hooks.end(), base + targetRvas[i]) == hooks.end();
     }
     bool ValidateTargets() const
     {
-        for (const auto& target : facts.targets) if (!TargetValid(target)) return false;
+        for (std::size_t i = 0; i < targetRvas.size(); ++i)
+            if (!TargetValid(i)) return false;
         return true;
     }
     bool GlobalsValid() const
     {
-        return Mapping(facts.globalLutId, facts.globalLutRva) &&
-            Mapping(facts.globalBaseId, facts.globalBaseRva) &&
-            InSection(".data", Address(facts.globalLutRva), sizeof(RE::ImageSpaceLUTData)) &&
-            InSection(".data", Address(facts.globalBaseRva), sizeof(RE::ImageSpaceBaseData));
+        return Mapping(kImageSpaceGlobalLutId, kImageSpaceGlobalLutRva) &&
+            Mapping(kImageSpaceGlobalBaseId, kImageSpaceGlobalBaseRva) &&
+            InSection(".data", base + kImageSpaceGlobalLutRva, sizeof(RE::ImageSpaceLUTData)) &&
+            InSection(".data", base + kImageSpaceGlobalBaseRva, sizeof(RE::ImageSpaceBaseData));
     }
-    bool ReadAllocator(const fo4hdr::game::ImageSpaceInstallation& request)
+    bool ReadAllocator(const void* allocatorInterface, std::uint32_t handle)
     {
-        return Read(request.trampolineInterface, &allocator, sizeof(allocator)) && allocator.version == 1 &&
-            request.pluginHandle != UINT32_MAX && Executable(reinterpret_cast<void*>(allocator.branch), 1);
+        return Read(allocatorInterface, &allocator, sizeof(allocator)) && allocator.version == 1 &&
+            handle != UINT32_MAX && Executable(reinterpret_cast<void*>(allocator.branch), 1);
     }
-    bool CallMatches(const fo4hdr::game::ImageSpaceCallFacts& call, std::uintptr_t address) const
+    bool CallMatches(std::size_t i, std::uintptr_t address) const
     {
-        return call.targetIndex < facts.targets.size() && MatchesBytes(address, call.bytes) &&
-            patch::CallTarget(address, call.bytes) == Address(facts.targets[call.targetIndex].rva);
+        return MatchesBytes(address, kImageSpaceCallBytes[i]) &&
+            kImageSpaceCallTargetIndices[i] < targetRvas.size() &&
+            patch::CallTarget(address, kImageSpaceCallBytes[i]) ==
+                base + targetRvas[kImageSpaceCallTargetIndices[i]];
     }
-    bool PrepareSite(std::size_t index)
+    bool PrepareSite(std::size_t i)
     {
-        const auto& call = facts.calls[index];
-        const auto address = Address(call.rva);
+        const auto address = base + kImageSpaceCallRvas[i];
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = Mapping(call.callerId, call.callerRva) &&
-            InSection(".text", Address(call.callerRva), 1) && InSection(".text", address, 5) &&
-            Executable(reinterpret_cast<void*>(address), 5) && CallMatches(call, address) &&
-            Region(reinterpret_cast<void*>(address), 5, info);
+        const bool valid = Mapping(kImageSpaceCallerIds[i], kImageSpaceCallerRvas[i]) &&
+            InSection(".text", base + kImageSpaceCallerRvas[i], 1) &&
+            InSection(".text", address, 5) && Executable(reinterpret_cast<void*>(address), 5) &&
+            CallMatches(i, address) && Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites[index] = {address, call.bytes, {}, info.Protect};
+        sites[i] = {address, kImageSpaceCallBytes[i], {}, info.Protect};
         return true;
     }
     bool PrepareSites()
     {
-        for (std::size_t index = 0; index < sites.size(); ++index) if (!PrepareSite(index)) return false;
+        for (std::size_t i = 0; i < sites.size(); ++i)
+            if (!PrepareSite(i)) return false;
         return true;
     }
-    bool PrepareRelay(std::size_t index, std::uint32_t handle)
+    bool PrepareRelay(std::size_t i, std::uint32_t handle)
     {
         constexpr std::array<std::size_t, 11> callbacks{0, 0, 0, 1, 1, 1, 1, 2, 3, 4, 5};
-        constexpr std::array<std::uint8_t, 11> targets{0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3};
-        if (facts.calls[index].targetIndex != targets[index]) return false;
         auto* relay = allocator.branch(handle, 14);
         MEMORY_BASIC_INFORMATION info{};
         if (!Executable(relay, 14) || !Region(relay, 14, info)) return false;
-        if (!patch::EncodeCall(sites[index].address, reinterpret_cast<std::uintptr_t>(relay),
-                sites[index].replacement)) return false;
+        if (!patch::EncodeCall(sites[i].address, reinterpret_cast<std::uintptr_t>(relay),
+                sites[i].replacement)) return false;
         std::array<std::uint8_t, 14> bytes{0xFF, 0x25, 0, 0, 0, 0};
-        const auto hook = hooks[callbacks[index]];
+        const auto hook = hooks[callbacks[i]];
         std::memcpy(bytes.data() + 6, &hook, sizeof(hook));
         return WriteBytes(reinterpret_cast<std::uintptr_t>(relay), bytes, info.Protect);
     }
     bool PrepareRelays(std::uint32_t handle)
     {
-        for (std::size_t index = 0; index < sites.size(); ++index)
-            if (!PrepareRelay(index, handle)) return false;
+        for (std::size_t i = 0; i < sites.size(); ++i)
+            if (!PrepareRelay(i, handle)) return false;
+        return true;
+    }
+    bool TargetsUnchanged() const
+    {
+        for (std::size_t i = 0; i < targetRvas.size(); ++i)
+            if (!MatchesBytes(base + targetRvas[i], targetBytes[i])) return false;
         return true;
     }
     bool Publish()
     {
-        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(Address(facts.globalLutRva));
-        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(Address(facts.globalBaseRva));
-        // Captured targets and branch relays remain resident even after partial rollback.
-        g_weather.store(reinterpret_cast<Weather>(Address(facts.targets[0].rva)), std::memory_order_release);
-        g_accumulate.store(reinterpret_cast<Accumulate>(Address(facts.targets[1].rva)), std::memory_order_release);
-        g_blend.store(reinterpret_cast<Blend>(Address(facts.targets[2].rva)), std::memory_order_release);
-        g_setLut.store(reinterpret_cast<SetLut>(Address(facts.targets[3].rva)), std::memory_order_release);
+        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(base + kImageSpaceGlobalLutRva);
+        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(base + kImageSpaceGlobalBaseRva);
+        // All relays and forwarding targets outlive rollback, including a
+        // protection failure that leaves an owned CALL reachable at shutdown.
+        g_weather.store(reinterpret_cast<Weather>(base + kImageSpaceWeatherRva), std::memory_order_release);
+        g_accumulate.store(reinterpret_cast<Accumulate>(base + kImageSpaceAccumulateRva), std::memory_order_release);
+        g_blend.store(reinterpret_cast<Blend>(base + kImageSpaceRoomBlendRva), std::memory_order_release);
+        g_setLut.store(reinterpret_cast<SetLut>(base + kImageSpaceSetLutRva), std::memory_order_release);
         PatchBackend backend;
         if (!patch::InstallPair(sites, backend)) return false;
-        g_installed.store(true, std::memory_order_release);
         fo4hdr::SetImageSpaceObservationReady(true);
+        g_installed.store(true, std::memory_order_release);
         return true;
     }
-    bool Prepare(const fo4hdr::game::ImageSpaceInstallation& request)
-    {
-        if (!ValidateTargets()) return false;
-        if (!GlobalsValid()) return false;
-        return ReadAllocator(request);
-    }
-    bool PinOwner() const noexcept
-    {
-        HMODULE resident{};
-        return ::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            reinterpret_cast<LPCWSTR>(&WeatherHook), &resident) != FALSE;
-    }
-    bool PrepareTransaction(std::uint32_t handle)
-    {
-        if (!PrepareSites()) return false;
-        if (!PrepareRelays(handle)) return false;
-        return ValidateTargets();
-    }
 public:
-    explicit NativeProvenanceInstallation(const fo4hdr::game::ImageSpaceRuntimeFacts& input) : facts(input) {}
-
-    bool Install(const fo4hdr::game::ImageSpaceInstallation& request)
+    bool Prepare(const void* allocatorInterface, std::uint32_t handle)
+    {
+        if (!ValidateTargets() || !GlobalsValid()) return false;
+        if (!ReadAllocator(allocatorInterface, handle)) return false;
+        return PrepareSites() && PrepareRelays(handle);
+    }
+    bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
         if (!base || module.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
         mappings.load_v2();
-        if (!Prepare(request)) return false;
-        if (!PinOwner()) return false;
-        if (!PrepareTransaction(request.pluginHandle)) return false;
+        if (!Prepare(allocatorInterface, handle)) return false;
+        if (!TargetsUnchanged()) return false;
         return Publish();
     }
 };
-}  // namespace
+#endif
+}
 
 namespace fo4hdr::game {
-
 void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     const RE::ImageSpaceLUTData* data, NativeLutObservation& result) noexcept
 {
@@ -909,14 +801,12 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     result.imageSpaceStatus = ImageSpaceObservationStatus::unavailable;
     result.imageSpaceRevision = 0;
     if (!g_installed.load(std::memory_order_acquire)) return;
-    if (!ImageSpaceCatalogReady())
-    {
+    if (!ImageSpaceCatalogReady()) {
         result.imageSpaceStatus = ImageSpaceObservationStatus::catalogUnavailable;
         return;
     }
     provenance::Provenance transfer{};
-    if (!g_transferPublication.TryRead(transfer))
-    {
+    if (!g_transferPublication.TryRead(transfer)) {
         result.imageSpaceStatus = transfer.status;
         return;
     }
@@ -925,8 +815,7 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     provenance::LutValues values{};
     result.imageSpaceStatus = ManagerValues(manager, data, values);
     if (result.imageSpaceStatus != provenance::Status::matched) return;
-    if (!CurrentTransfer(manager, values, transfer))
-    {
+    if (!CurrentTransfer(manager, values, transfer)) {
         result.imageSpaceStatus = ImageSpaceObservationStatus::stale;
         return;
     }
@@ -934,38 +823,6 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     result.imageSpaceValidSlots = transfer.validSlots & result.validSlots;
     result.imageSpaceRevision = transfer.observationRevision;
 }
-
-namespace {
-#if defined(FO4HDR_RUNTIME_1_10_163)
-ImageSpaceTargetFacts CopiedTarget(std::uint64_t id, std::uintptr_t rva,
-    std::span<const std::uint8_t> bytes) noexcept
-{
-    ImageSpaceTargetFacts result{id, rva};
-    std::copy(bytes.begin(), bytes.end(), result.bytes.begin());
-    result.byteCount = static_cast<std::uint8_t>(bytes.size());
-    return result;
-}
-
-ImageSpaceRuntimeFacts DeclaredImageSpaceFacts() noexcept
-{
-    using namespace generated;
-    ImageSpaceRuntimeFacts facts;
-    facts.targets = {CopiedTarget(kImageSpaceWeatherId, kImageSpaceWeatherRva, kImageSpaceWeatherBytes),
-        CopiedTarget(kImageSpaceAccumulateId, kImageSpaceAccumulateRva, kImageSpaceAccumulateBytes),
-        CopiedTarget(kImageSpaceRoomBlendId, kImageSpaceRoomBlendRva, kImageSpaceRoomBlendBytes),
-        CopiedTarget(kImageSpaceSetLutId, kImageSpaceSetLutRva, kImageSpaceSetLutBytes)};
-    for (std::size_t index = 0; index < facts.calls.size(); ++index)
-        facts.calls[index] = {kImageSpaceCallerIds[index], kImageSpaceCallerRvas[index],
-            kImageSpaceCallRvas[index], kImageSpaceCallBytes[index],
-            static_cast<std::uint8_t>(kImageSpaceCallTargetIndices[index])};
-    facts.globalLutId = kImageSpaceGlobalLutId;
-    facts.globalBaseId = kImageSpaceGlobalBaseId;
-    facts.globalLutRva = kImageSpaceGlobalLutRva;
-    facts.globalBaseRva = kImageSpaceGlobalBaseRva;
-    return facts;
-}
-#endif
-}  // namespace
 
 bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterface,
     std::uint32_t pluginHandle) noexcept
@@ -976,14 +833,504 @@ bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterfac
 #if !defined(FO4HDR_RUNTIME_1_10_163)
     return false;
 #else
-    try
-    {
-        const ImageSpaceInstallation request{DeclaredImageSpaceFacts(), trampolineInterface, pluginHandle};
-        NativeProvenanceInstallation installation(request.facts);
-        return installation.Install(request);
-    }
-    catch (...) { return false; }
+    try {
+        ImageSpaceInstallation installation;
+        return installation.Install(trampolineInterface, pluginHandle);
+    } catch (...) { return false; }
 #endif
 }
+}
 
-}  // namespace fo4hdr::game
+namespace {
+static_assert(
+    sizeof(RE::ImageSpaceManager) ==
+    fo4hdr::generated::kImageSpaceManagerSize);
+static_assert(
+    offsetof(RE::ImageSpaceManager, currentEOFData) ==
+    fo4hdr::generated::kImageSpaceCurrentEofDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, effectList) ==
+    fo4hdr::generated::kImageSpaceEffectListOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, baseData) ==
+    fo4hdr::generated::kImageSpaceBaseDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, overRideBaseData) ==
+    fo4hdr::generated::kImageSpaceOverrideBaseDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, underwaterBaseData) ==
+    fo4hdr::generated::kImageSpaceUnderwaterBaseDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, consoleBaseData) ==
+    fo4hdr::generated::kImageSpaceConsoleBaseDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, lutData) ==
+    fo4hdr::generated::kImageSpaceLutDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, overrideLUTData) ==
+    fo4hdr::generated::kImageSpaceOverrideLutDataOffset);
+static_assert(
+    offsetof(RE::ImageSpaceManager, isReady) ==
+    fo4hdr::generated::kImageSpaceReadyOffset);
+static_assert(
+    static_cast<std::uint16_t>(
+        RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_TOP_LEVEL_END) ==
+    fo4hdr::generated::kImageSpaceTopLevelEffectCount);
+static_assert(
+    fo4hdr::generated::ImageSpaceEffectEnumMatches<
+        RE::ImageSpaceManager::ImageSpaceEffectEnum>());
+static_assert(
+    fo4hdr::generated::kImageSpaceCommonLibSourceCommit ==
+    fo4hdr::generated::kCommonLibCommit);
+constexpr auto kDearImageSpaceActiveDataOffsets = [] {
+    constexpr auto managerData =
+        offsetof(RE::ImageSpaceManager, currentEOFData);
+    constexpr auto baseData =
+        managerData + offsetof(RE::ImageSpaceData, baseData);
+    constexpr auto hdr = baseData + offsetof(RE::ImageSpaceBaseData, hdrData);
+    constexpr auto cinematic =
+        baseData + offsetof(RE::ImageSpaceBaseData, cinematicData);
+    return std::array<std::size_t, 12>{
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptSpeed),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, bloomBlurRadius),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, bloomThreshold),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, bloomScale),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, receiveBloomThreshold),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, white),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, sunlightScale),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, skyScale),
+        hdr + offsetof(RE::ImageSpaceBaseData::HDR, eyeAdaptStrength),
+        cinematic +
+            offsetof(RE::ImageSpaceBaseData::Cinematic, saturation),
+        cinematic +
+            offsetof(RE::ImageSpaceBaseData::Cinematic, brightness),
+        cinematic +
+            offsetof(RE::ImageSpaceBaseData::Cinematic, contrast)
+    };
+}();
+static_assert(
+    kDearImageSpaceActiveDataOffsets ==
+    fo4hdr::generated::kImageSpaceActiveDataOffsets);
+struct ImageSpacePrimitiveArrayView
+{
+    std::uintptr_t virtualTable{};
+    std::uintptr_t data{};
+    std::uint16_t capacity{};
+    std::uint16_t freeIndex{};
+    std::uint16_t size{};
+    std::uint16_t growthSize{};
+};
+using DearImageSpacePrimitiveArray =
+    RE::NiTPrimitiveArray<RE::ImageSpaceEffect*>;
+static_assert(
+    sizeof(ImageSpacePrimitiveArrayView) ==
+    fo4hdr::generated::kImageSpacePrimitiveArraySize);
+static_assert(
+    sizeof(DearImageSpacePrimitiveArray) ==
+    fo4hdr::generated::kImageSpacePrimitiveArraySize);
+static_assert(
+    alignof(ImageSpacePrimitiveArrayView) ==
+    alignof(DearImageSpacePrimitiveArray));
+static_assert(
+    offsetof(ImageSpacePrimitiveArrayView, data) ==
+    fo4hdr::generated::kImageSpacePrimitiveArrayDataOffset);
+static_assert(
+    offsetof(ImageSpacePrimitiveArrayView, capacity) ==
+    fo4hdr::generated::kImageSpacePrimitiveArrayCapacityOffset);
+static_assert(
+    offsetof(ImageSpacePrimitiveArrayView, freeIndex) ==
+    fo4hdr::generated::kImageSpacePrimitiveArrayFreeIndexOffset);
+static_assert(
+    offsetof(ImageSpacePrimitiveArrayView, size) ==
+    fo4hdr::generated::kImageSpacePrimitiveArraySizeOffset);
+static_assert(
+    offsetof(RE::ImageSpaceEffect, isActive) ==
+    fo4hdr::generated::kImageSpaceEffectStoredActiveOffset);
+static_assert(
+    sizeof(RE::ImageSpaceLUTData) ==
+    fo4hdr::generated::kImageSpaceLutDataSize);
+static_assert(
+    offsetof(RE::ImageSpaceLUTData, weight) ==
+    fo4hdr::generated::kImageSpaceLutWeightOffset);
+static_assert(
+    offsetof(RE::ImageSpaceLUTData, texture) ==
+    fo4hdr::generated::kImageSpaceLutTextureOffset);
+static_assert(
+    std::extent_v<decltype(RE::ImageSpaceLUTData::weight)> ==
+    fo4hdr::generated::kImageSpaceLutEntryCount);
+static_assert(
+    std::extent_v<decltype(RE::ImageSpaceLUTData::texture)> ==
+    fo4hdr::generated::kImageSpaceLutEntryCount);
+static_assert(
+    std::tuple_size_v<decltype(
+        fo4hdr::generated::kImageSpaceEffectSemantics)> ==
+    std::tuple_size_v<decltype(
+        fo4hdr::GameHdrSnapshot{}.imageSpaceEffects)>);
+static_assert(
+    std::tuple_size_v<decltype(fo4hdr::GameHdrSnapshot{}.luts)> ==
+    fo4hdr::generated::kImageSpaceLutEntryCount);
+
+}
+namespace fo4hdr::game::observation {
+class ImageSpaceCollector
+{
+    GameSnapshotStore& store;
+    RE::ImageSpaceManager* manager{};
+    static constexpr std::size_t kManagerSize = fo4hdr::generated::kImageSpaceManagerSize;
+    static constexpr std::size_t kLutSize = fo4hdr::generated::kImageSpaceLutDataSize;
+    std::array<std::byte, kManagerSize> managerBytes{};
+    fo4hdr::GameHdrSnapshot observed{};
+    std::uint8_t readyByte{};
+    std::uintptr_t effectStorage{};
+    std::uint16_t effectCapacity{};
+    std::uint16_t effectFreeIndex{};
+    std::uint16_t effectSize{};
+    std::uintptr_t baseData{};
+    std::uintptr_t overrideData{};
+    std::uintptr_t underwaterData{};
+    std::uintptr_t consoleData{};
+    std::uintptr_t overrideLut{};
+    static constexpr auto kEffectList =
+        fo4hdr::generated::kImageSpaceEffectListOffset;
+
+    bool Fail(std::string_view reason) noexcept
+    {
+        ReportFeatureFailure(store, fo4hdr::GameSnapshotFeature::ImageSpace, "image-space", reason);
+        return false;
+    }
+    bool ReadManager()
+    {
+        manager = ValidateCommonLibObject(
+            RE::ImageSpaceManager::GetSingleton(),
+            sizeof(RE::ImageSpaceManager),
+            "RE::ImageSpaceManager::GetSingleton");
+        if (manager == nullptr || !GuardedReadValue(manager, managerBytes))
+        {
+            return Fail("relocation-or-object-invalid");
+        }
+
+        return true;
+    }
+
+    bool ReadEffectHeader()
+    {
+        using namespace fo4hdr::generated;
+        return ReadSnapshotField(managerBytes, kImageSpaceReadyOffset, readyByte) &&
+            ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayDataOffset, effectStorage) &&
+            ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayCapacityOffset, effectCapacity) &&
+            ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayFreeIndexOffset, effectFreeIndex) &&
+            ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArraySizeOffset, effectSize);
+    }
+
+    bool ReadDataPointers()
+    {
+        using namespace fo4hdr::generated;
+        return ReadSnapshotField(managerBytes, kImageSpaceBaseDataOffset, baseData) &&
+            ReadSnapshotField(managerBytes, kImageSpaceOverrideBaseDataOffset, overrideData) &&
+            ReadSnapshotField(managerBytes, kImageSpaceUnderwaterBaseDataOffset, underwaterData) &&
+            ReadSnapshotField(managerBytes, kImageSpaceConsoleBaseDataOffset, consoleData) &&
+            ReadSnapshotField(managerBytes, kImageSpaceOverrideLutDataOffset, overrideLut);
+    }
+
+    bool ReadFields()
+    {
+        if (!ReadEffectHeader() || !ReadDataPointers()) return Fail("manager-snapshot-invalid");
+        return true;
+    }
+    bool ValidateFields()
+    {
+        if (readyByte > 1)
+        {
+            return Fail("manager-ready-byte-invalid");
+        }
+        if (readyByte == 0)
+        {
+            return Fail("manager-not-ready");
+        }
+        const auto effectListValid = fo4hdr::ValidateImageSpaceEffectListPrefix(
+            {effectCapacity, effectSize, effectFreeIndex, effectStorage},
+            fo4hdr::generated::kImageSpaceTopLevelEffectCount);
+        if (!effectListValid)
+        {
+            REX::WARN(
+                "m2 image_space_effect_list valid=false capacity={} size={} "
+                "free_index={} storage_present={} required_top_level_prefix={}",
+                effectCapacity,
+                effectSize,
+                effectFreeIndex,
+                effectStorage != 0,
+                fo4hdr::generated::kImageSpaceTopLevelEffectCount);
+            return Fail("effect-list-prefix-invalid");
+        }
+
+        return true;
+    }
+
+    bool ReadActiveData()
+    {
+        observed.imageSpaceIdentity =
+            reinterpret_cast<std::uintptr_t>(manager);
+        observed.baseImageSpaceIdentity = baseData;
+        observed.overrideImageSpaceIdentity = overrideData;
+        observed.underwaterImageSpaceIdentity = underwaterData;
+        observed.consoleImageSpaceIdentity = consoleData;
+        observed.imageSpaceOverride = overrideData != 0;
+        if (!fo4hdr::DecodeImageSpaceActiveData(
+                managerBytes,
+                fo4hdr::generated::kImageSpaceActiveDataOffsets,
+                observed.activeImageSpace))
+        {
+            return Fail("active-data-invalid");
+        }
+
+        return true;
+    }
+
+    bool ReadEffect(std::size_t index)
+    {
+        std::uintptr_t effectIdentity{};
+        const auto* effectSlot = reinterpret_cast<const std::byte*>(
+            effectStorage) + index * sizeof(std::uintptr_t);
+        if (!GuardedReadValue(effectSlot, effectIdentity))
+        {
+            return Fail("effect-list-read-failed");
+        }
+        auto& destination = observed.imageSpaceEffects[index];
+        destination.declaredIndex = static_cast<std::uint16_t>(index);
+        destination.present = effectIdentity != 0;
+        destination.objectIdentity = effectIdentity;
+        if (effectIdentity != 0)
+        {
+            std::uint8_t storedActiveByte{};
+            if (!GuardedReadValue(
+                    reinterpret_cast<const std::byte*>(effectIdentity) +
+                        fo4hdr::generated::
+                            kImageSpaceEffectStoredActiveOffset,
+                    storedActiveByte) ||
+                storedActiveByte > 1)
+            {
+                return Fail("effect-object-read-failed");
+            }
+            destination.active = storedActiveByte != 0;
+            ++observed.imageSpaceEffectCount;
+        }
+        return true;
+    }
+
+    bool ReadEffects()
+    {
+        if (!IsReadableMemory(
+                reinterpret_cast<const void*>(effectStorage),
+                observed.imageSpaceEffects.size() * sizeof(std::uintptr_t),
+                false))
+        {
+            return Fail("effect-list-storage-invalid");
+        }
+        for (std::size_t index = 0;
+             index < observed.imageSpaceEffects.size();
+             ++index)
+        {
+            if (!ReadEffect(index)) return false;
+        }
+
+        return true;
+    }
+
+    bool ReadLut(const std::array<std::byte, kLutSize>& lutBytes, std::size_t index)
+    {
+        auto& destination = observed.luts[index];
+        if (!ReadSnapshotField(
+                lutBytes,
+                fo4hdr::generated::kImageSpaceLutWeightOffset +
+                    index * sizeof(float),
+                destination.weight) ||
+            !ReadSnapshotField(
+                lutBytes,
+                fo4hdr::generated::kImageSpaceLutTextureOffset +
+                    index * sizeof(std::uintptr_t),
+                destination.engineTextureId))
+        {
+            return Fail("lut-snapshot-invalid");
+        }
+        if (destination.engineTextureId != 0 && destination.weight > 0.0F)
+        {
+            ++observed.activeLutCount;
+        }
+        return true;
+    }
+
+    bool ReadLutStorage(std::array<std::byte, kLutSize>& lutBytes)
+    {
+        if (overrideLut != 0)
+        {
+            if (!GuardedReadValue(
+                    reinterpret_cast<const void*>(overrideLut),
+                    lutBytes))
+            {
+                return Fail("lut-storage-invalid");
+            }
+        }
+        else
+        {
+            std::memcpy(
+                lutBytes.data(),
+                managerBytes.data() +
+                    fo4hdr::generated::kImageSpaceLutDataOffset,
+                kLutSize);
+        }
+        return true;
+    }
+
+    bool ReadLuts()
+    {
+        std::array<std::byte, kLutSize> lutBytes{};
+        if (!ReadLutStorage(lutBytes)) return false;
+        for (std::size_t index = 0; index < observed.luts.size(); ++index)
+        {
+            if (!ReadLut(lutBytes, index)) return false;
+        }
+
+        return true;
+    }
+
+    void Publish()
+    {
+        store.Update(
+            [this](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
+                fo4hdr::MarkGameSnapshotFeatureAvailable(
+                    snapshot,
+                    fo4hdr::GameSnapshotFeature::ImageSpace);
+                snapshot.imageSpaceIdentity = observed.imageSpaceIdentity;
+                snapshot.baseImageSpaceIdentity =
+                    observed.baseImageSpaceIdentity;
+                snapshot.overrideImageSpaceIdentity =
+                    observed.overrideImageSpaceIdentity;
+                snapshot.underwaterImageSpaceIdentity =
+                    observed.underwaterImageSpaceIdentity;
+                snapshot.consoleImageSpaceIdentity =
+                    observed.consoleImageSpaceIdentity;
+                snapshot.imageSpaceOverride = observed.imageSpaceOverride;
+                snapshot.activeImageSpace = observed.activeImageSpace;
+                snapshot.imageSpaceEffectCount =
+                    observed.imageSpaceEffectCount;
+                snapshot.imageSpaceEffects = observed.imageSpaceEffects;
+                snapshot.luts = observed.luts;
+                for (auto& lut : snapshot.luts)
+                {
+                    lut.resourceGeneration = snapshot.resourceGeneration;
+                }
+                snapshot.activeLutCount = observed.activeLutCount;
+            });
+    }
+    void Report(std::string_view trigger)
+    {
+        REX::INFO(
+            "m2 image_space available=true trigger={} thread={} ready=true "
+            "override={} effect_capacity={} effect_size={} effect_free_index={} "
+            "top_level_effect_count={} effects={} active_luts={} "
+            "effect_semantics=exact-1.10.163 active_field_names=commonlib "
+            "xedit_alias_behavior=unverified current_eof_data=true "
+            "eye_adapt_speed={} bloom_blur_radius={} bloom_threshold={} "
+            "bloom_scale={} receive_bloom_threshold={} white={} "
+            "sunlight_scale={} sky_scale={} eye_adapt_strength={} "
+            "cinematic_saturation={} cinematic_brightness={} "
+            "cinematic_contrast={}",
+            trigger,
+            REX::W32::GetCurrentThreadId(),
+            observed.imageSpaceOverride,
+            effectCapacity,
+            effectSize,
+            effectFreeIndex,
+            fo4hdr::generated::kImageSpaceTopLevelEffectCount,
+            observed.imageSpaceEffectCount,
+            observed.activeLutCount,
+            observed.activeImageSpace.eyeAdaptSpeed,
+            observed.activeImageSpace.bloomBlurRadius,
+            observed.activeImageSpace.bloomThreshold,
+            observed.activeImageSpace.bloomScale,
+            observed.activeImageSpace.receiveBloomThreshold,
+            observed.activeImageSpace.white,
+            observed.activeImageSpace.sunlightScale,
+            observed.activeImageSpace.skyScale,
+            observed.activeImageSpace.eyeAdaptStrength,
+            observed.activeImageSpace.cinematicSaturation,
+            observed.activeImageSpace.cinematicBrightness,
+            observed.activeImageSpace.cinematicContrast);
+    }
+public:
+    explicit ImageSpaceCollector(GameSnapshotStore& destination) : store(destination) {}
+    void Collect(std::string_view trigger)
+    {
+        if (!ReadManager()) return;
+        if (!ReadFields() || !ValidateFields()) return;
+        if (!ReadActiveData()) return;
+        if (!ReadEffects() || !ReadLuts()) return;
+        Publish();
+        Report(trigger);
+    }
+};
+
+void ObserveImageSpace(GameSnapshotStore& store, std::string_view trigger)
+{
+    ImageSpaceCollector collector(store);
+    collector.Collect(trigger);
+}
+}
+
+namespace fo4hdr::game::observation {
+void ReportImageSpaceSemanticProfile()
+{
+    REX::INFO(
+        "m2 image_space_profile layout_exact=true effect_table_exact=true "
+        "effects={} table_sha256={} commonlib_source_commit={} "
+        "xedit_alias_source_commit={} xedit_alias_behavior=unverified",
+        fo4hdr::generated::kImageSpaceTopLevelEffectCount,
+        fo4hdr::generated::kImageSpaceEffectTableSha256,
+        fo4hdr::generated::kImageSpaceCommonLibSourceCommit,
+        fo4hdr::generated::kImageSpaceXEditAliasSourceCommit);
+    for (const auto& semantic :
+         fo4hdr::generated::kImageSpaceEffectSemantics)
+    {
+        REX::INFO(
+            "m2 image_space_profile_effect index={} symbol={}",
+            semantic.index,
+            semantic.symbol);
+    }
+    for (const auto& semantic :
+         fo4hdr::generated::kImageSpaceActiveDataSemantics)
+    {
+        REX::INFO(
+            "m2 image_space_profile_active_field field={} offset={} "
+            "xedit_alias=\"{}\" alias_behavior=unverified",
+            semantic.field,
+            semantic.offset,
+            semantic.xeditAlias.empty() ? "none" : semantic.xeditAlias);
+    }
+}
+
+void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
+{
+    if (fo4hdr::HasGameSnapshotFeature(
+            snapshot.availableFeatures,
+            fo4hdr::GameSnapshotFeature::ImageSpace))
+    {
+        for (std::size_t index = 0;
+             index < snapshot.imageSpaceEffects.size();
+             ++index)
+        {
+            const auto& effect = snapshot.imageSpaceEffects[index];
+            const auto& semantic =
+                fo4hdr::generated::kImageSpaceEffectSemantics[index];
+            REX::INFO(
+                "m2 image_space_effect index={} symbol={} present={} "
+                "stored_active={} semantic_mapping=exact-1.10.163",
+                semantic.index,
+                semantic.symbol,
+                effect.present,
+                effect.active);
+        }
+    }
+
+
+}
+}  // namespace fo4hdr::game::observation

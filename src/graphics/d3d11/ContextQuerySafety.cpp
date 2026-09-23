@@ -2,9 +2,20 @@
 
 #include "ContextQuerySafety.hpp"
 
-#include <algorithm>
-
 namespace fo4hdr {
+
+bool ContextQuerySafety::EnterCommandList() noexcept
+{
+    if (executionDepth == capacity) { unknown = true; return false; }
+    ++executionDepth;
+    return true;
+}
+
+void ContextQuerySafety::LeaveCommandList() noexcept
+{
+    if (executionDepth == 0) { unknown = true; return; }
+    --executionDepth;
+}
 
 void ContextQuerySafety::Begin(const void* key) noexcept
 {
@@ -21,30 +32,18 @@ void ContextQuerySafety::Begin(const void* key) noexcept
 
 void ContextQuerySafety::End(const void* key) noexcept
 {
-    const auto found = std::find(active.begin(), active.end(), key);
-    if (key == nullptr || found == active.end()) { unknown = true; return; }
-    *found = nullptr;
-}
-
-bool ContextQuerySafety::EnterCommandList() noexcept
-{
-    if (executionDepth == capacity) { unknown = true; return false; }
-    ++executionDepth;
-    return true;
-}
-
-void ContextQuerySafety::LeaveCommandList() noexcept
-{
-    if (executionDepth == 0) { unknown = true; return; }
-    --executionDepth;
+    if (key == nullptr) return;
+    for (auto& entry : active)
+        if (entry == key) { entry = nullptr; return; }
+    // End-only timestamp/event queries do not clear unrelated scopes.
 }
 
 bool ContextQuerySafety::CanDispatch() const noexcept
 {
     if (unknown || executionDepth != 0) return false;
-    return std::all_of(active.begin(), active.end(), [](const void* key) {
-        return key == nullptr;
-    });
+    for (const auto* entry : active)
+        if (entry != nullptr) return false;
+    return true;
 }
 
-}  // namespace fo4hdr
+} // namespace fo4hdr

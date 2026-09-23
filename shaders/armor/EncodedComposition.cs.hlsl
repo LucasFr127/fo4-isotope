@@ -33,7 +33,8 @@ float3 SignedGamma(float3 value, float exponent)
 
 float ContainStorage(float value)
 {
-    // Emergency FP16 containment can lose channel ratios; alpha is untouched.
+    // Emergency storage containment only. Extreme decode may lose channel
+    // ratios; this is not a tone mapper or display-peak bound. Alpha is untouched.
     if (isnan(value)) return 0.0f;
     return clamp(value, -65504.0f, 65504.0f);
 }
@@ -50,7 +51,11 @@ void main(uint3 id : SV_DispatchThreadID)
         : Fo4HdrExpandPrimaries(SignedGamma(value.rgb, 2.2f));
     if (Encode == 0 && PeakUiRelative > 0.0f)
     {
-        // Scale completed RGB together: additive native codes may exceed one.
+        // Native additive materials can emit codes well above one. RenoDX
+        // bounds their completed output by scaling RGB together, not by
+        // clipping individual channels or imposing SDR bounds on the source.
+        // Apply the HDR10/BT.2020 form at this interval's decode boundary;
+        // later ordinary UI retains its separate composition policy.
         const float maximum = max(max(transformed.r, transformed.g), transformed.b);
         transformed *= PeakUiRelative / max(PeakUiRelative, maximum);
     }

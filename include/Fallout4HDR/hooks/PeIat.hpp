@@ -28,9 +28,9 @@ struct PeIatResult
     void** slot{};
 };
 
-// The caller supplies readable mapped-image bytes with RVAs relative to their base,
-// not disk-file offsets. Lookup neither writes the slot nor proves it is writable/callable.
-[[nodiscard]] PeIatResult FindPe32PlusIatSlot(std::span<std::byte> image,
-    std::string_view importedModule, std::string_view importedSymbol) noexcept;
+[[nodiscard]] PeIatResult FindPe32PlusIatSlot(
+    std::span<std::byte> image,
+    std::string_view importedModule,
+    std::string_view importedSymbol) noexcept;
 
 }  // namespace fo4hdr

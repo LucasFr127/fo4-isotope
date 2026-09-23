@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "SettingsPanel.hpp"
-#include "LiveSettings.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "Fallout4HDR/config/SettingsPersistence.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 
 #include <imgui.h>
@@ -182,56 +183,33 @@ bool DrawGt7(ToneMapperParameters& parameters) noexcept
     return DrawControls(parameters, controls);
 }
 
-bool DrawOperator(PluginConfiguration& editable) noexcept
+bool DrawOperator(HdrSettings& editable) noexcept
 {
     ImGui::SeparatorText("Tone mapper");
-    const char* choices[]{"ACES 2", "AgX", "GT7", "ACES 2 Contrast Look"};
-    auto selected = static_cast<int>(editable.algorithm);
+    const char* choices[]{"ACES 2 Contrast Look", "AgX", "GT7"};
+    auto selected = static_cast<int>(editable.productionAlgorithm);
     if (selected >= static_cast<int>(std::size(choices))) selected = 0;
     ImGui::SetNextItemWidth(-1.0f);
     bool changed = ImGui::Combo("##operator", &selected, choices, static_cast<int>(std::size(choices)));
-    if (changed) editable.algorithm = static_cast<OperatorLutAlgorithm>(selected);
-    switch (editable.algorithm)
+    if (changed) editable.productionAlgorithm = static_cast<ProductionToneMapperAlgorithm>(selected);
+    switch (editable.productionAlgorithm)
     {
-    case OperatorLutAlgorithm::agX:
-        changed |= DrawAgx(editable.display.toneMapperParameters);
+    case ProductionToneMapperAlgorithm::agX:
+        changed |= DrawAgx(editable.toneMapperParameters);
         break;
-    case OperatorLutAlgorithm::gt7:
-        changed |= DrawGt7(editable.display.toneMapperParameters);
+    case ProductionToneMapperAlgorithm::gt7:
+        changed |= DrawGt7(editable.toneMapperParameters);
         break;
-    case OperatorLutAlgorithm::aces2Lmt:
-        changed |= DrawNumber("Look strength", editable.display.toneMapperParameters.acesLookStrength,
+    case ProductionToneMapperAlgorithm::aces2Lmt:
+        changed |= DrawNumber("Look strength", editable.toneMapperParameters.acesLookStrength,
             {kMinimumAcesLookStrength, kMaximumAcesLookStrength, "%.2f"});
         ImGui::TextWrapped("Zero bypasses the look; the fixed shadow and gamut adaptations remain.");
-        break;
-    case OperatorLutAlgorithm::aces2:
-        ImGui::TextUnformatted("ACES 2 has no adjustable look controls.");
         break;
     }
     return changed;
 }
 
-const char* RenderErrorText(LiveSettingsError error) noexcept
-{
-    constexpr std::array messages{
-        "", "Requested values are invalid. Active settings retained.",
-        "Builder busy. Active settings retained.", "Table preparation failed. Active settings retained.",
-        "Settings could not be applied. The request remains pending.",
-        "Settings generation limit reached.", "Live settings are unavailable."};
-    const auto index = static_cast<std::size_t>(error);
-    return index < messages.size() ? messages[index] : "Live settings are unavailable.";
-}
-
-const char* SaveStateText(SettingsPersistenceState state) noexcept
-{
-    constexpr std::array messages{
-        "Saving unavailable", "Not saved", "Saving requested settings",
-        "Requested settings saved", "Save failed; try again", "Save status busy"};
-    const auto index = static_cast<std::size_t>(state);
-    return index < messages.size() ? messages[index] : "Saving unavailable";
-}
-
-const char* OperatorName(OperatorLutAlgorithm algorithm) noexcept
+const char* OperatorName(ProductionToneMapperAlgorithm algorithm) noexcept
 {
     const auto name = ToString(algorithm);
     return name.empty() ? "Unknown operator" : name.data();
@@ -243,54 +221,55 @@ const char* GradingMethodName(ColorGradingMethod method) noexcept
     return name.empty() ? "Unknown grading method" : name.data();
 }
 
-void DrawConfigurationSummary(const char* label, const PluginConfiguration& value) noexcept
+void DrawConfigurationSummary(const char* label, const HdrSettings& value) noexcept
 {
     ImGui::TextWrapped("%s: %s, peak %.0f nits, UI %.0f nits, "
         "video %.0f nits, %s grading %.0f%%",
-        label, OperatorName(value.algorithm), value.display.displayPeakNits,
-        value.display.uiPaperWhiteNits, value.display.videoWhiteNits,
-        GradingMethodName(value.display.colorGradingMethod),
-        value.display.vanillaColorGradingStrengthPercent);
+        label, OperatorName(value.productionAlgorithm), value.displayPeakNits,
+        value.uiPaperWhiteNits, value.videoWhiteNits,
+        GradingMethodName(value.colorGradingMethod),
+        value.vanillaColorGradingStrengthPercent);
 }
 
-void DrawStatus(const LiveSettingsSnapshot& snapshot) noexcept
+void DrawStatus(const SettingsWindowView& snapshot) noexcept
 {
     ImGui::SeparatorText("Status");
-    if (!snapshot.available)
-    {
-        ImGui::TextWrapped("Live settings are unavailable. Controls are disabled.");
-        return;
-    }
-    DrawConfigurationSummary("Active", snapshot.active);
-    if (snapshot.pending) DrawConfigurationSummary("Pending", snapshot.requested);
-    ImGui::TextWrapped("%s", RenderErrorText(snapshot.error));
-    ImGui::TextUnformatted(SaveStateText(snapshot.persistence.state));
-    if (snapshot.saveRejected) ImGui::TextWrapped("Save request was not accepted; try again.");
+    DrawConfigurationSummary("Active", snapshot.activeSettings);
+    if (snapshot.lutPending)
+        ImGui::Text("Pending: %s at %.0f nits", OperatorName(snapshot.pendingAlgorithm), snapshot.pendingPeakNits);
+    if (snapshot.liveSettingsError)
+        ImGui::TextWrapped("Settings could not be applied. Active settings retained.");
+    const auto persistence = ReadSettingsPersistenceSnapshot();
+    if (persistence.state == SettingsPersistenceState::failed)
+        ImGui::TextWrapped("Save failed; try again.");
+    else if (persistence.state == SettingsPersistenceState::saving)
+        ImGui::TextUnformatted("Saving requested settings");
+    else if (persistence.state == SettingsPersistenceState::saved)
+        ImGui::TextUnformatted("Requested settings saved");
 }
 
-bool CanSave(const LiveSettingsSnapshot& snapshot) noexcept
+bool CanSave(const SettingsWindowView& snapshot) noexcept
 {
-    if (!snapshot.available) return false;
-    if (snapshot.persistence.state == SettingsPersistenceState::unavailable) return false;
-    return snapshot.persistence.state != SettingsPersistenceState::busy;
+    return snapshot.threadCompatible &&
+        ReadSettingsPersistenceSnapshot().state != SettingsPersistenceState::unavailable;
 }
 
 }  // namespace
 
-SettingsPanelActions DrawSettingsPanel(PluginConfiguration& editable,
-    const LiveSettingsSnapshot& snapshot) noexcept
+SettingsPanelActions DrawSettingsPanel(HdrSettings& editable,
+    const SettingsWindowView& snapshot) noexcept
 {
     ImGui::PushID("hdr-settings");
     SettingsPanelActions actions;
-    ImGui::BeginDisabled(!snapshot.available);
-    actions.request |= DrawOutput(editable.display);
+    ImGui::BeginDisabled(!snapshot.threadCompatible);
+    actions.request |= DrawOutput(editable);
     actions.request |= DrawOperator(editable);
-    actions.request |= DrawImage(editable.display);
-    actions.request |= DrawGrade(editable.display);
-    actions.request |= DrawSelective(editable.display.selectiveColor);
+    actions.request |= DrawImage(editable);
+    actions.request |= DrawGrade(editable);
+    actions.request |= DrawSelective(editable.selectiveColor);
     if (ImGui::Button("Reset settings"))
     {
-        editable = PluginConfiguration{};
+        editable = HdrSettings{};
         actions.request = true;
     }
     ImGui::EndDisabled();

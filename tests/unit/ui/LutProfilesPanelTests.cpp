@@ -2,7 +2,7 @@
 
 #include "UnitTestSuite.hpp"
 #include "LutProfilesPanel.hpp"
-#include "HdrRenderer.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "TestHarness.hpp"
 
@@ -83,7 +83,7 @@ struct PanelCase
 {
     ImVec2 windowSize;
     float scale;
-    const LutProfileDrawSnapshot& observation;
+    const LutProfilesView& observation;
     GradeProfileKind selectedKind;
     std::string_view selectedKey;
     bool enabled{true};
@@ -115,7 +115,7 @@ void RenderLutProfilesPanel(const PanelCase& test)
     PanelContext context;
     if (!context.Prepare(test.scale)) return;
     PluginConfiguration editable;
-    auto& settings = editable.display;
+    auto& settings = editable;
     FO4HDR_CHECK(SetLutGradeProfile(settings.lutGradeProfiles,
         "textures/luts/saved-only.dds", {72.0, true, 100.0, false}));
     FO4HDR_CHECK(SetImageSpaceGradeProfile(settings.lutGradeProfiles,
@@ -149,12 +149,12 @@ void RunLutProfilesPanelTests()
         "textures/effects/luts/"
         "a-very-long-active-grade-name-that-keeps-going-through-a-narrow-"
         "panel-and-contains-literal-100%-and-%s-format-text.dds"};
-    LutProfileDrawSnapshot empty;
+    LutProfilesView empty;
     empty.status = "No qualified LUT draw; literal %s stays text.";
     empty.imageSpaceStatus = nullptr;
     auto waiting = empty;
     waiting.imageSpaceStatus = "ImageSpace observation is waiting.";
-    LutProfileDrawSnapshot active;
+    LutProfilesView active;
     active.currentLuts = {MakeLut(longPercentPath, 0.625F, 11),
         MakeLut(longPercentPath, 0.375F, 22), LutSnapshot{}, LutSnapshot{}};
     active.currentImageSpaces = {

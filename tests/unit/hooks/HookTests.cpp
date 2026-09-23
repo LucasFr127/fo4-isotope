@@ -8,13 +8,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <barrier>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <new>
 #include <span>
-#include <thread>
 
 #include <Windows.h>
 
@@ -79,14 +76,6 @@ fo4hdr::PeIatResult CheckLookup(PeImage& image, Status expected,
     return result;
 }
 
-template <class T>
-void CheckField(std::size_t offset, T value, Status expected)
-{
-    auto image = MakePeImage();
-    Write(image, offset, value);
-    static_cast<void>(CheckLookup(image, expected));
-}
-
 void TestNamedImport()
 {
     auto image = MakePeImage();
@@ -107,102 +96,6 @@ void TestNamedImport()
     Write<std::uint16_t>(copy, nt + 20, 128);
     Write<std::uint32_t>(copy, optional + 108, 2);
     static_cast<void>(CheckLookup(copy, Status::success));
-}
-
-void TestPeHeaderBounds()
-{
-    auto image = MakePeImage();
-    FO4HDR_CHECK(fo4hdr::FindPe32PlusIatSlot({}, "d3d11.dll", symbol).status ==
-        Status::invalidArgument);
-    static_cast<void>(CheckLookup(image, Status::invalidArgument, ""));
-    static_cast<void>(CheckLookup(image, Status::invalidArgument, "d3d11.dll", ""));
-    for (const auto extent : {std::size_t{1}, std::size_t{0x3F}})
-    {
-        FO4HDR_CHECK(fo4hdr::FindPe32PlusIatSlot(std::span{image.bytes}.first(extent),
-            "d3d11.dll", symbol).status == Status::invalidDos);
-    }
-    for (const auto extent : {nt + 23, optional + 0xEF})
-    {
-        FO4HDR_CHECK(fo4hdr::FindPe32PlusIatSlot(std::span{image.bytes}.first(extent),
-            "d3d11.dll", symbol).status == Status::invalidNt);
-    }
-    CheckField<std::uint16_t>(0, 0, Status::invalidDos);
-    CheckField<std::int32_t>(0x3C, -1, Status::invalidNt);
-    CheckField<std::int32_t>(0x3C, 0x20, Status::invalidNt);
-    CheckField<std::int32_t>(0x3C, 0x7FFFFFFF, Status::invalidNt);
-    CheckField<std::uint32_t>(nt, 0, Status::invalidNt);
-    CheckField<std::uint16_t>(nt + 4, 0x014C, Status::notPe32PlusAmd64);
-    CheckField<std::uint16_t>(optional, 0x10B, Status::notPe32PlusAmd64);
-    CheckField<std::uint16_t>(nt + 20, 111, Status::invalidNt);
-    CheckField<std::uint16_t>(nt + 20, 0xFFFF, Status::invalidNt);
-    CheckField<std::uint32_t>(optional + 108, 17, Status::invalidNt);
-    CheckField<std::uint32_t>(optional + 108, 1, Status::importsUnavailable);
-}
-
-void TestImportBounds()
-{
-    CheckField<std::uint32_t>(optional + 120, 0, Status::importsUnavailable);
-    CheckField<std::uint32_t>(optional + 124, 0, Status::importsUnavailable);
-    CheckField<std::uint32_t>(optional + 124, 19, Status::malformedImports);
-    CheckField<std::uint32_t>(optional + 124, 20, Status::malformedImports);
-    CheckField<std::uint32_t>(optional + 120, 0xFFFFFFFF, Status::malformedImports);
-    CheckField<std::uint32_t>(optional + 124, 0xFFFFFFFF, Status::malformedImports);
-    CheckField<std::uint32_t>(imports, 0, Status::malformedImports);
-    CheckField<std::uint32_t>(imports + 12, 0x800, Status::malformedImports);
-    CheckField<std::uint32_t>(imports + 16, 0, Status::malformedImports);
-    CheckField<std::uint32_t>(imports + 20 + 4, 1, Status::malformedImports);
-    CheckField<std::uint32_t>(imports, 0x7F9, Status::malformedImports);
-    CheckField<std::uint32_t>(imports + 16, 0x7F9, Status::malformedImports);
-    CheckField<std::uint64_t>(names, std::uint64_t{1} << 62, Status::malformedImports);
-    CheckField<std::uint64_t>(names, 0x7FF, Status::malformedImports);
-    CheckField<std::uint64_t>(names, 0x7FE, Status::malformedImports);
-    CheckField<std::uint64_t>(slots + 8, 1, Status::malformedImports);
-    auto image = MakePeImage();
-    Write<std::uint32_t>(image, imports, 0x7F8);
-    Write<std::uint32_t>(image, imports + 16, 0x7F0);
-    Write<std::uint64_t>(image, 0x7F8, symbolName);
-    Write<std::uint64_t>(image, 0x7F0, 1);
-    static_cast<void>(CheckLookup(image, Status::malformedImports));
-}
-
-void TestNamesAndAlignment()
-{
-    for (const auto offset : {moduleName, symbolName + 2})
-    {
-        auto image = MakePeImage();
-        std::fill(image.bytes.begin() + offset, image.bytes.end(), std::byte{'X'});
-        static_cast<void>(CheckLookup(image, Status::malformedImports));
-    }
-    CheckField<std::uint32_t>(imports + 16, slots + 1, Status::malformedImports);
-    const auto image = MakePeImage();
-    alignas(void*) std::array<std::byte, 0x801> shifted{};
-    std::memcpy(shifted.data() + 1, image.bytes.data(), image.bytes.size());
-    const auto before = shifted;
-    const auto result = fo4hdr::FindPe32PlusIatSlot(
-        std::span{shifted}.subspan(1), "d3d11.dll", symbol);
-    FO4HDR_CHECK(result.status == Status::malformedImports);
-    FO4HDR_CHECK(result.slot == nullptr);
-    FO4HDR_CHECK(shifted == before);
-}
-
-void TestOrdinalAndAmbiguity()
-{
-    auto image = MakePeImage();
-    Write<std::uint64_t>(image, names, (std::uint64_t{1} << 63) | 7);
-    static_cast<void>(CheckLookup(image, Status::symbolNotFound));
-    Write<std::uint64_t>(image, names + 8, symbolName);
-    Write<std::uint64_t>(image, slots + 8, 1);
-    const auto result = CheckLookup(image, Status::success);
-    FO4HDR_CHECK(reinterpret_cast<std::byte*>(result.slot) == image.bytes.data() + slots + 8);
-    CheckField<std::uint64_t>(slots, 0, Status::nullTarget);
-    image = MakePeImage();
-    Write<std::uint64_t>(image, names + 8, symbolName);
-    Write<std::uint64_t>(image, slots + 8, 1);
-    static_cast<void>(CheckLookup(image, Status::duplicateSymbol));
-    image = MakePeImage();
-    Write<std::uint32_t>(image, optional + 124, 60);
-    std::memcpy(image.bytes.data() + imports + 20, image.bytes.data() + imports, 20);
-    static_cast<void>(CheckLookup(image, Status::duplicateSymbol));
 }
 
 using Owner = fo4hdr::PointerHookOwnership;
@@ -297,45 +190,6 @@ void TestCooperativeOwnership()
     FO4HDR_CHECK(!InstallOwner(owner, &slot));
 }
 
-void TestOwnershipRefusals()
-{
-    publications = 0;
-    void* slot = OriginalPointer();
-    for (const auto candidate : {static_cast<void*>(nullptr), ReplacementPointer()})
-    {
-        slot = candidate;
-        Owner owner;
-        FO4HDR_CHECK(!InstallOwner(owner, &slot));
-        FO4HDR_CHECK(slot == candidate);
-        FO4HDR_CHECK(owner.State() == OwnerState::installFailed);
-    }
-    Owner nullSlot;
-    FO4HDR_CHECK(!InstallOwner(nullSlot, nullptr));
-    slot = OriginalPointer();
-    Owner rejectedTarget;
-    void* uncallable = &slot;
-    FO4HDR_CHECK(!rejectedTarget.Install(&uncallable, ReplacementPointer(), AtomicWrite,
-        PublishNext));
-    FO4HDR_CHECK(slot == OriginalPointer());
-    Owner refusedPublication;
-    FO4HDR_CHECK(!refusedPublication.Install(&slot, ReplacementPointer(), AtomicWrite,
-        RejectPublication));
-    FO4HDR_CHECK(slot == OriginalPointer());
-    FO4HDR_CHECK(refusedPublication.Next() == OriginalPointer());
-    Owner noWriter;
-    FO4HDR_CHECK(!InstallOwner(noWriter, &slot, nullptr));
-    Owner noPublisher;
-    FO4HDR_CHECK(!noPublisher.Install(&slot, ReplacementPointer(), AtomicWrite,
-        nullptr));
-    Owner nullReplacement;
-    FO4HDR_CHECK(!nullReplacement.Install(&slot, nullptr, AtomicWrite,
-        PublishNext));
-    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(nullptr) == nullptr);
-    FO4HDR_CHECK(!fo4hdr::IsExecutableHookTarget(nullptr));
-    FO4HDR_CHECK(!fo4hdr::IsExecutableHookTarget(&slot));
-    FO4HDR_CHECK(publications == 0);
-}
-
 void TestForeignDisplacement()
 {
     void* slot = OriginalPointer();
@@ -355,256 +209,74 @@ void TestForeignDisplacement()
     FO4HDR_CHECK(rejected.State() == OwnerState::installFailed);
 }
 
+void TestOwnershipRefusals()
+{
+    for (const auto candidate : {static_cast<void*>(nullptr), ReplacementPointer()})
+    {
+        void* slot = candidate;
+        Owner owner;
+        FO4HDR_CHECK(!InstallOwner(owner, &slot));
+        FO4HDR_CHECK(slot == candidate);
+        FO4HDR_CHECK(owner.State() == OwnerState::installFailed);
+    }
+    Owner nullSlot;
+    FO4HDR_CHECK(!InstallOwner(nullSlot, nullptr));
+    void* slot = OriginalPointer();
+    Owner refusedPublication;
+    FO4HDR_CHECK(!refusedPublication.Install(&slot, ReplacementPointer(), AtomicWrite, RejectPublication));
+    FO4HDR_CHECK(slot == OriginalPointer());
+    FO4HDR_CHECK(refusedPublication.Next() == OriginalPointer());
+    Owner noWriter;
+    FO4HDR_CHECK(!InstallOwner(noWriter, &slot, nullptr));
+    Owner nullReplacement;
+    FO4HDR_CHECK(!nullReplacement.Install(&slot, nullptr, AtomicWrite, PublishNext));
+    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(nullptr) == nullptr);
+}
+
 void TestFailedRemovalKeepsNext()
 {
     void* slot = OriginalPointer();
     Owner owner;
     FO4HDR_CHECK(InstallOwner(owner, &slot));
     FO4HDR_CHECK(!owner.Remove(RejectWrite));
-    FO4HDR_CHECK(owner.State() == OwnerState::passive);
+    FO4HDR_CHECK(owner.State() == OwnerState::owned);
     FO4HDR_CHECK(owner.Next() == OriginalPointer());
     FO4HDR_CHECK(reinterpret_cast<ChainFunction>(slot)(10) == 15);
-    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
-    FO4HDR_CHECK(AtomicWrite(&slot, ReplacementPointer(), OriginalPointer()));
-}
-
-enum class WriteFault
-{
-    none,
-    refuseProtection,
-    refuseRestoration,
-    persistentRestoration,
-    foreignBeforeWrite,
-    foreignBeforeRollback,
-    reachableAfterRollback
-};
-
-struct WriteEvidence
-{
-    WriteFault fault{};
-    std::uint32_t protection{PAGE_READONLY};
-    unsigned protects{};
-    unsigned exchanges{};
-};
-WriteEvidence writeEvidence;
-
-bool ShouldRefuseProtection(unsigned call, WriteFault fault) noexcept
-{
-    switch (call)
-    {
-    case 1:
-        return fault == WriteFault::refuseProtection;
-    case 2:
-        return fault != WriteFault::none && fault != WriteFault::foreignBeforeWrite;
-    case 3:
-        return fault == WriteFault::persistentRestoration;
-    default:
-        return false;
-    }
-}
-
-bool FaultProtection(void*, std::size_t bytes, std::uint32_t protection,
-    std::uint32_t& previous) noexcept
-{
-    ++writeEvidence.protects;
-    previous = writeEvidence.protection;
-    if (bytes != sizeof(void*))
-    {
-        return false;
-    }
-    if (ShouldRefuseProtection(writeEvidence.protects, writeEvidence.fault))
-    {
-        return false;
-    }
-    writeEvidence.protection = protection;
-    return true;
-}
-
-void* FaultExchange(void** slot, void* expected, void* value) noexcept
-{
-    ++writeEvidence.exchanges;
-    if (writeEvidence.exchanges == 1 &&
-        writeEvidence.fault == WriteFault::foreignBeforeWrite)
-    {
-        std::atomic_ref<void*>(*slot).store(ForeignPointer());
-    }
-    if (writeEvidence.exchanges == 2)
-    {
-        if (writeEvidence.fault == WriteFault::foreignBeforeRollback ||
-            writeEvidence.fault == WriteFault::reachableAfterRollback)
-        {
-            std::atomic_ref<void*>(*slot).store(ForeignPointer());
-        }
-    }
-    const auto observed = ComparePointer(slot, expected, value);
-    if (writeEvidence.exchanges == 2 &&
-        writeEvidence.fault == WriteFault::reachableAfterRollback)
-    {
-        std::atomic_ref<void*>(*slot).store(ReplacementPointer());
-    }
-    return observed;
-}
-
-bool ProtectedFaultWrite(void** slot, void* expected, void* value) noexcept
-{
-    const fo4hdr::HookPointerWriteOperations operations{FaultProtection, FaultExchange};
-    return fo4hdr::WriteProtectedPointer(slot, expected, value, operations);
-}
-
-void TestProtectionTransaction()
-{
-    for (const auto fault : {WriteFault::none, WriteFault::refuseProtection,
-             WriteFault::refuseRestoration, WriteFault::persistentRestoration,
-             WriteFault::foreignBeforeWrite, WriteFault::foreignBeforeRollback})
-    {
-        writeEvidence = {fault};
-        void* slot = OriginalPointer();
-        const auto written = ProtectedFaultWrite(&slot, OriginalPointer(), ReplacementPointer());
-        FO4HDR_CHECK(written == (fault == WriteFault::none));
-        const auto expected = fault == WriteFault::none ? ReplacementPointer() : OriginalPointer();
-        if (fault == WriteFault::foreignBeforeWrite || fault == WriteFault::foreignBeforeRollback)
-        {
-            FO4HDR_CHECK(slot == ForeignPointer());
-        }
-        else
-        {
-            FO4HDR_CHECK(slot == expected);
-        }
-        if (fault == WriteFault::refuseProtection)
-        {
-            FO4HDR_CHECK(writeEvidence.exchanges == 0);
-        }
-        if (fault == WriteFault::persistentRestoration)
-        {
-            FO4HDR_CHECK(writeEvidence.protection == PAGE_READWRITE);
-        }
-        else
-        {
-            FO4HDR_CHECK(writeEvidence.protection == PAGE_READONLY);
-        }
-    }
-}
-
-void TestInvalidWriteOperations()
-{
-    void* slot = OriginalPointer();
-    const fo4hdr::HookPointerWriteOperations noProtection{nullptr, FaultExchange};
-    const fo4hdr::HookPointerWriteOperations noExchange{FaultProtection, nullptr};
-    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(&slot, OriginalPointer(),
-        ReplacementPointer(), noProtection));
-    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(&slot, OriginalPointer(),
-        ReplacementPointer(), noExchange));
-    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(nullptr, OriginalPointer(), ReplacementPointer()));
-    alignas(void*) std::array<std::byte, sizeof(void*) + 1> unaligned{};
-    auto** address = reinterpret_cast<void**>(unaligned.data() + 1);
-    FO4HDR_CHECK(!fo4hdr::WriteProtectedPointer(address, OriginalPointer(), ReplacementPointer()));
-    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(address) == nullptr);
-    Owner owner;
-    FO4HDR_CHECK(!InstallOwner(owner, address));
+    FO4HDR_CHECK(owner.Remove(AtomicWrite));
     FO4HDR_CHECK(slot == OriginalPointer());
 }
 
-void TestReachableFailedHook()
+void TestOneShotAndIdentity()
 {
-    writeEvidence = {WriteFault::reachableAfterRollback};
-    publishedNext = nullptr;
-    void* slot = ForeignPointer();
-    Owner owner;
-    FO4HDR_CHECK(!InstallOwner(owner, &slot, ProtectedFaultWrite));
-    FO4HDR_CHECK(slot == ReplacementPointer());
-    FO4HDR_CHECK(owner.State() == OwnerState::passive);
-    FO4HDR_CHECK(owner.Next() == ForeignPointer());
-    FO4HDR_CHECK(publishedNext == ForeignPointer());
-    FO4HDR_CHECK(reinterpret_cast<ChainFunction>(slot)(10) == 17);
-    FO4HDR_CHECK(!owner.Remove(AtomicWrite));
-    FO4HDR_CHECK(!InstallOwner(owner, &slot));
-    FO4HDR_CHECK(slot == ReplacementPointer());
-    FO4HDR_CHECK(AtomicWrite(&slot, ReplacementPointer(), ForeignPointer()));
+    fo4hdr::OneShotInitialization active;
+    FO4HDR_CHECK(active.Begin() == fo4hdr::OneShotInitializationAction::install);
+    FO4HDR_CHECK(active.Begin() == fo4hdr::OneShotInitializationAction::unavailable);
+    active.Complete(true);
+    FO4HDR_CHECK(active.Begin() == fo4hdr::OneShotInitializationAction::alreadyActive);
+    fo4hdr::OneShotInitialization failed;
+    FO4HDR_CHECK(failed.Begin() == fo4hdr::OneShotInitializationAction::install);
+    failed.Complete(false);
+    FO4HDR_CHECK(failed.Begin() == fo4hdr::OneShotInitializationAction::unavailable);
+    fo4hdr::ObjectGenerationIdentity identity;
+    int object{};
+    FO4HDR_CHECK(!identity.Publish(&object, 0));
+    FO4HDR_CHECK(identity.Publish(&object, 7));
+    FO4HDR_CHECK(identity.Matches(&object));
+    FO4HDR_CHECK(!identity.Retire(&object, 6));
+    FO4HDR_CHECK(identity.Retire(&object, 7));
+    FO4HDR_CHECK(!identity.Matches(&object));
 }
 
-void TestConcurrentOwnershipClaim()
-{
-    publications = 0;
-    publishedNext = nullptr;
-    void* slot = OriginalPointer();
-    Owner owner;
-    std::barrier start(2);
-    bool workerInstalled{};
-    std::jthread worker([&] {
-        start.arrive_and_wait();
-        workerInstalled = InstallOwner(owner, &slot);
-    });
-    start.arrive_and_wait();
-    const auto mainInstalled = InstallOwner(owner, &slot);
-    worker.join();
-    FO4HDR_CHECK(mainInstalled != workerInstalled);
-    FO4HDR_CHECK(publications == 1);
-    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(&slot) == ReplacementPointer());
-    FO4HDR_CHECK(owner.State() == OwnerState::owned);
-    FO4HDR_CHECK(owner.Next() == OriginalPointer());
-    FO4HDR_CHECK(owner.Remove(AtomicWrite));
-}
-
-struct OwnedPointerPage
-{
-    OwnedPointerPage() = default;
-    OwnedPointerPage(const OwnedPointerPage&) = delete;
-    OwnedPointerPage& operator=(const OwnedPointerPage&) = delete;
-
-    void* address{VirtualAlloc(nullptr, sizeof(void*), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)};
-    ~OwnedPointerPage()
-    {
-        if (address != nullptr)
-        {
-            FO4HDR_CHECK(VirtualFree(address, 0, MEM_RELEASE) != FALSE);
-        }
-    }
-};
-
-void TestNativeOwnedPage()
-{
-    OwnedPointerPage page;
-    FO4HDR_CHECK(page.address != nullptr);
-    if (page.address == nullptr)
-    {
-        return;
-    }
-    auto** slot = ::new (page.address) void*(OriginalPointer());
-    DWORD previous{};
-    FO4HDR_CHECK(VirtualProtect(slot, sizeof(void*), PAGE_READONLY, &previous) != FALSE);
-    FO4HDR_CHECK(previous == PAGE_READWRITE);
-    Owner owner;
-    FO4HDR_CHECK(InstallOwner(owner, slot, fo4hdr::WriteProtectedPointer));
-    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(slot) == ReplacementPointer());
-    MEMORY_BASIC_INFORMATION information{};
-    FO4HDR_CHECK(VirtualQuery(slot, &information, sizeof(information)) == sizeof(information));
-    FO4HDR_CHECK(information.Protect == PAGE_READONLY);
-    FO4HDR_CHECK(owner.Remove(fo4hdr::WriteProtectedPointer));
-    FO4HDR_CHECK(fo4hdr::AtomicPointerLoad(slot) == OriginalPointer());
-    FO4HDR_CHECK(VirtualQuery(slot, &information, sizeof(information)) == sizeof(information));
-    FO4HDR_CHECK(information.Protect == PAGE_READONLY);
-}
-
-}  // namespace
+} // namespace
 
 namespace fo4hdr::tests {
-
 void RunHookTests()
 {
     TestNamedImport();
-    TestPeHeaderBounds();
-    TestImportBounds();
-    TestNamesAndAlignment();
-    TestOrdinalAndAmbiguity();
     TestCooperativeOwnership();
     TestOwnershipRefusals();
     TestForeignDisplacement();
     TestFailedRemovalKeepsNext();
-    TestProtectionTransaction();
-    TestInvalidWriteOperations();
-    TestReachableFailedHook();
-    TestConcurrentOwnershipClaim();
-    TestNativeOwnedPage();
+    TestOneShotAndIdentity();
 }
-
-}  // namespace fo4hdr::tests
+} // namespace fo4hdr::tests

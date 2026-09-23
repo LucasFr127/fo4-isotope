@@ -1,89 +1,75 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
 #include "Fallout4HDR/config/HdrSettings.hpp"
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 
 namespace fo4hdr {
 
+inline constexpr float kDeveloperReferenceNits = 203.0F;
+inline constexpr float kVideoWhiteNits = 203.0F;
 inline constexpr unsigned kProductionOperatorConstantSlot = 13;
 inline constexpr unsigned kProductionOperatorLutSlot = 7;
 inline constexpr unsigned kProductionOperatorSamplerSlot = 7;
 
 struct alignas(16) OperatorConstants
 {
-    // Mode zero disables sampling; one, two and three select ACES2, AgX and GT7.
     std::uint32_t mode{};
-    float displayPeakNits{};
-    float uiWhiteNits{};
-    std::uint32_t inputDomain{};
-    std::array<float, 4> shaper{};
+    float displayPeakNits{1000.0F};
+    float sceneReferenceWhiteNits{kDeveloperReferenceNits};
+    float uiTransportWhiteNits{kDeveloperReferenceNits};
+    float sceneExposureMultiplier{1.0F};
+    float videoWhiteNits{kVideoWhiteNits};
+    float operatorShaperAngleGain{};
+    float operatorShaperBias{};
+    float bloomStrength{1.0F};
     float vanillaColorGradingStrength{1.0F};
     float contrastSlope{1.0F};
-    float blacksStrength{};
-    float shadowsEv{};
     float highlightsEv{};
+    float shadowsEv{};
     float saturationScale{1.0F};
-    std::array<float, 2> padding{};
+    std::uint32_t liveSettingsReserved{}; // Developer exposure lock in diagnostic copy only.
+    float blacksStrength{};
     std::array<float, 4> colorBalanceRow0{1.0F, 0.0F, 0.0F, 0.0F};
     std::array<float, 4> colorBalanceRow1{0.0F, 1.0F, 0.0F, 0.0F};
     std::array<float, 4> colorBalanceRow2{0.0F, 0.0F, 1.0F, 0.0F};
-
     std::uint32_t selectiveColorActive{};
-    std::array<std::uint32_t, 3> selectiveColorPadding{};
-    std::array<std::array<float, 4>, kSelectiveColorRegionCount> selectiveColorRegions{};
-    // Plane xyz retains selective geometry; w carries global grade removal.
+    std::uint32_t liveSettingsReserved1{};
+    std::array<float, 2> operatorShaperParameters{};
+    std::array<std::array<float, 4>, kSelectiveColorRegionCount>
+        selectiveColorRegions{};
+    // xyz remain the selective-color plane coefficients. The spare w lanes
+    // carry independent vanilla-grade removal controls without changing ABI.
     std::array<float, 4> selectiveColorPlaneA{};
     std::array<float, 4> selectiveColorPlaneB{};
-
     std::array<float, 4> lutProfileLuminanceRemoval{};
     std::array<float, 4> lutProfileColorRemoval{};
     std::uint32_t lutProfilesActive{};
     std::array<std::uint32_t, 3> lutProfilePadding{};
-
-    // The cold caller validates derived values before packing the shader layout.
-    void SetGrade(float strength, const HdrSettingsMath& image) noexcept
-    {
-        vanillaColorGradingStrength = strength;
-        contrastSlope = static_cast<float>(image.contrastSlope);
-        blacksStrength = static_cast<float>(image.blacksStrength);
-        shadowsEv = static_cast<float>(image.shadowsEv);
-        highlightsEv = static_cast<float>(image.highlightsEv);
-        saturationScale = static_cast<float>(image.saturationScale);
-        const auto& matrix = image.colorBalanceBt709;
-        colorBalanceRow0 = {static_cast<float>(matrix[0]), static_cast<float>(matrix[1]),
-            static_cast<float>(matrix[2]), 0.0F};
-        colorBalanceRow1 = {static_cast<float>(matrix[3]), static_cast<float>(matrix[4]),
-            static_cast<float>(matrix[5]), 0.0F};
-        colorBalanceRow2 = {static_cast<float>(matrix[6]), static_cast<float>(matrix[7]),
-            static_cast<float>(matrix[8]), 0.0F};
-    }
 };
 static_assert(sizeof(OperatorConstants) == 320);
-static_assert(offsetof(OperatorConstants, inputDomain) == 12);
-static_assert(offsetof(OperatorConstants, shaper) == 16);
-static_assert(offsetof(OperatorConstants, vanillaColorGradingStrength) == 32);
-static_assert(offsetof(OperatorConstants, contrastSlope) == 36);
-static_assert(offsetof(OperatorConstants, blacksStrength) == 40);
-static_assert(offsetof(OperatorConstants, shadowsEv) == 44);
-static_assert(offsetof(OperatorConstants, highlightsEv) == 48);
-static_assert(offsetof(OperatorConstants, saturationScale) == 52);
+static_assert(offsetof(OperatorConstants, bloomStrength) == 32);
+static_assert(offsetof(OperatorConstants, shadowsEv) == 48);
+static_assert(offsetof(OperatorConstants, blacksStrength) == 60);
 static_assert(offsetof(OperatorConstants, colorBalanceRow0) == 64);
 static_assert(offsetof(OperatorConstants, colorBalanceRow1) == 80);
 static_assert(offsetof(OperatorConstants, colorBalanceRow2) == 96);
-
 static_assert(offsetof(OperatorConstants, selectiveColorActive) == 112);
-static_assert(offsetof(OperatorConstants, selectiveColorPadding) == 116);
+static_assert(offsetof(OperatorConstants, liveSettingsReserved1) == 116);
+static_assert(offsetof(OperatorConstants, operatorShaperParameters) == 120);
 static_assert(offsetof(OperatorConstants, selectiveColorRegions) == 128);
 static_assert(offsetof(OperatorConstants, selectiveColorPlaneA) == 240);
 static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) == 256);
-
+static_assert(offsetof(OperatorConstants, selectiveColorPlaneA) +
+    3 * sizeof(float) == 252);
+static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) +
+    3 * sizeof(float) == 268);
 static_assert(offsetof(OperatorConstants, lutProfileLuminanceRemoval) == 272);
 static_assert(offsetof(OperatorConstants, lutProfileColorRemoval) == 288);
 static_assert(offsetof(OperatorConstants, lutProfilesActive) == 304);
-static_assert(offsetof(OperatorConstants, lutProfilePadding) == 308);
 
-}  // namespace fo4hdr
+
+} // namespace fo4hdr

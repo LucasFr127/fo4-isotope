@@ -1,858 +1,1268 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Carlos Lopez Jr.
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
+//
+// Fallout 4 shader identities and tone/LUT seams use the pinned RenoDX facts.
+// The exact-backbuffer FP16 proxy and UI-relative transport adapt
+// clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/
+// src/games/fallout4/addon.cpp and src/mods/swapchain_v2.hpp.
+// RenoDX material retains its MIT permission in THIRD_PARTY_NOTICES.md.
+// Native hooks, generation ownership, settings, grading integration and direct
+// display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "ObservedDraw.hpp"
+#include "ArmorCompositionPass.hpp"
 #include "NativeReferenceGradePass.hpp"
-#include "../resources/NativePresentationProxy.hpp"
-
+#include "../resources/SceneResources.hpp"
+#include "../resources/PresentationResources.hpp"
+#include "../resources/ArmorCompositionResources.hpp"
+#include "../resources/ReplacementShaders.hpp"
+#include "../resources/DeveloperExposureResources.hpp"
+#include "../resources/HdrResourcePolicy.hpp"
+#include "../RendererLifetime.hpp"
+#include "../GraphicsDiagnostics.hpp"
+#include "../LiveSettings.hpp"
+#include "../OperatorConstants.hpp"
+#include "../ShaderRegistry.hpp"
+#include "../LutProfileBindings.hpp"
+#include "../hooks/ContextHooks.hpp"
+#include "../d3d11/ScopedD3D11PixelBindings.hpp"
+#include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
+#include <Fallout4HDR/hooks/HookOwnership.hpp>
 #include <algorithm>
+#include <cassert>
 #include <cstring>
-#include <utility>
+#include <string_view>
 
 namespace fo4hdr {
+namespace {
+using Microsoft::WRL::ComPtr;
 
-bool ScenePassRenderer::InvalidateObservedBindings() noexcept
+struct CompletedDrawObservation
 {
-    if (!Active() || invoking_) return false;
-    ClearLineage();
-    lutInspector_ = {};
-    ResetExposurePolicy();
+    ID3D11DeviceContext* context;
+    DrawObservation& record;
+
+    PipelineHeartbeatEvaluation ObserveHeartbeat() const noexcept
+    {
+        g_heartbeat.Observe(record.currentPass);
+        return g_heartbeat.Evaluate(
+            g_evidence.resourceGeneration.load(std::memory_order_acquire), g_frame);
+    }
+    void ObserveLut() const noexcept
+    {
+        if (!record.currentReplacementActive) return;
+        if (!IsQualifiedSceneTarget(record.currentPrimaryRtv)) return;
+        auto* scene = AcquireSceneView(record.currentPrimaryRtv);
+        if (scene == nullptr) return;
+        const auto evaluation = ObserveHeartbeat();
+        if (evaluation.ready)
+        {
+            // The first resource-qualified tone-to-LUT branch is the common
+            // seam. Other image-space branches in the same frame are not
+            // interpreted as contradictory global ordering evidence.
+            g_scene.currentScene = scene;
+            g_scene.currentSceneDomain =
+                g_configuration.productionRequested ?
+                    LinearColorDomain::linearBt2020UiRelative :
+                    LinearColorDomain::linearBt709Relative;
+            g_evidence.colorDomain.store(
+                static_cast<std::uint32_t>(g_scene.currentSceneDomain),
+                std::memory_order_release);
+        }
+    }
+
+    void ObserveTemporal() const noexcept
+    {
+        // Both trusted Fallout 4 TAA variants write metadata/history to
+        // SV_Target0 and filtered scene color to SV_Target1. An unrelated
+        // temporal branch before the selected tone-to-LUT pair cannot impose
+        // that branch's output contract on the eventual presentation scene.
+        g_evidence.temporalAaDrawCount.fetch_add(
+            1, std::memory_order_relaxed);
+        const auto evaluation = ObserveHeartbeat();
+        const auto exactProxyReady =
+            record.currentSecondaryRtv != nullptr &&
+            record.currentSecondaryRtv ==
+                g_presentation.presentationProxyRtv.Get() &&
+            g_presentation.presentationProxySrv != nullptr;
+        const auto consumesSelectedScene =
+            CurrentPassConsumesSelectedScene(context, record);
+        const auto presentationTarget = exactProxyReady ||
+            RenderTargetMatchesResource(record.currentSecondaryRtv,
+                g_presentation.presentationBackBuffer.Get());
+        ApplyTemporalSceneAction(DecideTemporalSceneAction(evaluation,
+                    {.qualifiedSceneSelected = g_scene.currentScene != nullptr,
+                    .consumesSelectedScene = consumesSelectedScene,
+                    .presentationTarget = presentationTarget,
+                    .exactProxyReady = exactProxyReady}));
+    }
+
+    void ApplyTemporalSceneAction(TemporalSceneAction action) const noexcept
+    {
+        switch (action)
+        {
+        case TemporalSceneAction::ignoreUnqualifiedBranch:
+            g_evidence.temporalUnqualifiedDrawCount.fetch_add(
+                1, std::memory_order_relaxed);
+            return;
+        case TemporalSceneAction::rejectMissingProxy:
+            g_scene.temporalPassObserved = true;
+            g_evidence.temporalMissingProxyDrawCount.fetch_add(
+                1, std::memory_order_relaxed);
+            return;
+        case TemporalSceneAction::acceptProxy:
+            g_scene.temporalPassObserved = true;
+            g_scene.currentScene = g_presentation.presentationProxySrv;
+            g_presentation.presentationProxyDomain =
+                g_scene.currentSceneDomain;
+            g_scene.temporalSceneReady = true;
+            g_evidence.temporalProxyDrawCount.fetch_add(
+                1, std::memory_order_relaxed);
+            return;
+        }
+    }
+
+    void ObserveVideo() const noexcept
+    {
+            // Gameplay video is an explicit alternate source. Its replacement
+            // maps independently configured video white into the UI-relative FP16
+            // transport, but never masquerades as tone/LUT ownership.
+            if (!record.currentReplacementActive) return;
+            if (auto* videoScene =
+                    AcquireSceneView(record.currentPrimaryRtv))
+            {
+                g_scene.currentScene = videoScene;
+                g_scene.currentSceneDomain =
+                    LinearColorDomain::linearBt2020UiRelative;
+                g_evidence.colorDomain.store(static_cast<std::uint32_t>(
+                    g_scene.currentSceneDomain),
+                    std::memory_order_release);
+                g_scene.videoSceneReady = true;
+            }
+    }
+
+    void AdvanceOptionalScene() const noexcept
+    {
+        // A known optional pass advances only an exact selected scene input;
+        // another full-aspect FP16 branch cannot become the presentation scene.
+        if (!CurrentPassConsumesSelectedScene(context, record)) return;
+        if (auto* nextScene = AcquireSceneView(record.currentPrimaryRtv))
+            g_scene.currentScene = nextScene;
+    }
+
+    bool IsSceneAdvancingPass() const noexcept
+    {
+        // DOF auxiliary blur/mask intermediates feed a later blender and do
+        // not form presentation-scene boundaries themselves.
+        constexpr std::array passes{RenoDxShaderPass::fxaa,
+            RenoDxShaderPass::dofBlender, RenoDxShaderPass::gameDof,
+            RenoDxShaderPass::vignette};
+        return std::ranges::find(passes, record.currentPass) != passes.end();
+    }
+
+    void ObserveOther() const noexcept
+    {
+        if (!IsQualifiedSceneTarget(record.currentPrimaryRtv)) return;
+        if (record.currentPass == RenoDxShaderPass::video)
+        {
+            ObserveVideo();
+            return;
+        }
+        const auto evaluation = ObserveHeartbeat();
+        if (!evaluation.ready) return;
+        if (IsSceneAdvancingPass()) AdvanceOptionalScene();
+    }
+
+    bool IsReferenceObservationReady() const noexcept
+    {
+        return record.currentPassKnown && HdrPathRequested() &&
+            g_referenceHealthy && g_gameplayReadyApplied.load(std::memory_order_acquire);
+    }
+};
+
+void ObserveCompletedDraw(ID3D11DeviceContext* context, DrawObservation& record) noexcept
+{
+    if (g_armor.armorEncodedActive && context == g_rendererDevice.activeContext) return;
+    // Reference-pass validation must begin at the same render-thread lifecycle
+    // boundary as shader substitution. Startup, video, loading, and menu draws
+    // still use the original shaders/resources and cannot reject the later
+    // gameplay generation merely because their TAA output is not promoted.
+    const CompletedDrawObservation observation{context, record};
+    if (!observation.IsReferenceObservationReady()) return;
+    if (record.currentPass == RenoDxShaderPass::lut)
+        observation.ObserveLut();
+    else if (record.currentPass == RenoDxShaderPass::taa || record.currentPass == RenoDxShaderPass::taa2)
+        observation.ObserveTemporal();
+    else
+        observation.ObserveOther();
+}
+
+} // namespace
+using Microsoft::WRL::ComPtr;
+
+std::array<LutSnapshot, 4> g_lutInspectorLuts{};
+std::array<ImageSpaceIdentity, 4> g_lutInspectorImageSpaces{};
+std::uint32_t g_lutInspectorImageSpaceSlots{};
+const char* g_lutInspectorImageSpaceStatus{"Waiting for a qualified ImageSpace blend."};
+std::uint64_t g_lutInspectorFrame{};
+std::uint32_t g_lutInspectorValidatedSlots{};
+const char* g_lutInspectorStatus{"Waiting for a color grading draw."};
+
+const char* NativeLutObserverMessage() noexcept
+{
+    constexpr std::array messages{
+        std::pair{NativeLutObserverStatus::ready, "Waiting for a color grading draw."},
+        std::pair{NativeLutObserverStatus::unsupportedRuntime, "LUT identity observation is unavailable for this runtime."},
+        std::pair{NativeLutObserverStatus::invalidTarget, "Native LUT boundary could not be validated; global controls are used."},
+        std::pair{NativeLutObserverStatus::conflictingHook, "Native LUT boundary is owned by another hook; global controls are used."}};
+    const auto status = GetNativeLutObserverStatus();
+    const auto found = std::find_if(messages.begin(), messages.end(),
+        [status](const auto& entry) { return entry.first == status; });
+    return found == messages.end() ? "Native LUT observer unavailable; global controls are used." : found->second;
+
+}
+
+void PublishImageSpaceStatus(const NativeLutObservation& native) noexcept
+{
+    constexpr std::array messages{
+        std::pair{ImageSpaceObservationStatus::matched, "ImageSpace contributors matched the native LUT transfer."},
+        std::pair{ImageSpaceObservationStatus::catalogUnavailable, "ImageSpace record catalog unavailable; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::differentThread, "ImageSpace producer and draw threads are not qualified; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::overrideActive, "A native ImageSpace override is active; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::unqualifiedSource, "Room, direct or unidentified ImageSpace blend; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::updating, "ImageSpace observation is updating; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::stale, "ImageSpace transfer is stale or changed; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::unavailable, "ImageSpace observation unavailable; LUT/global controls are used."}};
+    for (const auto& [status, message] : messages)
+        if (native.imageSpaceStatus == status) {
+            g_lutInspectorImageSpaceStatus = message;
+            return;
+        }
+
+}
+
+bool MatchesNativeLutView(ID3D11ShaderResourceView* view, std::uint64_t expected) noexcept
+{
+    if (expected == 0) return false;
+    if (expected != reinterpret_cast<std::uintptr_t>(view)) return false;
+    return IsQualifiedNativeReferenceLook(view);
+}
+
+bool ValidateLutProfileViews(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept
+{
+    std::array<ID3D11ShaderResourceView*, 4> raw{};
+    context->PSGetShaderResources(3, static_cast<UINT>(raw.size()), raw.data());
+    std::array<ComPtr<ID3D11ShaderResourceView>, 4> views{};
+    for (std::size_t i = 0; i < views.size(); ++i) views[i].Attach(raw[i]);
+    bool mismatched{};
+    for (std::size_t i = 0; i < views.size(); ++i)
+    {
+        if ((native.validSlots & (1U << i)) == 0) continue;
+        if (!MatchesNativeLutView(views[i].Get(), native.expectedShaderViews[i]))
+            mismatched = true;
+        else
+            g_lutInspectorValidatedSlots |= 1U << i;
+    }
+    return !mismatched;
+}
+
+ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::size_t i) noexcept
+{
+    const auto& lut = g_lutInspectorLuts[i];
+    const auto path = (g_lutInspectorValidatedSlots & (1U << i)) != 0 ?
+        std::string_view(lut.utf8Path.data(), lut.pathLength) : std::string_view{};
+    const auto& key = native.imageSpaces[i].key;
+    const auto keyEnd = std::find(key.begin(), key.end(), '\0');
+    const auto imageSpaceKey = (g_lutInspectorImageSpaceSlots & (1U << i)) != 0 &&
+        keyEnd != key.end() ? std::string_view(key.data(), static_cast<std::size_t>(keyEnd - key.begin())) : std::string_view{};
+    return ResolveImageSpaceGradeProfile(g_activeSettings.lutGradeProfiles, path, imageSpaceKey,
+        {g_activeSettings.vanillaGradeLuminancePercent,
+        g_activeSettings.vanillaGradeColorPercent});
+}
+
+bool ResolveLutProfileConstants(const NativeLutObservation& native, OperatorConstants& constants) noexcept
+{
+    bool customized{};
+    for (std::size_t i = 0; i < native.luts.size(); ++i)
+    {
+        const auto resolved = ResolveLutProfileSlot(native, i);
+        constants.lutProfileLuminanceRemoval[i] =
+            static_cast<float>(1.0 - resolved.luminancePercent / 100.0);
+        constants.lutProfileColorRemoval[i] =
+            static_cast<float>(1.0 - resolved.colorPercent / 100.0);
+        customized = customized ||
+            constants.lutProfileLuminanceRemoval[i] != constants.selectiveColorPlaneA[3] ||
+            constants.lutProfileColorRemoval[i] != constants.selectiveColorPlaneB[3];
+    }
+    return customized;
+}
+
+bool UpdateLutProfileBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer,
+    const OperatorConstants& constants) noexcept
+{
+    g_replacements.lutProfileKeyReady = false;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(context->Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+    {
+        g_lutInspectorStatus = "LUT identities verified; profile upload failed. Global controls are used.";
+        return false;
+    }
+    std::memcpy(mapped.pData, &constants, sizeof(constants));
+    context->Unmap(buffer, 0);
+    g_replacements.lutProfileKey = constants;
+    g_replacements.lutProfileKeyReady = true;
     return true;
 }
 
-namespace {
+ID3D11Buffer* UploadLutProfileConstants(ID3D11DeviceContext* context, OperatorConstants constants, ID3D11Buffer* fallback) noexcept
+{
+    // Weight interpolation stays on the GPU and uses the draw's original b2.
+    // An unsuccessful upload must never reuse another draw's profile tuple.
+    auto* buffer = g_replacements.lutProfileConstants.Get();
+    if (!buffer)
+    {
+        g_lutInspectorStatus = "LUT identities verified; profile buffer unavailable. Global controls are used.";
+        return fallback;
+    }
+    constants.lutProfilesActive = 1;
+    if (!g_replacements.lutProfileKeyReady ||
+        std::memcmp(&constants, &g_replacements.lutProfileKey, sizeof(constants)) != 0)
+    {
+        if (!UpdateLutProfileBuffer(context, buffer, constants)) return fallback;
+    }
+    g_lutInspectorStatus = "Verified profiles follow the native blend; other slots use global controls.";
+    return buffer;
+
+}
+
+void ResetLutProfileInspector() noexcept
+{
+    g_lutInspectorFrame = g_frame;
+    g_lutInspectorLuts = {};
+    g_lutInspectorValidatedSlots = 0;
+    g_lutInspectorImageSpaces = {};
+    g_lutInspectorImageSpaceSlots = 0;
+    g_lutInspectorImageSpaceStatus = "Waiting for a qualified ImageSpace blend.";
+    g_lutInspectorStatus = NativeLutObserverMessage();
+}
+
+bool IsLutProfileDrawCurrent(ID3D11DeviceContext* context, const DrawObservation& record,
+    const NativeLutObservation& native) noexcept
+{
+    if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId())) return false;
+    if ((native.validSlots & ~15U) != 0) return false;
+    if (!record.immediate || context != g_rendererDevice.activeContext) return false;
+
+    return true;
+}
+
+bool ValidateLutProfileIdentity(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept
+{
+    g_lutInspectorLuts = native.luts;
+    g_lutInspectorImageSpaces = native.imageSpaces;
+    PublishImageSpaceStatus(native);
+    g_lutInspectorStatus = "LUT identities do not match this draw; global controls are used.";
+    const bool mismatched = !ValidateLutProfileViews(context, native);
+    if (mismatched || g_lutInspectorValidatedSlots == 0) {
+        g_lutInspectorImageSpaceStatus = "ImageSpace identities are not verified for this draw; global controls are used.";
+        return false;
+    }
+    g_lutInspectorImageSpaceSlots = EligibleImageSpaceSlots(native, g_lutInspectorValidatedSlots);
+    if (native.imageSpaceValidSlots && !g_lutInspectorImageSpaceSlots)
+        g_lutInspectorImageSpaceStatus = "ImageSpace provenance was revoked; LUT/global controls are used.";
+
+    g_lutInspectorStatus = "Verified slots can use profiles; unidentified slots use global controls.";
+    return true;
+}
+
+bool PrepareLutProfileInspector(ID3D11DeviceContext* context, const DrawObservation& record,
+    const NativeLutObservation& native) noexcept
+{
+    if (!IsLutProfileDrawCurrent(context, record, native)) return false;
+
+    if (!ValidateLutProfileIdentity(context, native)) return false;
+    if (!g_activeSettings.lutGradeProfiles.enabled ||
+        g_activeSettings.lutGradeProfiles.count == 0)
+        return false;
+
+    return true;
+}
+
+ID3D11Buffer* PrepareLutProfileDraw(
+    ID3D11DeviceContext* context, const DrawObservation& record,
+    ID3D11Buffer* fallback) noexcept
+{
+    if (GetCurrentThreadId() != g_observedPresentThread.load(std::memory_order_acquire) ||
+        !g_liveSettingsThreadCompatible.load(std::memory_order_acquire))
+        return fallback;
+    ResetLutProfileInspector();
+    const auto& native = CurrentNativeLutObservation();
+    if (!PrepareLutProfileInspector(context, record, native)) return fallback;
+
+    auto constants = g_replacements.configurationKey;
+    const bool customized = ResolveLutProfileConstants(native, constants);
+    if (!customized) return fallback;
+    if (g_lutInspectorImageSpaceSlots !=
+        EligibleImageSpaceSlots(native, g_lutInspectorValidatedSlots)) return fallback;
+
+    return UploadLutProfileConstants(context, constants, fallback);
+
+}
 
 using Microsoft::WRL::ComPtr;
-constexpr UINT sourceSlots = D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;
-constexpr UINT uavSlots = D3D11_PS_CS_UAV_REGISTER_COUNT;
 
-ComPtr<IUnknown> Identity(IUnknown* object) noexcept
+[[nodiscard]] bool IsSingleSampledShaderTexture(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
-    ComPtr<IUnknown> identity;
-    if (object != nullptr) static_cast<void>(object->QueryInterface(IID_PPV_ARGS(&identity)));
-    return identity;
+    return description.ArraySize == 1 && description.SampleDesc.Count == 1 &&
+        (description.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
 }
 
-bool SameObject(IUnknown* left, IUnknown* right) noexcept
+[[nodiscard]] bool IsFirstSingleMip(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
 {
-    const auto first = Identity(left);
-    const auto second = Identity(right);
-    return first && second && first.Get() == second.Get();
+    return view.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D &&
+        view.Texture2D.MostDetailedMip == 0 && view.Texture2D.MipLevels == 1;
 }
 
-bool SameDevice(ID3D11DeviceChild* child, ID3D11Device* device) noexcept
+[[nodiscard]] bool IsFullResolutionSdrUiTexture(const D3D11_TEXTURE2D_DESC& description,
+    const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
 {
-    if (child == nullptr) return false;
-    ComPtr<ID3D11Device> actual;
-    child->GetDevice(&actual);
-    return SameObject(actual.Get(), device);
+    return description.Format == DXGI_FORMAT_R8G8B8A8_UNORM &&
+        view.Format == DXGI_FORMAT_R8G8B8A8_UNORM && IsFirstSingleMip(view) &&
+        description.Width == g_presentation.width && description.Height == g_presentation.height &&
+        IsSingleSampledShaderTexture(description);
 }
 
-bool ColdContext(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+[[nodiscard]] bool HasFullResolutionSdrUiSource(
+    ID3D11DeviceContext* context) noexcept
 {
-    if (device == nullptr) return false;
     if (context == nullptr) return false;
-    if (device->GetFeatureLevel() != D3D_FEATURE_LEVEL_11_0) return false;
-    if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
-    if (!SameDevice(context, device)) return false;
-    ComPtr<ID3D11DeviceContext> canonical;
-    device->GetImmediateContext(&canonical);
-    return SameObject(canonical.Get(), context);
-}
-
-ComPtr<ID3D11Texture2D> Texture(ID3D11View* view) noexcept
-{
-    ComPtr<ID3D11Resource> resource;
-    if (view != nullptr) view->GetResource(&resource);
-    ComPtr<ID3D11Texture2D> texture;
-    if (resource) static_cast<void>(resource.As(&texture));
-    return texture;
-}
-
-bool SingleImage(const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    if (description.MipLevels != 1 || description.ArraySize != 1) return false;
-    return description.SampleDesc.Count == 1 && description.SampleDesc.Quality == 0;
-}
-
-bool ImageExtent(const D3D11_TEXTURE2D_DESC& description,
-    const ScenePassConfiguration& configuration) noexcept
-{
-    return description.Width == configuration.width && description.Height == configuration.height;
-}
-
-bool ImageDimensions(const ScenePassConfiguration& configuration) noexcept
-{
-    return configuration.width != 0 && configuration.height != 0;
-}
-
-bool NonemptyImage(const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    return description.Width != 0 && description.Height != 0;
-}
-
-D3D11_TEXTURE2D_DESC LayerDescription(ScenePassConfiguration configuration, DXGI_FORMAT format) noexcept
-{
-    D3D11_TEXTURE2D_DESC description{};
-    description.Width = configuration.width;
-    description.Height = configuration.height;
-    description.MipLevels = 1;
-    description.ArraySize = 1;
-    description.Format = format;
-    description.SampleDesc.Count = 1;
-    description.Usage = D3D11_USAGE_DEFAULT;
-    description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-    return description;
-}
-
-template <class Layer>
-bool PrepareLayer(ID3D11Device* device, const D3D11_TEXTURE2D_DESC& description, Layer& layer) noexcept
-{
-    if (FAILED(device->CreateTexture2D(&description, nullptr, &layer.texture))) return false;
-    if (FAILED(device->CreateRenderTargetView(layer.texture.Get(), nullptr, &layer.target))) return false;
-    if (FAILED(device->CreateShaderResourceView(layer.texture.Get(), nullptr, &layer.source))) return false;
-    return layer.texture && layer.target && layer.source;
-}
-
-template <class Layers>
-bool PrepareImages(ID3D11Device* device, ScenePassConfiguration configuration, Layers& layers) noexcept
-{
-    const auto backdrop = LayerDescription(configuration, DXGI_FORMAT_R16G16B16A16_FLOAT);
-    const auto hud = LayerDescription(configuration, DXGI_FORMAT_R8G8B8A8_UNORM);
-    return PrepareLayer(device, backdrop, layers[0]) && PrepareLayer(device, hud, layers[1]);
-}
-
-bool PrepareBlend(ID3D11Device* device, ComPtr<ID3D11BlendState>& blend) noexcept
-{
-    D3D11_BLEND_DESC description{};
-    auto& target = description.RenderTarget[0];
-    target.BlendEnable = TRUE;
-    target.SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    target.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    target.BlendOp = D3D11_BLEND_OP_ADD;
-    target.SrcBlendAlpha = D3D11_BLEND_ONE;
-    target.DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-    target.BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    target.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-    return SUCCEEDED(device->CreateBlendState(&description, &blend)) && blend;
-}
-
-std::size_t LayerIndex(NativeUiShaderRole role) noexcept
-{
-    return role == NativeUiShaderRole::gammaBackdrop ? 0 : 1;
-}
-
-NativeUiShaderRole BytecodeRole(std::span<const std::byte> bytecode) noexcept
-{
-    if (bytecode.size() < 32) return NativeUiShaderRole::unknown;
-    if (std::memcmp(bytecode.data(), "DXBC", 4) != 0) return NativeUiShaderRole::unknown;
-    std::array<std::uint32_t, 4> hash{};
-    std::memcpy(hash.data(), bytecode.data() + 4, sizeof(hash));
-    return FindNativeUiShaderRole(hash);
-}
-
-void ReleaseReference(IUnknown* object) noexcept
-{
-    if (object != nullptr) object->Release();
-}
-
-bool PixelShaderMatches(ID3D11DeviceContext* context, ID3D11PixelShader* expected) noexcept
-{
-    ComPtr<ID3D11PixelShader> actual;
-    std::array<ID3D11ClassInstance*, 256> classes{};
-    UINT count = static_cast<UINT>(classes.size());
-    context->PSGetShader(&actual, classes.data(), &count);
-    for (auto* instance : classes) ReleaseReference(instance);
-    return count <= classes.size() && SameObject(actual.Get(), expected);
-}
-
-bool MipZeroSource(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
-{
-    if (view.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
-    return view.Texture2D.MostDetailedMip == 0 && view.Texture2D.MipLevels == 1;
-}
-
-bool CodedHudImage(const D3D11_SHADER_RESOURCE_VIEW_DESC& view,
-    const D3D11_TEXTURE2D_DESC& description, const ScenePassConfiguration& configuration) noexcept
-{
-    if (view.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
-    if (description.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
-    return ImageExtent(description, configuration);
-}
-
-bool SourceView(ID3D11ShaderResourceView* source, NativeUiShaderRole role,
-    const ScenePassConfiguration& configuration) noexcept
-{
-    if (source == nullptr) return false;
-    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
-    source->GetDesc(&view);
-    if (!MipZeroSource(view)) return false;
-    const auto texture = Texture(source);
-    if (!texture) return false;
-    D3D11_TEXTURE2D_DESC description{};
-    texture->GetDesc(&description);
-    if (!SingleImage(description)) return false;
-    if (!NonemptyImage(description)) return false;
-    if (role == NativeUiShaderRole::gammaBackdrop) return true;
-    return CodedHudImage(view, description, configuration);
-}
-
-template <class Views>
-bool ReleaseAndOccupied(const Views& views) noexcept
-{
-    const bool occupied = std::any_of(views.begin(), views.end(), [](auto* view) { return view != nullptr; });
-    for (auto* view : views) ReleaseReference(view);
-    return occupied;
-}
-
-bool OccupiedUavs(ID3D11DeviceContext* context) noexcept
-{
-    std::array<ID3D11UnorderedAccessView*, uavSlots> om{};
-    std::array<ID3D11UnorderedAccessView*, uavSlots> cs{};
-    context->OMGetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr, 0, uavSlots, om.data());
-    context->CSGetUnorderedAccessViews(0, uavSlots, cs.data());
-    const bool omOccupied = ReleaseAndOccupied(om);
-    const bool csOccupied = ReleaseAndOccupied(cs);
-    return omOccupied || csOccupied;
-}
-
-bool BoundTarget(ID3D11DeviceContext* context, ID3D11RenderTargetView* expected,
-    ID3D11DepthStencilView* expectedDepth) noexcept
-{
-    std::array<ID3D11RenderTargetView*, 8> targets{};
-    ComPtr<ID3D11DepthStencilView> depth;
-    context->OMGetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), &depth);
-    const bool first = SameObject(targets[0], expected);
-    const bool others = std::all_of(targets.begin() + 1, targets.end(), [](auto* view) { return view == nullptr; });
-    for (auto* target : targets) ReleaseReference(target);
-    const bool depthMatches = depth.Get() == expectedDepth || SameObject(depth.Get(), expectedDepth);
-    return first && others && depthMatches;
-}
-
-bool BoundBlend(ID3D11DeviceContext* context, ID3D11BlendState* expected, UINT expectedMask) noexcept
-{
-    ComPtr<ID3D11BlendState> blend;
-    std::array<float, 4> factors{};
-    UINT mask{};
-    context->OMGetBlendState(&blend, factors.data(), &mask);
-    constexpr std::array<float, 4> defaults{1, 1, 1, 1};
-    if (!SameObject(blend.Get(), expected)) return false;
-    return factors == defaults && mask == expectedMask;
-}
-
-using ReadSources = void (*)(ID3D11DeviceContext*, ID3D11ShaderResourceView**);
-using WriteSource = void (*)(ID3D11DeviceContext*, UINT, ID3D11ShaderResourceView*);
-constexpr std::array<ReadSources, 6> readSources{
-    [](auto* context, auto** views) { context->VSGetShaderResources(0, sourceSlots, views); },
-    [](auto* context, auto** views) { context->HSGetShaderResources(0, sourceSlots, views); },
-    [](auto* context, auto** views) { context->DSGetShaderResources(0, sourceSlots, views); },
-    [](auto* context, auto** views) { context->GSGetShaderResources(0, sourceSlots, views); },
-    [](auto* context, auto** views) { context->PSGetShaderResources(0, sourceSlots, views); },
-    [](auto* context, auto** views) { context->CSGetShaderResources(0, sourceSlots, views); }};
-constexpr std::array<WriteSource, 6> writeSource{
-    [](auto* context, UINT slot, auto* view) { context->VSSetShaderResources(slot, 1, &view); },
-    [](auto* context, UINT slot, auto* view) { context->HSSetShaderResources(slot, 1, &view); },
-    [](auto* context, UINT slot, auto* view) { context->DSSetShaderResources(slot, 1, &view); },
-    [](auto* context, UINT slot, auto* view) { context->GSSetShaderResources(slot, 1, &view); },
-    [](auto* context, UINT slot, auto* view) { context->PSSetShaderResources(slot, 1, &view); },
-    [](auto* context, UINT slot, auto* view) { context->CSSetShaderResources(slot, 1, &view); }};
-
-class ScopedUiState
-{
-public:
-    ScopedUiState(ID3D11DeviceContext* context, ID3D11RenderTargetView* expected,
-        ID3D11RenderTargetView* capture) noexcept : context_(context), capture_(capture)
-    {
-        std::array<ID3D11RenderTargetView*, 8> targets{};
-        ID3D11DepthStencilView* depth{};
-        context_->OMGetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), &depth);
-        for (std::size_t index = 0; index < targets.size(); ++index) targets_[index].Attach(targets[index]);
-        depth_.Attach(depth);
-        if (!SameObject(targets_[0].Get(), expected)) return;
-        if (std::any_of(targets_.begin() + 1, targets_.end(), [](const auto& view) { return view != nullptr; })) return;
-        if (OccupiedUavs(context_)) return;
-        ComPtr<ID3D11Predicate> predicate;
-        BOOL value{};
-        context_->GetPredication(&predicate, &value);
-        if (predicate) return;
-        context_->OMGetBlendState(&blend_, factors_.data(), &mask_);
-        CaptureAliases();
-        ready_ = true;
-    }
-    ~ScopedUiState() noexcept { Restore(); }
-    [[nodiscard]] bool Ready() const noexcept { return ready_; }
-    [[nodiscard]] bool DepthDetached() const noexcept { return !depth_; }
-    [[nodiscard]] bool Bind(ID3D11BlendState* blend, bool clear) noexcept
-    {
-        mutated_ = true;
-        for (std::size_t stage = 0; stage < aliases_.size(); ++stage)
-            for (UINT slot = 0; slot < sourceSlots; ++slot)
-                if (aliases_[stage][slot]) writeSource[stage](context_, slot, nullptr);
-        if (clear) { const float transparent[4]{}; context_->ClearRenderTargetView(capture_, transparent); }
-        context_->OMSetRenderTargets(1, &capture_, depth_.Get());
-        context_->OMSetBlendState(blend, nullptr, mask_);
-        return BoundTarget(context_, capture_, depth_.Get()) && BoundBlend(context_, blend, mask_);
-    }
-
-private:
-    void CaptureAliases() noexcept
-    {
-        const auto captureTexture = Texture(capture_);
-        for (std::size_t stage = 0; stage < aliases_.size(); ++stage)
-        {
-            std::array<ID3D11ShaderResourceView*, sourceSlots> views{};
-            readSources[stage](context_, views.data());
-            for (UINT slot = 0; slot < sourceSlots; ++slot)
-            {
-                sources_[stage][slot].Attach(views[slot]);
-                aliases_[stage][slot] = SameObject(Texture(views[slot]).Get(), captureTexture.Get());
-            }
-        }
-    }
-    void Restore() noexcept
-    {
-        if (!mutated_) return;
-        context_->OMSetBlendState(blend_.Get(), factors_.data(), mask_);
-        std::array<ID3D11RenderTargetView*, 8> targets{};
-        for (std::size_t index = 0; index < targets.size(); ++index) targets[index] = targets_[index].Get();
-        context_->OMSetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), depth_.Get());
-        for (std::size_t stage = 0; stage < aliases_.size(); ++stage)
-            for (UINT slot = 0; slot < sourceSlots; ++slot)
-                if (aliases_[stage][slot]) writeSource[stage](context_, slot, sources_[stage][slot].Get());
-    }
-
-    ID3D11DeviceContext* context_;
-    ID3D11RenderTargetView* capture_;
-    std::array<ComPtr<ID3D11RenderTargetView>, 8> targets_;
-    ComPtr<ID3D11DepthStencilView> depth_;
-    ComPtr<ID3D11BlendState> blend_;
-    std::array<float, 4> factors_{};
-    UINT mask_{};
-    std::array<std::array<ComPtr<ID3D11ShaderResourceView>, sourceSlots>, 6> sources_;
-    std::array<std::array<bool, sourceSlots>, 6> aliases_{};
-    bool ready_{};
-    bool mutated_{};
-};
-
-class InvocationScope
-{
-public:
-    explicit InvocationScope(bool& invoking) noexcept : invoking_(invoking) { invoking_ = true; }
-    ~InvocationScope() noexcept { invoking_ = false; }
-private:
-    bool& invoking_;
-};
-
-bool Invoke(FiniteDrawInvocation invocation, ID3D11DeviceContext* context) noexcept
-{
-    try { invocation.draw(context, invocation.argument); return true; }
-    catch (...) { return false; }
-}
-
-bool TargetView(const D3D11_RENDER_TARGET_VIEW_DESC& view) noexcept
-{
-    if (view.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
-    return view.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D && view.Texture2D.MipSlice == 0;
-}
-
-bool TargetImage(const D3D11_TEXTURE2D_DESC& description,
-    const ScenePassConfiguration& configuration) noexcept
-{
-    if (description.Format != DXGI_FORMAT_R8G8B8A8_UNORM) return false;
-    return SingleImage(description) && ImageExtent(description, configuration);
-}
-
-bool FrameScene(const NativeUiFrame& frame, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    if (frame.scenes == nullptr) return false;
-    if (!frame.scenes->MatchesContext(device, context)) return false;
-    if (frame.scenes->FrameGeneration() != frame.frame) return false;
-    return frame.scenes->Views(frame.scenes->CurrentScene()).texture != nullptr;
-}
-
-bool KnownUiRole(NativeUiShaderRole role) noexcept
-{
-    return role == NativeUiShaderRole::hudComposite || role == NativeUiShaderRole::gammaBackdrop;
-}
-
-bool QualifiedRequirements(const NativeUiFrame& frame) noexcept
-{
-    return std::all_of(frame.requirements.begin(), frame.requirements.end(), [](auto requirement) {
-        return requirement == NativeUiLayerRequirement::required ||
-            requirement == NativeUiLayerRequirement::qualifiedAbsent;
-    });
-}
-
-}  // namespace
-
-bool NativeUiCapture::CanUse() const noexcept
-{
-    return thread_ == std::this_thread::get_id() && device_ && context_ && !invoking_;
-}
-
-bool NativeUiCapture::Initialize(ID3D11Device* device, ID3D11DeviceContext* context,
-    ScenePassConfiguration configuration, bool developerReference) noexcept
-{
-    if (device_) return false;
-    if (!ColdContext(device, context)) return false;
-    if (!ImageDimensions(configuration)) return false;
-    decltype(layers_) layers;
-    ComPtr<ID3D11BlendState> blend;
-    if (!PrepareImages(device, configuration, layers)) return false;
-    if (!PrepareBlend(device, blend)) return false;
-    device_ = device;
-    context_ = context;
-    layers_ = std::move(layers);
-    blend_ = std::move(blend);
-    configuration_ = configuration;
-    developerReference_ = developerReference;
-    thread_ = std::this_thread::get_id();
-    ++epoch_;
-    return true;
-}
-
-bool NativeUiCapture::Retire() noexcept
-{
-    if (!device_) return true;
-    if (!CanUse()) return false;
-    CloseFrame();
-    observed_ = {};
-    observedCount_ = 0;
-    layers_ = {};
-    blend_.Reset();
-    context_.Reset();
-    device_.Reset();
-    return true;
-}
-
-bool NativeUiCapture::ObserveCreatedPixelShader(std::span<const std::byte> bytecode,
-    ID3D11PixelShader* shader) noexcept
-{
-    if (!CanUse() || !SameDevice(shader, device_.Get())) return false;
-    const auto role = BytecodeRole(bytecode);
-    if (role == NativeUiShaderRole::unknown) return false;
-    const auto previous = ObservedRole(shader);
-    if (previous != NativeUiShaderRole::unknown) return previous == role;
-    if (observedCount_ == observed_.size()) return false;
-    observed_[observedCount_++] = {shader, role};
-    return true;
-}
-
-NativeUiShaderRole NativeUiCapture::ObservedRole(ID3D11PixelShader* shader) const noexcept
-{
-    for (std::size_t index = 0; index < observedCount_; ++index)
-        if (SameObject(observed_[index].shader.Get(), shader)) return observed_[index].role;
-    return NativeUiShaderRole::unknown;
-}
-
-void NativeUiCapture::AdvanceFrame(std::uint64_t frame) noexcept
-{
-    if (!CanUse()) return;
-    if (frame == 0 || frame <= lastFrame_) return;
-    CloseFrame();
-    frame_ = frame;
-    lastFrame_ = frame;
-    requirements_.fill(NativeUiLayerRequirement::required);
-}
-
-void NativeUiCapture::CloseFrame() noexcept
-{
-    if (!CanUse()) return;
-    presentationTarget_.Reset();
-    scenes_ = nullptr;
-    presentationProxy_ = nullptr;
-    frame_ = 0;
-    captured_ = {};
-    failed_ = false;
-    ++epoch_;
-}
-
-bool NativeUiCapture::QualifiedTarget(ID3D11RenderTargetView* target) const noexcept
-{
-    if (!SameDevice(target, device_.Get())) return false;
-    D3D11_RENDER_TARGET_VIEW_DESC view{};
-    target->GetDesc(&view);
-    if (!TargetView(view)) return false;
-    const auto texture = Texture(target);
-    if (!texture) return false;
-    D3D11_TEXTURE2D_DESC description{};
-    texture->GetDesc(&description);
-    if (!TargetImage(description, configuration_)) return false;
-    return !OwnedLayerAlias(texture.Get());
-}
-
-bool NativeUiCapture::OwnedLayerAlias(ID3D11Texture2D* texture) const noexcept
-{
-    return std::any_of(layers_.begin(), layers_.end(),
-        [texture](const Layer& layer) { return SameObject(texture, layer.texture.Get()); });
-}
-
-bool NativeUiCapture::FrameAdmissionCurrent(const NativeUiFrame& frame) const noexcept
-{
-    if (frame.frame == 0 || frame.frame < lastFrame_) return false;
-    return frame.frame != lastFrame_ || frame_ != 0;
-}
-
-bool NativeUiCapture::CanBeginFrame(const NativeUiFrame& frame, NativeUiCaptureScope scope) const noexcept
-{
-    if (!CanUse()) return false;
-    if (scope != NativeUiCaptureScope::qualifiedExclusive) return false;
-    if (!FrameAdmissionCurrent(frame)) return false;
-    if (presentationTarget_) return false;
-    if (!QualifiedRequirements(frame)) return false;
-    return FrameScene(frame, device_.Get(), context_.Get());
-}
-
-bool NativeUiCapture::BeginFrame(NativeUiFrame frame, NativeUiCaptureScope scope) noexcept
-{
-    if (!CanBeginFrame(frame, scope)) return false;
-    if (!QualifiedTarget(frame.presentationTarget)) return false;
-    return CommitFrame(frame);
-}
-
-bool NativeUiCapture::BeginPresentationFrame(NativePresentationProxy& proxy,
-    ScenePassRenderer& scenes, NativeUiCaptureScope scope) noexcept
-{
-    const auto owned = proxy.SceneViews();
-    const auto selected = scenes.Views(scenes.CurrentScene());
-    if (!QualifiedPresentationScene(scenes)) return false;
-    if (!SameObject(owned.texture, selected.texture)) return false;
-    if (!SameDevice(owned.renderTarget, device_.Get())) return false;
-    const NativeUiFrame frame{scenes.FrameGeneration(), owned.renderTarget, &scenes};
-    if (!CanBeginFrame(frame, scope)) return false;
-    if (!CommitFrame(frame)) return false;
-    presentationProxy_ = &proxy;
-    return PresentationSceneCurrent();
-}
-
-bool NativeUiCapture::CommitFrame(const NativeUiFrame& frame) noexcept
-{
-    if (frame.frame != frame_) AdvanceFrame(frame.frame);
-    if (frame.frame != frame_) return false;
-    presentationTarget_ = frame.presentationTarget;
-    scenes_ = frame.scenes;
-    requirements_ = frame.requirements;
-    return true;
-}
-
-void NativeUiCapture::WithdrawLostPresentationScene() noexcept
-{
-    if (CanUse() && !PresentationSceneCurrent()) CloseFrame();
-}
-
-bool NativeUiCapture::MissingRequiredLayer() const noexcept
-{
-    for (std::size_t index = 0; index < captured_.size(); ++index)
-        if (!captured_[index] && requirements_[index] == NativeUiLayerRequirement::required) return true;
-    return false;
-}
-
-NativeUiFrameStatus NativeUiCapture::Status() const noexcept
-{
-    if (!CanUse() || frame_ == 0) return NativeUiFrameStatus::unprepared;
-    if (failed_ || !PresentationSceneCurrent()) return NativeUiFrameStatus::failed;
-    if (!presentationTarget_) return NativeUiFrameStatus::targetUnqualified;
-    if (MissingRequiredLayer()) return NativeUiFrameStatus::missingRequired;
-    return NativeUiFrameStatus::ready;
-}
-
-bool NativeUiCapture::QualifiedDraw(const QualifiedNativeUiDraw& draw) const noexcept
-{
-    if (!SameDevice(draw.shader, device_.Get())) return false;
-    if (!PixelShaderMatches(context_.Get(), draw.shader)) return false;
+    if (g_presentation.width == 0 || g_presentation.height == 0)
+        return false;
     ComPtr<ID3D11ShaderResourceView> source;
-    context_->PSGetShaderResources(0, 1, &source);
-    if (!SameDevice(source.Get(), device_.Get())) return false;
-    if (!SourceView(source.Get(), draw.role, configuration_)) return false;
-    const auto texture = Texture(source.Get());
-    if (SameObject(texture.Get(), Texture(presentationTarget_.Get()).Get())) return false;
-    if (OwnedLayerAlias(texture.Get())) return false;
-    if (draw.role != NativeUiShaderRole::gammaBackdrop) return true;
-    return draw.kind == NativeUiDrawKind::indexedSix;
+    context->PSGetShaderResources(0, 1, &source);
+    if (!source) return false;
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    source->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&texture))) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
+    source->GetDesc(&viewDescription);
+    return IsFullResolutionSdrUiTexture(description, viewDescription);
 }
 
-bool NativeUiCapture::QualifiedPresentationScene(const ScenePassRenderer& scenes) const noexcept
+[[nodiscard]] bool HasTexture2dUiMaskSource(
+    ID3D11DeviceContext* context) noexcept
 {
-    const auto domain = scenes.CurrentSceneDomain();
-    if (developerReference_)
-        return domain == SceneColorDomain::bt709Scene || domain == SceneColorDomain::bt2020UiRelative;
-    return scenes.CurrentSceneOperatorProduced() && domain == SceneColorDomain::bt2020UiRelative;
+    if (context == nullptr) return false;
+    ComPtr<ID3D11ShaderResourceView> source;
+    context->PSGetShaderResources(0, 1, &source);
+    if (!source) return false;
+    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
+    source->GetDesc(&viewDescription);
+    if (viewDescription.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D)
+        return false;
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    source->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&texture))) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    return description.Width != 0 && description.Height != 0 && IsSingleSampledShaderTexture(description);
 }
 
-bool NativeUiCapture::PresentationSceneCurrent() const noexcept
+enum class NativeUiCaptureKind : std::uint8_t
 {
-    if (presentationProxy_ == nullptr) return true;
-    if (scenes_ == nullptr || !QualifiedPresentationScene(*scenes_)) return false;
-    const auto owned = presentationProxy_->SceneViews();
-    const auto selected = scenes_->Views(scenes_->CurrentScene());
-    return owned.texture != nullptr && SameObject(owned.texture, selected.texture) &&
-        SameObject(owned.renderTarget, presentationTarget_.Get());
+    none,
+    backdrop,
+    composite
+};
+
+[[nodiscard]] bool HdrFrameReadyForDraw() noexcept
+{
+    return HdrPathRequested() && g_referenceHealthy &&
+        g_gameplayReadyApplied.load(std::memory_order_acquire);
 }
 
-bool NativeUiCapture::CanCapture(const QualifiedNativeUiDraw& draw) const noexcept
+class ScopedGameUiCapture
 {
-    if (!CanUse() || !PresentationSceneCurrent()) return false;
-    if (draw.frame != frame_ || !presentationTarget_) return false;
-    return scenes_ != nullptr && scenes_->FrameGeneration() == draw.frame;
-}
-
-SceneDrawOutcome NativeUiCapture::ExecuteQualified(QualifiedNativeUiDraw draw,
-    FiniteDrawInvocation invocation) noexcept
-{
-    if (!CanCapture(draw)) return SceneDrawOutcome::forwarded;
-    if (!KnownUiRole(draw.role)) return SceneDrawOutcome::forwarded;
-    const auto index = LayerIndex(draw.role);
-    if (failed_) return SceneDrawOutcome::forwarded;
-    if (requirements_[index] == NativeUiLayerRequirement::qualifiedAbsent)
-    { failed_ = true; return SceneDrawOutcome::forwarded; }
-    if (invocation.draw == nullptr || !QualifiedDraw(draw)) { failed_ = true; return SceneDrawOutcome::forwarded; }
-    const auto result = SubmitDraw(index, draw.role, invocation);
-    // Publish only after the captured native draw and every touched binding restore.
-    if (result != SceneDrawOutcome::replaced) { failed_ = true; return result; }
-    captured_[index] = true;
-    return SceneDrawOutcome::replaced;
-}
-
-SceneDrawOutcome NativeUiCapture::SubmitDraw(std::size_t index, NativeUiShaderRole role,
-    FiniteDrawInvocation invocation) noexcept
-{
-    const InvocationScope invoking{invoking_};
-    ScopedUiState state{context_.Get(), presentationTarget_.Get(), layers_[index].target.Get()};
-    if (!state.Ready()) return SceneDrawOutcome::forwarded;
-    if (role == NativeUiShaderRole::gammaBackdrop && !state.DepthDetached()) return SceneDrawOutcome::forwarded;
-    if (!state.Bind(blend_.Get(), !captured_[index])) return SceneDrawOutcome::forwarded;
-    return Invoke(invocation, context_.Get()) ? SceneDrawOutcome::replaced : SceneDrawOutcome::callbackFailed;
-}
-
-SceneDrawOutcome NativeUiCapture::ExecuteObserved(std::uint64_t frame,
-    NativeUiDrawKind kind, FiniteDrawInvocation invocation) noexcept
-{
-    if (!CanCapture({frame})) return SceneDrawOutcome::forwarded;
-    ComPtr<ID3D11PixelShader> shader;
-    context_->PSGetShader(&shader, nullptr, nullptr);
-    return ExecuteQualified({frame, ObservedRole(shader.Get()), shader.Get(), kind}, invocation);
-}
-
-bool NativeUiCapture::PacketReady(std::uint64_t frame, std::uint64_t epoch) const noexcept
-{
-    if (scenes_ == nullptr || scenes_->FrameGeneration() != frame) return false;
-    return frame != 0 && frame == frame_ && epoch == epoch_ && Status() == NativeUiFrameStatus::ready;
-}
-
-ID3D11ShaderResourceView* NativeUiCapture::CompletedSource(std::size_t index) const noexcept
-{
-    return captured_[index] ? layers_[index].source.Get() : nullptr;
-}
-
-CompletedNativeUiLayers NativeUiCapture::CompletedLayers() const noexcept
-{
-    CompletedNativeUiLayers layers;
-    if (Status() != NativeUiFrameStatus::ready) return layers;
-    layers.owner_ = this;
-    layers.frame_ = frame_;
-    layers.epoch_ = epoch_;
-    return layers;
-}
-
-bool CompletedNativeUiLayers::ReadyFor(std::uint64_t frame, const ScenePassRenderer* scenes) const noexcept
-{
-    return owner_ != nullptr && scenes == owner_->scenes_ && frame == frame_ && owner_->PacketReady(frame_, epoch_);
-}
-
-ID3D11ShaderResourceView* CompletedNativeUiLayers::Backdrop() const noexcept
-{
-    return owner_ != nullptr && ReadyFor(frame_, owner_->scenes_) ? owner_->CompletedSource(0) : nullptr;
-}
-
-ID3D11ShaderResourceView* CompletedNativeUiLayers::Hud() const noexcept
-{
-    return owner_ != nullptr && ReadyFor(frame_, owner_->scenes_) ? owner_->CompletedSource(1) : nullptr;
-}
-
-namespace {
-
-bool MatchesProfileLook(const NativeLutObservation& observation,
-    std::size_t slot, ID3D11ShaderResourceView* view) noexcept
-{
-    if ((observation.validSlots & (1u << slot)) == 0) return true;
-    const auto& lut = observation.luts[slot];
-    if (lut.pathLength == 0 || lut.pathLength >= lut.utf8Path.size()) return false;
-    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
-    if (!NormalizeLutGradePath({lut.utf8Path.data(), lut.pathLength}, normalized)) return false;
-    return normalized == lut.utf8Path && reinterpret_cast<std::uintptr_t>(view) ==
-        observation.expectedShaderViews[slot];
-}
-
-bool MatchesProfileInputs(const NativeLutObservation& observation,
-    const NativeReferenceInputs& inputs) noexcept
-{
-    for (std::size_t slot = 0; slot < inputs.looks.size(); ++slot)
-        if (!MatchesProfileLook(observation, slot, inputs.looks[slot].Get())) return false;
-    return true;
-}
-
-const char* ImageSpaceProfileStatus(ImageSpaceObservationStatus status) noexcept
-{
-    constexpr std::array statuses{
-        std::pair{ImageSpaceObservationStatus::unavailable, "Unavailable"},
-        std::pair{ImageSpaceObservationStatus::waiting, "Waiting"},
-        std::pair{ImageSpaceObservationStatus::matched, "Matched at draw"},
-        std::pair{ImageSpaceObservationStatus::catalogUnavailable, "Catalog unavailable"},
-        std::pair{ImageSpaceObservationStatus::differentThread, "Different thread"},
-        std::pair{ImageSpaceObservationStatus::unqualifiedSource, "Unqualified source"},
-        std::pair{ImageSpaceObservationStatus::overrideActive, "Override active"},
-        std::pair{ImageSpaceObservationStatus::stale, "Stale"},
-        std::pair{ImageSpaceObservationStatus::updating, "Updating"}};
-    const auto found = std::find_if(statuses.begin(), statuses.end(),
-        [status](const auto& item) { return item.first == status; });
-    return found == statuses.end() ? "Unavailable" : found->second;
-}
-
-std::string_view ImageSpaceProfileKey(const ImageSpaceIdentity& identity) noexcept
-{
-    const auto end = std::find(identity.key.begin(), identity.key.end(), '\0');
-    if (end == identity.key.end()) return {};
-    return {identity.key.data(), static_cast<std::size_t>(end - identity.key.begin())};
-}
-
-}  // namespace
-
-bool PrepareLutProfileBuffer(ID3D11Device* device,
-    const LutGradeProfiles& profiles, Microsoft::WRL::ComPtr<ID3D11Buffer>& buffer) noexcept
-{
-    if (!profiles.enabled || profiles.count == 0) return true;
-    D3D11_BUFFER_DESC description{};
-    description.ByteWidth = sizeof(OperatorConstants);
-    description.Usage = D3D11_USAGE_DYNAMIC;
-    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    description.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-    return SUCCEEDED(device->CreateBuffer(&description, nullptr, &buffer)) && buffer != nullptr;
-}
-
-LutProfileDrawSnapshot ScenePassRenderer::CopyLutInspector() const noexcept
-{
-    if (!Active()) return {};
-    if (invoking_ || !frameOpen_) return {};
-    return lutInspector_.frame == frameGeneration_ ? lutInspector_ : LutProfileDrawSnapshot{};
-}
-
-bool ScenePassRenderer::CaptureLutProfileDraw(NativeLutObservation& observation) noexcept
-{
-    lutInspector_ = {};
-    lutInspector_.frame = frameGeneration_;
-    observation = CurrentNativeLutObservation();
-    if (!IsCurrentNativeLutObservation(observation, GetCurrentThreadId())) return false;
-    if ((observation.validSlots & ~15u) != 0) return false;
-    // Binding/range getters do not prove CPU weight contents; interpolation
-    // consumes the actual native b2 weights in the pixel shader.
-    NativeReferenceInputs inputs;
-    if (!CaptureNativeReferenceInputs(context_.Get(), inputs)) return false;
-    if (!MatchesProfileInputs(observation, inputs)) return false;
-    if (!IsCurrentNativeLutObservation(observation, GetCurrentThreadId())) return false;
-    lutInspector_.currentLuts = observation.luts;
-    lutInspector_.currentImageSpaces = observation.imageSpaces;
-    lutInspector_.validatedSlots = observation.validSlots;
-    lutInspector_.imageSpaceValidSlots = EligibleImageSpaceSlots(observation, observation.validSlots);
-    lutInspector_.observationSerial = observation.serial;
-    lutInspector_.status = "Matched at draw";
-    lutInspector_.imageSpaceStatus = ImageSpaceProfileStatus(observation.imageSpaceStatus);
-    return true;
-}
-
-void ScenePassRenderer::ResolveLutProfileConstants(const NativeLutObservation& observation,
-    OperatorConstants& values) noexcept
-{
-    const ResolvedLutGrade global{
-        (1.0 - static_cast<double>(values.selectiveColorPlaneA[3])) * 100.0,
-        (1.0 - static_cast<double>(values.selectiveColorPlaneB[3])) * 100.0};
-    const auto imageSpaceSlots = EligibleImageSpaceSlots(observation, observation.validSlots);
-    bool customized{};
-    for (std::size_t slot = 0; slot < observation.luts.size(); ++slot)
+public:
+    ScopedGameUiCapture(
+        ID3D11DeviceContext* context,
+        DrawObservation& record,
+        bool exactIndexedQuad) noexcept : context_(context), record_(&record)
     {
-        auto resolved = global;
-        if ((observation.validSlots & (1u << slot)) != 0)
+        if (!CanCaptureUiFrame() || !HasCaptureTargets()) return;
+
+        const auto allowlistedUiShader =
+            IsLateGameUiShader(record.expectedBoundShader);
+        const auto allowlistedBackdropShader =
+            IsLateGameUiBackdropShader(record.expectedBoundShader);
+        if (allowlistedUiShader == allowlistedBackdropShader)
+            return;
+
+        ComPtr<ID3D11PixelShader> actualShader;
+        context_->PSGetShader(&actualShader, nullptr, nullptr);
+        if (actualShader.Get() != record.expectedBoundShader)
+            return;
+
+        if (!CapturePreviousTargets()) return;
+        if (!SelectCaptureKind(allowlistedUiShader, exactIndexedQuad)) return;
+        CaptureBlendState();
+        if (!BindCaptureTarget()) return;
+        ActivateCapture();
+    }
+
+    ~ScopedGameUiCapture() noexcept
+    {
+        if (!active_) return;
+        if (context_ == nullptr || record_ == nullptr) return;
+        context_->OMSetBlendState(previousBlend_.Get(),
+            blendFactor_.data(), sampleMask_);
+        ID3D11RenderTargetView* restore = previousRtvs_[0].Get();
+        InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
+            &restore, depthStencil_.Get());
+    }
+
+    ScopedGameUiCapture(const ScopedGameUiCapture&) = delete;
+    ScopedGameUiCapture& operator=(const ScopedGameUiCapture&) = delete;
+
+    [[nodiscard]] bool Active() const noexcept { return active_; }
+    [[nodiscard]] NativeUiCaptureKind Kind() const noexcept { return kind_; }
+
+private:
+    void ActivateCapture() noexcept
+    {
+        context_->OMSetBlendState(
+            g_uiTransport.gameUiBlend.Get(), nullptr, sampleMask_);
+        if (kind_ == NativeUiCaptureKind::backdrop)
+            g_uiTransport.gameUiBackdropCapturedThisFrame = true;
+        else
+            g_uiTransport.gameUiCapturedThisFrame = true;
+        active_ = true;
+    }
+
+    [[nodiscard]] static bool CanCaptureUiFrame() noexcept
+    {
+        return g_configuration.productionRequested && HdrFrameReadyForDraw() &&
+            g_scene.productionOperatorApplied && g_scene.currentScene != nullptr;
+    }
+
+    [[nodiscard]] bool HasCaptureTargets() const noexcept
+    {
+        return record_->currentSinglePresentationTarget && context_ != nullptr &&
+            OriginalRenderTargetSetter(context_) != nullptr && UiCaptureResourcesReady();
+    }
+
+    bool CapturePreviousTargets() noexcept
+    {
+        std::array<ID3D11RenderTargetView*,
+            D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> current{};
+        ID3D11DepthStencilView* depth{};
+        context_->OMGetRenderTargets(static_cast<UINT>(current.size()),
+            current.data(), &depth);
+        for (std::size_t index = 0; index < current.size(); ++index)
+            previousRtvs_[index].Attach(current[index]);
+        depthStencil_.Attach(depth);
+        if (previousRtvs_[0].Get() !=
+                g_presentation.presentationProxyRtv.Get() ||
+            std::any_of(previousRtvs_.begin() + 1, previousRtvs_.end(),
+                [](const auto& view) { return view != nullptr; }))
+            return false;
+
+        std::array<ID3D11UnorderedAccessView*,
+            D3D11_PS_CS_UAV_REGISTER_COUNT> uavs{};
+        context_->OMGetRenderTargetsAndUnorderedAccessViews(
+            0, nullptr, nullptr, 0, static_cast<UINT>(uavs.size()),
+            uavs.data());
+        bool uavBound{};
+        for (auto* uav : uavs)
         {
-            const auto& lut = observation.luts[slot];
-            const std::string_view path(lut.utf8Path.data(), lut.pathLength);
-            const auto key = (imageSpaceSlots & (1u << slot)) != 0
-                ? ImageSpaceProfileKey(observation.imageSpaces[slot]) : std::string_view{};
-            resolved = ResolveImageSpaceGradeProfile(sceneGrade_.lutGradeProfiles, path, key, global);
+            uavBound |= uav != nullptr;
+            if (uav != nullptr) uav->Release();
         }
-        values.lutProfileLuminanceRemoval[slot] = static_cast<float>(1.0 - resolved.luminancePercent / 100.0);
-        values.lutProfileColorRemoval[slot] = static_cast<float>(1.0 - resolved.colorPercent / 100.0);
-        customized |= resolved != global;
+        return !uavBound;
     }
-    values.lutProfilesActive = customized ? 1u : 0u;
-}
 
-ID3D11Buffer* ScenePassRenderer::UploadLutProfileConstants(const OperatorConstants& values) noexcept
-{
-    if (lutProfileKeyReady_ && std::memcmp(&values, &lutProfileKey_, sizeof(values)) == 0)
-        return lutProfileConstants_.Get();
-    lutProfileKeyReady_ = false;
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (FAILED(context_->Map(lutProfileConstants_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-        return nullptr;
-    if (!mapped.pData)
+    bool SelectCaptureKind(bool allowlistedUiShader, bool exactIndexedQuad) noexcept
     {
-        context_->Unmap(lutProfileConstants_.Get(), 0);
-        return nullptr;
+        const LateGameUiFrame commonArguments{
+            .hdrPathRequested = HdrPathRequested(), .referenceHealthy = g_referenceHealthy.load(),
+            .gameplayReady = g_gameplayReadyApplied.load(std::memory_order_acquire),
+            .productionOperatorApplied = g_scene.productionOperatorApplied,
+            .qualifiedSceneSelected = g_scene.currentScene != nullptr,
+            .exactSinglePresentationTarget = record_->currentSinglePresentationTarget};
+        if (allowlistedUiShader)
+        {
+            if (DecideLateGameUiAction(commonArguments, true,
+                    HasFullResolutionSdrUiSource(context_)) !=
+                LateGameUiAction::captureSeparately)
+                return false;
+            kind_ = NativeUiCaptureKind::composite;
+        }
+        else
+        {
+            if (DecideLateGameUiBackdropAction(commonArguments,
+                    {.allowlistedBackdropShader = true, .exactIndexedQuad = exactIndexedQuad,
+                    .texture2dMaskSource = HasTexture2dUiMaskSource(context_),
+                    .depthDetached = depthStencil_ == nullptr}) !=
+                LateGameUiAction::captureSeparately)
+                return false;
+            kind_ = NativeUiCaptureKind::backdrop;
+        }
+
+        return true;
     }
-    std::memcpy(mapped.pData, &values, sizeof(values));
-    context_->Unmap(lutProfileConstants_.Get(), 0);
-    lutProfileKey_ = values;
-    lutProfileKeyReady_ = true;
-    return lutProfileConstants_.Get();
-}
 
-ID3D11Buffer* ScenePassRenderer::PrepareLutProfileConstants(const DrawReplacement& replacement,
-    NativeLutObservation& observation) noexcept
+    void CaptureBlendState() noexcept
+    {
+        FLOAT factor[4]{};
+        UINT sampleMask{};
+        ID3D11BlendState* blend{};
+        context_->OMGetBlendState(&blend, factor, &sampleMask);
+        previousBlend_.Attach(blend);
+        std::copy(std::begin(factor), std::end(factor), blendFactor_.begin());
+        sampleMask_ = sampleMask;
+    }
+
+    bool BindCaptureTarget() noexcept
+    {
+        auto* target = kind_ == NativeUiCaptureKind::backdrop ?
+            g_uiTransport.gameUiBackdropRtv.Get() :
+            g_uiTransport.gameUiRtv.Get();
+        const auto alreadyCaptured =
+            kind_ == NativeUiCaptureKind::backdrop ?
+            g_uiTransport.gameUiBackdropCapturedThisFrame :
+            g_uiTransport.gameUiCapturedThisFrame;
+        if (!alreadyCaptured)
+        {
+            constexpr float transparent[4]{};
+            context_->ClearRenderTargetView(target, transparent);
+        }
+        InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
+            &target, depthStencil_.Get());
+        std::array<ID3D11RenderTargetView*,
+            D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> installed{};
+        context_->OMGetRenderTargets(static_cast<UINT>(installed.size()),
+            installed.data(), nullptr);
+        const auto installedOwned = installed[0] == target &&
+            std::all_of(installed.begin() + 1, installed.end(),
+                [](const auto* view) { return view == nullptr; });
+        for (auto* view : installed)
+            if (view != nullptr) view->Release();
+        if (!installedOwned)
+        {
+            ID3D11RenderTargetView* restore = previousRtvs_[0].Get();
+            InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
+                &restore, depthStencil_.Get());
+            return false;
+        }
+
+        return true;
+    }
+
+    ID3D11DeviceContext* context_{};
+    DrawObservation* record_{};
+    std::array<ComPtr<ID3D11RenderTargetView>,
+        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> previousRtvs_{};
+    ComPtr<ID3D11DepthStencilView> depthStencil_;
+    ComPtr<ID3D11BlendState> previousBlend_;
+    std::array<float, 4> blendFactor_{};
+    UINT sampleMask_{0xFFFFFFFFU};
+    NativeUiCaptureKind kind_{NativeUiCaptureKind::none};
+    bool active_{};
+};
+
+class ScopedExposureCaptureState
 {
-    if (!replacement.grade) return nullptr;
-    if (!CaptureLutProfileDraw(observation)) return nullptr;
-    if (!lutProfileConstants_) return nullptr;
-    auto* global = replacement.operatorConstants;
-    const auto domain = global == operatorConstants_[0].Get() ? 0u : 1u;
-    if (global != operatorConstants_[domain].Get()) return nullptr;
-    auto values = operatorConstantValues_[domain];
-    ResolveLutProfileConstants(observation, values);
-    if (!values.lutProfilesActive) return nullptr;
-    if (!CurrentLutProfileDraw(observation)) return nullptr;
-    return UploadLutProfileConstants(values);
-}
+public:
+    explicit ScopedExposureCaptureState(
+        ID3D11DeviceContext* context) noexcept : context_(context)
+    {
+        try
+        {
+            if (context_ == nullptr) return;
+            CaptureShader();
+            CaptureBindings();
+            active_ = true;
+        }
+        catch (...) { RecordAbiException(); }
+    }
 
-bool ScenePassRenderer::CurrentLutProfileDraw(const NativeLutObservation& observation) const noexcept
+    ~ScopedExposureCaptureState() noexcept
+    {
+        try
+        {
+            if (!active_) return;
+            RestoreBindings();
+            RestoreShader();
+        }
+        catch (...)
+        {
+            g_referenceHealthy = false;
+            RecordAbiException();
+        }
+    }
+
+    ScopedExposureCaptureState(
+        const ScopedExposureCaptureState&) = delete;
+    ScopedExposureCaptureState& operator=(
+        const ScopedExposureCaptureState&) = delete;
+
+    [[nodiscard]] bool Active() const noexcept { return active_; }
+
+private:
+    void CaptureShader()
+    {
+        std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES>
+            instances{};
+        instanceCount_ = static_cast<UINT>(instances.size());
+        ID3D11ComputeShader* shader{};
+        context_->CSGetShader(&shader, instances.data(), &instanceCount_);
+        shader_.Attach(shader);
+        for (UINT index = 0; index < instanceCount_; ++index)
+            instances_[index].Attach(instances[index]);
+    }
+
+    void CaptureBindings()
+    {
+        ID3D11Buffer* exposureConstant{};
+        context_->CSGetConstantBuffers(2, 1, &exposureConstant);
+        exposureConstant_.Attach(exposureConstant);
+        ID3D11ShaderResourceView* resource{};
+        context_->CSGetShaderResources(0, 1, &resource);
+        resource_.Attach(resource);
+        ID3D11UnorderedAccessView* unordered{};
+        context_->CSGetUnorderedAccessViews(0, 1, &unordered);
+        unordered_.Attach(unordered);
+    }
+
+    void RestoreBindings()
+    {
+        ID3D11ShaderResourceView* clearResource{};
+        ID3D11UnorderedAccessView* clearUnordered{};
+        context_->CSSetShaderResources(0, 1, &clearResource);
+        context_->CSSetUnorderedAccessViews(0, 1, &clearUnordered, nullptr);
+
+        auto* resource = resource_.Get();
+        auto* unordered = unordered_.Get();
+        auto* exposureConstant = exposureConstant_.Get();
+        context_->CSSetConstantBuffers(2, 1, &exposureConstant);
+        context_->CSSetShaderResources(0, 1, &resource);
+        context_->CSSetUnorderedAccessViews(0, 1, &unordered, nullptr);
+    }
+
+    void RestoreShader()
+    {
+        std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES>
+            instances{};
+        for (UINT index = 0; index < instanceCount_; ++index)
+            instances[index] = instances_[index].Get();
+        context_->CSSetShader(shader_.Get(),
+            instanceCount_ == 0 ? nullptr : instances.data(),
+            instanceCount_);
+    }
+
+    ID3D11DeviceContext* context_{};
+    ComPtr<ID3D11ComputeShader> shader_;
+    std::array<ComPtr<ID3D11ClassInstance>,
+        D3D11_SHADER_MAX_INTERFACES> instances_{};
+    UINT instanceCount_{};
+    ComPtr<ID3D11Buffer> exposureConstant_;
+    ComPtr<ID3D11ShaderResourceView> resource_;
+    ComPtr<ID3D11UnorderedAccessView> unordered_;
+    bool active_{};
+};
+
+void ClearExposureCaptureViews(
+    ID3D11DeviceContext* context) noexcept
 {
-    return IsCurrentNativeLutObservation(observation, GetCurrentThreadId()) &&
-        EligibleImageSpaceSlots(observation, observation.validSlots) == lutInspector_.imageSpaceValidSlots;
+    std::array<ID3D11ShaderResourceView*, 1> resources{};
+    std::array<ID3D11UnorderedAccessView*, 1> unordered{};
+    context->CSSetShaderResources(0,
+        static_cast<UINT>(resources.size()), resources.data());
+    context->CSSetUnorderedAccessViews(0,
+        static_cast<UINT>(unordered.size()), unordered.data(), nullptr);
 }
 
-void ScenePassRenderer::BindLutProfileConstants(ID3D11Buffer* constants,
-    const NativeLutObservation& observation) noexcept
+[[nodiscard]] bool IsExposureCaptureSafe(
+    ID3D11DeviceContext* context, const DrawObservation& record)
 {
-    if (!constants || !CurrentLutProfileDraw(observation)) return;
-    context_->PSSetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
+    if (context == nullptr || context != g_rendererDevice.activeContext) return false;
+    if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE || !record.computeQueries.CanDispatch())
+        return false;
+    ComPtr<ID3D11Predicate> predicate;
+    BOOL predicateValue{};
+    context->GetPredication(&predicate, &predicateValue);
+    return !predicate;
 }
 
-
-void ScenePassRenderer::ResetOperatorResources() noexcept
+struct NativeExposureBinding
 {
-    for (auto& constants : operatorConstants_) constants.Reset();
-    lutProfileConstants_.Reset();
-    operatorConstantValues_ = {};
-    lutProfileKeyReady_ = false;
-    lutInspector_ = {};
-    operatorSampler_.Reset();
-    operatorSource_.Reset();
-    operatorTexture_.Reset();
-    operatorEnabled_ = false;
-}
+    ComPtr<ID3D11ShaderResourceView> exposure;
+    ComPtr<ID3D11Buffer> constants;
+    UINT first{};
+    UINT count{};
+};
 
-ID3D11Buffer* ScenePassRenderer::ConstantsForInput(SceneTextureHandle input) const noexcept
+[[nodiscard]] bool IsNativeExposureTexture(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
-    const auto* source = Resolve(input);
-    if (source == nullptr) return nullptr;
-    const auto domain = static_cast<std::size_t>(source->domain);
-    return domain < operatorConstants_.size() ? operatorConstants_[domain].Get() : nullptr;
+    const std::array dimensions{description.Width, description.Height, description.MipLevels,
+        description.ArraySize, description.SampleDesc.Count};
+    return std::ranges::all_of(dimensions, [](UINT dimension) { return dimension == 1; });
 }
 
-}  // namespace fo4hdr
+[[nodiscard]] bool IsNativeExposureFormat(DXGI_FORMAT format) noexcept
+{
+    constexpr std::array formats{DXGI_FORMAT_R11G11B10_FLOAT, DXGI_FORMAT_R16_FLOAT,
+        DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT};
+    return std::ranges::find(formats, format) != formats.end();
+}
+
+[[nodiscard]] bool ValidExposureConstantRange(UINT first, UINT count, UINT width) noexcept
+{
+    return count >= 2 && static_cast<std::uint64_t>(first) * 16U + 32U <= width;
+}
+
+[[nodiscard]] bool MatchesNativeExposure(const D3D11_SHADER_RESOURCE_VIEW_DESC& view,
+    const D3D11_TEXTURE2D_DESC& description, UINT bufferWidth) noexcept
+{
+    return IsFirstSingleMip(view) && IsNativeExposureTexture(description) &&
+        bufferWidth >= 32 && IsNativeExposureFormat(view.Format);
+}
+
+[[nodiscard]] bool QualifiedNativeExposure(
+    ID3D11DeviceContext* context, NativeExposureBinding& binding) noexcept
+{
+    auto* context1 = g_developerExposure.context1.Get();
+    UINT first{}, count{};
+    context->PSGetShaderResources(2, 1, &binding.exposure);
+    if (context1) context1->PSGetConstantBuffers1(2, 1, &binding.constants, &first, &count);
+    else context->PSGetConstantBuffers(2, 1, &binding.constants);
+    if (!binding.exposure || !binding.constants) return false;
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+    binding.exposure->GetDesc(&view);
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    binding.exposure->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&texture))) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    D3D11_BUFFER_DESC buffer{};
+    binding.constants->GetDesc(&buffer);
+    if (context1 && !ValidExposureConstantRange(first, count, buffer.ByteWidth)) return false;
+    binding.first = first;
+    binding.count = count;
+    return MatchesNativeExposure(view, description, buffer.ByteWidth);
+}
+
+[[nodiscard]] bool CaptureQualifiedNativeExposure(
+    ID3D11DeviceContext* context, const DrawObservation& record,
+    ID3D11ComputeShader* shader, ID3D11UnorderedAccessView* output) noexcept
+{
+    if (!shader || !output) return false;
+    if (!IsExposureCaptureSafe(context, record))
+        return false;
+    NativeExposureBinding binding;
+    if (!QualifiedNativeExposure(context, binding)) return false;
+    auto* context1 = g_developerExposure.context1.Get();
+    // Restore the complete original b2 range after the general compute guard's
+    // whole-buffer restore; the range guard therefore outlives that guard.
+    ScopedD3D11ComputeConstantBuffer exposureRange;
+    exposureRange.Capture(context, context1, 2);
+    ScopedExposureCaptureState saved(context);
+    if (!saved.Active()) return false;
+    auto* source = binding.exposure.Get();
+    auto* bufferPointer = binding.constants.Get();
+    context->CSSetShaderResources(0, 1, &source);
+    if (context1) context1->CSSetConstantBuffers1(2, 1, &bufferPointer, &binding.first, &binding.count);
+    else context->CSSetConstantBuffers(2, 1, &bufferPointer);
+    context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+    context->CSSetShader(shader, nullptr, 0);
+    context->Dispatch(1, 1, 1);
+    ClearExposureCaptureViews(context);
+    return true;
+}
+
+void ObserveDeveloperExposure(
+    ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    auto& diagnostic = g_developerExposure;
+    if (!g_configuration.developerMode) return;
+    if (!diagnostic.state.Requested() && !diagnostic.state.Active()) return;
+    NativeExposureBinding binding;
+    if (!QualifiedNativeExposure(context, binding))
+    {
+        // Retire at Present to keep the frame's exposure coherent.
+        diagnostic.state.Request(false);
+        diagnostic.failed = true;
+        return;
+    }
+    diagnostic.observedFrame = g_frame;
+    if (diagnostic.state.NeedsCapture() && CaptureQualifiedNativeExposure(
+            context, record, diagnostic.captureShader.Get(), diagnostic.uav.Get()))
+        diagnostic.state.Capture(g_frame,
+            g_evidence.resourceGeneration.load(std::memory_order_acquire));
+}
+
+
+
+struct ProductionDrawKind
+{
+    bool lut{};
+    bool toneMap{};
+    bool temporal{};
+    bool video{};
+    [[nodiscard]] bool Supported() const noexcept { return toneMap || lut || temporal || video; }
+};
+
+[[nodiscard]] ProductionDrawKind ClassifyProductionDraw(RenoDxShaderPass pass) noexcept
+{
+    constexpr std::array tonePasses{RenoDxShaderPass::toneMapA, RenoDxShaderPass::toneMapB,
+        RenoDxShaderPass::toneMapNewA, RenoDxShaderPass::toneMapNewB};
+    return {pass == RenoDxShaderPass::lut,
+        std::ranges::find(tonePasses, pass) != tonePasses.end(),
+        pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2,
+        pass == RenoDxShaderPass::video};
+}
+
+[[nodiscard]] bool ProductionResourcesReady() noexcept
+{
+    return HdrFrameReadyForDraw() && g_replacements.device == g_rendererDevice.activeDevice &&
+        ReplacementConstantBuffersReady();
+}
+
+[[nodiscard]] bool IsProductionScene(const DrawObservation& record,
+    const PipelineHeartbeatEvaluation& heartbeat) noexcept
+{
+    return IsQualifiedSceneTarget(record.currentPrimaryRtv) &&
+        heartbeat.currentGeneration && heartbeat.currentFrame;
+}
+
+[[nodiscard]] bool IsProductionTemporalTarget(const DrawObservation& record) noexcept
+{
+    return g_scene.productionOperatorApplied && g_scene.currentScene != nullptr &&
+        record.currentSecondaryRtv != nullptr &&
+        record.currentSecondaryRtv == g_presentation.presentationProxyRtv.Get() &&
+        g_presentation.presentationProxySrv != nullptr;
+}
+
+[[nodiscard]] bool IsProductionTemporal(const DrawObservation& record,
+    const PipelineHeartbeatEvaluation& heartbeat) noexcept
+{
+    return heartbeat.currentGeneration && heartbeat.currentFrame && heartbeat.ready &&
+        IsProductionTemporalTarget(record);
+}
+
+[[nodiscard]] bool IsProductionDraw(ProductionDrawKind kind, const DrawObservation& record,
+    bool configurationMatches, const PipelineHeartbeatEvaluation& heartbeat) noexcept
+{
+    if (!configurationMatches || !g_configuration.productionRequested) return false;
+    if (kind.toneMap) return IsProductionScene(record, heartbeat);
+    if (kind.lut) return IsProductionScene(record, heartbeat) && heartbeat.toneMapFamilyObserved;
+    if (kind.temporal)
+    {
+        // Unrelated TAA branches bind neutral b13; only scene/proxy lineage
+        // may undo and restore production UI-relative transport around history.
+        return IsProductionTemporal(record, heartbeat);
+    }
+    // Video uses the fixed b13 layout without claiming the gameplay heartbeat.
+    return true;
+}
+
+class ScopedProductionBindings
+{
+public:
+    ScopedProductionBindings(
+        ID3D11DeviceContext* context,
+        const DrawObservation& record) noexcept : context_(context)
+    {
+        const auto kind = ClassifyProductionDraw(record.currentPass);
+        if (context_ == nullptr) return;
+        if (!record.currentPassKnown || !record.currentReplacementActive) return;
+        if (!kind.Supported() || !ProductionResourcesReady()) return;
+        const auto configurationMatches = ReplacementSetMatchesConfiguration();
+        const auto heartbeat = g_heartbeat.Evaluate(
+            g_evidence.resourceGeneration.load(std::memory_order_acquire), g_frame);
+        lut_ = kind.lut;
+        production_ = IsProductionDraw(kind, record, configurationMatches, heartbeat);
+        BindProductionInputs(record, kind.toneMap);
+    }
+
+    ~ScopedProductionBindings() noexcept = default;
+
+    ScopedProductionBindings(const ScopedProductionBindings&) = delete;
+    ScopedProductionBindings& operator=(
+        const ScopedProductionBindings&) = delete;
+
+    [[nodiscard]] bool UsesProductionSettings() const noexcept
+    {
+        return active_ && production_;
+    }
+    [[nodiscard]] bool UsesProductionOperator() const noexcept
+    {
+        return active_ && production_ && lut_;
+    }
+
+private:
+    void BindProductionInputs(const DrawObservation& record, bool toneMap) noexcept
+    {
+        if (production_ && toneMap) ObserveDeveloperExposure(context_, record);
+        auto* owned = SelectConstants(record);
+        const bool lockExposure = ShouldLockExposure(toneMap);
+        if (lockExposure) owned = g_developerExposure.constants.Get();
+        const auto bindOperatorLut = production_ && lut_ &&
+            RequiresOperatorLut(g_replacements.configurationKey.mode);
+        active_ = bindings_.Bind(context_, g_rendererDevice.activeContext1.Get(),
+            {.constantBufferSlot = kProductionOperatorConstantSlot, .constantBuffer = owned,
+            .shaderResourceSlot = kProductionOperatorLutSlot,
+            .shaderResource = g_replacements.operatorLutSrv.Get(),
+            .samplerSlot = kProductionOperatorSamplerSlot,
+            .sampler = g_replacements.operatorLutSampler.Get(), .bindShaderResource = bindOperatorLut,
+            .extraShaderResourceSlot = 17,
+            .extraShaderResource = lockExposure ? g_developerExposure.srv.Get() : nullptr,
+            .rejectExtraShaderResourceCollision = false});
+        if (!active_) BindFallback();
+    }
+
+    [[nodiscard]] ID3D11Buffer* SelectConstants(const DrawObservation& record) noexcept
+    {
+        ID3D11Buffer* owned = production_ ?
+            g_replacements.operatorConstants.Get() :
+            g_replacements.bypassConstants.Get();
+        if (production_ && lut_) owned = PrepareLutProfileDraw(context_, record, owned);
+        return owned;
+    }
+
+    [[nodiscard]] bool ShouldLockExposure(bool toneMap) const noexcept
+    {
+        return production_ && toneMap && g_developerExposure.state.Active();
+    }
+
+    void BindFallback() noexcept
+    {
+        g_referenceHealthy = false;
+        RecordFailure(GraphicsObservationFailure::requiredHeartbeatMissing);
+        production_ = false;
+        // This draw must not sample the operator LUT with incomplete
+        // bindings: mode 0 uses only the
+        // original scene/look resources. Context, bypass buffer and the
+        // inactive guard were verified above; constants-only Bind has no
+        // remaining failure condition or fallible D3D call.
+        active_ = bindings_.Bind(context_, g_rendererDevice.activeContext1.Get(),
+            {.constantBufferSlot = kProductionOperatorConstantSlot,
+            .constantBuffer = g_replacements.bypassConstants.Get(),
+            .shaderResourceSlot = kProductionOperatorLutSlot, .shaderResource = nullptr,
+            .samplerSlot = kProductionOperatorSamplerSlot, .sampler = nullptr,
+            .bindShaderResource = false});
+        assert(active_);
+        // Earlier HDR scene work cannot be undone within this draw. The
+        // current proxy receives the bounded SDR handoff, not a claim of
+        // exact vanilla reconstruction for the partial transition frame.
+    }
+
+    ID3D11DeviceContext* context_{};
+    ScopedD3D11PixelBindings bindings_;
+    bool active_{};
+    bool production_{};
+    bool lut_{};
+};
+
+class ScopedNativeReferenceDraw
+{
+public:
+    ScopedNativeReferenceDraw(ID3D11DeviceContext* context, DrawObservation& record,
+        bool production) noexcept : context_(context), record_(record)
+    {
+        if (GetCurrentThreadId() != g_observedPresentThread.load(std::memory_order_acquire))
+            return;
+        if (!Eligible(production)) return;
+        const auto& resources = g_replacements.nativeReference;
+        if (!ResourcesReady(resources)) return;
+        const bool prepare = g_replacements.configurationKey.vanillaColorGradingStrength > 0.0F;
+        auto* context1 = g_rendererDevice.activeContext1.Get();
+        if (!PreparationAvailable(prepare, context1)) return;
+        ComPtr<ID3D11PixelShader> actual;
+        if (!BindShader(resources, actual)) return;
+        if (!Prepare(prepare, context1, resources)) return;
+        g_nativeReferenceStatus = nullptr;
+    }
+
+    ~ScopedNativeReferenceDraw() noexcept
+    {
+        if (preparedBound_)
+        {
+            auto* previous = inputs_.looks[0].Get();
+            context_->PSSetShaderResources(3, 1, &previous);
+        }
+        RestoreShader();
+    }
+
+    ScopedNativeReferenceDraw(const ScopedNativeReferenceDraw&) = delete;
+    ScopedNativeReferenceDraw& operator=(const ScopedNativeReferenceDraw&) = delete;
+
+private:
+    [[nodiscard]] bool Eligible(bool production) const noexcept
+    {
+        return g_activeSettings.colorGradingMethod == ColorGradingMethod::nativeReference &&
+            production && record_.currentPass == RenoDxShaderPass::lut &&
+            record_.currentReplacementActive && HasOriginalPixelShaderSetter(context_);
+    }
+
+    [[nodiscard]] static bool ResourcesReady(const NativeReferenceResources& resources) noexcept
+    {
+        const bool ready = NativeReferenceResourcesReady(resources);
+        if (!ready) g_nativeReferenceStatus = "Radial fallback: grading resources unavailable.";
+        return ready;
+    }
+
+    [[nodiscard]] bool CanPrepare(ID3D11DeviceContext1* context1) const noexcept
+    {
+        return context_ == g_rendererDevice.activeContext && record_.immediate && context1 &&
+            record_.computeQueries.CanDispatch();
+    }
+
+    [[nodiscard]] bool PreparationAvailable(bool prepare, ID3D11DeviceContext1* context1) const noexcept
+    {
+        if (!prepare || CanPrepare(context1)) return true;
+        g_nativeReferenceStatus = "Radial fallback: preparation is unavailable for this draw.";
+        return false;
+    }
+    [[nodiscard]] bool BindShader(const NativeReferenceResources& resources,
+        ComPtr<ID3D11PixelShader>& actual) noexcept
+    {
+        BindOriginalPixelShader(context_, resources.shader.Get());
+        swapped_ = true;
+
+        context_->PSGetShader(&actual, nullptr, nullptr);
+        if (actual.Get() != resources.shader.Get())
+        {
+            RestoreShader();
+            g_nativeReferenceStatus = "Radial fallback: grading shader binding changed.";
+            return false;
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool Prepare(bool prepare, ID3D11DeviceContext1* context1,
+        const NativeReferenceResources& resources) noexcept
+    {
+        if (!prepare) return true;
+        // Recheck after the captured shader-binding call: another hook may
+        // change predication, query state or the native input bindings.
+        if (!record_.computeQueries.CanDispatch() ||
+            !CaptureNativeReferenceInputs(context_, context1, inputs_))
+        {
+            RestoreShader();
+            g_nativeReferenceStatus = "Radial fallback: native LUT inputs or draw state are unsupported.";
+            return false;
+        }
+        DispatchNativeReferencePrepare(context_, context1, inputs_, resources);
+        auto* prepared = resources.preblendSrv.Get();
+        context_->PSSetShaderResources(3, 1, &prepared);
+        preparedBound_ = true;
+        return true;
+    }
+
+    void RestoreShader() noexcept
+    {
+        if (!swapped_) return;
+        BindOriginalPixelShader(context_, record_.expectedBoundShader);
+        (void)ValidateExpectedShaderBinding(context_, record_);
+        swapped_ = false;
+    }
+
+    ID3D11DeviceContext* context_{};
+    DrawObservation& record_;
+    NativeReferenceInputs inputs_;
+    bool swapped_{};
+    bool preparedBound_{};
+};
+
+void CloseRetainedArmorReplacement(const DrawObservation& record) noexcept
+{
+    if (record.currentReplacementActive)
+    {
+        ArmorUiScopeToken outer{};
+        outer.serial = g_armor.armorEncodedScope;
+        ArmorEncodedBoundary(outer, false);
+        g_armor.armorEncodedFailed = true;
+        g_armor.armorEncodedStatus = "Disabled: retained scene replacement inside armor scope";
+    }
+}
+
+void RecordNativeUiCapture(NativeUiCaptureKind kind) noexcept
+{
+    if (kind == NativeUiCaptureKind::backdrop)
+        g_evidence.nativeUiBackdropCaptureDrawCount.fetch_add(
+            1, std::memory_order_relaxed);
+    else
+        g_evidence.nativeUiCaptureDrawCount.fetch_add(
+            1, std::memory_order_relaxed);
+}
+
+void RecordProductionDraw(const ScopedProductionBindings& operatorBindings) noexcept
+{
+    if (operatorBindings.UsesProductionSettings())
+        ObserveQualifiedSettingsDrawThread();
+    if (operatorBindings.UsesProductionOperator())
+    {
+        g_scene.productionOperatorApplied = true;
+        g_evidence.productionOperatorDrawCount.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+}
+
+void ExecuteObservedDraw(
+    DrawObservation& record,
+    ID3D11DeviceContext* context,
+    bool exactIndexedQuad,
+    const DrawInvocation& draw) noexcept
+{
+    if (context != g_rendererDevice.activeContext)
+    {
+        draw();
+        return;
+    }
+    if (g_armor.armorEncodedActive && context == g_rendererDevice.activeContext)
+    {
+        CloseRetainedArmorReplacement(record);
+        draw();
+        ObservePipboyScreenDraw(context, record);
+        return;
+    }
+    if (!ValidateExpectedShaderBinding(context, record))
+    {
+        draw();
+        ObservePipboyScreenDraw(context, record);
+        return;
+    }
+    {
+        ScopedGameUiCapture gameUiCapture(
+            context, record, exactIndexedQuad);
+        if (gameUiCapture.Active())
+        {
+            RecordNativeUiCapture(gameUiCapture.Kind());
+            draw();
+            ObservePipboyScreenDraw(context, record);
+            return;
+        }
+    }
+    {
+        ScopedProductionBindings operatorBindings(context, record);
+        {
+            ScopedNativeReferenceDraw grading(context, record,
+                operatorBindings.UsesProductionSettings());
+            draw();
+        }
+        ObservePipboyScreenDraw(context, record);
+        RecordProductionDraw(operatorBindings);
+    }
+    try { ObserveCompletedDraw(context, record); }
+    catch (...) { RecordAbiException(); }
+}
+
+
+} // namespace fo4hdr

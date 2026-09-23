@@ -18,13 +18,13 @@ struct NativeReferenceInputs
     UINT constantCount{};
 };
 
-// Internal caller keeps the immediate context exclusive and supplies qualified
-// look/weight semantics; getters prove layout and binding, not native identity.
 [[nodiscard]] bool IsQualifiedNativeReferenceLook(ID3D11ShaderResourceView* view) noexcept;
 
-[[nodiscard]] bool CaptureNativeReferenceInputs(ID3D11DeviceContext1* context, NativeReferenceInputs& inputs) noexcept;
+[[nodiscard]] bool CaptureNativeReferenceInputs(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, NativeReferenceInputs& inputs) noexcept;
 
-[[nodiscard]] bool DispatchNativeReferencePrepare(ID3D11DeviceContext1* context, const NativeReferenceInputs& inputs,
+void DispatchNativeReferencePrepare(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, const NativeReferenceInputs& inputs,
     const NativeReferenceResources& state) noexcept;
 
 } // namespace fo4hdr

@@ -1,74 +1,106 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
-
-#include <d3d11_1.h>
-
+#include "Fallout4HDR/config/HdrSettings.hpp"
+#include "Fallout4HDR/output/NativeLutObservation.hpp"
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
+#include <Windows.h>
+#include <d3d11.h>
+#include <array>
 #include <cstdint>
-#include <memory>
 
 namespace fo4hdr {
 
-class LiveSettings;
-class SettingsPersistence;
-class PresentationPass;
-
-enum class SettingsWindowScope { unavailable, qualifiedExclusive };
-
-struct SettingsWindowConfiguration
+struct LutProfilesView
 {
-    HWND window{};
-    UINT width{};
-    UINT height{};
-    HdrSettingsInput* input{};
-    LiveSettings* live{};
-    // Optional joined owner must outlive the window; retire the window before destroying it.
-    SettingsPersistence* persistence{};
-    // Optional renderer-thread owner outlives this window; only copied diagnostics escape.
-    PresentationPass* presentation{};
-    bool developerOverlay{};
+    std::array<LutSnapshot, 4> currentLuts{};
+    std::uint32_t validatedSlots{};
+    const char* status{};
+    std::array<ImageSpaceIdentity, 4> currentImageSpaces{};
+    std::uint32_t imageSpaceValidSlots{};
+    const char* imageSpaceStatus{};
 };
 
-struct SettingsWindowOverlay
+struct SettingsDisplayView
 {
-    ID3D11ShaderResourceView* source{};
+    bool known{};
+    std::array<wchar_t, 128> monitorDevicePath{};
+    std::array<wchar_t, 64> friendlyName{};
+    std::array<wchar_t, 32> deviceName{};
+    float peakNits{}, fullFrameNits{}, sdrWhiteNits{};
+};
+
+struct SettingsPipboyObservation
+{
+    bool requested{};
+    std::uint64_t generation{}, contextGeneration{};
+    std::uint64_t producerDraws{}, consumerDraws{}, pendingConsumers{};
+    std::uint64_t matchedConsumers{}, unmatchedConsumers{}, rejectedDraws{};
+    std::uint64_t lastProducerFrame{}, lastConsumerFrame{}, lastMatchedFrame{}, lastProducerAge{};
+};
+
+struct SettingsPipboyViewObservation
+{
     std::uint64_t frame{};
-    UINT width{};
-    UINT height{};
-    std::uint32_t calibrationMode{};
+    D3D11_TEXTURE2D_DESC texture{};
+    DXGI_FORMAT format{};
+    UINT dimension{}, mip{}, mipCount{};
 };
 
-// Initialize/Draw/Retire and destruction require one renderer thread. Borrowed
-// input/live owners outlive this owner; input callbacks never call ImGui.
-// Qualified scope excludes active queries, command lists, concurrent context
-// use and reentry. Stock backend buffer/texture growth is not allocation-free.
-class SettingsWindow
+struct SettingsPipboyView
 {
-public:
-    SettingsWindow() noexcept;
-    ~SettingsWindow() noexcept;
-    SettingsWindow(const SettingsWindow&) = delete;
-    SettingsWindow& operator=(const SettingsWindow&) = delete;
-
-    [[nodiscard]] bool Initialize(ID3D11Device* device, ID3D11DeviceContext1* context,
-        SettingsWindowConfiguration configuration) noexcept;
-    // Returned FP16 RGB is premultiplied authored IEC code, with independent
-    // coverage alpha, BT.709/UI-relative. Consume only in the named frame,
-    // without externally binding its private view; decode before HDR blend.
-    // A hidden calibration control surface can publish a null source with current
-    // frame/extent/mode. Mode 0 is normal, 10-14 are diagnostic patterns.
-    // Same-frame Draw returns the saved publication without draining input again.
-    // A newer-frame Draw or Retire invalidates it. Never render into PQ/R10.
-    [[nodiscard]] SettingsWindowOverlay Draw(std::uint64_t frame,
-        SettingsWindowScope scope) noexcept;
-    // Retire before input Stop/device reset/resize, with callbacks and rendering
-    // quiescent. Resize uses a new cold owner with fresh dimensions.
-    [[nodiscard]] bool Retire() noexcept;
-
-private:
-    struct State;
-    std::unique_ptr<State> state_;
+    SettingsPipboyObservation state;
+    SettingsPipboyViewObservation producerInput, producerOutput, consumerInput;
+    std::array<std::uint64_t, 6> rejections{};
+    std::uint64_t producerResourceChanges{};
+    const char* status{"Off"};
 };
 
-}  // namespace fo4hdr
+// Borrowed strings and snapshots remain valid for the synchronous draw call.
+struct SettingsWindowView
+{
+    HdrSettings activeSettings;
+    bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{};
+    bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
+    ProductionToneMapperAlgorithm pendingAlgorithm{};
+    double pendingPeakNits{};
+    const char* nativeReferenceStatus{};
+    const char* armorEncodedStatus{"Off"};
+    const char* rendererFailure{"none"};
+    std::uint64_t resourceGeneration{}, frame{}, settingsGeneration{}, desiredSettingsGeneration{}, lutRequestGeneration{};
+    SettingsDisplayView display;
+    LutProfilesView lutProfiles;
+    SettingsPipboyView pipboy;
+};
+
+struct SettingsWindowActions
+{
+    // Required synchronous actions execute on the render thread.
+    void (*focusLost)() noexcept;
+    void (*requestExposure)(bool) noexcept;
+    void (*requestPipboyObservation)(bool) noexcept;
+    void (*refreshView)(SettingsWindowView&) noexcept;
+};
+
+struct SettingsInputActivation
+{
+    bool ready{}, active{};
+    std::uint32_t currentThreadId{}, windowThreadId{};
+};
+
+void InitializeSettingsWindow(const HdrSettings& settings) noexcept;
+void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept;
+[[nodiscard]] bool ShutdownSettingsWindowBackend() noexcept;
+[[nodiscard]] bool SettingsWindowBackendReady() noexcept;
+[[nodiscard]] SettingsInputActivation TryActivateSettingsWindowInput() noexcept;
+[[nodiscard]] bool DrawSettingsWindow(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept;
+[[nodiscard]] bool SetSettingsWindowOpen(bool open) noexcept;
+[[nodiscard]] bool SettingsWindowOpen() noexcept;
+[[nodiscard]] std::uint32_t SettingsCalibrationMode() noexcept;
+[[nodiscard]] const HdrSettings& ReadSettingsDraft() noexcept;
+[[nodiscard]] bool SettingsCommitRequested() noexcept;
+[[nodiscard]] bool ConsumeSettingsCommitRequest() noexcept;
+
+} // namespace fo4hdr

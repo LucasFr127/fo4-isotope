@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 Carlos Lopez Jr.
-// Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/games/fallout4/taa2_0x61CC29E6.ps_5_0.hlsl
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/taa2_0x61CC29E6.ps_5_0.hlsl
 // Adapted for Fallout4HDR from the pinned TAA2 0x61CC29E6 shader. Modification:
 // preserve the original Fallout 4 temporal body and bindings while wrapping
 // color in the project HDR intermediate defined by TemporalIntermediate.hlsli.
@@ -23,17 +23,17 @@ cbuffer cb2 : register(b2) {
   float4 cb2[6];
 }
 
-// Negative comparison masks preserve the native bitwise flag combinations.
+// 3Dmigoto declarations
 #define cmp -
 
 float3 convertRenderInput(float3 render)
 {
-  return Fo4HdrEncodeTemporalScene(render);
+  return Fo4HdrEncodeTemporalInput(Fo4HdrNormalizeTemporalInput(render));
 }
 
 float3 convertRenderOutput(float3 render)
 {
-  return Fo4HdrDecodeTemporalScene(render);
+  return Fo4HdrRestoreUiTransport(Fo4HdrDecodeTemporalOutput(render));
 }
 
 void main(float4 v0 : SV_POSITION0, float2 v1 : TEXCOORD0, out float4 o0 : SV_Target0, out float4 o1 : SV_Target1) {

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <utility>
 
 namespace fo4hdr {
 
@@ -15,62 +16,49 @@ enum class HookOwnershipState
     owned,
     ownershipLost,
     installFailed,
-    restored,
-    removing,
-    passive
+    restored
 };
 
 using HookPointerWriter = bool (*)(void** slot, void* expected, void* value) noexcept;
 using HookNextPublisher = bool (*)(void* next) noexcept;
 
-[[nodiscard]] void* AtomicPointerLoad(void* const* slot) noexcept;
-// Executable committed storage is only one prerequisite; the caller proves ABI/lifetime.
-[[nodiscard]] bool IsExecutableHookTarget(void* target) noexcept;
-
-using HookPageProtector = bool (*)(void* address, std::size_t bytes,
-    std::uint32_t protection, std::uint32_t& previous) noexcept;
-using HookPointerExchange = void* (*)(void** slot, void* expected, void* value) noexcept;
-
-struct HookPointerWriteOperations
+[[nodiscard]] inline void* AtomicPointerLoad(
+    void* const* slot) noexcept
 {
-    HookPageProtector protect{};
-    HookPointerExchange exchange{};
-};
+    if (slot == nullptr) return nullptr;
+    return std::atomic_ref<void*>(
+        *const_cast<void**>(slot)).load(std::memory_order_acquire);
+}
 
-// The injected operations obey the same page-protection and expected-value contracts
-// as the native adapter. A false result can leave value reachable after failed rollback.
-// The caller keeps storage mapped and serializes protection changes on its page.
-[[nodiscard]] bool WriteProtectedPointer(void** slot, void* expected, void* value,
-    const HookPointerWriteOperations& operations) noexcept;
-// The native adapter refuses executable slot pages before changing any protection.
-[[nodiscard]] bool WriteProtectedPointer(void** slot, void* expected, void* value) noexcept;
+template <class Function, class... Arguments>
+decltype(auto) InvokeCapturedNext(
+    Function next,
+    Arguments&&... arguments) noexcept(
+        noexcept(next(std::forward<Arguments>(arguments)...)))
+{
+    return next(std::forward<Arguments>(arguments)...);
+}
 
-// The caller supplies stable, readable aligned storage, proves ABI, and keeps next code resident.
-// Published callback state and this record outlive every reachable or in-flight callback.
-// Neither a false result nor successful removal establishes safe destruction/unloading.
 class PointerHookOwnership
 {
 public:
-    [[nodiscard]] bool Install(void** slot, void* replacement, HookPointerWriter writer,
-        HookNextPublisher publishNext) noexcept;
+    [[nodiscard]] bool Install(
+        void** slot,
+        void* replacement,
+        HookPointerWriter writer,
+        HookNextPublisher publishNext = nullptr) noexcept;
     [[nodiscard]] bool Remove(HookPointerWriter writer) noexcept;
     [[nodiscard]] HookOwnershipState Health() noexcept;
 
-    [[nodiscard]] void* Next() const noexcept
-    {
-        return next_.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] void* Next() const noexcept { return next_; }
     [[nodiscard]] HookOwnershipState State() const noexcept
     {
         return state_.load(std::memory_order_acquire);
     }
 
 private:
-    [[nodiscard]] bool Capture(void** slot, void* replacement) noexcept;
-    void RecordWriteFailure(HookOwnershipState absentState) noexcept;
-
     void** slot_{};
-    std::atomic<void*> next_{};
+    void* next_{};
     void* replacement_{};
     std::atomic<HookOwnershipState> state_{HookOwnershipState::empty};
 };
@@ -79,6 +67,54 @@ struct VtablePatch
 {
     std::size_t index{};
     void* replacement{};
+};
+
+enum class OneShotInitializationState : std::uint32_t
+{
+    uninitialized,
+    installing,
+    active,
+    failed
+};
+
+enum class OneShotInitializationAction : std::uint32_t
+{
+    install,
+    alreadyActive,
+    unavailable
+};
+
+class OneShotInitialization
+{
+public:
+    [[nodiscard]] OneShotInitializationAction Begin() noexcept;
+    void Complete(bool succeeded) noexcept;
+    [[nodiscard]] OneShotInitializationState State() const noexcept
+    {
+        return state_.load(std::memory_order_acquire);
+    }
+
+private:
+    std::atomic<OneShotInitializationState> state_{
+        OneShotInitializationState::uninitialized};
+};
+
+class BoundedAtomicFlagGuard
+{
+public:
+    explicit BoundedAtomicFlagGuard(
+        std::atomic_flag& flag,
+        std::size_t maximumAttempts) noexcept;
+    ~BoundedAtomicFlagGuard();
+
+    BoundedAtomicFlagGuard(const BoundedAtomicFlagGuard&) = delete;
+    BoundedAtomicFlagGuard& operator=(const BoundedAtomicFlagGuard&) = delete;
+
+    [[nodiscard]] bool OwnsLock() const noexcept { return owns_; }
+
+private:
+    std::atomic_flag* flag_{};
+    bool owns_{};
 };
 
 class ObjectGenerationIdentity
@@ -110,8 +146,21 @@ private:
     std::span<void*> shadow,
     std::span<const VtablePatch> patches) noexcept;
 
-
-[[nodiscard]] std::size_t DiscoverCallableVtableSlots(void* const* table,
-    std::size_t minimum, std::size_t maximum) noexcept;
+template <class Result, class Call, class OnException>
+Result InvokeNoexceptBoundary(
+    Result failureResult,
+    Call&& call,
+    OnException&& onException) noexcept
+{
+    try
+    {
+        return std::forward<Call>(call)();
+    }
+    catch (...)
+    {
+        std::forward<OnException>(onException)();
+        return failureResult;
+    }
+}
 
 }  // namespace fo4hdr

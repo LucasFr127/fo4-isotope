@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-struct IDXGISwapChain;
-
 namespace fo4hdr::tests {
 
 void RunHdrCoreTests();
@@ -16,9 +14,6 @@ void RunGt7Tests();
 void RunPipelineContractTests();
 void RunPipboyScreenObservationTests();
 void RunHookTests();
-void RunNativeImageSlotsTests();
-void RunDeviceCreationHookTests();
-void RunSwapChainObservationTests(void (*create)(IDXGISwapChain*));
 void RunHdrSettingsMathTests();
 void RunHdrConfigurationTests();
 void TestLutGradeProfiles();

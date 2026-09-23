@@ -1,49 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SceneLayers.hlsli"
 
-Texture2D<float4> ScenePixels : register(t0);
-Texture2D<float4> BackdropPixels : register(t1);
-Texture2D<float4> HudPixels : register(t2);
-Texture2D<float4> SettingsPixels : register(t3);
 RWTexture2D<float4> PresentTarget : register(u0);
-
-cbuffer PresentFrame : register(b0)
-{
-    uint2 FrameSize;
-    float DisplayPeakNits;
-    uint SceneDomain;
-    float UiWhiteNits;
-    uint SettingsPresent;
-    uint CalibrationMode;
-    uint Reserved;
-};
-
-[numthreads(8, 8, 1)]
-void CopySdrCodes(uint3 pixel : SV_DispatchThreadID)
-{
-    if (any(pixel.xy >= FrameSize)) return;
-    // Preserve authored display codes through the handoff; no linearization or PQ.
-    PresentTarget[pixel.xy] = float4(saturate(ScenePixels.Load(int3(pixel.xy, 0)).rgb), 1.0f);
-}
 
 [numthreads(8, 8, 1)]
 void main(uint3 pixel : SV_DispatchThreadID)
 {
     if (any(pixel.xy >= FrameSize)) return;
-    // Domain 0 retains the 203-nit scene white; domain 1 is BT.2020 relative to UI white.
-    const float3 scene = ScenePixels.Load(int3(pixel.xy, 0)).rgb;
-    float3 light = SceneDomain == 1u ? scene * UiWhiteNits : Fo4HdrBt709ToBt2020Nits(scene, 203.0f);
-    light = Fo4HdrCalibrationLight(CalibrationMode, pixel.xy, FrameSize,
-        float2(DisplayPeakNits, UiWhiteNits), light);
-    if (CalibrationMode < 10u || CalibrationMode > 13u)
+    float3 value = EvaluateFrameLayers(pixel.xy);
+    if (FrameMode == 0u)
+        value = saturate(value);
+    else
     {
-        light = Fo4HdrBlendAuthoredLayer(light, BackdropPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, true);
-        light = Fo4HdrBlendAuthoredLayer(light, HudPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
+        if (FrameMode == 1u || FrameMode == 2u) value *= ReferenceWhite;
+        // Compose in registers and encode directly into the presenting buffer:
+        // no intermediate storage, rounding, or full-frame output copy.
+        value = Fo4HdrEncodeAbsoluteLight(value);
     }
-    if (SettingsPresent != 0u)
-    {
-        light = Fo4HdrBlendAuthoredLayer(light, SettingsPixels.Load(int3(pixel.xy, 0)), UiWhiteNits, false);
-    }
-    // Encode only at the terminal UAV, after all contributions are linear light.
-    PresentTarget[pixel.xy] = float4(Fo4HdrEncodeAbsoluteLight(light), 1.0f);
+    PresentTarget[pixel.xy] = float4(value, 1.0f);
 }

@@ -1,35 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-
 #include "Fallout4HDR/config/HdrSettings.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
-
 #include <cstdint>
-
 namespace fo4hdr {
-
 struct DisplayCalibrationView
 {
-    bool known{};
-    bool identityAvailable{};
-    const wchar_t* name{};
+    const char* displayNameUtf8{};
     double reportedPeakNits{};
     double reportedFullFrameNits{};
-    double sdrWhiteNits{};
-    bool profileAvailable{};
-    SettingsPersistenceState profileState{SettingsPersistenceState::unavailable};
+    double osSdrWhiteNits{};
+    bool identityAvailable{};
+    bool profileBusy{};
+    bool saveReady{};
+    const char* status{};
 };
 
 struct DisplayCalibrationActions
 {
     bool changed{};
+    bool load{};
+    bool save{};
     bool hideOverlay{};
-    bool refreshDisplay{};
-    bool saveProfile{};
-    bool loadProfile{};
 };
 
-[[nodiscard]] DisplayCalibrationActions DrawDisplayCalibrationPanel(
-    HdrSettings& settings, std::uint32_t& mode, DisplayCalibrationView display = {}) noexcept;
-
-}  // namespace fo4hdr
+[[nodiscard]] DisplayCalibrationActions DrawDisplayCalibrationPanel(HdrSettings& settings, std::uint32_t& mode, const DisplayCalibrationView& view) noexcept;
+}

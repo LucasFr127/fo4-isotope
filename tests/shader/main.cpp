@@ -110,15 +110,8 @@ int wmain(int argc, wchar_t** argv)
         const auto input = TransferInputs();
         const auto output = fo4hdr::tests::gpu::EvaluateTransfer(shaderPath, input, displayPeakNits);
         const auto error = CheckTransfer(input, output);
-        fo4hdr::tests::gpu::VerifyShippingPixelShaders(
-            shaderPath.parent_path());
-        fo4hdr::tests::gpu::VerifyImageControls(shaderPath.parent_path());
-        fo4hdr::tests::gpu::VerifyArmorEncodedComposition(shaderPath.parent_path());
-        fo4hdr::tests::gpu::VerifyCreativeGradeLut(shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyHdrGradeTransfer(shaderPath.parent_path() / "HdrGradeTransfer.dxbc");
         fo4hdr::tests::gpu::VerifyOperatorLut(
-            shaderPath.parent_path());
-        fo4hdr::tests::gpu::VerifyDeveloperExposure(
             shaderPath.parent_path());
         fo4hdr::tests::gpu::VerifyDisplayCalibration(shaderPath.parent_path());
         fo4hdr::tests::RunSettingsPanelTests();

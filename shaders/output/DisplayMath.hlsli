@@ -16,11 +16,6 @@ float3 Fo4HdrExpandPrimaries(float3 light)
     return mul(transform, light);
 }
 
-float3 Fo4HdrBt709ToBt2020Nits(float3 linearBt709, float whiteNits)
-{
-    return Fo4HdrExpandPrimaries(linearBt709) * whiteNits;
-}
-
 float3 Fo4HdrBoundLight(float3 light, float ceiling)
 {
     if ((asuint(ceiling) & 0x7fffffffu) >= 0x7f800000u || ceiling <= 0.0f || ceiling > 10000.0f)
@@ -35,11 +30,10 @@ float3 Fo4HdrBoundLight(float3 light, float ceiling)
 float3 Fo4HdrEncodeAbsoluteLight(float3 nits)
 {
     const float3 luminance = Fo4HdrBoundLight(nits, 10000.0f) * 0.0001f;
-    // Both bases are nonnegative; abs makes that domain explicit to FXC.
-    const float3 power = pow(abs(luminance), 2610.0f / 16384.0f);
+    const float3 power = pow(luminance, 2610.0f / 16384.0f);
     const float3 ratio = (3424.0f / 4096.0f + power * (2413.0f / 128.0f)) /
         (1.0f + power * (2392.0f / 128.0f));
-    return saturate(pow(abs(ratio), 2523.0f / 32.0f));
+    return saturate(pow(ratio, 2523.0f / 32.0f));
 }
 
 #endif

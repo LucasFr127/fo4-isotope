@@ -416,8 +416,7 @@ struct PeakTransform
 {
     Vec3 ap1 = Multiply(ap0, transform.ap0ToAp1);
     for (double& channel : ap1)
-        channel = std::isfinite(channel)
-            ? std::clamp(channel, 0.0, transform.odt.toneScale.forwardLimit) : 0.0;
+        channel = std::clamp(channel, 0.0, transform.odt.toneScale.forwardLimit);
     return Multiply(ap1, transform.ap1ToAp0);
 }
 
@@ -433,9 +432,13 @@ struct PeakTransform
     const PeakTransform& transform, Vec3 toneMapped, bool production = false) noexcept
 {
     const Vec3 compressed = CompressGamut(toneMapped, transform.odt, production);
-    const Vec3 output = JMhToRgb(compressed, transform.odt.limit);
-    return {output[0] * kReferenceLuminance, output[1] * kReferenceLuminance,
-        output[2] * kReferenceLuminance};
+    Vec3 output = JMhToRgb(compressed, transform.odt.limit);
+    for (double& channel : output)
+    {
+        channel *= kReferenceLuminance;
+        if (!std::isfinite(channel)) channel = 0.0;
+    }
+    return {output[0], output[1], output[2]};
 }
 
 [[nodiscard]] LinearRgb EvaluateSceneNits(const PeakTransform& transform, LinearRgb input) noexcept
@@ -470,7 +473,7 @@ struct PeakTransform
     Vec3 output{evaluated.red, evaluated.green, evaluated.blue};
     for (double& channel : output)
     {
-        channel = std::isfinite(channel) ? std::clamp(channel, 0.0, transform.odt.peakLuminance) : 0.0;
+        channel = std::clamp(channel, 0.0, transform.odt.peakLuminance);
     }
     return {output[0], output[1], output[2]};
 }
@@ -521,7 +524,7 @@ LinearRgb MapAces2LmtToBt2020Nits(
     const auto evaluated = EvaluateAces2LmtLutNits(transform, sceneLinearBt709, lookStrength);
     Vec3 output{evaluated.red, evaluated.green, evaluated.blue};
     for (double& channel : output)
-        channel = std::isfinite(channel) ? std::clamp(channel, 0.0, transform.state.odt.peakLuminance) : 0.0;
+        channel = std::clamp(channel, 0.0, transform.state.odt.peakLuminance);
     return {output[0], output[1], output[2]};
 }
 

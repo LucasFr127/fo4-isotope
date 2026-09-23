@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
-// Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/games/fallout4/15_tonemap_newa_0x67685D89.ps_5_0.hlsl
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/15_tonemap_newa_0x67685D89.ps_5_0.hlsl
 // Modified Fallout4HDR adaptation of RenoDX Fallout 4 shader 0x67685D89;
 // see THIRD_PARTY_NOTICES.md.
 #define FO4HDR_CB2_COUNT 5

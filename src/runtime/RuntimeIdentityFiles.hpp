@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "Fallout4HDR/runtime/RuntimeValidation.hpp"
-
-#include <cstddef>
+#include <filesystem>
 #include <optional>
-#include <span>
+#include <string>
 
 namespace fo4hdr {
 
-[[nodiscard]] std::optional<RuntimeVersion> DecodeFixedFileVersion(
-    std::span<const std::byte> bytes) noexcept;
+[[nodiscard]] std::optional<std::string> Sha256File(
+    const std::filesystem::path& path) noexcept;
 
-[[nodiscard]] std::optional<RuntimeVersion> ReadCurrentExecutableVersion() noexcept;
+[[nodiscard]] std::optional<std::string> Sha256CanonicalTextFile(
+    const std::filesystem::path& path) noexcept;
 
 }  // namespace fo4hdr

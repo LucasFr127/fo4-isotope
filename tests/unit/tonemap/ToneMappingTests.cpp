@@ -2,7 +2,7 @@
 
 #include "Fallout4HDR/tonemap/Aces2.hpp"
 #include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "config/SettingsPersistence.hpp"
 #include "reference/Aces2LmtSourceOracle.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
@@ -197,22 +197,22 @@ void CheckLookSource(LinearRgb input)
 void CheckLookSettings()
 {
     PluginConfiguration settings;
-    settings.algorithm = OperatorLutAlgorithm::aces2Lmt;
-    settings.display.toneMapperParameters.acesLookStrength = 0.5;
-    FO4HDR_CHECK(ValidatePluginConfiguration(settings));
-    const auto saved = RewritePluginConfigurationIni("; retained\n", settings);
+    settings.productionAlgorithm = ProductionToneMapperAlgorithm::aces2Lmt;
+    settings.toneMapperParameters.acesLookStrength = 0.5;
+    FO4HDR_CHECK((fo4hdr::ValidateHdrSettings(settings) == fo4hdr::HdrSettingsValidationError::none));
+    const auto saved = RewriteHdrSettingsIni("; retained\n", settings);
     const auto parsed = ParsePluginConfiguration(saved);
-    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(parsed.value == settings);
-    auto changed = settings.display.toneMapperParameters;
+    FO4HDR_CHECK(parsed.valid == true);
+    FO4HDR_CHECK(static_cast<const HdrSettings&>(parsed.value) == static_cast<const HdrSettings&>(settings));
+    auto changed = settings.toneMapperParameters;
     changed.acesLookStrength = 1.0;
-    FO4HDR_CHECK(ActiveToneMapperParameters(settings.algorithm, changed) !=
-        ActiveToneMapperParameters(settings.algorithm, settings.display.toneMapperParameters));
-    FO4HDR_CHECK(ActiveToneMapperParameters(OperatorLutAlgorithm::gt7, changed) ==
-        ActiveToneMapperParameters(OperatorLutAlgorithm::gt7, settings.display.toneMapperParameters));
-    settings.display.toneMapperParameters.acesLookStrength =
+    FO4HDR_CHECK(ActiveToneMapperParameters(settings.productionAlgorithm, changed) !=
+        ActiveToneMapperParameters(settings.productionAlgorithm, settings.toneMapperParameters));
+    FO4HDR_CHECK(ActiveToneMapperParameters(ProductionToneMapperAlgorithm::gt7, changed) ==
+        ActiveToneMapperParameters(ProductionToneMapperAlgorithm::gt7, settings.toneMapperParameters));
+    settings.toneMapperParameters.acesLookStrength =
         std::numeric_limits<double>::quiet_NaN();
-    FO4HDR_CHECK(!ValidatePluginConfiguration(settings));
+    FO4HDR_CHECK(!(fo4hdr::ValidateHdrSettings(settings) == fo4hdr::HdrSettingsValidationError::none));
 }
 
 void TestAces2ContrastLook()

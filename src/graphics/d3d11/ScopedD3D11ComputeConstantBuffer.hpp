@@ -1,35 +1,35 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <d3d11_1.h>
-#include <wrl/client.h>
 
 namespace fo4hdr {
 
-// Borrows the qualified Context1 and preserves the exact selected CS constant-buffer window.
-// Capture and explicit restoration stay in the enclosing dispatch's state order.
+// Context interfaces are borrowed for the enclosing dispatch's lifetime. The
+// caller supplies its generation-cached Context1; capturing state never performs QI.
 class ScopedD3D11ComputeConstantBuffer
 {
 public:
-    explicit ScopedD3D11ComputeConstantBuffer(ID3D11DeviceContext1* context, UINT slot = 0) noexcept;
-    ~ScopedD3D11ComputeConstantBuffer() noexcept;
+    ScopedD3D11ComputeConstantBuffer() noexcept = default;
     ScopedD3D11ComputeConstantBuffer(const ScopedD3D11ComputeConstantBuffer&) = delete;
-    ScopedD3D11ComputeConstantBuffer& operator=(const ScopedD3D11ComputeConstantBuffer&) = delete;
+    ScopedD3D11ComputeConstantBuffer& operator=(
+        const ScopedD3D11ComputeConstantBuffer&) = delete;
+    ~ScopedD3D11ComputeConstantBuffer() noexcept;
 
-    void Capture() noexcept;
-    [[nodiscard]] bool Ready() const noexcept;
-    void Bind(ID3D11Buffer* constants) noexcept;
-    // The caller supplies the admitted source window; no legacy range is inferred.
-    void BindRange(ID3D11Buffer* constants, UINT firstConstant, UINT constantCount) noexcept;
+    void Capture(ID3D11DeviceContext* context, ID3D11DeviceContext1* cachedContext1,
+        UINT slot) noexcept;
+
     void Restore() noexcept;
 
 private:
-    ID3D11DeviceContext1* context_;
-    Microsoft::WRL::ComPtr<ID3D11Buffer> constants_;
+    ID3D11DeviceContext* context_{};
+    ID3D11DeviceContext1* context1_{};
+    ID3D11Buffer* buffer_{};
     UINT slot_{};
     UINT firstConstant_{};
     UINT constantCount_{};
-    bool bound_{};
 };
 
-}  // namespace fo4hdr
+} // namespace fo4hdr

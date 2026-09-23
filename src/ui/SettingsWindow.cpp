@@ -1,217 +1,61 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
+#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "Fallout4HDR/graphics/HdrRenderer.hpp"
 #include "SettingsPanel.hpp"
 #include "DisplayCalibrationPanel.hpp"
 #include "LutProfilesPanel.hpp"
-#include "DisplayDiscovery.hpp"
-#include "LiveSettings.hpp"
-#include "NativeActiveOwner.hpp"
-#include "passes/PresentationPass.hpp"
+#include "../graphics/LiveSettings.hpp"
+#include "../graphics/DisplayDiscovery.hpp"
 
 #include <imgui.h>
-#include <backends/imgui_impl_dx11.h>
 #include <backends/imgui_impl_win32.h>
+#include <backends/imgui_impl_dx11.h>
 #include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
-#include <cmath>
-#include <limits>
-#include <new>
+#include <atomic>
+#include <utility>
 
 namespace fo4hdr {
 namespace {
 
 using Microsoft::WRL::ComPtr;
-constexpr UINT outputCount = 8;
-constexpr UINT classCapacity = 256;
+HdrSettings g_draft;
+GradeProfileSelection g_profileSelection;
+ComPtr<ID3D11Device> g_device;
+ComPtr<ID3D11DeviceContext> g_context;
+ImGuiContext* g_imgui{};
+HWND g_window{};
+std::atomic<HWND> g_inputWindow{};
+DWORD g_thread{};
+bool g_platform{}, g_renderer{}, g_ready{}, g_open{}, g_drawing{}, g_commit{};
+bool g_hideOverlay{};
+bool g_consumerReady{};
+bool g_saveRequested{};
+HdrSettings g_saveDraft;
+std::uint32_t g_calibrationMode{};
+std::atomic<std::uint64_t> g_inputGeneration{};
+std::uint64_t g_profileRequest{};
+bool g_profileLoad{};
+DisplayCalibrationProfile g_profileDraft;
+SettingsPersistenceState g_profileState{SettingsPersistenceState::unavailable};
+LARGE_INTEGER g_frequency{}, g_previous{};
 
-template<class T>
-struct SavedShader
-{
-    ComPtr<T> shader;
-    std::array<ID3D11ClassInstance*, classCapacity> classes{};
-    UINT count{classCapacity};
-
-    ~SavedShader()
-    {
-        for (auto* instance : classes) if (instance) instance->Release();
-    }
-
-    template<class Getter>
-    bool Capture(ID3D11DeviceContext* context, Getter getter) noexcept
-    {
-        (context->*getter)(shader.GetAddressOf(), classes.data(), &count);
-        return count <= classCapacity;
-    }
-
-    template<class Setter>
-    void Restore(ID3D11DeviceContext* context, Setter setter) noexcept
-    {
-        (context->*setter)(shader.Get(), classes.data(), count);
-    }
-};
-
-// The stock renderer restores its normal IA/RS/PS/VS/GS state but drops HS/DS/CS,
-// and restores VS b0 with the base API. This guard retains the omitted state and
-// disables predication/output hazards before any overlay clear or native draw.
-class OverlayState
+class ImGuiScope
 {
 public:
-    explicit OverlayState(ID3D11DeviceContext1* context) noexcept : context_(context)
+    explicit ImGuiScope(ImGuiContext* context, bool retiring = false) noexcept : previous_(ImGui::GetCurrentContext())
     {
-        complete_ = CaptureShaders() && CaptureOutputs();
-        context_->VSGetConstantBuffers1(0, 1, constants_.GetAddressOf(), &first_, &count_);
-        complete_ = complete_ && first_ % 16 == 0 && count_ % 16 == 0 && count_ <= 4096;
-        context_->GetPredication(predicate_.GetAddressOf(), &predicateValue_);
+        if (retiring && previous_ == context) previous_ = nullptr;
+        ImGui::SetCurrentContext(context);
     }
-
-    ~OverlayState() noexcept
-    {
-        if (!changed_) return;
-        context_->OMSetRenderTargets(0, nullptr, nullptr);
-        context_->CSSetUnorderedAccessViews(0, outputCount, emptyUavs_.data(), counters_.data());
-        RestoreOutputs();
-        vertex_.Restore(context_, &ID3D11DeviceContext::VSSetShader);
-        pixel_.Restore(context_, &ID3D11DeviceContext::PSSetShader);
-        geometry_.Restore(context_, &ID3D11DeviceContext::GSSetShader);
-        hull_.Restore(context_, &ID3D11DeviceContext::HSSetShader);
-        domain_.Restore(context_, &ID3D11DeviceContext::DSSetShader);
-        compute_.Restore(context_, &ID3D11DeviceContext::CSSetShader);
-        auto* constants = constants_.Get();
-        context_->VSSetConstantBuffers1(0, 1, &constants, &first_, &count_);
-        context_->SetPredication(predicate_.Get(), predicateValue_);
-    }
-
-    bool Begin(ID3D11RenderTargetView* target) noexcept
-    {
-        if (!complete_) return false;
-        counters_.fill(std::numeric_limits<UINT>::max());
-        context_->SetPredication(nullptr, FALSE);
-        context_->OMSetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr,
-            0, outputCount, emptyUavs_.data(), counters_.data());
-        context_->CSSetUnorderedAccessViews(0, outputCount, emptyUavs_.data(), counters_.data());
-        context_->OMSetRenderTargets(1, &target, nullptr);
-        changed_ = true;
-        return true;
-    }
-
+    ~ImGuiScope() noexcept { ImGui::SetCurrentContext(previous_); }
 private:
-    bool CaptureShaders() noexcept
-    {
-        const std::array captured{
-            vertex_.Capture(context_, &ID3D11DeviceContext::VSGetShader),
-            pixel_.Capture(context_, &ID3D11DeviceContext::PSGetShader),
-            geometry_.Capture(context_, &ID3D11DeviceContext::GSGetShader),
-            hull_.Capture(context_, &ID3D11DeviceContext::HSGetShader),
-            domain_.Capture(context_, &ID3D11DeviceContext::DSGetShader),
-            compute_.Capture(context_, &ID3D11DeviceContext::CSGetShader)};
-        return std::ranges::all_of(captured, [](bool value) { return value; });
-    }
-
-    void CaptureTargets() noexcept
-    {
-        std::array<ID3D11RenderTargetView*, outputCount> targets{};
-        context_->OMGetRenderTargets(outputCount, targets.data(), depth_.GetAddressOf());
-        for (UINT index = 0; index < outputCount; ++index)
-        {
-            targets_[index].Attach(targets[index]);
-            if (targets[index]) targetCount_ = index + 1;
-        }
-    }
-
-    bool CaptureOutputs() noexcept
-    {
-        CaptureTargets();
-        std::array<ID3D11UnorderedAccessView*, outputCount> om{};
-        std::array<ID3D11UnorderedAccessView*, outputCount> cs{};
-        context_->OMGetRenderTargetsAndUnorderedAccessViews(0, nullptr, nullptr, 0, outputCount, om.data());
-        context_->CSGetUnorderedAccessViews(0, outputCount, cs.data());
-        bool valid = true;
-        for (UINT index = 0; index < outputCount; ++index)
-        {
-            om_[index].Attach(om[index]);
-            cs_[index].Attach(cs[index]);
-            if (index < targetCount_ && om[index]) valid = false;
-        }
-        return valid;
-    }
-
-    void RestoreOutputs() noexcept
-    {
-        std::array<ID3D11RenderTargetView*, outputCount> targets{};
-        std::array<ID3D11UnorderedAccessView*, outputCount> om{};
-        std::array<ID3D11UnorderedAccessView*, outputCount> cs{};
-        for (UINT index = 0; index < outputCount; ++index)
-        {
-            targets[index] = targets_[index].Get();
-            om[index] = om_[index].Get();
-            cs[index] = cs_[index].Get();
-        }
-        if (targetCount_ == outputCount)
-            context_->OMSetRenderTargets(outputCount, targets.data(), depth_.Get());
-        else
-            context_->OMSetRenderTargetsAndUnorderedAccessViews(targetCount_, targets.data(), depth_.Get(),
-                targetCount_, outputCount - targetCount_, om.data() + targetCount_, counters_.data());
-        context_->CSSetUnorderedAccessViews(0, outputCount, cs.data(), counters_.data());
-    }
-
-    ID3D11DeviceContext1* context_;
-    SavedShader<ID3D11VertexShader> vertex_;
-    SavedShader<ID3D11PixelShader> pixel_;
-    SavedShader<ID3D11GeometryShader> geometry_;
-    SavedShader<ID3D11HullShader> hull_;
-    SavedShader<ID3D11DomainShader> domain_;
-    SavedShader<ID3D11ComputeShader> compute_;
-    ComPtr<ID3D11Buffer> constants_;
-    ComPtr<ID3D11Predicate> predicate_;
-    ComPtr<ID3D11DepthStencilView> depth_;
-    std::array<ComPtr<ID3D11RenderTargetView>, outputCount> targets_;
-    std::array<ComPtr<ID3D11UnorderedAccessView>, outputCount> om_;
-    std::array<ComPtr<ID3D11UnorderedAccessView>, outputCount> cs_;
-    std::array<ID3D11UnorderedAccessView*, outputCount> emptyUavs_{};
-    std::array<UINT, outputCount> counters_{};
-    UINT targetCount_{};
-    UINT first_{};
-    UINT count_{};
-    BOOL predicateValue_{};
-    bool complete_{};
-    bool changed_{};
+    ImGuiContext* previous_;
 };
-
-bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
-{
-    if (!left || !right) return false;
-    ComPtr<IUnknown> a;
-    ComPtr<IUnknown> b;
-    return SUCCEEDED(left->QueryInterface(IID_PPV_ARGS(&a))) && a &&
-        SUCCEEDED(right->QueryInterface(IID_PPV_ARGS(&b))) && b && a.Get() == b.Get();
-}
-
-bool MatchesNativeContext(ID3D11Device* device, ID3D11DeviceContext1* context) noexcept
-{
-    ComPtr<ID3D11Device> actual;
-    ComPtr<ID3D11DeviceContext> immediate;
-    context->GetDevice(&actual);
-    device->GetImmediateContext(&immediate);
-    return SameIdentity(device, actual.Get()) && SameIdentity(context, immediate.Get());
-}
-
-bool OffsetSupported(ID3D11Device* device) noexcept
-{
-    D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
-    return SUCCEEDED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS, &options, sizeof(options))) &&
-        options.ConstantBufferOffsetting;
-}
-
-bool QualifiedContext(ID3D11Device* device, ID3D11DeviceContext1* context) noexcept
-{
-    if (!device || !context) return false;
-    if (device->GetFeatureLevel() != D3D_FEATURE_LEVEL_11_0) return false;
-    if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
-    return MatchesNativeContext(device, context) && OffsetSupported(device);
-}
 
 ImGuiKey NamedKey(WPARAM key) noexcept
 {
@@ -322,405 +166,375 @@ void InputEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
     else MouseEvent(io, message);
 }
 
-bool QualifiedConfiguration(const SettingsWindowConfiguration& configuration) noexcept
+
+HdrSettingsInput* CurrentInput() noexcept
 {
-    if (!configuration.input) return false;
-    if (!configuration.live && !configuration.developerOverlay) return false;
-    if (!configuration.width || !configuration.height) return false;
-    constexpr auto maximum = D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION;
-    if (configuration.width > maximum || configuration.height > maximum) return false;
-    return configuration.input->Matches(configuration.window, GetCurrentThreadId());
+    return SettingsInputForGeneration(g_inputGeneration.load(std::memory_order_acquire));
 }
-class CurrentContext
+
+bool BackendTuple(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    return g_window == window && g_device.Get() == device && g_context.Get() == context;
+}
+
+void ClearBackend() noexcept
+{
+    ImGuiScope scoped(g_imgui, true);
+    if (g_renderer) ImGui_ImplDX11_Shutdown();
+    if (g_platform) ImGui_ImplWin32_Shutdown();
+    if (g_imgui) ImGui::DestroyContext(g_imgui);
+    g_imgui = nullptr;
+    g_renderer = g_platform = g_ready = g_open = false;
+    g_calibrationMode = 0;
+    g_consumerReady = false;
+    g_context.Reset();
+    g_device.Reset();
+    g_window = nullptr;
+    g_inputGeneration.store(0, std::memory_order_release);
+    g_inputWindow.store(nullptr, std::memory_order_release);
+}
+
+bool CreateBackendResources(HWND window, ID3D11Device* device, ID3D11DeviceContext* context)
+{
+    if (!QueryPerformanceFrequency(&g_frequency)) return false;
+    if (g_frequency.QuadPart <= 0) return false;
+    if (!QueryPerformanceCounter(&g_previous)) return false;
+    ImGuiScope scoped(nullptr);
+    g_imgui = ImGui::CreateContext();
+    if (!g_imgui) return false;
+    ImGui::GetIO().IniFilename = nullptr;
+    g_platform = ImGui_ImplWin32_Init(window);
+    if (!g_platform) return false;
+    g_renderer = ImGui_ImplDX11_Init(device, context);
+    if (!g_renderer) return false;
+    // Stock backend compilation and later buffer growth retain their existing limits.
+    return ImGui_ImplDX11_CreateDeviceObjects();
+}
+
+bool PrepareBackend(HWND window, ID3D11Device* device, ID3D11DeviceContext* context)
+{
+    const auto generation = ReadGraphicsObservation().resourceGeneration;
+    if (generation == 0) return false;
+    if (!IsWindow(window)) return false;
+    g_thread = GetCurrentThreadId();
+    g_window = window;
+    g_device = device;
+    g_context = context;
+    if (!CreateBackendResources(window, device, context)) return false;
+    if (!PublishSettingsInputHost(window, generation)) return false;
+    g_inputGeneration.store(generation, std::memory_order_release);
+    g_inputWindow.store(window, std::memory_order_release);
+    g_ready = true;
+    (void)TryActivateSettingsInputHostOnCurrentThread();
+    return true;
+}
+
+void DrainInput(HdrSettingsInput& input, const SettingsWindowActions& actions) noexcept
+{
+    std::array<HdrSettingsInputMessage, HdrSettingsInput::capacity> messages;
+    const auto copied = input.Drain(messages);
+    auto& io = ImGui::GetIO();
+    if (copied.focusLost)
+    {
+        io.ClearEventsQueue();
+        io.ClearInputKeys();
+        io.ClearInputMouse();
+        io.AddFocusEvent(copied.focused);
+        g_open = false;
+        actions.focusLost();
+    }
+    for (std::size_t index = 0; index < copied.messages; ++index) InputEvent(io, messages[index]);
+    if (copied.toggles % 2 != 0) g_open = !g_open;
+}
+
+bool BeginUiFrame() noexcept
+{
+    LARGE_INTEGER now{};
+    RECT client{};
+    if (!QueryPerformanceCounter(&now) || !GetClientRect(g_window, &client)) return false;
+    const auto elapsed = static_cast<double>(now.QuadPart - g_previous.QuadPart) /
+        static_cast<double>(g_frequency.QuadPart);
+    g_previous = now;
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = {static_cast<float>(client.right), static_cast<float>(client.bottom)};
+    io.DeltaTime = static_cast<float>(std::clamp(elapsed, 0.001, 0.1));
+    io.MouseDrawCursor = g_open;
+    ImGui_ImplDX11_NewFrame();
+    ImGui::NewFrame();
+    return true;
+}
+
+bool SameCalibration(const HdrSettings& value, const DisplayCalibrationProfile& draft) noexcept
+{
+    return value.displayPeakNits == draft.displayPeakNits &&
+        value.uiPaperWhiteNits == draft.uiPaperWhiteNits && value.videoWhiteNits == draft.videoWhiteNits;
+}
+
+void RefreshDisplayView(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+{
+    InvalidateDisplayCapabilities();
+    (void)RefreshDisplayCapabilities(g_window);
+    actions.refreshView(view);
+}
+
+void ConsumeCalibration(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+{
+    const auto result = ReadSettingsPersistenceSnapshot();
+    g_profileState = result.displayCalibrationState;
+    if (!g_profileRequest || result.displayCalibrationGeneration != g_profileRequest) return;
+    g_profileRequest = 0;
+    if (!g_profileLoad || result.displayCalibrationState != SettingsPersistenceState::loaded) return;
+    RefreshDisplayView(view, actions);
+    if (!view.display.known || result.displayCalibration.monitorDevicePath != view.display.monitorDevicePath) return;
+    if (!SameCalibration(g_draft, g_profileDraft)) return;
+    g_draft.displayPeakNits = result.displayCalibration.displayPeakNits;
+    g_draft.uiPaperWhiteNits = result.displayCalibration.uiPaperWhiteNits;
+    g_draft.videoWhiteNits = result.displayCalibration.videoWhiteNits;
+    g_commit = true;
+}
+
+bool CalibrationRequested(const DisplayCalibrationActions& requested, const SettingsWindowView& view) noexcept
+{
+    if (g_profileRequest) return false;
+    if (!view.display.known) return false;
+    return requested.save || requested.load;
+}
+
+void SubmitCalibration(bool save, const SettingsWindowView& view) noexcept
+{
+    const auto& identity = view.display.monitorDevicePath;
+    g_profileLoad = !save;
+    if (save)
+        g_profileRequest = RequestDisplayCalibrationSave(identity.data(), view.activeSettings);
+    else
+    {
+        g_profileDraft = {identity, g_draft.displayPeakNits, g_draft.uiPaperWhiteNits, g_draft.videoWhiteNits};
+        g_profileRequest = RequestDisplayCalibrationLoad(identity.data());
+    }
+}
+
+void RequestCalibration(const DisplayCalibrationActions& requested, SettingsWindowView& view,
+    const SettingsWindowActions& actions) noexcept
+{
+    if (!CalibrationRequested(requested, view)) return;
+    const auto identity = view.display.monitorDevicePath;
+    RefreshDisplayView(view, actions);
+    if (!view.display.known) return;
+    if (identity != view.display.monitorDevicePath) return;
+    SubmitCalibration(requested.save, view);
+}
+
+const char* ProfileStatusText(SettingsPersistenceState state) noexcept
+{
+    switch (state)
+    {
+    case SettingsPersistenceState::loading: return "Reading display profile...";
+    case SettingsPersistenceState::saving: return "Saving display profile...";
+    case SettingsPersistenceState::saved: return "Display profile saved.";
+    case SettingsPersistenceState::loaded: return "Display profile read completed.";
+    case SettingsPersistenceState::missing: return "No profile for this display.";
+    case SettingsPersistenceState::failed: return "Display profile operation failed.";
+    default: return nullptr;
+    }
+}
+
+void DrawCalibration(SettingsWindowView& view, const SettingsWindowActions& callbacks, bool& changed)
+{
+    if (!ImGui::CollapsingHeader("Display calibration")) return;
+    ConsumeCalibration(view, callbacks);
+    std::array<char, 256> displayName{};
+    (void)WideCharToMultiByte(CP_UTF8, 0, view.display.friendlyName.data(), -1,
+        displayName.data(), static_cast<int>(displayName.size()), nullptr, nullptr);
+    const DisplayCalibrationView display{displayName.data(), view.display.peakNits,
+        view.display.fullFrameNits, view.display.sdrWhiteNits,
+        view.display.known && view.display.monitorDevicePath[0] != L'\0',
+        g_profileRequest != 0 || g_profileState == SettingsPersistenceState::unavailable,
+        !view.lutPending && !view.liveSettingsError, ProfileStatusText(g_profileState)};
+    if (ImGui::Button("Refresh display details")) RefreshDisplayView(view, callbacks);
+    const auto result = DrawDisplayCalibrationPanel(g_draft, g_calibrationMode, display);
+    RequestCalibration(result, view, callbacks);
+    changed |= result.changed;
+    g_hideOverlay = result.hideOverlay;
+}
+
+void DrawCurrentPanel(SettingsWindowView& view, const SettingsWindowActions& callbacks)
+{
+    const auto& io = ImGui::GetIO();
+    ImGui::SetNextWindowSize({std::min(440.0F, io.DisplaySize.x), std::min(900.0F, io.DisplaySize.y)}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.5F}, ImGuiCond_FirstUseEver, {0.5F, 0.5F});
+    SettingsPanelActions actions;
+    g_hideOverlay = false;
+    if (ImGui::Begin("Fallout4HDR", &g_open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
+    {
+        actions = DrawSettingsPanel(g_draft, view);
+        if (ImGui::CollapsingHeader("LUT and ImageSpace profiles"))
+            actions.request |= DrawLutProfilesPanel(g_draft, view.lutProfiles, g_profileSelection);
+        DrawCalibration(view, callbacks, actions.request);
+    }
+    ImGui::End();
+    if (actions.request) g_commit = true;
+    if (actions.save) { g_saveDraft = g_draft; g_saveRequested = true; }
+}
+
+void DrawCurrentDiagnostics(const SettingsWindowView& view)
+{
+    if (!g_configuration.showDeveloperOverlay) return;
+    if (ImGui::Begin("Fallout4HDR diagnostics", nullptr, ImGuiWindowFlags_NoSavedSettings))
+    {
+        ImGui::TextUnformatted(g_configuration.developerHdr10Reference ? "Native HDR10 reference" : "Production HDR");
+        const auto evidence = ReadGraphicsObservation();
+        ImGui::Text("Present observations: %llu; HDR submissions: %llu",
+            static_cast<unsigned long long>(evidence.presentCount), static_cast<unsigned long long>(evidence.hdrFrameCount));
+        ImGui::TextUnformatted(g_configuration.traceRenderPipeline ? "Pipeline trace enabled" : "Pipeline trace disabled");
+        ImGui::TextUnformatted(view.rendererFailure);
+    }
+    ImGui::End();
+}
+
+void PrepareBackendOrClear(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    try { if (!PrepareBackend(window, device, context)) ClearBackend(); }
+    catch (...) { ClearBackend(); }
+}
+
+bool OnClosedUiThread() noexcept
+{
+    if (g_drawing) return false;
+    return g_thread == GetCurrentThreadId();
+}
+
+bool NativeBackendArguments(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    if (!window) return false;
+    if (!device) return false;
+    return context != nullptr;
+}
+
+bool EnableInputConsumer(bool interactive) noexcept
+{
+    if (!interactive) return true;
+    if (g_consumerReady) return true;
+    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
+    g_consumerReady = SetSettingsInputHostConsumerReady(generation, true);
+    return g_consumerReady;
+}
+
+bool SaveRequestReady(const SettingsWindowView& view) noexcept
+{
+    if (!g_saveRequested) return false;
+    if (g_commit) return false;
+    if (view.liveSettingsError) return false;
+    return true;
+}
+
+void SaveRequestedDraft(const SettingsWindowView& view) noexcept
+{
+    if (SaveRequestReady(view)) g_saveRequested = RequestHdrSettingsSave(g_saveDraft) == 0;
+}
+
+void DrawFramePanels(SettingsWindowView& view, const SettingsWindowActions& actions, bool interactive)
+{
+    if (g_open && interactive) DrawCurrentPanel(view, actions);
+    else { g_hideOverlay = false; g_calibrationMode = 0; }
+    DrawCurrentDiagnostics(view);
+}
+
+class UiFrame
 {
 public:
-    explicit CurrentContext(ImGuiContext* selected) noexcept : previous_(ImGui::GetCurrentContext())
-    {
-        ImGui::SetCurrentContext(selected);
-    }
-    ~CurrentContext() { ImGui::SetCurrentContext(previous_); }
+    explicit UiFrame(bool begun) noexcept : open_(begun) {}
+    ~UiFrame() noexcept { if (open_) ImGui::EndFrame(); }
+    void Render() { ImGui::Render(); open_ = false; }
 private:
-    ImGuiContext* previous_;
+    bool open_;
 };
+
+bool DrawUiFrame(SettingsWindowView& view, const SettingsWindowActions& actions, HdrSettingsInput& input)
+{
+    DrainInput(input, actions);
+    const auto interactive = g_configuration.productionRequested;
+    if (!EnableInputConsumer(interactive)) return false;
+    const auto begun = BeginUiFrame();
+    UiFrame frame(begun);
+    if (!begun) return false;
+    DrawFramePanels(view, actions, interactive);
+    frame.Render();
+    SaveRequestedDraft(view);
+    const auto& io = ImGui::GetIO();
+    const auto open = g_open && interactive;
+    input.SetCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
+    return (open || g_configuration.showDeveloperOverlay) && !g_hideOverlay;
+}
 
 }  // namespace
 
-struct SettingsWindow::State
+void InitializeSettingsWindow(const HdrSettings& settings) noexcept
 {
-    DWORD thread{GetCurrentThreadId()};
-    SettingsWindowConfiguration configuration;
-    DisplayDiscovery displayDiscovery;
-    DisplayCalibrationSnapshot profileStatus;
-    DisplayCalibrationProfile loadDraft;
-    std::uint64_t profileGeneration{};
-    bool loadingProfile{};
-    ComPtr<ID3D11Device> device;
-    ComPtr<ID3D11DeviceContext1> context;
-    ComPtr<ID3D11Texture2D> texture;
-    ComPtr<ID3D11RenderTargetView> target;
-    ComPtr<ID3D11ShaderResourceView> source;
-    ImGuiContext* imgui{};
-    PluginConfiguration editable;
-    GradeProfileSelection gradeProfileSelection;
-    LARGE_INTEGER frequency{};
-    LARGE_INTEGER previous{};
-    std::uint64_t frame{};
-    SettingsWindowOverlay publication;
-    bool platform{};
-    bool renderer{};
-    std::uint32_t calibrationMode{};
-    bool hideOverlay{};
-    bool open{};
-    bool drawing{};
-
-    ~State() noexcept
-    {
-        displayDiscovery.Reset();
-        if (!imgui) return;
-        auto* old = ImGui::GetCurrentContext();
-        ImGui::SetCurrentContext(imgui);
-        configuration.input->SetCapture(false, false, false);
-        if (renderer) ImGui_ImplDX11_Shutdown();
-        if (platform) ImGui_ImplWin32_Shutdown();
-        ImGui::DestroyContext(imgui);
-        ImGui::SetCurrentContext(old == imgui ? nullptr : old);
-    }
-
-    bool PrepareSurface() noexcept
-    {
-        D3D11_TEXTURE2D_DESC description{};
-        description.Width = configuration.width;
-        description.Height = configuration.height;
-        description.MipLevels = description.ArraySize = description.SampleDesc.Count = 1;
-        description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        description.Usage = D3D11_USAGE_DEFAULT;
-        if (FAILED(device->CreateTexture2D(&description, nullptr, &texture)) || !texture) return false;
-        return PrepareViews();
-    }
-
-    bool PrepareViews() noexcept
-    {
-        if (FAILED(device->CreateRenderTargetView(texture.Get(), nullptr, &target)) || !target) return false;
-        return SUCCEEDED(device->CreateShaderResourceView(texture.Get(), nullptr, &source)) && source;
-    }
-
-    bool PrepareBackend()
-    {
-        auto* old = ImGui::GetCurrentContext();
-        imgui = ImGui::CreateContext();
-        if (!imgui) return false;
-        ImGui::SetCurrentContext(old);
-        const CurrentContext selected(imgui);
-        auto& io = ImGui::GetIO();
-        io.IniFilename = io.LogFilename = nullptr;
-        io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NoMouseCursorChange;
-        io.FontDefault = io.Fonts->AddFontDefaultVector();
-        ImGui::StyleColorsDark();
-        if (!io.FontDefault) return false;
-        platform = ImGui_ImplWin32_Init(configuration.window);
-        if (!platform) return false;
-        renderer = ImGui_ImplDX11_Init(device.Get(), context.Get());
-        if (!renderer) return false;
-        // The unmodified backend compiles its shaders here and can grow buffers
-        // later; readiness is not shipping-policy or hot-path performance proof.
-        return ImGui_ImplDX11_CreateDeviceObjects();
-    }
-
-    bool Prepare()
-    {
-        if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) return false;
-        if (!QueryPerformanceCounter(&previous)) return false;
-        return PrepareSurface() && PrepareBackend();
-    }
-
-    bool CanDraw(std::uint64_t requestedFrame, SettingsWindowScope scope) const noexcept
-    {
-        if (thread != GetCurrentThreadId() || drawing) return false;
-        if (scope != SettingsWindowScope::qualifiedExclusive) return false;
-        if (!configuration.input->Matches(configuration.window, thread)) return false;
-        return requestedFrame != 0 && requestedFrame >= frame;
-    }
-    void DrainInput() noexcept
-    {
-        std::array<HdrSettingsInputMessage, HdrSettingsInput::capacity> messages;
-        const auto snapshot = configuration.input->Drain(messages);
-        auto& io = ImGui::GetIO();
-        if (snapshot.focusLost)
-        {
-            io.ClearEventsQueue();
-            io.ClearInputKeys();
-            io.ClearInputMouse();
-            io.AddFocusEvent(snapshot.focused);
-            open = false;
-        }
-        for (std::size_t index = 0; index < snapshot.messages; ++index) InputEvent(io, messages[index]);
-        if (snapshot.toggles % 2 != 0) open = !open;
-    }
-
-    bool BeginFrame() noexcept
-    {
-        LARGE_INTEGER now{};
-        if (!QueryPerformanceCounter(&now)) return false;
-        const auto elapsed = static_cast<double>(now.QuadPart - previous.QuadPart) /
-            static_cast<double>(frequency.QuadPart);
-        previous = now;
-        auto& io = ImGui::GetIO();
-        io.DisplaySize = {static_cast<float>(configuration.width), static_cast<float>(configuration.height)};
-        io.DeltaTime = static_cast<float>(std::clamp(elapsed, 0.001, 0.1));
-        io.MouseDrawCursor = open;
-        ImGui_ImplDX11_NewFrame();
-        ImGui::NewFrame();
-        return true;
-    }
-
-    static DisplayCalibrationProfile ProfileFor(
-        const DisplayCapabilities& display, const HdrSettings& settings) noexcept
-    {
-        return {display.monitorDevicePath, settings.displayPeakNits,
-            settings.uiPaperWhiteNits, settings.videoWhiteNits};
-    }
-
-    bool LoadStillApplies(const DisplayCapabilities& display,
-        const DisplayCalibrationProfile& profile) const noexcept
-    {
-        if (profile.monitorDevicePath != display.monitorDevicePath) return false;
-        const auto current = ProfileFor(display, editable.display);
-        if (current.displayPeakNits != loadDraft.displayPeakNits) return false;
-        if (current.uiPaperWhiteNits != loadDraft.uiPaperWhiteNits) return false;
-        return current.videoWhiteNits == loadDraft.videoWhiteNits;
-    }
-
-    DisplayCapabilities ResolveDisplay() noexcept
-    {
-        displayDiscovery.Reset();
-        return displayDiscovery.Refresh(configuration.window);
-    }
-
-    void ApplyLoadedProfile(const DisplayCalibrationSnapshot& status) noexcept
-    {
-        if (!loadingProfile || status.state != SettingsPersistenceState::loaded) return;
-        const auto display = ResolveDisplay();
-        if (!display.known || !LoadStillApplies(display, status.profile)) return;
-        auto candidate = editable;
-        candidate.display.displayPeakNits = status.profile.displayPeakNits;
-        candidate.display.uiPaperWhiteNits = status.profile.uiPaperWhiteNits;
-        candidate.display.videoWhiteNits = status.profile.videoWhiteNits;
-        if (configuration.live->Request(candidate)) editable = candidate;
-    }
-
-    bool OwnProfileCompletion(const DisplayCalibrationSnapshot& status) noexcept
-    {
-        if (!profileGeneration) return false;
-        if (status.requestedGeneration != profileGeneration)
-        {
-            profileGeneration = 0;
-            return false;
-        }
-        if (status.completedGeneration != profileGeneration) return false;
-        profileGeneration = 0;
-        return true;
-    }
-
-    void ConsumeProfile() noexcept
-    {
-        if (!configuration.persistence) return;
-        const auto status = configuration.persistence->DisplayCalibrationStatus();
-        if (status.state == SettingsPersistenceState::busy) return;
-        profileStatus = status;
-        if (!OwnProfileCompletion(status)) return;
-        ApplyLoadedProfile(status);
-    }
-
-    bool CanRequestProfile(const DisplayCalibrationActions& actions,
-        const DisplayCapabilities& display) const noexcept
-    {
-        if (!configuration.persistence || profileGeneration) return false;
-        if (!display.known || display.monitorDevicePath[0] == L'\0') return false;
-        return actions.saveProfile || actions.loadProfile;
-    }
-
-    void RequestProfile(const DisplayCalibrationActions& actions,
-        const DisplayCapabilities& display, const PluginConfiguration& active) noexcept
-    {
-        if (!CanRequestProfile(actions, display)) return;
-        const auto resolved = ResolveDisplay();
-        if (!resolved.known || resolved.monitorDevicePath != display.monitorDevicePath) return;
-        if (actions.saveProfile)
-        {
-            loadingProfile = false;
-            profileGeneration = configuration.persistence->RequestDisplayCalibrationSave(
-                ProfileFor(display, active.display));
-        }
-        else if (actions.loadProfile)
-        {
-            loadingProfile = true;
-            loadDraft = ProfileFor(display, editable.display);
-            profileGeneration = configuration.persistence->RequestDisplayCalibrationLoad(loadDraft);
-        }
-    }
-
-    bool DrawGradeProfiles()
-    {
-        if (!ImGui::CollapsingHeader("LUT and ImageSpace profiles")) return false;
-        const auto observation = configuration.presentation ?
-            configuration.presentation->CopyLutInspector() : LutProfileDrawSnapshot{};
-        return DrawLutProfilesPanel(editable.display, observation, gradeProfileSelection);
-    }
-
-    void DrawDeveloperPanel()
-    {
-        const auto evidence = ReadNativeDiagnosticProjection();
-        if (ImGui::Begin("Fallout4HDR diagnostics", nullptr, ImGuiWindowFlags_NoSavedSettings))
-        {
-            ImGui::TextUnformatted(evidence.referenceRequested ? "Native HDR10 reference" : "Production HDR");
-            ImGui::Text("Trace frames: %llu; HDR submissions: %llu",
-                static_cast<unsigned long long>(evidence.tracedFrames),
-                static_cast<unsigned long long>(evidence.hdrFrames));
-            ImGui::TextUnformatted(evidence.traceRequested ? "Pipeline trace enabled" : "Pipeline trace disabled");
-        }
-        ImGui::End();
-    }
-
-    void DrawPanel()
-    {
-        const auto snapshot = configuration.live->Snapshot();
-        
-        const auto width = std::min(440.0F, static_cast<float>(configuration.width));
-        const auto height = std::min(900.0F, static_cast<float>(configuration.height));
-        ImGui::SetNextWindowSize({width, height}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos({static_cast<float>(configuration.width) * 0.5F,
-            static_cast<float>(configuration.height) * 0.5F}, ImGuiCond_FirstUseEver, {0.5F, 0.5F});
-        SettingsPanelActions actions;
-        hideOverlay = false;
-        if (ImGui::Begin("Fallout4HDR", &open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
-        {
-            actions = DrawSettingsPanel(editable, snapshot);
-            actions.request |= DrawGradeProfiles();
-            if (ImGui::CollapsingHeader("Display calibration"))
-            {
-                const auto display = displayDiscovery.Refresh(configuration.window);
-                ConsumeProfile();
-                const DisplayCalibrationView view{display.known, display.monitorDevicePath[0] != L'\0',
-                    display.friendlyName[0] ? display.friendlyName.data() : display.description.DeviceName,
-                    display.description.MaxLuminance, display.description.MaxFullFrameLuminance,
-                    display.sdrWhiteNits, configuration.persistence && profileGeneration == 0,
-                    profileStatus.state};
-                const auto calibration = DrawDisplayCalibrationPanel(editable.display, calibrationMode, view);
-                if (calibration.refreshDisplay) displayDiscovery.Reset();
-                RequestProfile(calibration, display, snapshot.active);
-                actions.request |= calibration.changed;
-                hideOverlay = calibration.hideOverlay;
-            }
-        }
-        ImGui::End();
-        if (actions.request) (void)configuration.live->Request(editable);
-        if (actions.save) (void)configuration.live->RequestSave();
-    }
-
-    void DrawPanels()
-    {
-        if (open && configuration.live) DrawPanel();
-        else
-        {
-            hideOverlay = false;
-            calibrationMode = 0;
-        }
-        if (configuration.developerOverlay) DrawDeveloperPanel();
-    }
-
-    bool HasVisiblePanel() const noexcept
-    {
-        return (open && configuration.live) || configuration.developerOverlay;
-    }
-
-    SettingsWindowOverlay RenderFrame(std::uint64_t requestedFrame, bool& frameOpen)
-    {
-        DrainInput();
-        if (!BeginFrame()) return {};
-        frameOpen = true;
-        DrawPanels();
-        ImGui::Render();
-        frameOpen = false;
-        const auto& io = ImGui::GetIO();
-        configuration.input->SetCapture(HasVisiblePanel(), io.WantCaptureKeyboard, io.WantCaptureMouse);
-        if (!HasVisiblePanel())
-        {
-            calibrationMode = 0;
-            return {};
-        }
-        if (hideOverlay)
-            return {nullptr, requestedFrame, configuration.width, configuration.height, calibrationMode};
-        if (!DrawOverlay()) return {};
-        return {source.Get(), requestedFrame, configuration.width, configuration.height, calibrationMode};
-    }
-    bool DrawOverlay()
-    {
-        OverlayState saved(context.Get());
-        if (!saved.Begin(target.Get())) return false;
-        constexpr float transparent[4]{};
-        context->ClearRenderTargetView(target.Get(), transparent);
-        ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-        return true;
-    }
-};
-
-SettingsWindow::SettingsWindow() noexcept = default;
-SettingsWindow::~SettingsWindow() noexcept { (void)Retire(); }
-
-bool SettingsWindow::Initialize(ID3D11Device* device, ID3D11DeviceContext1* context,
-    SettingsWindowConfiguration configuration) noexcept
-{
-    if (state_) return false;
-    if (!QualifiedConfiguration(configuration)) return false;
-    if (!QualifiedContext(device, context)) return false;
-    try
-    {
-        auto candidate = std::make_unique<State>();
-        candidate->configuration = configuration;
-        if (configuration.live) candidate->editable = configuration.live->Snapshot().requested;
-        candidate->device = device;
-        candidate->context = context;
-        if (!candidate->Prepare()) return false;
-        state_ = std::move(candidate);
-        return true;
-    }
-    catch (...) { return false; }
+    g_draft = settings;
+    g_commit = false;
 }
 
-SettingsWindowOverlay SettingsWindow::Draw(std::uint64_t frame, SettingsWindowScope scope) noexcept
+void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
 {
-    if (!state_) return {};
-    if (!state_->CanDraw(frame, scope)) return {};
-    if (frame == state_->frame) return state_->publication;
-    state_->publication = {};
-    state_->drawing = true;
-    SettingsWindowOverlay overlay;
-    bool frameOpen{};
-    try
-    {
-        const CurrentContext selected(state_->imgui);
-        overlay = state_->RenderFrame(frame, frameOpen);
-    }
-    catch (...)
-    {
-        const CurrentContext selected(state_->imgui);
-        if (frameOpen) ImGui::EndFrame();
-        state_->configuration.input->SetCapture(false, false, false);
-    }
-    if (overlay.frame == 0) state_->calibrationMode = 0;
-    state_->frame = frame;
-    state_->publication = overlay;
-    state_->drawing = false;
-    return overlay;
+    if (!requested) { (void)ShutdownSettingsWindowBackend(); return; }
+    if (g_ready && BackendTuple(window, device, context)) return;
+    if (g_imgui)
+        if (!ShutdownSettingsWindowBackend()) return;
+    if (!NativeBackendArguments(window, device, context)) return;
+    PrepareBackendOrClear(window, device, context);
 }
 
-bool SettingsWindow::Retire() noexcept
+bool ShutdownSettingsWindowBackend() noexcept
 {
-    if (!state_) return true;
-    if (state_->thread != GetCurrentThreadId() || state_->drawing) return false;
-    state_.reset();
+    if (!g_imgui) return true;
+    if (g_thread != GetCurrentThreadId() || g_drawing) return false;
+    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
+    // Refusal leaves the published consumer and its retained backend intact.
+    if (generation && !SetSettingsInputHostConsumerReady(generation, false)) return false;
+    RevokeSettingsInputHost();
+    ClearBackend();
     return true;
 }
+
+bool SettingsWindowBackendReady() noexcept { return g_ready; }
+
+SettingsInputActivation TryActivateSettingsWindowInput() noexcept
+{
+    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
+    const auto active = generation && TryActivateSettingsInputHostOnCurrentThread();
+    const auto window = g_inputWindow.load(std::memory_order_acquire);
+    return {generation != 0, active, GetCurrentThreadId(), window ? GetWindowThreadProcessId(window, nullptr) : 0};
+}
+
+bool DrawSettingsWindow(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+{
+    if (!g_ready) return false;
+    if (!OnClosedUiThread()) return false;
+    auto* input = CurrentInput();
+    if (!input) return false;
+    if (!input->Matches(g_window, g_thread)) return false;
+    ImGuiScope scoped(g_imgui);
+    g_drawing = true;
+    bool visible{};
+    try { visible = DrawUiFrame(view, actions, *input); }
+    catch (...) { input->SetCapture(false, false, false); }
+    g_drawing = false;
+    return visible;
+}
+
+bool SetSettingsWindowOpen(bool open) noexcept
+{
+    if (!g_ready) return false;
+    if (!OnClosedUiThread()) return false;
+    g_open = open;
+    if (!open) g_calibrationMode = 0;
+    return true;
+}
+
+bool SettingsWindowOpen() noexcept { return g_open; }
+std::uint32_t SettingsCalibrationMode() noexcept { return g_calibrationMode; }
+const HdrSettings& ReadSettingsDraft() noexcept { return g_draft; }
+bool SettingsCommitRequested() noexcept { return g_commit; }
+bool ConsumeSettingsCommitRequest() noexcept { return std::exchange(g_commit, false); }
 
 }  // namespace fo4hdr

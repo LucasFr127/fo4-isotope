@@ -57,38 +57,45 @@ private:
     bool complete_{};
 };
 
-enum class CpuPerformancePath : std::uint8_t
+enum class FrozenM6PerformancePath : std::uint8_t
 {
-    disabledBoundary,
-    active
+    disabledBoundaryCpu,
+    activeCpu,
+    activeGpu
 };
 
-struct CpuPerformanceBudget
+struct FrozenM6PerformanceBudget
 {
     double maximumP95Milliseconds{};
     double maximumP99Milliseconds{};
     bool requiresP95{};
 };
 
-[[nodiscard]] constexpr CpuPerformanceBudget GetCpuPerformanceBudget(
-    CpuPerformancePath path) noexcept
+[[nodiscard]] constexpr FrozenM6PerformanceBudget GetFrozenM6PerformanceBudget(
+    FrozenM6PerformancePath path) noexcept
 {
     switch (path)
     {
-    case CpuPerformancePath::disabledBoundary:
+    case FrozenM6PerformancePath::disabledBoundaryCpu:
         return {.maximumP99Milliseconds = 0.05, .requiresP95 = false};
-    case CpuPerformancePath::active:
+    case FrozenM6PerformancePath::activeCpu:
         return {
             .maximumP95Milliseconds = 0.25,
             .maximumP99Milliseconds = 0.50,
+            .requiresP95 = true
+        };
+    case FrozenM6PerformancePath::activeGpu:
+        return {
+            .maximumP95Milliseconds = 1.0,
+            .maximumP99Milliseconds = 1.5,
             .requiresP95 = true
         };
     }
     return {};
 }
 
-[[nodiscard]] bool PassesCpuPerformanceBudget(
-    CpuPerformancePath path,
+[[nodiscard]] bool PassesFrozenM6PerformanceBudget(
+    FrozenM6PerformancePath path,
     PerformancePercentiles percentiles) noexcept;
 
 }  // namespace fo4hdr

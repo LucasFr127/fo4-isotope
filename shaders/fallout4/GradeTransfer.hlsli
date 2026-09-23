@@ -2,17 +2,14 @@
 #ifndef FO4HDR_GRADE_TRANSFER
 #define FO4HDR_GRADE_TRANSFER
 
+#include "../tonemap/OperatorLut.hlsli"
+
 float Fo4HdrLargestGradeChannel(float3 rgb) { return max(rgb.x, max(rgb.y, rgb.z)); }
 
 float3 Fo4HdrGradeCleanScene(float3 rgb)
 {
-    // Bit tests keep the NaN policy explicit under optimized shader arithmetic.
     [unroll] for (uint channel = 0; channel < 3; ++channel)
-    {
-        const uint magnitude = asuint(rgb[channel]) & 0x7fffffffu;
-        rgb[channel] = magnitude > 0x7f800000u
-            ? 0.0f : clamp(rgb[channel], 0.0f, 65504.0f);
-    }
+        rgb[channel] = Fo4HdrSanitizeOperatorInput(rgb[channel], 0u);
     return rgb;
 }
 
@@ -87,7 +84,8 @@ float Fo4HdrRadialCurve(float value)
 
 float Fo4HdrRadialGuideScale(float peak)
 {
-    // The factored inverse remains finite at black; only lookup exposure is bounded.
+    // Factor f(peak)/peak so the inverse scale remains finite at exact black.
+    // Only lookup exposure is bounded at native white; scene RGB is retained.
     if (peak >= 5.6f) return 1.0f / peak;
     const float value = 2.0f * peak;
     return 2.0f * (0.14f * value + 1.0f / 60.0f) /
@@ -103,17 +101,18 @@ float3 Fo4HdrRadialCoordinates(float3 scene)
 float3 Fo4HdrTransferRadialGrade(float3 input, float3 weightedCodes, float strength)
 {
     const float3 scene = Fo4HdrGradeCleanScene(input);
-    const uint magnitude = asuint(strength) & 0x7fffffffu;
-    const float amount = magnitude > 0x7f800000u ? 0.0f : saturate(strength);
-    if (amount <= 0.0f) return scene;
-    // Decode the weighted codes once, then restore their common scene scale.
+    const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
+        ? 0.0f : saturate(strength);
+    if (!(amount > 0.0f)) return scene;
+
+    // Match the lookup's gamma encoding, then restore its common RGB scale.
+    // This radial extension also scales authored black lift with scene peak.
     const float3 decoded = pow(Fo4HdrGradeCleanScene(weightedCodes), 2.2f);
     const float3 restored = decoded / Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
-    // Uniform scaling may round one FP32 ULP above the FP16 limit.
-    const float3 graded = min(restored * min(1.0f,
+    // Uniform scaling can round its maximum one FP32 ULP above the FP16 limit.
+    const float3 endpoint = min(restored * min(1.0f,
         65504.0f / max(Fo4HdrLargestGradeChannel(restored), 65504.0f)), 65504.0f);
-    if (amount >= 1.0f) return graded;
-    return lerp(scene, graded, amount);
+    return lerp(scene, endpoint, amount);
 }
 
 #endif

@@ -61,13 +61,13 @@ void FixedPerformanceStatistics::Reset() noexcept
     complete_ = false;
 }
 
-bool PassesCpuPerformanceBudget(
-    CpuPerformancePath path,
+bool PassesFrozenM6PerformanceBudget(
+    FrozenM6PerformancePath path,
     PerformancePercentiles percentiles) noexcept
 {
     if (!ValidPercentiles(percentiles)) return false;
 
-    const auto budget = GetCpuPerformanceBudget(path);
+    const auto budget = GetFrozenM6PerformanceBudget(path);
     return budget.maximumP99Milliseconds > 0.0 &&
         (!budget.requiresP95 ||
             percentiles.p95Milliseconds <= budget.maximumP95Milliseconds) &&

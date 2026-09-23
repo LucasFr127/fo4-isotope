@@ -66,37 +66,37 @@ void TestFixedPerformanceStatistics()
 
 void TestCpuBudgets()
 {
-    const auto disabled = GetCpuPerformanceBudget(
-        CpuPerformancePath::disabledBoundary);
+    const auto disabled = GetFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::disabledBoundaryCpu);
     FO4HDR_CHECK(!disabled.requiresP95);
     FO4HDR_CHECK(disabled.maximumP99Milliseconds == 0.05);
-    FO4HDR_CHECK(PassesCpuPerformanceBudget(
-        CpuPerformancePath::disabledBoundary,
+    FO4HDR_CHECK(PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::disabledBoundaryCpu,
         {.p95Milliseconds = 0.049, .p99Milliseconds = 0.05}));
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        CpuPerformancePath::disabledBoundary,
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::disabledBoundaryCpu,
         {.p95Milliseconds = 0.049, .p99Milliseconds = 0.051}));
 
-    FO4HDR_CHECK(PassesCpuPerformanceBudget(
-        CpuPerformancePath::active,
+    FO4HDR_CHECK(PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.25, .p99Milliseconds = 0.50}));
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        CpuPerformancePath::active,
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.251, .p99Milliseconds = 0.50}));
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        CpuPerformancePath::active,
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.25, .p99Milliseconds = 0.501}));
 
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        CpuPerformancePath::active,
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.4, .p99Milliseconds = 0.3}));
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        CpuPerformancePath::active,
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.2,
          .p99Milliseconds =
              std::numeric_limits<double>::quiet_NaN()}));
-    FO4HDR_CHECK(!PassesCpuPerformanceBudget(
-        static_cast<CpuPerformancePath>(0xFF),
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        static_cast<FrozenM6PerformancePath>(0xFF),
         {.p95Milliseconds = 0.0, .p99Milliseconds = 0.0}));
 }
 

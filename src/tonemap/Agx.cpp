@@ -517,17 +517,6 @@ struct ScaleBlend
     };
 }
 
-bool ValidSigmoid(const Sigmoid& value) noexcept
-{
-    const std::array fields{value.transitionX, value.transitionY, value.toe.scale,
-        value.toe.power, value.shoulder.scale, value.shoulder.power, value.slope,
-        value.intercept};
-    if (!std::ranges::all_of(fields, [](double field) { return std::isfinite(field); })) return false;
-    // Dark-segment scales may be signed, but division by a zero scale is invalid.
-    if (value.toe.scale == 0.0 || value.shoulder.scale == 0.0) return false;
-    return value.toe.power > 0.0 && value.shoulder.power > 0.0;
-}
-
 }  // namespace
 
 LinearRgb ApplyAgxDisplayGamut(
@@ -540,10 +529,8 @@ std::optional<AgxTransform> CreateAgxTransform(
     double displayPeakNits, const ToneMapperParameters& parameters) noexcept
 {
     if (!IsValidDisplayPeak(displayPeakNits)) return std::nullopt;
-    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::agX, parameters)) return std::nullopt;
+    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::agX, parameters)) return std::nullopt;
     const auto prepared = PrepareAgx(displayPeakNits, parameters);
-    if (!ValidSigmoid(prepared.formationSigmoid)) return std::nullopt;
-    if (!ValidSigmoid(prepared.darkeningSigmoid)) return std::nullopt;
     AgxTransform transform;
     transform.displayPeakNits_ = displayPeakNits;
     transform.hdrSdrRatio_ = prepared.hdrSdrRatio;

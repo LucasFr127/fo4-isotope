@@ -1,24 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/game/GameHdrSnapshot.hpp"
+
 #include <array>
-#include <cstddef>
 #include <cstdint>
-#include <span>
 
 namespace fo4hdr {
-
-struct ImageSpaceActiveData
-{
-    float eyeAdaptSpeed{}, bloomBlurRadius{}, bloomThreshold{}, bloomScale{};
-    float receiveBloomThreshold{}, white{}, sunlightScale{}, skyScale{};
-    float eyeAdaptStrength{}, cinematicSaturation{}, cinematicBrightness{}, cinematicContrast{};
-};
-
-inline constexpr std::size_t kImageSpaceActiveDataFieldCount{12};
-[[nodiscard]] bool DecodeImageSpaceActiveData(std::span<const std::byte> source,
-    const std::array<std::size_t, kImageSpaceActiveDataFieldCount>& offsets,
-    ImageSpaceActiveData& destination) noexcept;
 
 enum class NativeLutObserverStatus : std::uint8_t
 {
@@ -34,25 +22,6 @@ struct ImageSpaceIdentity
     std::array<char, 260> key{};
     std::array<char, 128> editorId{};
     std::uint32_t formId{};
-};
-
-struct LutSnapshot
-{
-    // Owned UTF-8 path; ASCII case and separators are normalized.
-    std::array<char, 260> utf8Path{};
-    std::uint16_t pathLength{};
-    float weight{};
-    std::uint64_t engineTextureId{};
-};
-
-struct ImageSpaceSnapshot
-{
-    ImageSpaceActiveData active{};
-    ImageSpaceIdentity base{};
-    std::array<char, 260> baseLutPath{};
-    std::uint64_t managerIdentity{}, baseDataIdentity{}, resourceGeneration{};
-    std::uint32_t threadId{};
-    bool ready{}, overrideActive{}, baseMatched{};
 };
 
 enum class ImageSpaceObservationStatus : std::uint8_t

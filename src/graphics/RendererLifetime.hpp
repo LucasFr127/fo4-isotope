@@ -1,30 +1,41 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+
 #pragma once
 
+#include "Fallout4HDR/output/RenderPipelineContract.hpp"
+#include "Fallout4HDR/output/HdrActivationPolicy.hpp"
+#include <d3d11_1.h>
+#include <dxgi.h>
+#include <wrl/client.h>
 #include <atomic>
 #include <cstdint>
-#include <limits>
 
 namespace fo4hdr {
 
-class RendererLifetime
+struct RendererDevice
 {
-public:
-    static constexpr auto terminalEpoch = (std::numeric_limits<std::uint64_t>::max)() - 1;
-
-    // Exclusive setup supplies a nonzero even start and an exclusive even bound once.
-    [[nodiscard]] bool Prepare(std::uint64_t initialEpoch, std::uint64_t epochLimit) noexcept;
-    // After preparation, call once after complete installation before callbacks or retirement.
-    void PublishInitial() noexcept;
-    [[nodiscard]] std::uint64_t CurrentEpoch() const noexcept;
-    [[nodiscard]] std::uint64_t BeginResize(std::uint64_t epoch) noexcept;
-    // Complete only a BeginResize transition after native success and ownership qualification.
-    void CompleteResize(std::uint64_t transition) noexcept;
-    void Retire() noexcept;
-
-private:
-    std::uint64_t epochLimit_{};
-    std::atomic<std::uint64_t> epoch_{};
+    ID3D11Device* activeDevice{};
+    ID3D11DeviceContext* activeContext{};
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext1> activeContext1;
 };
+extern RendererDevice g_rendererDevice;
+extern HWND g_outputWindow;
 
-}  // namespace fo4hdr
+extern PipelineHeartbeat g_heartbeat;
+extern HdrRendererLifecycle g_lifecycle;
+extern std::uint64_t g_frame;
+extern std::atomic<bool> g_referenceHealthy;
+extern std::atomic<bool> g_gameplayReadyApplied;
+extern std::atomic<bool> g_rendererCreationClaimed;
+
+std::uint64_t PublishLifecycleGeneration() noexcept;
+void ResetSceneTracking() noexcept;
+void RetireLostDeviceGeneration() noexcept;
+void BeginPublishedHeartbeatGeneration() noexcept;
+bool DisplayGenerationChanged(IDXGISwapChain*, bool& sdrColorSpaceEstablished) noexcept;
+void ResetResources(bool retainColorControl = false) noexcept;
+bool EnsureResources(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
+bool EnsureWideGamutResources(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
+WideGamutResourceReadiness CurrentWideGamutReadiness() noexcept;
+
+} // namespace fo4hdr

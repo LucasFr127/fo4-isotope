@@ -4,48 +4,41 @@
 
 namespace fo4hdr {
 
-ScopedD3D11ComputeConstantBuffer::ScopedD3D11ComputeConstantBuffer(
-    ID3D11DeviceContext1* context, UINT slot) noexcept : context_(context), slot_(slot)
-{}
-
 ScopedD3D11ComputeConstantBuffer::~ScopedD3D11ComputeConstantBuffer() noexcept
-{
-    if (bound_) Restore();
-}
+{ Restore(); }
 
-void ScopedD3D11ComputeConstantBuffer::Capture() noexcept
+void ScopedD3D11ComputeConstantBuffer::Capture(ID3D11DeviceContext* context, ID3D11DeviceContext1* cachedContext1,
+    UINT slot) noexcept
 {
-    if (slot_ >= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT) return;
-    context_->CSGetConstantBuffers1(slot_, 1, &constants_, &firstConstant_, &constantCount_);
-}
+    Restore();
+    if (!context) return;
 
-bool ScopedD3D11ComputeConstantBuffer::Ready() const noexcept
-{
-    if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
-    return slot_ < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT &&
-        constantCount_ <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT;
-}
-
-void ScopedD3D11ComputeConstantBuffer::Bind(ID3D11Buffer* constants) noexcept
-{
-    bound_ = true;
-    context_->CSSetConstantBuffers(slot_, 1, &constants);
-}
-
-void ScopedD3D11ComputeConstantBuffer::BindRange(ID3D11Buffer* constants,
-    UINT firstConstant, UINT constantCount) noexcept
-{
-    bound_ = true;
-    context_->CSSetConstantBuffers1(slot_, 1, &constants, &firstConstant, &constantCount);
+    context_ = context;
+    context1_ = cachedContext1;
+    slot_ = slot;
+    if (context1_)
+        context1_->CSGetConstantBuffers1(slot_, 1, &buffer_, &firstConstant_,
+            &constantCount_);
+    else
+        context_->CSGetConstantBuffers(slot_, 1, &buffer_);
 }
 
 void ScopedD3D11ComputeConstantBuffer::Restore() noexcept
 {
-    if (context_ == nullptr) return;
-    auto* constants = constants_.Get();
-    context_->CSSetConstantBuffers1(slot_, 1, &constants, &firstConstant_, &constantCount_);
-    bound_ = false;
+    if (!context_) return;
+
+    if (context1_)
+        context1_->CSSetConstantBuffers1(slot_, 1, &buffer_, &firstConstant_,
+            &constantCount_);
+    else
+        context_->CSSetConstantBuffers(slot_, 1, &buffer_);
+
+    if (buffer_) {
+        buffer_->Release();
+        buffer_ = nullptr;
+    }
     context_ = nullptr;
+    context1_ = nullptr;
 }
 
-}  // namespace fo4hdr
+} // namespace fo4hdr

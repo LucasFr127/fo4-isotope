@@ -13,25 +13,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
+#include <limits>
 #include <vector>
 #include <utility>
 
 namespace fo4hdr {
 namespace {
-
-constexpr std::uint32_t kAces2OperatorLutEdge{128};
-constexpr std::uint32_t kAgxOperatorLutEdge{92};
-constexpr std::uint32_t kGt7OperatorLutEdge{64};
-constexpr std::uint32_t kOperatorLutCoefficientPadding{2};
-constexpr double kOperatorLutSceneMaximum{65504.0};
-
-double OperatorLutInputOffset(OperatorLutAlgorithm algorithm) noexcept;
-std::uint32_t OperatorLutEdge(OperatorLutAlgorithm algorithm) noexcept;
-double OperatorLutInputShaperMinimum(OperatorLutAlgorithm algorithm, double peak) noexcept;
-double OperatorLutInputShaperMaximum(OperatorLutAlgorithm algorithm, double peak) noexcept;
-double DecodeOperatorLutCoordinate(
-    double coordinate, OperatorLutAlgorithm algorithm, double peak) noexcept;
 
 [[nodiscard]] bool RoundMantissaUp(
     std::uint32_t remainder, std::uint32_t halfway,
@@ -98,18 +85,18 @@ double DecodeOperatorLutCoordinate(
 struct PreparedOperator
 {
     explicit PreparedOperator(const OperatorLutData& data) noexcept :
-        algorithm(data.algorithm), lookStrength(data.parameters.acesLookStrength),
-        aces2((algorithm == OperatorLutAlgorithm::aces2 || algorithm == OperatorLutAlgorithm::aces2Lmt) ?
+        algorithm(data.algorithm), parameters(data.toneMapperParameters),
+        aces2(algorithm == ProductionToneMapperAlgorithm::aces2Lmt ?
             CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
-        agx(algorithm == OperatorLutAlgorithm::agX ?
-            CreateAgxTransform(data.displayPeakNits, data.parameters) :
+        agx(algorithm == ProductionToneMapperAlgorithm::agX ?
+            CreateAgxTransform(data.displayPeakNits, parameters) :
             std::optional<AgxTransform>{}),
-        gt7(algorithm == OperatorLutAlgorithm::gt7 ?
-            CreateGt7Transform(data.displayPeakNits, data.parameters) : Gt7TransformHandle{})
+        gt7(algorithm == ProductionToneMapperAlgorithm::gt7 ?
+            CreateGt7Transform(data.displayPeakNits, parameters) : Gt7TransformHandle{})
     {}
 
-    OperatorLutAlgorithm algorithm;
-    double lookStrength;
+    ProductionToneMapperAlgorithm algorithm;
+    const ToneMapperParameters& parameters;
     Aces2TransformHandle aces2;
     std::optional<AgxTransform> agx;
     Gt7TransformHandle gt7;
@@ -118,10 +105,9 @@ struct PreparedOperator
     {
         switch (algorithm)
         {
-        case OperatorLutAlgorithm::aces2:
-        case OperatorLutAlgorithm::aces2Lmt: return aces2 != nullptr;
-        case OperatorLutAlgorithm::agX: return agx.has_value();
-        case OperatorLutAlgorithm::gt7: return gt7 != nullptr;
+        case ProductionToneMapperAlgorithm::aces2Lmt: return aces2 != nullptr;
+        case ProductionToneMapperAlgorithm::agX: return agx.has_value();
+        case ProductionToneMapperAlgorithm::gt7: return gt7 != nullptr;
         }
         return false;
     }
@@ -130,40 +116,31 @@ struct PreparedOperator
     {
         switch (algorithm)
         {
-        case OperatorLutAlgorithm::aces2:
-        case OperatorLutAlgorithm::aces2Lmt:
-            return EvaluateAces(sceneLinear);
-        case OperatorLutAlgorithm::agX:
+        case ProductionToneMapperAlgorithm::aces2Lmt:
+            return aces2 != nullptr ?
+                EvaluateAces2LmtLutNits(*aces2, sceneLinear,
+                    parameters.acesLookStrength) : LinearRgb{};
+        case ProductionToneMapperAlgorithm::agX:
             return agx.has_value() ? EvaluateAgxLutNits(*agx, sceneLinear) : LinearRgb{};
-        case OperatorLutAlgorithm::gt7:
+        case ProductionToneMapperAlgorithm::gt7:
             return gt7 != nullptr ? EvaluateGt7LutNits(*gt7, sceneLinear) : LinearRgb{};
         }
         return {};
     }
-
-    [[nodiscard]] LinearRgb EvaluateAces(LinearRgb sceneLinear) const noexcept
-    {
-        if (!aces2) return {};
-        return algorithm == OperatorLutAlgorithm::aces2Lmt ?
-            EvaluateAces2LmtLutNits(*aces2, sceneLinear, lookStrength) :
-            EvaluateAces2LutNits(*aces2, sceneLinear);
-    }
 };
 
 [[nodiscard]] bool IsAces2Algorithm(
-    OperatorLutAlgorithm algorithm) noexcept
+    ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == OperatorLutAlgorithm::aces2 ||
-        algorithm == OperatorLutAlgorithm::aces2Lmt;
+    return algorithm == ProductionToneMapperAlgorithm::aces2Lmt;
 }
 
 [[nodiscard]] bool IsLutAlgorithm(
-    OperatorLutAlgorithm algorithm) noexcept
+    ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == OperatorLutAlgorithm::aces2 ||
-        algorithm == OperatorLutAlgorithm::aces2Lmt ||
-        algorithm == OperatorLutAlgorithm::agX ||
-        algorithm == OperatorLutAlgorithm::gt7;
+    return algorithm == ProductionToneMapperAlgorithm::aces2Lmt ||
+        algorithm == ProductionToneMapperAlgorithm::agX ||
+        algorithm == ProductionToneMapperAlgorithm::gt7;
 }
 
 [[nodiscard]] bool IsValidPeak(double peak) noexcept
@@ -185,24 +162,41 @@ struct PreparedOperator
         std::abs(value.blue) <= kOperatorLutSceneMaximum;
 }
 
-[[nodiscard]] double ShaperCenter(
-    OperatorLutAlgorithm algorithm, double peak) noexcept
+[[nodiscard]] bool MatchesShaper(const OperatorLutData& data) noexcept
 {
-    if (IsAces2Algorithm(algorithm)) return 2.4;
-    return algorithm == OperatorLutAlgorithm::gt7 ?
+    return data.inputShaperMinimum ==
+            OperatorLutInputShaperMinimum(data.algorithm, data.displayPeakNits) &&
+        data.inputShaperMaximum ==
+            OperatorLutInputShaperMaximum(data.algorithm, data.displayPeakNits) &&
+        data.inputOffset == OperatorLutInputOffset(data.algorithm);
+}
+
+[[nodiscard]] bool MatchesAlgorithm(const OperatorLutData& data) noexcept
+{
+    return IsLutAlgorithm(data.algorithm) &&
+        ValidateToneMapperParameters(data.algorithm, data.toneMapperParameters) &&
+        data.toneMapperParameters == ActiveToneMapperParameters(
+            data.algorithm, data.toneMapperParameters);
+}
+
+[[nodiscard]] double ShaperCenter(
+    ProductionToneMapperAlgorithm algorithm, double peak) noexcept
+{
+    if (algorithm == ProductionToneMapperAlgorithm::aces2Lmt) return 2.4;
+    return algorithm == ProductionToneMapperAlgorithm::gt7 ?
         std::log2(8.0 * peak / kSceneReferenceWhiteNits) : 6.0;
 }
 
 [[nodiscard]] double ShaperWidth(
-    OperatorLutAlgorithm algorithm) noexcept
+    ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == OperatorLutAlgorithm::gt7 ? 2.5 : 3.0;
+    return algorithm == ProductionToneMapperAlgorithm::gt7 ? 2.5 : 3.0;
 }
 
-[[nodiscard]] double LogarithmicWeight(OperatorLutAlgorithm algorithm) noexcept
+[[nodiscard]] double LogarithmicWeight(ProductionToneMapperAlgorithm algorithm) noexcept
 {
     return IsAces2Algorithm(algorithm) ? 0.25 :
-        (algorithm == OperatorLutAlgorithm::agX ? 0.3 : 0.4);
+        (algorithm == ProductionToneMapperAlgorithm::agX ? 0.3 : 0.4);
 }
 
 struct ShaperBounds
@@ -212,7 +206,7 @@ struct ShaperBounds
 };
 
 [[nodiscard]] double ShapeLogarithm(double logarithm,
-    OperatorLutAlgorithm algorithm, double peak,
+    ProductionToneMapperAlgorithm algorithm, double peak,
     ShaperBounds bounds) noexcept
 {
     const auto angle = std::atan((logarithm - ShaperCenter(algorithm, peak)) /
@@ -424,10 +418,11 @@ struct LatticeSampler
     return coordinates;
 }
 
-[[nodiscard]] bool IsValidBuildRequest(OperatorLutAlgorithm algorithm,
-    double peak) noexcept
+[[nodiscard]] bool IsValidBuildRequest(ProductionToneMapperAlgorithm algorithm,
+    double peak, const ToneMapperParameters& parameters) noexcept
 {
-    return IsLutAlgorithm(algorithm) && IsValidPeak(peak);
+    return IsLutAlgorithm(algorithm) &&
+        ValidateToneMapperParameters(algorithm, parameters) && IsValidPeak(peak);
 }
 
 [[nodiscard]] bool EncodeCoefficients(const std::vector<LinearRgb>& nodes,
@@ -470,29 +465,43 @@ struct LatticeSampler
     return true;
 }
 
-double OperatorLutInputOffset(OperatorLutAlgorithm algorithm) noexcept
+}  // namespace
+
+double OperatorLutInputOffset(ProductionToneMapperAlgorithm algorithm) noexcept
 {
     switch (algorithm)
     {
-    case OperatorLutAlgorithm::aces2:
-    case OperatorLutAlgorithm::aces2Lmt:
-    case OperatorLutAlgorithm::agX:
-    case OperatorLutAlgorithm::gt7: return 1.0 / 65536.0;
+    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::agX:
+    case ProductionToneMapperAlgorithm::gt7: return 1.0 / 65536.0;
     }
     return 0.0;
 }
 
 std::uint32_t OperatorLutEdge(
-    OperatorLutAlgorithm algorithm) noexcept
+    ProductionToneMapperAlgorithm algorithm) noexcept
 {
     if (!IsLutAlgorithm(algorithm)) return 0U;
     return IsAces2Algorithm(algorithm) ? kAces2OperatorLutEdge :
-        (algorithm == OperatorLutAlgorithm::agX ?
+        (algorithm == ProductionToneMapperAlgorithm::agX ?
             kAgxOperatorLutEdge : kGt7OperatorLutEdge);
 }
 
+bool OperatorLutData::IsValid() const noexcept
+{
+    constexpr std::size_t channels{4};
+    const auto expected = static_cast<std::size_t>(textureEdge) * textureEdge * textureEdge *
+        channels;
+    return MatchesAlgorithm(*this) &&
+        edge == OperatorLutEdge(algorithm) &&
+        textureEdge == edge + kOperatorLutCoefficientPadding &&
+        IsValidPeak(displayPeakNits) &&
+        MatchesShaper(*this) &&
+        rgba16.size() == expected;
+}
+
 double OperatorLutInputShaperMinimum(
-    OperatorLutAlgorithm algorithm,
+    ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits) noexcept
 {
     if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits))
@@ -503,7 +512,7 @@ double OperatorLutInputShaperMinimum(
 }
 
 double OperatorLutInputShaperMaximum(
-    OperatorLutAlgorithm algorithm,
+    ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits) noexcept
 {
     if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits))
@@ -516,7 +525,7 @@ double OperatorLutInputShaperMaximum(
 
 double DecodeOperatorLutCoordinate(
     double coordinate,
-    OperatorLutAlgorithm algorithm,
+    ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits) noexcept
 {
     if (!std::isfinite(coordinate)) return 0.0;
@@ -543,13 +552,31 @@ double DecodeOperatorLutCoordinate(
     return std::max(0.0, std::exp2((low + high) * 0.5) - OperatorLutInputOffset(algorithm));
 }
 
-}  // namespace
+double EncodeOperatorLutCoordinate(
+    double value,
+    ProductionToneMapperAlgorithm algorithm,
+    double displayPeakNits) noexcept
+{
+    // Preserve each analytical operator's nonfinite policy; finite values
+    // above the FP16 input contract map to the last representable endpoint.
+    if (std::isnan(value) || value <= 0.0) value = 0.0;
+    if (IsAces2Algorithm(algorithm) && !std::isfinite(value)) value = 0.0;
+    value = std::min(value, kOperatorLutSceneMaximum);
+    const auto minimum =
+        OperatorLutInputShaperMinimum(algorithm, displayPeakNits);
+    const auto maximum =
+        OperatorLutInputShaperMaximum(algorithm, displayPeakNits);
+    if (!(maximum > minimum)) return 0.0;
+    const auto logarithm = std::log2(value + OperatorLutInputOffset(algorithm));
+    return std::clamp(ShapeLogarithm(logarithm, algorithm, displayPeakNits,
+        {minimum, maximum}), 0.0, 1.0);
+}
 
 std::array<float, 4> OperatorLutShaperParameters(
-    OperatorLutAlgorithm algorithm, double displayPeakNits) noexcept
+    ProductionToneMapperAlgorithm algorithm, double peak) noexcept
 {
-    const auto minimum = OperatorLutInputShaperMinimum(algorithm, displayPeakNits);
-    const auto maximum = OperatorLutInputShaperMaximum(algorithm, displayPeakNits);
+    const auto minimum = OperatorLutInputShaperMinimum(algorithm, peak);
+    const auto maximum = OperatorLutInputShaperMaximum(algorithm, peak);
     if (!(maximum > minimum)) return {};
     const auto weight = LogarithmicWeight(algorithm);
     const auto angleGain = (1.0 - weight) / (maximum - minimum);
@@ -557,44 +584,31 @@ std::array<float, 4> OperatorLutShaperParameters(
         OperatorLutInputOffset(algorithm)) + 16.0);
     return {static_cast<float>(angleGain),
         static_cast<float>(-minimum * angleGain + 16.0 * logGain),
-        static_cast<float>(ShaperCenter(algorithm, displayPeakNits)),
+        static_cast<float>(ShaperCenter(algorithm, peak)),
         static_cast<float>(logGain)};
 }
 
-bool OperatorLutData::IsValid() const noexcept
-{
-    if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits)) return false;
-    if (!ValidateToneMapperParameters(algorithm, parameters) ||
-        parameters != ActiveToneMapperParameters(algorithm, parameters)) return false;
-    if (edge != OperatorLutEdge(algorithm) ||
-        textureEdge != edge + kOperatorLutCoefficientPadding) return false;
-    constexpr std::size_t channels{4};
-    const auto expected = static_cast<std::size_t>(textureEdge) * textureEdge * textureEdge *
-        channels;
-    return rgba16.size() == expected;
-}
-
 OperatorLutData BuildOperatorLut(
-    OperatorLutAlgorithm algorithm,
-    double displayPeakNits,
-    OperatorLutCancellation cancellation) noexcept
-{
-    return BuildOperatorLut(algorithm, displayPeakNits, ToneMapperParameters{}, cancellation);
-}
-
-OperatorLutData BuildOperatorLut(
-    OperatorLutAlgorithm algorithm,
+    ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits,
     const ToneMapperParameters& parameters,
     OperatorLutCancellation cancellation) noexcept
 {
-    if (cancellation.IsCancelled() || !IsValidBuildRequest(algorithm, displayPeakNits)) return {};
-    if (!ValidateToneMapperParameters(algorithm, parameters)) return {};
     OperatorLutData result;
     result.edge = OperatorLutEdge(algorithm);
+    result.textureEdge = result.edge;
+    result.inputShaperMinimum =
+        OperatorLutInputShaperMinimum(algorithm, displayPeakNits);
+    result.inputShaperMaximum =
+        OperatorLutInputShaperMaximum(algorithm, displayPeakNits);
+    result.inputOffset = OperatorLutInputOffset(algorithm);
     result.displayPeakNits = displayPeakNits;
     result.algorithm = algorithm;
-    result.parameters = ActiveToneMapperParameters(algorithm, parameters);
+    result.toneMapperParameters = ActiveToneMapperParameters(algorithm, parameters);
+
+    if (cancellation.IsCancelled() ||
+        !IsValidBuildRequest(algorithm, displayPeakNits, parameters)) return {};
+
     try
     {
         if (!BakeOperatorLut(result, cancellation)) return {};
@@ -603,7 +617,6 @@ OperatorLutData BuildOperatorLut(
     {
         return {};
     }
-    if (cancellation.IsCancelled()) return {};
     return result.IsValid() ? std::move(result) : OperatorLutData{};
 }
 

@@ -1,1203 +1,757 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Carlos Lopez Jr.
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
+//
+// Fallout 4 shader identities and tone/LUT seams use the pinned RenoDX facts.
+// The exact-backbuffer FP16 proxy and UI-relative transport adapt
+// clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/
+// src/games/fallout4/addon.cpp and src/mods/swapchain_v2.hpp.
+// RenoDX material retains its MIT permission in THIRD_PARTY_NOTICES.md.
+// Native hooks, generation ownership, settings, grading integration and direct
+// display output are project implementations of the Fallout 4 and DXGI contracts.
 
-#include "HdrRenderer.hpp"
-#include "OperatorConstants.hpp"
-#include "resources/NativePresentationProxy.hpp"
-#include "RenoDxShaderIdentity.hpp"
-#include "d3d11/ScopedD3D11PixelBindings.hpp"
-#include "passes/ObservedDraw.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
-
-#include <fo4hdr-shaders/ToneMapA.hpp>
-#include <fo4hdr-shaders/ToneMapB.hpp>
-#include <fo4hdr-shaders/ToneMapNewA.hpp>
-#include <fo4hdr-shaders/ToneMapNewB.hpp>
-#include <fo4hdr-shaders/CreativeGradeLut.hpp>
-#include <fo4hdr-shaders/NativeReferenceGrade.hpp>
-#include <fo4hdr-shaders/TemporalAa.hpp>
-#include <fo4hdr-shaders/TemporalAa2.hpp>
-#include <fo4hdr-shaders/Fxaa.hpp>
-#include <fo4hdr-shaders/Video.hpp>
-#include <fo4hdr-shaders/DeveloperExposureCapture.hpp>
-
+#include "Fallout4HDR/graphics/HdrRenderer.hpp"
+#include "Fallout4HDR/hooks/HookOwnership.hpp"
+#include "GraphicsDiagnostics.hpp"
+#include "LiveSettings.hpp"
+#include "hooks/DeviceHooks.hpp"
+#include "passes/ArmorCompositionPass.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include <Fallout4HDR/output/ArmorUiComposition.hpp>
+#include <new>
 #include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <exception>
-#include <limits>
+#include <array>
 #include <utility>
+#include "RendererLifetime.hpp"
+#include "DisplayDiscovery.hpp"
+#include "ShaderRegistry.hpp"
+#include "resources/PresentationResources.hpp"
+#include "resources/SceneResources.hpp"
+#include "resources/ReplacementShaders.hpp"
+#include "resources/DeveloperExposureResources.hpp"
+#include "resources/ArmorCompositionResources.hpp"
+#include "LutProfileBindings.hpp"
+#include "DrawObservation.hpp"
+#include <Fallout4HDR/output/NativeLutObservation.hpp>
+#include "PresentFrame.hpp"
+
+#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include <Fallout4HDR/tonemap/OperatorLut.hpp>
+#include <Fallout4HDR/output/SelectiveColor.hpp>
 
 namespace fo4hdr {
+RendererDevice g_rendererDevice;
+HWND g_outputWindow{};
+PipelineHeartbeat g_heartbeat;
+HdrRendererLifecycle g_lifecycle;
+std::uint64_t g_frame{1};
+std::atomic<bool> g_referenceHealthy{true};
+std::atomic<bool> g_gameplayReadyApplied{};
+std::atomic<bool> g_rendererCreationClaimed{};
+[[nodiscard]] std::uint64_t PublishLifecycleGeneration() noexcept
+{
+    const auto generation = g_lifecycle.Snapshot().resourceGeneration;
+    g_evidence.resourceGeneration.store(generation,
+        std::memory_order_release);
+    if (CurrentWideGamutReadiness().Complete())
+    {
+        g_presentation.colorDomainGeneration = generation;
+        g_evidence.colorDomainGeneration.store(
+            generation, std::memory_order_release);
+    }
+    return generation;
+}
+
+
+[[nodiscard]] WideGamutResourceReadiness CurrentWideGamutReadiness() noexcept
+{
+    return {
+        .replacementShaderSet = ReplacementProgramsReady(),
+        .presentationProxySet = PresentationProxyReady(),
+        .compositionSet = PresentationCompositionReady(),
+        .uiSet = DeveloperUiResourcesReady() && GameUiBackdropResourcesReady() &&
+            GameUiResourcesReady(),
+        .outputSet = PresentationOutputReady()
+    };
+}
+
+void ResetSceneTracking() noexcept
+{
+    ResetNativeLutObservation();
+    g_lutInspectorLuts = {};
+    g_lutInspectorImageSpaces = {};
+    g_lutInspectorImageSpaceSlots = 0;
+    g_lutInspectorFrame = 0;
+    g_lutInspectorValidatedSlots = 0;
+    StopPipboyScreenObservation("Stopped: scene or resource retirement");
+    CloseArmorEncodedCompositionForLifecycle();
+    // Loading/focus/resource retirement ends the session; retained TLS tokens
+    // cannot be accepted after the request generation changes.
+    ResetArmorUiScope();
+    g_developerExposure.state.Reset();
+    g_developerExposure.observedFrame = 0;
+    ResetSceneResources();
+}
+void UnbindPresentationProxy() noexcept
+{
+    if (g_rendererDevice.activeContext == nullptr) return;
+    if (!g_presentation.presentationProxyRtv) return;
+    auto* record = FindDrawObservation(g_rendererDevice.activeContext);
+    if (record == nullptr || OriginalRenderTargetSetter(g_rendererDevice.activeContext) == nullptr) return;
+    const bool proxyBound =
+        record->currentPrimaryRtv == g_presentation.presentationProxyRtv.Get() ||
+        record->currentSecondaryRtv == g_presentation.presentationProxyRtv.Get();
+    if (!proxyBound) return;
+    InvokeCapturedNext(OriginalRenderTargetSetter(g_rendererDevice.activeContext),
+        g_rendererDevice.activeContext, 0, nullptr, nullptr);
+    record->currentPrimaryRtv = nullptr;
+    record->currentSecondaryRtv = nullptr;
+}
+
+
+void ResetResources(bool retainColorControl) noexcept
+{
+    g_nativeReferenceStatus = "Waiting for a color grading draw.";
+    CloseArmorEncodedCompositionForLifecycle();
+    UnbindPresentationProxy();
+    ResetSceneTracking();
+    ResetDeveloperExposureResources();
+    g_presentation.presentationRedirectedThisFrame = false;
+    ResetArmorCompositionResources();
+    // Retire the real output UAV before the transport images and proxy.
+    RetirePresentationOutput();
+    ResetUiTransportResources();
+    ResetPresentationResources(retainColorControl);
+}
+
+[[nodiscard]] bool EnsureResources(
+    IDXGISwapChain* swapChain, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    if (PresentationResourcesReady()) {
+        // Prepare the optional armor conversion outside the Draw path.
+        EnsureArmorEncodedResources(device, context);
+        return true;
+    }
+    const auto creation = CreatePresentationResources(swapChain, device, context);
+    if (creation == PresentationResourceCreation::compositionFailed) ResetResources();
+    if (creation != PresentationResourceCreation::ready) return false;
+    EnsureArmorEncodedResources(device, context);
+    EnsureSettingsWindowBackend(g_configuration.productionRequested || g_configuration.showDeveloperOverlay,
+        g_outputWindow, device, context);
+    if (CurrentWideGamutReadiness().Complete()) {
+        g_presentation.colorDomainGeneration =
+            g_evidence.resourceGeneration.load(std::memory_order_acquire);
+        g_evidence.colorDomainGeneration.store(
+            g_presentation.colorDomainGeneration, std::memory_order_release);
+    }
+    return true;
+}
+
+[[nodiscard]] bool EnsureWideGamutResources(
+    IDXGISwapChain* swapChain,
+    ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    return CreatePresentationProxy(swapChain, device) &&
+        EnsureResources(swapChain, device, context) &&
+        CurrentWideGamutReadiness().Complete();
+}
+
+bool DisplayRebuildFailed(IDXGISwapChain* swapChain, int hdrState) noexcept
+{
+    return hdrState == 1 && HdrPathRequested() && g_rendererDevice.activeDevice != nullptr &&
+        !EnsureWideGamutResources(swapChain, g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
+}
+
+void RebuildChangedDisplay(IDXGISwapChain* swapChain, int hdrState) noexcept
+{
+    if (!DisplayRebuildFailed(swapChain, hdrState)) return;
+    g_referenceHealthy = false;
+    RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
+}
+
+void BeginPublishedHeartbeatGeneration() noexcept
+{
+    const auto generation = PublishLifecycleGeneration();
+    g_frame = 1;
+    g_heartbeat.Reset(generation);
+    g_heartbeat.BeginFrame(generation, g_frame);
+}
+
+struct DisplayGenerationObservation
+{
+    DXGI_SWAP_CHAIN_DESC description{};
+    HMONITOR monitor{};
+    int hdrState{};
+    int previousHdrState{};
+
+    void Read(IDXGISwapChain* swapChain) noexcept
+    {
+        const auto outputKnown = swapChain != nullptr &&
+            SUCCEEDED(swapChain->GetDesc(&description)) &&
+            RefreshDisplayCapabilities(description.OutputWindow);
+        if (!outputKnown) InvalidateDisplayCapabilities();
+        monitor = outputKnown ? CurrentDisplayCapabilities().description.Monitor : nullptr;
+        hdrState = outputKnown && CurrentDisplayCapabilities().description.ColorSpace ==
+            DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 ? 1 : 0;
+        previousHdrState = ActiveDisplayHdrState();
+    }
+
+    bool FirstObservation() const noexcept
+    {
+        return ActiveDisplayMonitor() == nullptr && previousHdrState < 0;
+    }
+
+    bool Changed() const noexcept
+    {
+        return ActiveDisplayMonitor() != monitor || previousHdrState != hdrState;
+    }
+
+    void PublishMonitor() const noexcept
+    {
+        PublishActiveDisplay(monitor, hdrState);
+    }
+
+    void ApplyChange(IDXGISwapChain* swapChain, bool& sdrColorSpaceEstablished) const noexcept
+    {
+        if (g_presentation.swapChain3) sdrColorSpaceEstablished = SetColorSpace(false);
+        PublishMonitor();
+        g_lifecycle.OnDisplayChange();
+        ResetResources();
+        g_presentation.width = description.BufferDesc.Width;
+        g_presentation.height = description.BufferDesc.Height;
+        g_referenceHealthy = true;
+        RebuildChangedDisplay(swapChain, hdrState);
+        BeginPublishedHeartbeatGeneration();
+    }
+};
+
+[[nodiscard]] bool DisplayGenerationChanged(IDXGISwapChain* swapChain,
+    bool& sdrColorSpaceEstablished) noexcept
+{
+    sdrColorSpaceEstablished = false;
+    DisplayGenerationObservation observation;
+    observation.Read(swapChain);
+    if (observation.FirstObservation())
+    {
+        observation.PublishMonitor();
+        return false;
+    }
+    if (!observation.Changed()) return false;
+    observation.ApplyChange(swapChain, sdrColorSpaceEstablished);
+    return true;
+}
+void RetireLostDeviceGeneration() noexcept
+{
+    if (!ShutdownSettingsWindowBackend()) return;
+    ResetResources();
+    ResetReplacementShaders();
+    ResetShaderRegistry();
+    g_lifecycle.OnDeviceLost();
+    (void)PublishLifecycleGeneration();
+    g_rendererDevice.activeDevice = nullptr;
+    g_rendererDevice.activeContext = nullptr;
+    g_rendererDevice.activeContext1.Reset();
+    g_outputWindow = nullptr;
+    ResetDisplayDiscovery();
+    // The claim is scoped to the retired device generation. A replacement
+    // D3D creation may make one fresh bounded HDR attempt.
+    g_rendererCreationClaimed.store(false, std::memory_order_release);
+    g_referenceHealthy.store(true, std::memory_order_release);
+}
+
+
+
+PluginConfiguration g_configuration{};
+HdrSettings g_activeSettings{};
+std::uint64_t g_settingsGeneration{1};
+std::uint64_t g_desiredSettingsGeneration{1};
+std::uint64_t g_lutRequestGeneration{};
+std::uint64_t g_deviceGeneration{};
+bool g_lutPending{};
+OperatorLutBuildRequest g_pendingLutRequest{};
+namespace {
+bool g_lutSubmissionNeeded{};
+unsigned g_lutSubmissionAttempts{};
+}
+std::unique_ptr<OperatorLutBuildResult> g_activeCpuLut;
+bool g_liveSettingsError{};
+std::atomic<DWORD> g_currentFrameQualifiedDrawThread{};
+std::atomic<bool> g_currentFrameQualifiedDrawThreadConflict{};
+std::atomic<DWORD> g_observedQualifiedDrawThread{};
+std::atomic<DWORD> g_observedPresentThread{};
+std::atomic<bool> g_liveSettingsThreadCompatible{true};
+
 namespace {
 
-using Microsoft::WRL::ComPtr;
-
-struct ReplacementBytecode
+[[nodiscard]] std::array<float, 4> OperatorColorVector(
+    double x, double y, double z) noexcept
 {
-    const BYTE* data;
-    std::size_t size;
-};
-
-constexpr std::array<ReplacementBytecode, ScenePassRenderer::replacementProgramCount> programs{{
-    {kToneMapABytecode, sizeof(kToneMapABytecode)},
-    {kToneMapBBytecode, sizeof(kToneMapBBytecode)},
-    {kToneMapNewABytecode, sizeof(kToneMapNewABytecode)},
-    {kToneMapNewBBytecode, sizeof(kToneMapNewBBytecode)},
-    {kCreativeGradeLutBytecode, sizeof(kCreativeGradeLutBytecode)},
-    {kTemporalAaBytecode, sizeof(kTemporalAaBytecode)},
-    {kTemporalAa2Bytecode, sizeof(kTemporalAa2Bytecode)},
-    {kFxaaBytecode, sizeof(kFxaaBytecode)},
-    {kVideoBytecode, sizeof(kVideoBytecode)}
-}};
-
-std::size_t ProgramIndex(RenoDxShaderPass pass) noexcept
-{
-    constexpr std::array supported{
-        RenoDxShaderPass::toneMapA, RenoDxShaderPass::toneMapB,
-        RenoDxShaderPass::toneMapNewA, RenoDxShaderPass::toneMapNewB,
-        RenoDxShaderPass::lut, RenoDxShaderPass::taa, RenoDxShaderPass::taa2,
-        RenoDxShaderPass::fxaa, RenoDxShaderPass::video};
-    for (std::size_t index = 0; index < supported.size(); ++index)
-    {
-        if (supported[index] == pass) return index;
-    }
-    return ScenePassRenderer::replacementProgramCount;
+    return {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z), 0.0F};
 }
 
-bool TemporalPass(RenoDxShaderPass pass) noexcept
-{
-    return pass == RenoDxShaderPass::taa || pass == RenoDxShaderPass::taa2;
-}
-
-bool OperatorPass(RenoDxShaderPass pass) noexcept
-{
-    return pass == RenoDxShaderPass::lut || TemporalPass(pass);
-}
-
-constexpr std::array tonePasses{
-    RenoDxShaderPass::toneMapA, RenoDxShaderPass::toneMapB,
-    RenoDxShaderPass::toneMapNewA, RenoDxShaderPass::toneMapNewB};
-
-bool SupportedInputDomain(RenoDxShaderPass pass, SceneColorDomain domain,
-    bool operatorProduced) noexcept
-{
-    if (domain == SceneColorDomain::bt709Scene) return true;
-    if (domain != SceneColorDomain::bt2020UiRelative) return false;
-    if (pass == RenoDxShaderPass::fxaa) return true;
-    return operatorProduced && TemporalPass(pass);
-}
-
-ComPtr<IUnknown> CanonicalIdentity(IUnknown* object) noexcept
-{
-    ComPtr<IUnknown> identity;
-    if (object == nullptr) return identity;
-    if (FAILED(object->QueryInterface(IID_PPV_ARGS(&identity)))) identity.Reset();
-    return identity;
-}
-
-bool SameIdentity(IUnknown* left, IUnknown* right) noexcept
-{
-    const auto leftIdentity = CanonicalIdentity(left);
-    const auto rightIdentity = CanonicalIdentity(right);
-    return leftIdentity && leftIdentity.Get() == rightIdentity.Get();
-}
-
-ComPtr<ID3D11Resource> ViewResource(ID3D11View* view) noexcept
-{
-    ComPtr<ID3D11Resource> resource;
-    if (view != nullptr) view->GetResource(&resource);
-    return resource;
-}
-
-bool CompatibleTextureFootprint(ID3D11View* view, ID3D11Texture2D* color) noexcept
-{
-    const auto resource = ViewResource(view);
-    ComPtr<ID3D11Texture2D> texture;
-    if (!resource || FAILED(resource.As(&texture))) return false;
-    D3D11_TEXTURE2D_DESC candidate{};
-    D3D11_TEXTURE2D_DESC destination{};
-    texture->GetDesc(&candidate);
-    color->GetDesc(&destination);
-    if (candidate.Width != destination.Width || candidate.Height != destination.Height) return false;
-    if (candidate.ArraySize != 1) return false;
-    return candidate.SampleDesc.Count == destination.SampleDesc.Count &&
-        candidate.SampleDesc.Quality == destination.SampleDesc.Quality;
-}
-
-bool Float4TemporalFormat(DXGI_FORMAT format) noexcept
-{
-    return format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
-        format == DXGI_FORMAT_R32G32B32A32_FLOAT;
-}
-
-bool CompatibleMetadataTarget(ID3D11RenderTargetView* view,
-    ID3D11Texture2D* color) noexcept
-{
-    if (view == nullptr) return false;
-    D3D11_RENDER_TARGET_VIEW_DESC viewDescription{};
-    view->GetDesc(&viewDescription);
-    if (!Float4TemporalFormat(viewDescription.Format)) return false;
-    if (viewDescription.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D) return false;
-    if (viewDescription.Texture2D.MipSlice != 0) return false;
-    return CompatibleTextureFootprint(view, color);
-}
-
-bool CompatibleHistoryView(ID3D11ShaderResourceView* view,
-    ID3D11Texture2D* scene) noexcept
-{
-    if (view == nullptr) return false;
-    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
-    view->GetDesc(&viewDescription);
-    if (!Float4TemporalFormat(viewDescription.Format)) return false;
-    if (viewDescription.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
-    if (viewDescription.Texture2D.MostDetailedMip != 0) return false;
-    if (viewDescription.Texture2D.MipLevels != 1) return false;
-    return CompatibleTextureFootprint(view, scene);
-}
-
-std::array<ComPtr<ID3D11ShaderResourceView>, 5> TemporalInputs(
-    ID3D11DeviceContext* context, UINT count) noexcept
-{
-    std::array<ID3D11ShaderResourceView*, 5> raw{};
-    std::array<ComPtr<ID3D11ShaderResourceView>, 5> owned;
-    context->PSGetShaderResources(0, count, raw.data());
-    for (std::size_t index = 0; index < count; ++index) owned[index].Attach(raw[index]);
-    return owned;
-}
-
-bool DistinctTemporalIdentities(const std::array<ComPtr<IUnknown>, 3>& identities) noexcept
-{
-    for (const auto& identity : identities)
-    {
-        if (!identity) return false;
-    }
-    return identities[0].Get() != identities[1].Get() &&
-        identities[0].Get() != identities[2].Get() &&
-        identities[1].Get() != identities[2].Get();
-}
-
-bool InputAvoidsTemporalOutputs(ID3D11ShaderResourceView* input,
-    const std::array<ComPtr<IUnknown>, 3>& identities, bool history) noexcept
-{
-    const auto identity = CanonicalIdentity(ViewResource(input).Get());
-    if (!identity) return false;
-    if (history && identity.Get() == identities[0].Get()) return false;
-    return identity.Get() != identities[1].Get() && identity.Get() != identities[2].Get();
-}
-
-bool InputsAvoidTemporalOutputs(
-    const std::array<ComPtr<ID3D11ShaderResourceView>, 5>& inputs,
-    ID3D11Resource* scene, ID3D11Resource* metadata, ID3D11Resource* color) noexcept
-{
-    const std::array identities{
-        CanonicalIdentity(scene), CanonicalIdentity(metadata), CanonicalIdentity(color)};
-    if (!DistinctTemporalIdentities(identities)) return false;
-    if (!inputs[1]) return false;
-    for (std::size_t index = 0; index < inputs.size(); ++index)
-    {
-        if (!inputs[index]) continue;
-        if (!InputAvoidsTemporalOutputs(inputs[index].Get(), identities, index == 1)) return false;
-    }
-    return true;
-}
-
-bool AssociatedImmediateContext(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
-    ComPtr<ID3D11DeviceContext> immediate;
-    ComPtr<ID3D11Device> contextDevice;
-    device->GetImmediateContext(&immediate);
-    context->GetDevice(&contextDevice);
-    return SameIdentity(immediate.Get(), context) && SameIdentity(contextDevice.Get(), device);
-}
-
-bool Fp16SceneSupported(ID3D11Device* device) noexcept
-{
-    UINT support{};
-    if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R16G16B16A16_FLOAT, &support)))
-        return false;
-    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE2D |
-        D3D11_FORMAT_SUPPORT_SHADER_SAMPLE | D3D11_FORMAT_SUPPORT_RENDER_TARGET;
-    return (support & required) == required;
-}
-
-bool ValidInitializationArguments(ID3D11Device* device,
-    ID3D11DeviceContext* context, const ScenePassConfiguration& configuration) noexcept
-{
-    if (device == nullptr || context == nullptr) return false;
-    return configuration.width != 0 && configuration.height != 0 &&
-        configuration.whites.Valid() && configuration.sceneGrade.Valid();
-}
-
-bool CompatibleDevice(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_11_0) return false;
-    return AssociatedImmediateContext(device, context) && Fp16SceneSupported(device);
-}
-
-bool ValidWhite(float value) noexcept
-{
-    if (!std::isfinite(value)) return false;
-    return value >= kMinimumUiPaperWhiteNits && value <= kMaximumUiPaperWhiteNits;
-}
-
-bool PreparePixelContext(ID3D11Device* device, ID3D11DeviceContext* context,
-    ComPtr<ID3D11DeviceContext1>& prepared) noexcept
-{
-    D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
-    if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS,
-            &options, sizeof(options)))) return false;
-    if (!options.ConstantBufferOffsetting) return false;
-    if (FAILED(context->QueryInterface(IID_PPV_ARGS(&prepared)))) return false;
-    return prepared != nullptr;
-}
-
-bool PrepareVideoConstants(ID3D11Device* device, LayerWhiteConfiguration whites,
-    ComPtr<ID3D11Buffer>& prepared) noexcept
-{
-    const std::array<float, 4> values{whites.videoWhiteNits / whites.uiWhiteNits, 0.0F, 0.0F, 0.0F};
-    static_assert(sizeof(values) == 16);
-    D3D11_BUFFER_DESC description{};
-    description.ByteWidth = sizeof(values);
-    description.Usage = D3D11_USAGE_IMMUTABLE;
-    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    const D3D11_SUBRESOURCE_DATA data{values.data(), 0, 0};
-    if (FAILED(device->CreateBuffer(&description, &data, &prepared))) return false;
-    return prepared != nullptr;
-}
-
-struct PreparedOperator
-{
-    ComPtr<ID3D11Texture3D> texture;
-    ComPtr<ID3D11ShaderResourceView> source;
-    ComPtr<ID3D11SamplerState> sampler;
-    std::array<ComPtr<ID3D11Buffer>, 2> constants;
-    std::array<OperatorConstants, 2> values;
-    ComPtr<ID3D11Buffer> profileConstants;
-};
-
-bool ValidOperatorTable(const OperatorLutData& table) noexcept
-{
-    if (!table.IsValid()) return false;
-    for (const auto coefficient : table.rgba16)
-    {
-        if ((coefficient & 0x7C00U) == 0x7C00U) return false;
-    }
-    return true;
-}
-
-bool OperatorFormatSupported(ID3D11Device* device) noexcept
-{
-    UINT support{};
-    if (FAILED(device->CheckFormatSupport(DXGI_FORMAT_R16G16B16A16_FLOAT, &support))) return false;
-    constexpr UINT required = D3D11_FORMAT_SUPPORT_TEXTURE3D | D3D11_FORMAT_SUPPORT_SHADER_SAMPLE;
-    return (support & required) == required;
-}
-
-bool PrepareOperatorTexture(ID3D11Device* device, const OperatorLutData& table,
-    PreparedOperator& prepared) noexcept
-{
-    if (!OperatorFormatSupported(device)) return false;
-    D3D11_TEXTURE3D_DESC description{};
-    description.Width = description.Height = description.Depth = table.textureEdge;
-    description.MipLevels = 1;
-    description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    description.Usage = D3D11_USAGE_IMMUTABLE;
-    description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-    const UINT rowPitch = table.textureEdge * 8;
-    const D3D11_SUBRESOURCE_DATA data{table.rgba16.data(), rowPitch, rowPitch * table.textureEdge};
-    if (FAILED(device->CreateTexture3D(&description, &data, &prepared.texture))) return false;
-    if (!prepared.texture) return false;
-    if (FAILED(device->CreateShaderResourceView(prepared.texture.Get(), nullptr, &prepared.source))) return false;
-    return prepared.source != nullptr;
-}
-
-bool PrepareOperatorSampler(ID3D11Device* device, PreparedOperator& prepared) noexcept
-{
-    D3D11_SAMPLER_DESC description{};
-    description.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    description.AddressU = description.AddressV = description.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    description.MaxLOD = D3D11_FLOAT32_MAX;
-    description.MaxAnisotropy = 1;
-    description.ComparisonFunc = D3D11_COMPARISON_NEVER;
-    if (FAILED(device->CreateSamplerState(&description, &prepared.sampler))) return false;
-    return prepared.sampler != nullptr;
-}
-
-std::uint32_t OperatorMode(OperatorLutAlgorithm algorithm) noexcept
+[[nodiscard]] bool SetProductionOperatorMode(
+    ProductionToneMapperAlgorithm algorithm, OperatorConstants& settings) noexcept
 {
     switch (algorithm)
     {
-    case OperatorLutAlgorithm::aces2:
-    case OperatorLutAlgorithm::aces2Lmt: return 1;
-    case OperatorLutAlgorithm::agX: return 2;
-    case OperatorLutAlgorithm::gt7: return 3;
-    default: return 0;
+    case ProductionToneMapperAlgorithm::aces2Lmt: settings.mode = 1U; return true;
+    case ProductionToneMapperAlgorithm::agX: settings.mode = 2U; return true;
+    case ProductionToneMapperAlgorithm::gt7: settings.mode = 3U; return true;
+    default: return false;
     }
 }
 
-bool PackSelectiveVector(const std::array<double, 3>& source,
-    std::array<float, 4>& target) noexcept
+} // namespace
+
+[[nodiscard]] bool BuildOperatorSettings(
+    const HdrSettings& values,
+    OperatorConstants& settings) noexcept
 {
-    for (std::size_t index = 0; index < source.size(); ++index)
-    {
-        target[index] = static_cast<float>(source[index]);
-        if (!std::isfinite(target[index])) return false;
-    }
-    target[3] = 0.0F;
+    const auto math = DeriveHdrSettingsMath(values);
+    SelectiveColorPrepared selective{};
+    if (!PrepareSelectiveColor(values.selectiveColor, selective))
+        return false;
+    const auto shaper = OperatorLutShaperParameters(
+        values.productionAlgorithm, values.displayPeakNits);
+    settings = {
+        .mode = 0U,
+        .displayPeakNits =
+            static_cast<float>(values.displayPeakNits),
+        .sceneReferenceWhiteNits =
+            static_cast<float>(kSceneReferenceWhiteNits),
+        .uiTransportWhiteNits =
+            static_cast<float>(kSceneReferenceWhiteNits),
+        .sceneExposureMultiplier = 1.0F,
+        .videoWhiteNits = kVideoWhiteNits,
+        .operatorShaperAngleGain = shaper[0],
+        .operatorShaperBias = shaper[1],
+        .bloomStrength = static_cast<float>(math.bloomMultiplier),
+        .vanillaColorGradingStrength =
+            static_cast<float>(math.vanillaColorGradingBlend),
+        .contrastSlope = static_cast<float>(math.contrastSlope),
+        .highlightsEv = static_cast<float>(math.highlightsEv),
+        .shadowsEv = static_cast<float>(math.shadowsEv),
+        .saturationScale = static_cast<float>(math.saturationScale),
+        .liveSettingsReserved = 0U,
+        .blacksStrength = static_cast<float>(math.blacksStrength),
+        .colorBalanceRow0 = OperatorColorVector(math.colorBalanceBt709[0],
+            math.colorBalanceBt709[1], math.colorBalanceBt709[2]),
+        .colorBalanceRow1 = OperatorColorVector(math.colorBalanceBt709[3],
+            math.colorBalanceBt709[4], math.colorBalanceBt709[5]),
+        .colorBalanceRow2 = OperatorColorVector(math.colorBalanceBt709[6],
+            math.colorBalanceBt709[7], math.colorBalanceBt709[8]),
+        .selectiveColorActive = selective.effectiveActive ? 1U : 0U,
+        .liveSettingsReserved1 = 0U,
+        .operatorShaperParameters = {shaper[2], shaper[3]},
+        .selectiveColorPlaneA = OperatorColorVector(
+            selective.planeA[0], selective.planeA[1], selective.planeA[2]),
+        .selectiveColorPlaneB = OperatorColorVector(
+            selective.planeB[0], selective.planeB[1], selective.planeB[2])
+    };
+    for (std::size_t index = 0; index < kSelectiveColorRegionCount; ++index)
+        settings.selectiveColorRegions[index] = OperatorColorVector(
+            selective.regions[index][0], selective.regions[index][1], selective.regions[index][2]);
+    settings.selectiveColorPlaneA[3] =
+        static_cast<float>(math.vanillaGradeLuminanceRemoval);
+    settings.selectiveColorPlaneB[3] =
+        static_cast<float>(math.vanillaGradeColorRemoval);
+    if (!g_configuration.productionRequested) return true;
+
+    if (!SetProductionOperatorMode(values.productionAlgorithm, settings)) return false;
+    settings.uiTransportWhiteNits =
+        static_cast<float>(values.uiPaperWhiteNits);
+    settings.sceneExposureMultiplier =
+        static_cast<float>(math.sceneExposureMultiplier);
+    settings.videoWhiteNits = static_cast<float>(values.videoWhiteNits);
     return true;
 }
 
-bool PrepareSelectiveConstants(const SelectiveColorSettings& settings,
-    OperatorConstants& values) noexcept
+[[nodiscard]] bool BuildOperatorSettings(
+    OperatorConstants& settings) noexcept
 {
-    SelectiveColorPrepared prepared;
-    if (!PrepareSelectiveColor(settings, prepared)) return false;
-    values.selectiveColorActive = prepared.effectiveActive ? 1u : 0u;
-    for (std::size_t index = 0; index < prepared.regions.size(); ++index)
-        if (!PackSelectiveVector(prepared.regions[index], values.selectiveColorRegions[index]))
-            return false;
-    return PackSelectiveVector(prepared.planeA, values.selectiveColorPlaneA) &&
-        PackSelectiveVector(prepared.planeB, values.selectiveColorPlaneB);
+    return BuildOperatorSettings(g_activeSettings, settings);
 }
 
-bool PrepareOperatorConstants(ID3D11Device* device, const ScenePassConfiguration& config,
-    PreparedOperator& prepared) noexcept
+[[nodiscard]] bool RequiresOperatorLut(std::uint32_t mode) noexcept
 {
-    OperatorConstants values{};
-    values.uiWhiteNits = config.whites.uiWhiteNits;
-    values.SetGrade(config.sceneGrade.vanillaColorGradingStrength, config.sceneGrade.imageControls);
-    if (!PrepareSelectiveConstants(config.sceneGrade.selectiveColor, values)) return false;
-    values.selectiveColorPlaneA[3] = static_cast<float>(config.sceneGrade.imageControls.vanillaGradeLuminanceRemoval);
-    values.selectiveColorPlaneB[3] = static_cast<float>(config.sceneGrade.imageControls.vanillaGradeColorRemoval);
-    if (const auto* table = config.operatorLut)
-    {
-        values.mode = OperatorMode(table->algorithm);
-        values.displayPeakNits = static_cast<float>(table->displayPeakNits);
-        values.shaper = OperatorLutShaperParameters(table->algorithm, table->displayPeakNits);
-    }
-    constexpr std::array domains{SceneColorDomain::bt709Scene, SceneColorDomain::bt2020UiRelative};
-    for (const auto domain : domains)
-    {
-        const auto index = static_cast<std::size_t>(domain);
-        if (index >= prepared.constants.size()) return false;
-        values.inputDomain = static_cast<std::uint32_t>(domain);
-        prepared.values[index] = values;
-        D3D11_BUFFER_DESC description{};
-        description.ByteWidth = sizeof(values);
-        description.Usage = D3D11_USAGE_IMMUTABLE;
-        description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        const D3D11_SUBRESOURCE_DATA data{&values, 0, 0};
-        if (FAILED(device->CreateBuffer(&description, &data, &prepared.constants[index]))) return false;
-        if (!prepared.constants[index]) return false;
-    }
-    return true;
+    return mode >= 1U && mode <= 3U;
 }
 
-bool PrepareOperator(ID3D11Device* device, const ScenePassConfiguration& configuration,
-    PreparedOperator& prepared) noexcept
+
+void ObserveQualifiedSettingsDrawThread() noexcept
 {
-    if (const auto* table = configuration.operatorLut)
+    const auto thread = GetCurrentThreadId();
+    DWORD empty{};
+    if (!g_currentFrameQualifiedDrawThread.compare_exchange_strong(
+            empty, thread, std::memory_order_acq_rel) && empty != thread)
     {
-        if (!ValidOperatorTable(*table)) return false;
-        if (!PrepareOperatorTexture(device, *table, prepared)) return false;
-        if (!PrepareOperatorSampler(device, prepared)) return false;
+        g_currentFrameQualifiedDrawThreadConflict.store(
+            true, std::memory_order_release);
     }
-    if (!PrepareOperatorConstants(device, configuration, prepared)) return false;
-    return PrepareLutProfileBuffer(device, configuration.sceneGrade.lutGradeProfiles,
-        prepared.profileConstants);
+    g_observedQualifiedDrawThread.store(thread, std::memory_order_release);
 }
 
-bool PrepareReplacementResources(ID3D11Device* device,
-    std::array<ComPtr<ID3D11PixelShader>, ScenePassRenderer::replacementProgramCount>& prepared,
-    DeveloperExposureResources& exposure, const HdrSettingsMath& controls) noexcept
+[[nodiscard]] bool HdrPathRequested() noexcept
 {
-    for (std::size_t index = 0; index < programs.size(); ++index)
-    {
-        const auto& program = programs[index];
-        const auto result = device->CreatePixelShader(
-            program.data, program.size, nullptr, &prepared[index]);
-        if (FAILED(result) || !prepared[index]) return false;
-    }
-    return exposure.Prepare(device, std::as_bytes(std::span{kDeveloperExposureCaptureBytecode}),
-        static_cast<float>(controls.sceneExposureMultiplier), static_cast<float>(controls.bloomMultiplier));
+    return g_configuration.enabled &&
+        (g_configuration.productionRequested ||
+         g_configuration.developerHdr10Reference);
 }
 
-bool PrepareDrawResources(ID3D11Device* device, const ScenePassConfiguration& configuration,
-    ComPtr<ID3D11Buffer>& videoConstants, PreparedOperator& prepared) noexcept
+
+void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
 {
-    if (!PrepareVideoConstants(device, configuration.whites, videoConstants)) return false;
-    return PrepareOperator(device, configuration, prepared);
+    g_activeSettings = static_cast<const HdrSettings&>(configuration);
+    InitializeSettingsWindow(g_activeSettings);
+    g_settingsGeneration = 1;
+    g_desiredSettingsGeneration = 1;
+    g_lutRequestGeneration = 0;
+    g_lutPending = false;
+    g_pendingLutRequest = {};
+    g_lutSubmissionNeeded = false;
+    g_lutSubmissionAttempts = 0;
+    g_liveSettingsError = false;
 }
 
-std::size_t CanonicalProgramIndex(const RenoDxShaderDescriptor* descriptor) noexcept
+[[nodiscard]] bool SameOperatorKey(
+    const HdrSettings& left,
+    const HdrSettings& right) noexcept
 {
-    if (descriptor == nullptr) return ScenePassRenderer::replacementProgramCount;
-    if (FindRenoDxFallout4Shader(descriptor->crc32) != descriptor)
-        return ScenePassRenderer::replacementProgramCount;
-    return ProgramIndex(descriptor->pass);
+    return left.productionAlgorithm == right.productionAlgorithm &&
+        left.displayPeakNits == right.displayPeakNits &&
+        ActiveToneMapperParameters(left.productionAlgorithm,
+            left.toneMapperParameters) ==
+            ActiveToneMapperParameters(right.productionAlgorithm,
+                right.toneMapperParameters);
 }
 
-bool OriginalSceneEffect(RenoDxShaderPass pass) noexcept
+void ApplyOperatorKey(
+    ProductionToneMapperAlgorithm algorithm,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters,
+    HdrSettings& settings) noexcept
 {
-    constexpr std::array supported{RenoDxShaderPass::fxaa, RenoDxShaderPass::dofBlender,
-        RenoDxShaderPass::gameDof, RenoDxShaderPass::vignette};
-    return std::find(supported.begin(), supported.end(), pass) != supported.end();
+    settings.productionAlgorithm = algorithm;
+    settings.displayPeakNits = displayPeakNits;
+    switch (algorithm)
+    {
+    case ProductionToneMapperAlgorithm::aces2Lmt:
+        settings.toneMapperParameters.acesLookStrength =
+            parameters.acesLookStrength;
+        break;
+    case ProductionToneMapperAlgorithm::agX:
+        settings.toneMapperParameters.agxMiddleGrayEv =
+            parameters.agxMiddleGrayEv;
+        settings.toneMapperParameters.agxContrast = parameters.agxContrast;
+        settings.toneMapperParameters.agxHdrPurity = parameters.agxHdrPurity;
+        settings.toneMapperParameters.agxHdrShoulderPower =
+            parameters.agxHdrShoulderPower;
+        break;
+    case ProductionToneMapperAlgorithm::gt7:
+        settings.toneMapperParameters.gt7ToeStrength =
+            parameters.gt7ToeStrength;
+        settings.toneMapperParameters.gt7ShoulderStart =
+            parameters.gt7ShoulderStart;
+        settings.toneMapperParameters.gt7ColorBlend =
+            parameters.gt7ColorBlend;
+        break;
+    }
 }
 
-bool OriginalAuxiliaryEffect(RenoDxShaderPass pass) noexcept
+void ApplyOperatorKey(
+    const HdrSettings& source,
+    HdrSettings& destination) noexcept
 {
-    constexpr std::array supported{RenoDxShaderPass::dofAuxiliary1,
-        RenoDxShaderPass::dofAuxiliary2, RenoDxShaderPass::dofAuxiliary3};
-    return std::find(supported.begin(), supported.end(), pass) != supported.end();
+    ApplyOperatorKey(source.productionAlgorithm, source.displayPeakNits,
+        source.toneMapperParameters, destination);
 }
 
-// Class-instance tuples support 256 entries; the SDK interface limit is separate.
-constexpr UINT pixelClassInstanceCapacity = 256;
-
-class ScopedPixelShader
+void ApplyOperatorKey(
+    const OperatorLutBuildRequest& source,
+    HdrSettings& destination) noexcept
 {
-public:
-    ScopedPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* replacement) noexcept
-        : context_(context)
-    {
-        context_->PSGetShader(&previous_, classes_.data(), &classCount_);
-        if (classCount_ > pixelClassInstanceCapacity) return;
-        if (replacement != nullptr)
-        {
-            context_->PSSetShader(replacement, nullptr, 0);
-            replaced_ = true;
-        }
-    }
+    ApplyOperatorKey(source.algorithm, source.displayPeakNits,
+        source.toneMapperParameters, destination);
+}
 
-    ~ScopedPixelShader() noexcept
-    {
-        if (classCount_ <= pixelClassInstanceCapacity)
-            context_->PSSetShader(previous_.Get(), classes_.data(), classCount_);
-        const auto capturedCount = classCount_ < pixelClassInstanceCapacity
-            ? classCount_ : pixelClassInstanceCapacity;
-        for (UINT index = 0; index < capturedCount; ++index)
-        {
-            if (classes_[index] != nullptr) classes_[index]->Release();
-        }
-    }
-
-    [[nodiscard]] bool Replaced() const noexcept { return replaced_; }
-    [[nodiscard]] bool Replace(ID3D11PixelShader* shader) noexcept
-    {
-        context_->PSSetShader(shader, nullptr, 0);
-        ComPtr<ID3D11PixelShader> actual;
-        context_->PSGetShader(&actual, nullptr, nullptr);
-        replaced_ = actual.Get() == shader;
-        return replaced_;
-    }
-    void UseFallbackIfRequired(bool prepared, ID3D11PixelShader* fallback) noexcept
-    {
-        if (!prepared) (void)Replace(fallback);
-    }
-    ScopedPixelShader(const ScopedPixelShader&) = delete;
-    ScopedPixelShader& operator=(const ScopedPixelShader&) = delete;
-
-private:
-    ID3D11DeviceContext* context_;
-    ComPtr<ID3D11PixelShader> previous_;
-    std::array<ID3D11ClassInstance*, pixelClassInstanceCapacity> classes_{};
-    UINT classCount_{pixelClassInstanceCapacity};
-    bool replaced_{};
-};
-
-class ScopedVideoConstants
+[[nodiscard]] OperatorLutBuildRequest DesiredOperatorLutBuild() noexcept
 {
-public:
-    ScopedVideoConstants(ID3D11DeviceContext1* context, ID3D11Buffer* replacement) noexcept
-        : context_(context), replacement_(replacement)
-    {
-        if (replacement_ == nullptr) return;
-        // The base getter owns the reference; Context1 supplies only the exact window.
-        context_->PSGetConstantBuffers(0, 1, &previous_);
-        context_->PSGetConstantBuffers1(0, 1, nullptr, &firstConstant_, &constantCount_);
-    }
+    return {
+        .algorithm = ReadSettingsDraft().productionAlgorithm,
+        .displayPeakNits = ReadSettingsDraft().displayPeakNits,
+        .deviceGeneration = g_deviceGeneration,
+        .settingsGeneration = g_desiredSettingsGeneration,
+        .requestGeneration = g_lutRequestGeneration,
+        .toneMapperParameters = ActiveToneMapperParameters(
+            ReadSettingsDraft().productionAlgorithm,
+            ReadSettingsDraft().toneMapperParameters)
+    };
+}
 
-    ~ScopedVideoConstants() noexcept
-    {
-        if (!bound_) return;
-        auto* previous = previous_.Get();
-        context_->PSSetConstantBuffers1(0, 1, &previous, &firstConstant_, &constantCount_);
-    }
-
-    [[nodiscard]] bool Ready() const noexcept
-    {
-        if (replacement_ == nullptr) return true;
-        // Bound empty windows are legal, but cannot be distinguished here from
-        // an unqualified legacy default, so this path leaves that draw unchanged.
-        if (previous_ && constantCount_ == 0) return false;
-        if (firstConstant_ % 16 != 0 || constantCount_ % 16 != 0) return false;
-        return constantCount_ <= D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT;
-    }
-
-    void Bind() noexcept
-    {
-        if (replacement_ == nullptr) return;
-        context_->PSSetConstantBuffers(0, 1, &replacement_);
-        bound_ = true;
-    }
-
-    ScopedVideoConstants(const ScopedVideoConstants&) = delete;
-    ScopedVideoConstants& operator=(const ScopedVideoConstants&) = delete;
-
-private:
-    ID3D11DeviceContext1* context_;
-    ID3D11Buffer* replacement_;
-    ComPtr<ID3D11Buffer> previous_;
-    UINT firstConstant_{};
-    UINT constantCount_{};
-    bool bound_{};
-};
-
-class DrawScope
+[[nodiscard]] OperatorLutBuildRequest PendingOperatorLutBuild() noexcept
 {
-public:
-    explicit DrawScope(bool& invoking) noexcept : invoking_(invoking) { invoking_ = true; }
-    ~DrawScope() noexcept { invoking_ = false; }
-    DrawScope(const DrawScope&) = delete;
-    DrawScope& operator=(const DrawScope&) = delete;
+    auto request = g_pendingLutRequest;
+    request.deviceGeneration = g_deviceGeneration;
+    request.settingsGeneration = g_desiredSettingsGeneration;
+    return request;
+}
 
-private:
-    bool& invoking_;
-};
+[[nodiscard]] bool PendingOperatorKeyMatches(
+    const HdrSettings& settings) noexcept
+{
+    return g_lutPending &&
+        g_pendingLutRequest.algorithm == settings.productionAlgorithm &&
+        g_pendingLutRequest.displayPeakNits == settings.displayPeakNits &&
+        g_pendingLutRequest.toneMapperParameters ==
+            ActiveToneMapperParameters(settings.productionAlgorithm,
+                settings.toneMapperParameters);
+}
+
+void RetirePendingOperatorLutBuild() noexcept
+{
+    if (g_lutPending)
+        CancelOperatorLutBuild(++g_lutRequestGeneration);
+    g_lutPending = false;
+    g_lutSubmissionNeeded = false;
+    g_pendingLutRequest = {};
+}
+
+void SubmitPendingOperatorLutBuild() noexcept
+{
+    const auto status = RequestOperatorLutBuild(g_pendingLutRequest);
+    g_lutSubmissionNeeded = RetryOperatorLutSubmission(
+        status, g_lutSubmissionAttempts);
+    if (status != OperatorLutRequestStatus::accepted && !g_lutSubmissionNeeded)
+    {
+        RetirePendingOperatorLutBuild();
+        g_liveSettingsError = true;
+    }
+}
+
+void QueueOperatorLutBuild(OperatorLutBuildRequest request) noexcept
+{
+    ++g_lutRequestGeneration;
+    request.deviceGeneration = g_deviceGeneration;
+    request.settingsGeneration = g_desiredSettingsGeneration;
+    request.requestGeneration = g_lutRequestGeneration;
+    request.toneMapperParameters = ActiveToneMapperParameters(
+        request.algorithm, request.toneMapperParameters);
+    g_lutPending = true;
+    g_pendingLutRequest = request;
+    g_lutSubmissionAttempts = 0;
+    SubmitPendingOperatorLutBuild();
+}
+
+void QueueDesiredOperatorLutBuild() noexcept
+{
+    QueueOperatorLutBuild(DesiredOperatorLutBuild());
+}
+
+void PublishImmediateSettings(ID3D11DeviceContext* context,
+    const HdrSettings& immediate) noexcept
+{
+    if (!PublishReplacementSettings(context, immediate, g_desiredSettingsGeneration))
+    {
+        g_liveSettingsError = true;
+        return;
+    }
+    g_activeSettings = immediate;
+    g_settingsGeneration = g_desiredSettingsGeneration;
+}
+
+void UpdateDesiredOperator(bool operatorChanged,
+    const HdrSettings& desired) noexcept
+{
+    if (!operatorChanged)
+    {
+        RetirePendingOperatorLutBuild();
+        return;
+    }
+    if (!PendingOperatorKeyMatches(desired))
+        QueueDesiredOperatorLutBuild();
+}
+
+void CommitUiDraft(ID3D11DeviceContext* context) noexcept
+{
+    (void)ConsumeSettingsCommitRequest();
+    g_liveSettingsError = false;
+    if (ValidateHdrSettings(ReadSettingsDraft()) != HdrSettingsValidationError::none)
+    {
+        g_liveSettingsError = true;
+        return;
+    }
+    ++g_desiredSettingsGeneration;
+    auto desired = ReadSettingsDraft();
+    const auto operatorChanged = !SameOperatorKey(g_activeSettings, desired);
+    auto immediate = desired;
+    if (operatorChanged)
+        ApplyOperatorKey(g_activeSettings, immediate);
+    PublishImmediateSettings(context, immediate);
+    UpdateDesiredOperator(operatorChanged, desired);
+}
+
+void FailPendingOperatorLut() noexcept
+{
+    g_lutPending = false;
+    g_pendingLutRequest = {};
+    g_liveSettingsError = true;
+}
+
+void PublishCompletedOperatorLut(ID3D11Device* device,
+    ID3D11DeviceContext* context,
+    std::unique_ptr<OperatorLutBuildResult> result) noexcept
+{
+    auto completedSettings = g_activeSettings;
+    ApplyOperatorKey(result->request, completedSettings);
+    if (!PublishReplacementLut(device, context, *result, completedSettings))
+    {
+        FailPendingOperatorLut();
+        return;
+    }
+    g_activeCpuLut = std::move(result);
+    g_activeSettings = completedSettings;
+    g_lutPending = false;
+    g_pendingLutRequest = {};
+    g_liveSettingsError = g_settingsGeneration != g_desiredSettingsGeneration;
+}
+
+void CommitCompletedOperatorLut(ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    auto result = TakeCompletedOperatorLutBuild();
+    const auto failedRequestGeneration = TakeFailedOperatorLutBuildGeneration();
+    if (g_lutPending && failedRequestGeneration == g_lutRequestGeneration)
+        FailPendingOperatorLut();
+    const auto completionAction = result ?
+        ClassifyOperatorLutCompletion(
+            result->request, PendingOperatorLutBuild(), g_lutPending) :
+        OperatorLutCompletionAction::retire;
+    if (completionAction != OperatorLutCompletionAction::publish) return;
+    if (!PreparedOperatorLutMatches(result->data, result->request))
+    {
+        FailPendingOperatorLut();
+        return;
+    }
+    PublishCompletedOperatorLut(device, context, std::move(result));
+}
+
+bool CanCommitLiveSettings(ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    return g_configuration.productionRequested && device != nullptr &&
+        context != nullptr;
+}
+
+void CommitLiveSettingsAtEndPresent(ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    if (!CanCommitLiveSettings(device, context)) return;
+    if (!g_liveSettingsThreadCompatible.load(std::memory_order_acquire))
+    {
+        if (SettingsCommitRequested() || g_lutPending)
+            g_liveSettingsError = true;
+        return;
+    }
+    if (g_lutSubmissionNeeded) SubmitPendingOperatorLutBuild();
+    if (SettingsCommitRequested()) CommitUiDraft(context);
+    CommitCompletedOperatorLut(device, context);
+}
+
+
+namespace {
+
+OneShotInitialization g_initialization;
+
+[[nodiscard]] bool GraphicsDiagnosticsRequested(const PluginConfiguration& configuration) noexcept
+{
+    return configuration.developerMode &&
+        (configuration.traceRenderPipeline || configuration.measurePerformance);
+}
+
+[[nodiscard]] bool GraphicsHdrRequested(const PluginConfiguration& configuration) noexcept
+{
+    return configuration.enabled &&
+        (configuration.productionRequested ||
+            (configuration.developerMode && configuration.developerHdr10Reference));
+}
+
+void PublishGraphicsRequest(const PluginConfiguration& configuration, bool hdrRequested) noexcept
+{
+    g_evidence.performanceRequested.store(configuration.measurePerformance, std::memory_order_release);
+    g_evidence.performanceActivePath.store(hdrRequested, std::memory_order_release);
+    g_evidence.requested.store(true, std::memory_order_release);
+    g_evidence.referenceRequested.store(
+        configuration.enabled && configuration.developerHdr10Reference, std::memory_order_release);
+    g_evidence.productionRequested.store(
+        configuration.enabled && configuration.productionRequested, std::memory_order_release);
+}
+
+void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexcept
+{
+    g_configuration = configuration;
+    SetArmorUiBoundaryCallback(ArmorEncodedBoundary);
+    SetArmorUiCorrectionEnabled(configuration.enabled && configuration.productionRequested);
+    InitializeLiveSettings(configuration);
+}
+
+[[nodiscard]] bool PrepareInitialOperatorLut(const PluginConfiguration& configuration) noexcept
+{
+    if (!configuration.enabled || !configuration.productionRequested) return true;
+    // Prepare before intercepting device creation, which requires a complete
+    // operator. Retain these device-independent bytes for later recreation.
+    g_activeCpuLut.reset(new (std::nothrow) OperatorLutBuildResult{});
+    if (g_activeCpuLut) {
+        g_activeCpuLut->request = DesiredOperatorLutBuild();
+        g_activeCpuLut->data = BuildOperatorLut(
+            g_activeSettings.productionAlgorithm, g_activeSettings.displayPeakNits,
+            ActiveToneMapperParameters(g_activeSettings.productionAlgorithm,
+                g_activeSettings.toneMapperParameters));
+    }
+    return g_activeCpuLut && g_activeCpuLut->data.IsValid() && InitializeOperatorLutWorker();
+}
+
+[[nodiscard]] bool FailGraphicsInitialization(GraphicsObservationFailure failure) noexcept
+{
+    RecordFailure(failure);
+    g_initialization.Complete(false);
+    return false;
+}
 
 }  // namespace
 
-bool LayerWhiteConfiguration::Valid() const noexcept
+bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noexcept
 {
-    return ValidWhite(uiWhiteNits) && ValidWhite(videoWhiteNits);
-}
-
-ScenePassRenderer::~ScenePassRenderer() noexcept
-{
-    // Destruction cannot retire a renderer from outside its qualified owner thread.
-    if (!Retire()) std::terminate();
-}
-
-bool ScenePassRenderer::Initialize(ID3D11Device* device,
-    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
-{
-    if (lifetime_.CurrentEpoch() != 0) return false;
-    if (!PrepareResources(device, immediateContext, configuration)) return false;
-    if (!lifetime_.Prepare(2, RendererLifetime::terminalEpoch)) return false;
-    lifetime_.PublishInitial();
-    exposureGeneration_ = lifetime_.CurrentEpoch();
-    return true;
-}
-
-bool ScenePassRenderer::PrepareResources(ID3D11Device* device,
-    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
-{
-    if (!ValidInitializationArguments(device, immediateContext, configuration))
+    const auto diagnosticsRequested = GraphicsDiagnosticsRequested(configuration);
+    const auto hdrRequested = GraphicsHdrRequested(configuration);
+    if (!hdrRequested && !diagnosticsRequested) return false;
+    switch (g_initialization.Begin()) {
+    case OneShotInitializationAction::alreadyActive:
+        return g_configuration == configuration;
+    case OneShotInitializationAction::unavailable:
         return false;
-    if (!CompatibleDevice(device, immediateContext)) return false;
-
-    ComPtr<ID3D11DeviceContext1> preparedContext;
-    if (!PreparePixelContext(device, immediateContext, preparedContext)) return false;
-    ComPtr<ID3D11Buffer> preparedVideoConstants;
-    PreparedOperator preparedOperator;
-    if (!PrepareDrawResources(device, configuration, preparedVideoConstants, preparedOperator)) return false;
-
-    std::array<ComPtr<ID3D11PixelShader>, replacementProgramCount> prepared;
-    DeveloperExposureResources preparedExposure;
-    if (!PrepareReplacementResources(device, prepared, preparedExposure,
-            configuration.sceneGrade.imageControls)) return false;
-    NativeReferenceResources preparedReference;
-    // Optional preparation failure preserves the ordinary radial grade path.
-    (void)BuildNativeReferenceResources(device, preparedReference);
-    ComPtr<ID3D11PixelShader> preparedReferenceShader;
-    (void)device->CreatePixelShader(kNativeReferenceGradeBytecode,
-        sizeof(kNativeReferenceGradeBytecode), nullptr, &preparedReferenceShader);
-    ownerThread_ = std::this_thread::get_id();
-    device_ = device;
-    context_ = std::move(preparedContext);
-    videoConstants_ = std::move(preparedVideoConstants);
-    operatorTexture_ = std::move(preparedOperator.texture);
-    operatorSource_ = std::move(preparedOperator.source);
-    operatorSampler_ = std::move(preparedOperator.sampler);
-    operatorConstants_ = std::move(preparedOperator.constants);
-    operatorConstantValues_ = preparedOperator.values;
-    lutProfileConstants_ = std::move(preparedOperator.profileConstants);
-    lutProfileKeyReady_ = false;
-    lutInspector_ = {};
-    operatorEnabled_ = configuration.operatorLut != nullptr;
-    whites_ = configuration.whites;
-    width_ = configuration.width;
-    height_ = configuration.height;
-    replacements_ = std::move(prepared);
-    exposureResources_ = std::move(preparedExposure);
-    nativeReference_ = std::move(preparedReference);
-    nativeReferenceShader_ = std::move(preparedReferenceShader);
-    sceneGrade_ = configuration.sceneGrade;
+    case OneShotInitializationAction::install:
+        break;
+    }
+    PublishGraphicsRequest(configuration, hdrRequested);
+    InitializeGraphicsSettings(configuration);
+    if (!PrepareInitialOperatorLut(configuration)) {
+        g_activeCpuLut.reset();
+        return FailGraphicsInitialization(GraphicsObservationFailure::resourceCreationFailed);
+    }
+    ResetPerformanceMeasurement();
+    const auto failure = InstallGraphicsImport();
+    if (failure != GraphicsObservationFailure::none) return FailGraphicsInitialization(failure);
+    RecordFailure(GraphicsObservationFailure::none);
+    g_evidence.initialized.store(true, std::memory_order_release);
+    g_initialization.Complete(true);
     return true;
 }
 
-bool ScenePassRenderer::ApplySettings(const OperatorLutData& table,
-    LayerWhiteConfiguration whites, SceneGradeConfiguration sceneGrade) noexcept
+GraphicsSettingsInputActivation TryActivateGraphicsSettingsInputOnCurrentThread() noexcept
 {
-    if (!Active()) return false;
-    if (invoking_ || frameOpen_) return false;
-    if (!whites.Valid()) return false;
-    if (!sceneGrade.Valid()) return false;
-    const ScenePassConfiguration configuration{width_, height_, whites, &table, sceneGrade};
-    ComPtr<ID3D11Buffer> preparedVideoConstants;
-    PreparedOperator preparedOperator;
-    if (!PrepareDrawResources(device_.Get(), configuration, preparedVideoConstants, preparedOperator))
-        return false;
-    if (!exposureResources_.SetControls(device_.Get(),
-            static_cast<float>(sceneGrade.imageControls.sceneExposureMultiplier),
-            static_cast<float>(sceneGrade.imageControls.bloomMultiplier))) return false;
-    videoConstants_ = std::move(preparedVideoConstants);
-    operatorTexture_ = std::move(preparedOperator.texture);
-    operatorSource_ = std::move(preparedOperator.source);
-    operatorSampler_ = std::move(preparedOperator.sampler);
-    operatorConstants_ = std::move(preparedOperator.constants);
-    operatorConstantValues_ = preparedOperator.values;
-    lutProfileConstants_ = std::move(preparedOperator.profileConstants);
-    lutProfileKeyReady_ = false;
-    lutInspector_ = {};
-    operatorEnabled_ = true;
-    whites_ = whites;
-    sceneGrade_ = sceneGrade;
-    MarkSettingsStale();
-    ResetExposurePolicy();
-    return true;
+    const auto input = TryActivateSettingsWindowInput();
+    return {input.ready, input.active, input.currentThreadId, input.windowThreadId};
 }
 
-void ScenePassRenderer::MarkSettingsStale() noexcept
-{
-    ClearLineage();
-    for (auto& scene : scenes_)
-    {
-        if (scene.domain == SceneColorDomain::bt2020UiRelative) scene.settingsStale = true;
-    }
-}
-
-bool ScenePassRenderer::MatchesContext(ID3D11Device* device,
-    ID3D11DeviceContext* immediateContext) const noexcept
-{
-    if (!Active() || invoking_) return false;
-    return SameIdentity(device, device_.Get()) && SameIdentity(immediateContext, context_.Get());
-}
-
-bool ScenePassRenderer::CanResizeBorrowed() const noexcept
-{
-    if (!OnOwnerThread() || invoking_) return false;
-    if (!borrowedContext_) return false;
-    const auto epoch = lifetime_.CurrentEpoch();
-    return epoch != 0 && epoch != RendererLifetime::terminalEpoch;
-}
-
-bool ScenePassRenderer::RetireForResize() noexcept
-{
-    if (!CanResizeBorrowed()) return false;
-    const auto epoch = lifetime_.CurrentEpoch();
-    if ((epoch & 1) == 0) return true;
-    const auto transition = lifetime_.BeginResize(epoch);
-    ReleaseResources();
-    return transition != RendererLifetime::terminalEpoch;
-}
-
-bool ScenePassRenderer::ReinitializeBorrowed(ID3D11Device* device,
-    ID3D11DeviceContext* immediateContext, ScenePassConfiguration configuration) noexcept
-{
-    if (!CanResizeBorrowed()) return false;
-    const auto transition = lifetime_.CurrentEpoch();
-    if ((transition & 1) != 0) return false;
-    if (!SameIdentity(device, device_.Get()) || !SameIdentity(immediateContext, context_.Get())) return false;
-    if (!PrepareResources(device, immediateContext, configuration)) return false;
-    lifetime_.CompleteResize(transition);
-    exposureGeneration_ = lifetime_.CurrentEpoch();
-    return Active();
-}
-
-bool ScenePassRenderer::Retire() noexcept
-{
-    if (context_ && !OnOwnerThread()) return false;
-    if (invoking_) return false;
-    lifetime_.Retire();
-    // Scoped draw bindings already restored; only the exclusive fixture owns all state.
-    ClearExclusiveState();
-    ReleaseResources();
-    context_.Reset();
-    device_.Reset();
-    borrowedContext_ = false;
-    return true;
-}
-
-void ScenePassRenderer::ReleaseResources() noexcept
-{
-    RetirePipboyScreenObservation();
-    ClearLineage();
-    frameOpen_ = false;
-    ResetExposurePolicy();
-    exposureGeneration_ = 0;
-    exposureResources_.Reset();
-    ResetNativeReferenceResources(nativeReference_);
-    nativeReferenceShader_.Reset();
-    for (auto& scene : scenes_) scene = {};
-    for (auto& shader : observed_) shader = {};
-    for (auto& shader : replacements_) shader.Reset();
-    videoConstants_.Reset();
-    ResetOperatorResources();
-    sceneCount_ = 0;
-    observedCount_ = 0;
-}
-
-void ScenePassRenderer::ClearLineage() noexcept
-{
-    nativeReferenceFrame_ = 0;
-    selectedScene_ = {};
-    for (auto& scene : scenes_) scene.toneProduced = false;
-}
-
-bool ScenePassRenderer::BeginFrame() noexcept
-{
-    if (!Active() || invoking_) return false;
-    if (frameOpen_ || endedExposureFrame_ != 0) ResetExposurePolicy();
-    ClearLineage();
-    frameOpen_ = false;
-    if (frameGeneration_ == std::numeric_limits<std::uint64_t>::max())
-    {
-        ResetExposurePolicy();
-        return false;
-    }
-    ++frameGeneration_;
-    frameOpen_ = true;
-    return true;
-}
-
-bool ScenePassRenderer::EndFrame() noexcept
-{
-    if (!Active() || invoking_) return false;
-    if (frameOpen_) endedExposureFrame_ = frameGeneration_;
-    else ResetExposurePolicy();
-    ClearLineage();
-    frameOpen_ = false;
-    return true;
-}
-
-void ScenePassRenderer::ResetExposurePolicy() noexcept
-{
-    exposureLock_.Reset();
-    endedExposureFrame_ = 0;
-}
-
-bool ScenePassRenderer::SetExposureLockRequested(bool requested) noexcept
-{
-    if (!Active() || invoking_) return false;
-    if (!requested)
-    {
-        ResetExposurePolicy();
-        return true;
-    }
-    if (!exposureResources_.Ready()) return false;
-    if (!exposureLock_.Requested()) ResetExposurePolicy();
-    exposureLock_.Request(true);
-    return true;
-}
-
-bool ScenePassRenderer::ExposureLockActive() const noexcept
-{
-    if (!Active() || invoking_) return false;
-    return exposureLock_.Active() && exposureLock_.Generation() == exposureGeneration_;
-}
-
-bool ScenePassRenderer::CompleteExposureFrame(std::uint64_t savedFrame,
-    DeveloperExposureFrameQualification qualification) noexcept
-{
-    if (!Active() || invoking_) return false;
-    if (frameOpen_)
-    {
-        ResetExposurePolicy();
-        return false;
-    }
-    if (savedFrame == 0 || savedFrame != endedExposureFrame_)
-    {
-        ResetExposurePolicy();
-        return false;
-    }
-    endedExposureFrame_ = 0;
-    exposureLock_.EndFrame(savedFrame, exposureGeneration_, qualification.Eligible());
-    return exposureLock_.Active();
-}
-
-void ScenePassRenderer::InvalidateSlot(std::size_t slot) noexcept
-{
-    scenes_[slot].toneProduced = false;
-    scenes_[slot].operatorProduced = false;
-    if (!scenes_[slot].settingsStale) scenes_[slot].domain = SceneColorDomain::bt709Scene;
-    if (selectedScene_.owner_ == this && selectedScene_.slot_ == slot) selectedScene_ = {};
-}
-
-bool ScenePassRenderer::InvalidateScene(SceneTextureHandle handle) noexcept
-{
-    if (!Active() || invoking_) return false;
-    if (Resolve(handle) == nullptr) return false;
-    scenes_[handle.slot_].settingsStale = false;
-    InvalidateSlot(handle.slot_);
-    return true;
-}
-
-std::uint8_t ScenePassRenderer::WriteMaskForResource(ID3D11Resource* resource) const noexcept
-{
-    constexpr std::uint8_t allScenes = 0xff;
-    const auto identity = CanonicalIdentity(resource);
-    if (!identity) return allScenes;
-    std::uint8_t writes{};
-    for (std::size_t index = 0; index < sceneCount_; ++index)
-    {
-        const auto owned = CanonicalIdentity(scenes_[index].texture.Get());
-        if (!owned) return allScenes;
-        if (identity.Get() == owned.Get()) writes |= static_cast<std::uint8_t>(1u << index);
-    }
-    return writes;
-}
-
-std::uint8_t ScenePassRenderer::BoundWriteMask() const noexcept
-{
-    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> raw{};
-    context_->OMGetRenderTargets(static_cast<UINT>(raw.size()), raw.data(), nullptr);
-    std::uint8_t writes{};
-    for (auto* view : raw)
-    {
-        if (view == nullptr) continue;
-        ComPtr<ID3D11RenderTargetView> owned;
-        owned.Attach(view);
-        writes |= WriteMaskForResource(ViewResource(owned.Get()).Get());
-    }
-    return writes;
-}
-
-void ScenePassRenderer::InvalidateWrites(std::uint8_t writes) noexcept
-{
-    for (std::size_t index = 0; index < sceneCount_; ++index)
-    {
-        if ((writes & (1u << index)) != 0) InvalidateSlot(index);
-    }
-}
-
-ScenePassRenderer::DrawLineage ScenePassRenderer::CaptureLineage(
-    SceneTextureHandle input) const noexcept
-{
-    if (!frameOpen_) return {};
-    const auto* source = Resolve(input);
-    const auto* selected = Resolve(selectedScene_);
-    return {source != nullptr && source == selected,
-        source != nullptr && source->toneProduced, selected != nullptr, BoundWriteMask(),
-        source != nullptr ? source->domain : SceneColorDomain::bt709Scene,
-        source != nullptr && source->operatorProduced};
-}
-
-const ScenePassRenderer::SceneTexture* ScenePassRenderer::SelectedBoundInput(
-    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input) const noexcept
-{
-    if (descriptor == nullptr) return nullptr;
-    if (FindRenoDxFallout4Shader(descriptor->crc32) != descriptor) return nullptr;
-    const auto* source = Resolve(input);
-    if (source == nullptr || source != Resolve(selectedScene_)) return nullptr;
-    if (source->settingsStale) return nullptr;
-    ComPtr<ID3D11ShaderResourceView> bound;
-    context_->PSGetShaderResources(descriptor->sceneInputSlot, 1, &bound);
-    return (bound.Get() == source->shaderResource.Get() ||
-        EquivalentSceneSrv(device_.Get(), source->texture.Get(), bound.Get())) ? source : nullptr;
-}
-
-ScenePassRenderer::OriginalContinuation ScenePassRenderer::QualifyOriginalContinuation(
-    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
-    SceneTextureHandle destination) const noexcept
-{
-    const auto* source = SelectedBoundInput(descriptor, input);
-    if (source == nullptr) return OriginalContinuation::none;
-    // Auxiliary storage never becomes the completed scene. Actual writes still revoke aliases.
-    if (OriginalAuxiliaryEffect(descriptor->pass)) return OriginalContinuation::retain;
-    const auto* target = Resolve(destination);
-    if (target == nullptr || target == source) return OriginalContinuation::none;
-    if (!OriginalSceneEffect(descriptor->pass)) return OriginalContinuation::none;
-    return BoundSceneViewsMatch(*descriptor, *source, *target)
-        ? OriginalContinuation::advance : OriginalContinuation::none;
-}
-
-void ScenePassRenderer::PublishOutputDomain(RenoDxShaderPass pass,
-    SceneTextureHandle destination, const DrawLineage& lineage) noexcept
-{
-    auto& target = scenes_[destination.slot_];
-    target.settingsStale = false;
-    if (pass == RenoDxShaderPass::video)
-    {
-        target.domain = SceneColorDomain::bt2020UiRelative;
-        target.operatorProduced = false;
-        return;
-    }
-    if (pass == RenoDxShaderPass::lut && operatorEnabled_)
-    {
-        target.domain = SceneColorDomain::bt2020UiRelative;
-        target.operatorProduced = true;
-        return;
-    }
-    target.domain = lineage.domain;
-    target.operatorProduced = lineage.operatorProduced;
-}
-
-void ScenePassRenderer::PublishLineage(const RenoDxShaderDescriptor& descriptor,
-    SceneTextureHandle destination, const DrawLineage& lineage) noexcept
-{
-    if (descriptor.group == PipelinePassGroup::toneMapFamily)
-    {
-        scenes_[destination.slot_].toneProduced = true;
-        scenes_[destination.slot_].domain = SceneColorDomain::bt709Scene;
-        scenes_[destination.slot_].operatorProduced = false;
-        scenes_[destination.slot_].settingsStale = false;
-        return;
-    }
-    PublishOutputDomain(descriptor.pass, destination, lineage);
-    if (descriptor.pass == RenoDxShaderPass::video)
-    {
-        selectedScene_ = destination;
-        return;
-    }
-    if (lineage.consumesSelected)
-    {
-        selectedScene_ = destination;
-        return;
-    }
-    if (lineage.selectionExisted) return;
-    if (descriptor.pass == RenoDxShaderPass::lut && lineage.toneInput)
-    {
-        selectedScene_ = destination;
-    }
-}
-
-void ScenePassRenderer::CompleteLineage(const RenoDxShaderDescriptor* descriptor,
-    SceneTextureHandle destination, SceneDrawOutcome outcome,
-    const DrawLineage& lineage) noexcept
-{
-    if (!frameOpen_) return;
-    InvalidateWrites(lineage.writes);
-    if (outcome == SceneDrawOutcome::callbackFailed)
-    {
-        selectedScene_ = {};
-        return;
-    }
-    if (outcome != SceneDrawOutcome::replaced)
-    {
-        if (lineage.original == OriginalContinuation::advance)
-            PublishLineage(*descriptor, destination, lineage);
-        else if (lineage.original == OriginalContinuation::none && lineage.consumesSelected)
-            selectedScene_ = {};
-        return;
-    }
-    PublishLineage(*descriptor, destination, lineage);
-}
-
-const RenoDxShaderDescriptor* ScenePassRenderer::BoundDescriptor() const noexcept
-{
-    ComPtr<ID3D11PixelShader> actual;
-    context_->PSGetShader(&actual, nullptr, nullptr);
-    for (std::size_t index = 0; index < observedCount_; ++index)
-    {
-        if (observed_[index].original.Get() == actual.Get())
-            return observed_[index].descriptor;
-    }
-    return nullptr;
-}
-
-ID3D11PixelShader* ScenePassRenderer::QualifiedReplacement(
-    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
-    SceneTextureHandle destination) const noexcept
-{
-    const auto program = CanonicalProgramIndex(descriptor);
-    if (program == replacements_.size()) return nullptr;
-    const auto* source = Resolve(input);
-    const auto* target = Resolve(destination);
-    if (source == nullptr) return nullptr;
-    if (source->settingsStale) return nullptr;
-    if (target == nullptr) return nullptr;
-    if (source == target) return nullptr;
-    if (!SupportedInputDomain(descriptor->pass, source->domain, source->operatorProduced)) return nullptr;
-    if (!BoundSceneViewsMatch(*descriptor, *source, *target)) return nullptr;
-    return replacements_[program].Get();
-}
-
-bool ScenePassRenderer::BoundSceneViewsMatch(const RenoDxShaderDescriptor& descriptor,
-    const SceneTexture& source, const SceneTexture& target) const noexcept
-{
-    if (TemporalPass(descriptor.pass)) return BoundTemporalViewsMatch(descriptor, source, target);
-    ComPtr<ID3D11ShaderResourceView> boundInput;
-    ComPtr<ID3D11RenderTargetView> boundTarget;
-    context_->PSGetShaderResources(descriptor.sceneInputSlot, 1, &boundInput);
-    context_->OMGetRenderTargets(1, &boundTarget, nullptr);
-    return (boundInput.Get() == source.shaderResource.Get() ||
-        EquivalentSceneSrv(device_.Get(), source.texture.Get(), boundInput.Get())) &&
-        (boundTarget.Get() == target.renderTarget.Get() ||
-        EquivalentSceneRtv(device_.Get(), target.texture.Get(), boundTarget.Get()));
-}
-
-bool ScenePassRenderer::BoundTemporalViewsMatch(const RenoDxShaderDescriptor& descriptor,
-    const SceneTexture& source, const SceneTexture& target) const noexcept
-{
-    std::array<ID3D11RenderTargetView*, 2> raw{};
-    context_->OMGetRenderTargets(static_cast<UINT>(raw.size()), raw.data(), nullptr);
-    ComPtr<ID3D11RenderTargetView> metadata;
-    ComPtr<ID3D11RenderTargetView> color;
-    metadata.Attach(raw[0]);
-    color.Attach(raw[1]);
-    if (color.Get() != target.renderTarget.Get() &&
-        !EquivalentSceneRtv(device_.Get(), target.texture.Get(), color.Get())) return false;
-    if (!CompatibleMetadataTarget(metadata.Get(), target.texture.Get())) return false;
-    const auto metadataResource = ViewResource(metadata.Get());
-    const auto inputs = TemporalInputs(context_.Get(), descriptor.pass == RenoDxShaderPass::taa ? 4 : 5);
-    if (inputs[0].Get() != source.shaderResource.Get() &&
-        !EquivalentSceneSrv(device_.Get(), source.texture.Get(), inputs[0].Get())) return false;
-    if (!CompatibleHistoryView(inputs[1].Get(), source.texture.Get())) return false;
-    return InputsAvoidTemporalOutputs(inputs, source.texture.Get(),
-        metadataResource.Get(), target.texture.Get());
-}
-
-bool ScenePassRenderer::CanInvoke(FiniteDrawInvocation invocation) const noexcept
-{
-    if (!Active()) return false;
-    if (invoking_) return false;
-    return invocation.draw != nullptr;
-}
-
-SceneDrawOutcome ScenePassRenderer::Invoke(const RenoDxShaderDescriptor* descriptor,
-    SceneTextureHandle input, SceneTextureHandle destination,
-    FiniteDrawInvocation invocation) noexcept
-{
-    DrawScope drawScope{invoking_};
-    const auto replacement = PrepareDrawReplacement(descriptor, input, destination);
-    auto lineage = CaptureLineage(input);
-    lineage.original = QualifyOriginalContinuation(descriptor, input, destination);
-    const auto result = InvokeDraw(replacement, invocation);
-    // Publish only after shader/classes, exposure/operator slots and video b0 are restored.
-    CompleteExposureDraw(result, replacement.tone);
-    ObservePipboyScreenDraw(result.outcome);
-    CompleteLineage(descriptor, destination, result.outcome, lineage);
-    return result.outcome;
-}
-
-ScenePassRenderer::DrawReplacement ScenePassRenderer::PrepareDrawReplacement(
-    const RenoDxShaderDescriptor* descriptor, SceneTextureHandle input,
-    SceneTextureHandle destination) const noexcept
-{
-    DrawReplacement replacement;
-    replacement.shader = QualifiedReplacement(descriptor, input, destination);
-    if (replacement.shader == nullptr) return replacement;
-    if (OperatorPass(descriptor->pass))
-    {
-        replacement.operatorConstants = ConstantsForInput(input);
-        if (replacement.operatorConstants == nullptr) replacement.shader = nullptr;
-    }
-    if (descriptor->pass == RenoDxShaderPass::video)
-        replacement.videoConstants = videoConstants_.Get();
-    replacement.grade = descriptor->pass == RenoDxShaderPass::lut;
-    ConfigureNativeReferenceReplacement(replacement, descriptor->pass);
-    replacement.tone = std::find(tonePasses.begin(), tonePasses.end(), descriptor->pass) != tonePasses.end();
-    PrepareExposureReplacement(replacement, descriptor->pass);
-    return replacement;
-}
-
-void ScenePassRenderer::PrepareExposureReplacement(DrawReplacement& replacement,
-    RenoDxShaderPass pass) const noexcept
-{
-    if (std::find(tonePasses.begin(), tonePasses.end(), pass) == tonePasses.end()) return;
-    if (!frameOpen_ || !exposureResources_.Ready()) return;
-    replacement.capture = exposureLock_.NeedsCapture();
-    replacement.replay = exposureLock_.Active() &&
-        exposureLock_.Generation() == exposureGeneration_;
-}
-
-void ScenePassRenderer::CompleteExposureDraw(const DrawResult& result, bool tone) noexcept
-{
-    if (result.outcome == SceneDrawOutcome::callbackFailed || result.exposureFailed)
-    {
-        ResetExposurePolicy();
-        return;
-    }
-    if (!tone) return;
-    if (result.outcome != SceneDrawOutcome::replaced)
-    {
-        ResetExposurePolicy();
-        return;
-    }
-    if (result.captured) exposureLock_.Capture(frameGeneration_, exposureGeneration_);
-    if (result.replayed) exposureLock_.Observe(frameGeneration_, exposureGeneration_);
-}
-
-ScenePassRenderer::DrawResult ScenePassRenderer::InvokeDraw(DrawReplacement replacement,
-    FiniteDrawInvocation invocation) noexcept
-{
-    ScopedVideoConstants constantsScope{context_.Get(), replacement.videoConstants};
-    ScopedD3D11PixelBindings operatorScope{context_.Get(), replacement.operatorConstants};
-    ScopedDeveloperExposureBindings exposureScope{context_.Get(), replacement.tone};
-    const auto constantsReady = constantsScope.Ready() && operatorScope.Ready();
-    ScopedPixelShader pixelScope{context_.Get(),
-        constantsReady && exposureScope.Ready() ? replacement.shader : nullptr};
-    NativeReferenceSource nativeSource{context_.Get()};
-    DrawResult result;
-    if (pixelScope.Replaced())
-    {
-        const bool prepared = PrepareNativeReferenceDraw(replacement);
-        pixelScope.UseFallbackIfRequired(prepared, replacement.radialFallback);
-        NativeLutObservation profileObservation;
-        auto* profileConstants = PrepareLutProfileConstants(replacement, profileObservation);
-        nativeSource.Bind(NativeReferenceSourceForDraw(replacement, prepared));
-        constantsScope.Bind();
-        operatorScope.Bind(operatorSource_.Get(), operatorSampler_.Get());
-        BindLutProfileConstants(profileConstants, profileObservation);
-        result = PrepareExposureDraw(replacement);
-        exposureScope.Bind(exposureResources_.Selector(result.replayed),
-            result.replayed ? exposureResources_.Snapshot() : nullptr);
-    }
-    try
-    {
-        invocation.draw(context_.Get(), invocation.argument);
-    }
-    catch (...)
-    {
-        result.outcome = SceneDrawOutcome::callbackFailed;
-        return result;
-    }
-    result.outcome = pixelScope.Replaced() ? SceneDrawOutcome::replaced : SceneDrawOutcome::forwarded;
-    return result;
-}
-
-ScenePassRenderer::DrawResult ScenePassRenderer::PrepareExposureDraw(
-    const DrawReplacement& replacement) noexcept
-{
-    DrawResult result;
-    if (replacement.capture)
-    {
-        result.captured = exposureResources_.TryCapture(context_.Get());
-        result.exposureFailed = !result.captured;
-    }
-    if (replacement.replay)
-    {
-        result.replayed = exposureResources_.CanReplay(context_.Get());
-        result.exposureFailed = !result.replayed;
-    }
-    return result;
-}
-
-SceneDrawOutcome ScenePassRenderer::Execute(const RenoDxShaderDescriptor& descriptor,
-    SceneTextureHandle input, SceneTextureHandle destination,
-    FiniteDrawInvocation invocation) noexcept
-{
-    if (!CanInvoke(invocation)) return SceneDrawOutcome::invalidInvocation;
-    return Invoke(&descriptor, input, destination, invocation);
-}
-
-SceneDrawOutcome ScenePassRenderer::ExecuteObserved(SceneTextureHandle input,
-    SceneTextureHandle destination, FiniteDrawInvocation invocation) noexcept
-{
-    if (!CanInvoke(invocation)) return SceneDrawOutcome::invalidInvocation;
-    return Invoke(BoundDescriptor(), input, destination, invocation);
-}
-
-}  // namespace fo4hdr
+} // namespace fo4hdr

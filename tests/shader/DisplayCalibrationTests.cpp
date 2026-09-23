@@ -31,16 +31,19 @@ struct CalibrationConstants
 {
     UINT width{calibrationWidth};
     UINT height{calibrationHeight};
-    float peak{calibrationPeak};
-    UINT domain{1};
-    float white{calibrationWhite};
-    UINT settingsPresent{};
     UINT mode{};
-    UINT reserved{};
+    float white{calibrationWhite};
+    float referenceWhite{203.0F};
+    float peak{calibrationPeak};
+    UINT mattePresent{};
+    UINT hudPresent{};
+    UINT settingsPresent{};
+    std::array<UINT, 3> reserved{};
 };
-static_assert(sizeof(CalibrationConstants) == 32);
-static_assert(offsetof(CalibrationConstants, mode) == 24);
-static_assert(offsetof(CalibrationConstants, reserved) == 28);
+static_assert(sizeof(CalibrationConstants) == 48);
+static_assert(offsetof(CalibrationConstants, mode) == 8);
+static_assert(offsetof(CalibrationConstants, settingsPresent) == 32);
+
 
 D3D11_TEXTURE2D_DESC CalibrationDescription(DXGI_FORMAT format, UINT bindings)
 {
@@ -135,6 +138,7 @@ ComPtr<ID3D11Buffer> CalibrationBuffer(ID3D11Device& device, UINT mode)
     CalibrationConstants constants;
     constants.mode = mode;
     constants.settingsPresent = mode == 11 || mode == 14;
+    constants.mattePresent = constants.hudPresent = mode == 14;
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = sizeof(constants);
     description.Usage = D3D11_USAGE_IMMUTABLE;

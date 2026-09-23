@@ -2,7 +2,7 @@
 
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "config/SettingsPersistence.hpp"
 #include "Fallout4HDR/output/SelectiveColor.hpp"
 #include "reference/SelectiveColorSourceOracle.hpp"
 #include "HdrSettingsTestSupport.hpp"
@@ -119,26 +119,26 @@ void TestSelectiveValidation()
 void TestSelectiveIni()
 {
     const auto old = ParsePluginConfiguration(kOriginal);
-    FO4HDR_CHECK(old.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(old.value.display.selectiveColor == SelectiveColorSettings{});
+    FO4HDR_CHECK(old.valid == true);
+    FO4HDR_CHECK(old.value.selectiveColor == SelectiveColorSettings{});
     const auto original = std::string(kOriginal) + std::string(kSelectiveIni);
     const auto parsed = ParsePluginConfiguration(original);
-    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(parsed.value.display.selectiveColor == ExpectedSelectiveSettings());
+    FO4HDR_CHECK(parsed.valid == true);
+    FO4HDR_CHECK(parsed.value.selectiveColor == ExpectedSelectiveSettings());
     auto changed = parsed.value;
-    changed.display.selectiveColor.regions.back().brightness = 25;
+    changed.selectiveColor.regions.back().brightness = 25;
     FO4HDR_CHECK(changed != parsed.value);
-    const auto rewritten = RewritePluginConfigurationIni(original, changed);
+    const auto rewritten = RewriteHdrSettingsIni(original, changed);
     FO4HDR_CHECK(rewritten.find("Untouched = yes") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("peak comment") != std::string::npos);
     const auto roundTrip = ParsePluginConfiguration(rewritten);
-    FO4HDR_CHECK(roundTrip.status == PluginConfigurationStatus::loaded);
+    FO4HDR_CHECK(roundTrip.valid == true);
     FO4HDR_CHECK(roundTrip.value == changed);
-    FO4HDR_CHECK(ParsePluginConfiguration(original + "Enabled=0\n").status == PluginConfigurationStatus::invalid);
+    FO4HDR_CHECK(ParsePluginConfiguration(original + "Enabled=0\n").valid == false);
     FO4HDR_CHECK(ParsePluginConfiguration(std::string(kOriginal) +
-        "[SelectiveColor]\nEnabled=true\n").status == PluginConfigurationStatus::invalid);
+        "[SelectiveColor]\nEnabled=true\n").valid == false);
     FO4HDR_CHECK(ParsePluginConfiguration(std::string(kOriginal) +
-        "[SelectiveColor]\nEnabled=0\nMagentaBrightness=100.01\n").status == PluginConfigurationStatus::invalid);
+        "[SelectiveColor]\nEnabled=0\nMagentaBrightness=100.01\n").valid == false);
 }
 
 }  // namespace

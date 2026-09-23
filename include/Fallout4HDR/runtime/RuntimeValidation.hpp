@@ -1,24 +1,39 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <array>
-#include <cstdint>
+#include <string_view>
 
 namespace fo4hdr {
 
-using RuntimeVersion = std::array<std::uint16_t, 4>;
-
 struct RuntimeIdentity
 {
-    RuntimeVersion runtimeVersion{};
-    RuntimeVersion f4seVersion{};
+    std::string_view runtimeVersion;
+    std::string_view executableSha256;
+    std::string_view f4seVersion;
+    std::string_view f4seLoaderSha256;
+    std::string_view f4seRuntimeSha256;
+    std::string_view addressLibraryFile;
+    std::string_view addressLibrarySha256;
+    std::string_view manifestSha256;
 };
 
 enum class RuntimeValidationReason
 {
     Valid,
+    ProfileUninitialized,
     RuntimeVersionMismatch,
-    F4seVersionMismatch
+    ExecutableUnavailable,
+    ExecutableHashMismatch,
+    F4seVersionMismatch,
+    F4seLoaderUnavailable,
+    F4seLoaderHashMismatch,
+    F4seRuntimeUnavailable,
+    F4seRuntimeHashMismatch,
+    AddressLibraryFileMismatch,
+    AddressLibraryUnavailable,
+    AddressLibraryHashMismatch,
+    ManifestUnavailable,
+    ManifestHashMismatch
 };
 
 struct RuntimeValidationResult
@@ -27,7 +42,41 @@ struct RuntimeValidationResult
     RuntimeValidationReason reason;
 };
 
+enum class RuntimeAction
+{
+    MilestoneValidation,
+    ReleasePackaging
+};
+
+enum class RuntimeActionReason
+{
+    Allowed,
+    UnknownStatus,
+    UnknownAction,
+    StatusNotAuthorized
+};
+
+struct RuntimeActionResult
+{
+    bool allowed;
+    RuntimeActionReason reason;
+};
+
 [[nodiscard]] RuntimeValidationResult ValidateRuntimeIdentity(
+    const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept;
+
+[[nodiscard]] std::string_view ToString(
+    RuntimeValidationReason reason) noexcept;
+
+[[nodiscard]] RuntimeActionResult ValidateRuntimeAction(
+    std::string_view status,
+    RuntimeAction action) noexcept;
+
+[[nodiscard]] std::string_view ToString(
+    RuntimeAction action) noexcept;
+
+[[nodiscard]] std::string_view ToString(
+    RuntimeActionReason reason) noexcept;
 
 }  // namespace fo4hdr

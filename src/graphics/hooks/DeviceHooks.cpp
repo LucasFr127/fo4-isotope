@@ -1,1070 +1,1062 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Carlos Lopez Jr.
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
+//
+// Fallout 4 shader identities and tone/LUT seams use the pinned RenoDX facts.
+// The exact-backbuffer FP16 proxy and UI-relative transport adapt
+// clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/
+// src/games/fallout4/addon.cpp and src/mods/swapchain_v2.hpp.
+// RenoDX material retains its MIT permission in THIRD_PARTY_NOTICES.md.
+// Native hooks, generation ownership, settings, grading integration and direct
+// display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "DeviceHooks.hpp"
+
 #include "HookRecords.hpp"
-#include "NativeImageSlots.hpp"
+#include "ContextHooks.hpp"
 #include "SwapChainHooks.hpp"
-#include "../resources/NativeSceneAssociation.hpp"
+#include "../DisplayDiscovery.hpp"
+#include "../resources/ReplacementShaders.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "Fallout4HDR/hooks/PeIat.hpp"
+#include "../GraphicsDiagnostics.hpp"
+#include "../LiveSettings.hpp"
+#include "../RendererLifetime.hpp"
+#include "../ShaderRegistry.hpp"
+#include "../resources/HdrResourcePolicy.hpp"
+#include "../resources/PresentationResources.hpp"
 
-#include <d3d11_4.h>
-#include <dxgi1_6.h>
 #include <wrl/client.h>
-
+#include <Windows.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdint>
 #include <cstring>
-#include <memory>
 #include <span>
-#include <string_view>
 #include <type_traits>
 
 namespace fo4hdr {
 
-std::atomic<DeviceHookRecord*> g_deviceHooks{};
-std::atomic<ContextHookRecord*> g_contextHooks{};
-std::atomic<SwapChainHookRecord*> g_swapChainHooks{};
+using Microsoft::WRL::ComPtr;
+
+std::array<DeviceRecord, kMaximumHookObjects> g_devices{};
+std::array<ContextRecord, kMaximumHookObjects> g_contexts{};
+std::array<SwapChainRecord, kMaximumHookObjects> g_swapChains{};
+std::atomic_flag g_installLock = ATOMIC_FLAG_INIT;
+std::atomic<std::uint64_t> g_objectGeneration{};
+
+template <class Record, std::size_t Count>
+[[nodiscard]] Record* FindRecord(
+    std::array<Record, Count>& records, void* object) noexcept
+{
+    for (auto& record : records)
+        if (record.identity.Matches(object)) return &record;
+    return nullptr;
+}
+
+[[nodiscard]] DeviceRecord* FindDevice(ID3D11Device* device) noexcept
+{
+    return FindRecord(g_devices, device);
+}
+
+[[nodiscard]] ContextRecord* FindContext(
+    ID3D11DeviceContext* context) noexcept
+{
+    return FindRecord(g_contexts, context);
+}
+
+[[nodiscard]] SwapChainRecord* FindSwapChain(
+    IDXGISwapChain* swapChain) noexcept
+{
+    return FindRecord(g_swapChains, swapChain);
+}
+
+DrawObservation* FindDrawObservation(ID3D11DeviceContext* context) noexcept
+{
+    return FindContext(context);
+}
+
+RenderTargetSetter OriginalRenderTargetSetter(ID3D11DeviceContext* context) noexcept
+{
+    const auto* record = FindContext(context);
+    return record ? record->nextOmSetRenderTargets : nullptr;
+}
+
+bool HasOriginalPixelShaderSetter(ID3D11DeviceContext* context) noexcept
+{
+    const auto* record = FindContext(context);
+    return record && record->nextPsSetShader;
+}
+
+void BindOriginalPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader) noexcept
+{
+    const auto* record = FindContext(context);
+    if (record && record->nextPsSetShader)
+        record->nextPsSetShader(context, shader, nullptr, 0);
+}
+
+static bool QueryCommittedRegion(const void* address, MEMORY_BASIC_INFORMATION& info) noexcept
+{
+    return VirtualQuery(address, &info, sizeof(info)) == sizeof(info) && info.State == MEM_COMMIT;
+}
+
+static bool RegionAccessible(const MEMORY_BASIC_INFORMATION& info) noexcept
+{
+    return (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0;
+}
+static bool QueryAccessibleRegion(const void* address, MEMORY_BASIC_INFORMATION& info) noexcept
+{
+    return QueryCommittedRegion(address, info) && RegionAccessible(info);
+}
+
+static bool RegionContains(const MEMORY_BASIC_INFORMATION& info, const void* address, std::size_t bytes) noexcept
+{
+    const auto begin = reinterpret_cast<std::uintptr_t>(address);
+    const auto region = reinterpret_cast<std::uintptr_t>(info.BaseAddress);
+    return begin >= region && begin - region <= info.RegionSize &&
+        bytes <= info.RegionSize - (begin - region);
+}
+[[nodiscard]] bool IsReadable(const void* address, std::size_t bytes) noexcept
+{
+    if (address == nullptr || bytes == 0) return false;
+    MEMORY_BASIC_INFORMATION info{};
+    if (!QueryAccessibleRegion(address, info))
+        return false;
+    return RegionContains(info, address, bytes);
+}
+
+[[nodiscard]] static bool IsCommittedAccessible(
+    const void* address, std::size_t bytes) noexcept
+{
+    auto current = reinterpret_cast<std::uintptr_t>(address);
+    const auto end = current + bytes;
+    if (end < current) return false;
+    while (current < end)
+    {
+        MEMORY_BASIC_INFORMATION info{};
+        if (!QueryAccessibleRegion(reinterpret_cast<const void*>(current), info))
+            return false;
+        const auto regionEnd =
+            reinterpret_cast<std::uintptr_t>(info.BaseAddress) +
+            info.RegionSize;
+        if (regionEnd <= current) return false;
+        current = regionEnd;
+    }
+    return true;
+}
+
+[[nodiscard]] bool IsExecutableAddress(const void* address) noexcept
+{
+    if (address == nullptr) return false;
+    MEMORY_BASIC_INFORMATION info{};
+    if (!QueryAccessibleRegion(address, info))
+        return false;
+    constexpr std::array<DWORD, 4> executableProtections{
+        PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY};
+    return std::ranges::find(executableProtections, info.Protect & 0xFFu) != executableProtections.end();
+}
+
+static bool CallableVtableSlot(void* const* slot) noexcept
+{
+    return IsReadable(slot, sizeof(void*)) && IsExecutableAddress(*slot);
+}
+// Preserve the complete contiguous callable tail exposed by the concrete
+// driver object; a fixed public-interface length can truncate vendor-private
+// entries and dispatch through a null slot.
+[[nodiscard]] std::size_t DiscoverVtableSlots(
+    void* const* table, std::size_t minimum) noexcept
+{
+    if (table == nullptr) return 0;
+    std::size_t count{};
+    for (; count < kMaximumVtableSlots; ++count)
+    {
+        if (!CallableVtableSlot(table + count))
+            break;
+    }
+    if (count == kMaximumVtableSlots &&
+        CallableVtableSlot(table + count))
+        return 0;
+    return count >= minimum ? count : 0;
+}
+
+[[nodiscard]] bool ObjectCompareExchange(
+    void** slot, void* expected, void* value) noexcept
+{
+    if (slot == nullptr) return false;
+    std::atomic_ref<void*> atomic(*slot);
+    return atomic.compare_exchange_strong(
+        expected, value, std::memory_order_acq_rel);
+}
+
+[[nodiscard]] bool ProtectedCompareExchange(
+    void** slot, void* expected, void* value) noexcept
+{
+    if (slot == nullptr) return false;
+    DWORD originalProtection{};
+    if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE,
+            &originalProtection))
+        return false;
+    std::atomic_ref<void*> atomic(*slot);
+    const auto exchanged = atomic.compare_exchange_strong(
+        expected, value, std::memory_order_acq_rel);
+    DWORD ignored{};
+    if (VirtualProtect(slot, sizeof(void*), originalProtection, &ignored))
+        return exchanged;
+
+    g_evidence.protectionRestoreFailureCount.fetch_add(
+        1, std::memory_order_relaxed);
+    RecordFailure(GraphicsObservationFailure::protectionRestoreFailed);
+    if (exchanged)
+    {
+        auto installed = value;
+        (void)atomic.compare_exchange_strong(
+            installed, expected, std::memory_order_acq_rel);
+    }
+    (void)VirtualProtect(slot, sizeof(void*), originalProtection, &ignored);
+    return false;
+}
+
+struct MainImageHeaders
+{
+    std::span<std::byte> first;
+
+    template <class Value>
+    bool Read(std::size_t offset, Value& value) const noexcept
+    {
+        if (offset > first.size() || first.size() - offset < sizeof(value)) return false;
+        std::memcpy(&value, first.data() + offset, sizeof(value));
+        return true;
+    }
+
+    bool ReadNtOffset(std::uint32_t& nt) const noexcept
+    {
+        std::uint16_t dos{};
+        std::uint32_t signature{};
+        return Read(0, dos) && dos == 0x5A4D && Read(0x3C, nt) &&
+            Read(nt, signature) && signature == 0x4550;
+    }
+
+    bool ReadImageSize(std::uint32_t nt, std::uint32_t& imageSize) const noexcept
+    {
+        std::uint16_t optionalSize{};
+        return Read(nt + 20, optionalSize) && optionalSize >= 64 &&
+            Read(nt + 24 + 56, imageSize) && imageSize >= 4096 &&
+            imageSize <= 0x80000000u;
+    }
+};
+
+static bool MainImageRegionReady(const void* base, MEMORY_BASIC_INFORMATION& info) noexcept
+{
+    return QueryCommittedRegion(base, info) && info.RegionSize >= 0x1000 && RegionAccessible(info);
+}
+
+[[nodiscard]] std::span<std::byte> MainImage() noexcept
+{
+    const auto module = GetModuleHandleW(nullptr);
+    if (module == nullptr) return {};
+    auto* base = reinterpret_cast<std::byte*>(module);
+    MEMORY_BASIC_INFORMATION info{};
+    if (!MainImageRegionReady(base, info)) return {};
+    const MainImageHeaders headers{std::span<std::byte>(base, info.RegionSize)};
+    std::uint32_t nt{};
+    std::uint32_t imageSize{};
+    if (!headers.ReadNtOffset(nt)) return {};
+    if (!headers.ReadImageSize(nt, imageSize)) return {};
+    if (!IsCommittedAccessible(base, imageSize)) return {};
+    return {base, imageSize};
+}
 
 namespace {
-
-using Microsoft::WRL::ComPtr;
-constexpr std::array<std::size_t, 5> deviceSlots{5, 7, 8, 9, 15};
-constexpr std::array<std::size_t, 10> contextSlots{9, 12, 13, 20, 21, 27, 28, 33, 34, 58};
-constexpr std::array<std::size_t, 2> chainSlots{8, 13};
-constexpr std::size_t maximumFileBytes = 64 * 1024 * 1024;
-DeviceHookRecord residentDevice;
-SwapChainHookRecord residentChain;
-alignas(ContextHookRecord) std::array<std::byte, sizeof(ContextHookRecord)> residentContextStorage;
-std::atomic_flag residentClaim = ATOMIC_FLAG_INIT;
-
-class ImageFile
-{
-public:
-    ImageFile() noexcept = default;
-    ~ImageFile() noexcept
-    {
-        if (data_ != nullptr) UnmapViewOfFile(data_);
-        if (mapping_ != nullptr) CloseHandle(mapping_);
-        if (file_ != INVALID_HANDLE_VALUE) CloseHandle(file_);
-    }
-    ImageFile(const ImageFile&) = delete;
-    ImageFile& operator=(const ImageFile&) = delete;
-
-    bool Open(const wchar_t* path) noexcept
-    {
-        file_ = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
-            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file_ == INVALID_HANDLE_VALUE) return false;
-        LARGE_INTEGER size{};
-        if (!GetFileSizeEx(file_, &size)) return false;
-        if (size.QuadPart <= 0 || size.QuadPart > maximumFileBytes) return false;
-        bytes_ = static_cast<std::size_t>(size.QuadPart);
-        mapping_ = CreateFileMappingW(file_, nullptr, PAGE_READONLY, 0, 0, nullptr);
-        if (mapping_ == nullptr) return false;
-        data_ = static_cast<const std::byte*>(MapViewOfFile(mapping_, FILE_MAP_READ, 0, 0, bytes_));
-        return data_ != nullptr;
-    }
-
-    [[nodiscard]] std::span<const std::byte> Bytes() const noexcept { return {data_, bytes_}; }
-
-private:
-    HANDLE file_{INVALID_HANDLE_VALUE};
-    HANDLE mapping_{};
-    const std::byte* data_{};
-    std::size_t bytes_{};
-};
-
-bool ImageRange(const void* address, std::size_t bytes, HMODULE module) noexcept
-{
-    MEMORY_BASIC_INFORMATION page{};
-    if (VirtualQuery(address, &page, sizeof(page)) != sizeof(page)) return false;
-    if (page.State != MEM_COMMIT || page.Type != MEM_IMAGE) return false;
-    if (page.AllocationBase != module || (page.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0) return false;
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    const auto base = reinterpret_cast<std::uintptr_t>(page.BaseAddress);
-    if (start < base || start - base > page.RegionSize) return false;
-    return bytes <= page.RegionSize - (start - base);
+PointerHookOwnership g_d3dIat;
+PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN g_nextD3d{};
 }
 
-bool DataSlot(void** slot, HMODULE module) noexcept
+template <class Record, std::size_t Count>
+[[nodiscard]] Record* AllocateRecord(
+    std::array<Record, Count>& records) noexcept
 {
-    if (reinterpret_cast<std::uintptr_t>(slot) % std::atomic_ref<void*>::required_alignment != 0)
+    for (auto& record : records)
+        if (record.identity.Object() == nullptr) return &record;
+    return nullptr;
+}
+
+[[nodiscard]] bool ValidateNext(void* next, void* hook) noexcept
+{
+    return next != nullptr && next != hook && IsExecutableAddress(next);
+}
+
+template <class Object, class Record>
+[[nodiscard]] bool PublishObjectShadow(Object* object, Record& record, void** current) noexcept
+{
+    const auto generation = g_objectGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
+    if constexpr (std::is_same_v<Record, ContextRecord>) record.generation = generation;
+    if (!record.identity.Publish(object, generation)) return false;
+    if (!ObjectCompareExchange(reinterpret_cast<void**>(object), current, record.shadow.data()))
+    {
+        (void)record.identity.Retire(object, generation);
         return false;
-    if (!ImageRange(slot, sizeof(void*), module)) return false;
-    MEMORY_BASIC_INFORMATION page{};
-    if (VirtualQuery(slot, &page, sizeof(page)) != sizeof(page)) return false;
-    constexpr std::array<DWORD, 3> readable{PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY};
-    return std::find(readable.begin(), readable.end(), page.Protect & 0xFF) != readable.end();
-}
-
-bool SystemImagePath(HMODULE module, std::wstring_view filename,
-    std::array<wchar_t, 32768>& path) noexcept
-{
-    const auto loaded = GetModuleFileNameW(module, path.data(), static_cast<DWORD>(path.size()));
-    if (loaded == 0 || loaded >= path.size()) return false;
-    std::array<wchar_t, 32768> expected{};
-    const auto directory = GetSystemDirectoryW(expected.data(), static_cast<UINT>(expected.size()));
-    if (directory == 0 || directory + filename.size() + 2 > expected.size()) return false;
-    expected[directory] = L'\\';
-    std::copy(filename.begin(), filename.end(), expected.begin() + directory + 1);
-    return CompareStringOrdinal(path.data(), -1, expected.data(), -1, TRUE) == CSTR_EQUAL;
-}
-
-bool ReadableImageRange(const void* address, std::size_t bytes, HMODULE module) noexcept
-{
-    if (!ImageRange(address, bytes, module)) return false;
-    MEMORY_BASIC_INFORMATION page{};
-    if (VirtualQuery(address, &page, sizeof(page)) != sizeof(page)) return false;
-    constexpr std::array<DWORD, 6> readable{PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
-        PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY};
-    return std::find(readable.begin(), readable.end(), page.Protect & 0xFF) != readable.end();
-}
-
-bool LoadedHeaderMatches(HMODULE module, const NativeImageSlots& disk) noexcept
-{
-    const auto headers = disk.HeaderBytes();
-    if (headers.empty()) return false;
-    if (!ReadableImageRange(module, headers.size(), module)) return false;
-    // This intentionally refuses loader-modified headers instead of guessing layout.
-    return std::memcmp(module, headers.data(), headers.size()) == 0;
-}
-
-bool PinCode(void* address, HMODULE expected = nullptr) noexcept
-{
-    HMODULE pinned{};
-    const auto flags = GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN;
-    if (!GetModuleHandleExW(flags, reinterpret_cast<LPCWSTR>(address), &pinned)) return false;
-    return expected == nullptr || pinned == expected;
-}
-
-class NativeSlotProof
-{
-public:
-    bool Prepare(void* creationNext) noexcept
-    {
-        module_ = GetModuleHandleW(L"d3d11.dll");
-        if (module_ == nullptr) return false;
-        if (creationNext != reinterpret_cast<void*>(GetProcAddress(module_, "D3D11CreateDeviceAndSwapChain")))
-            return false;
-        if (!PrepareImage(L"d3d11.dll")) return false;
-        if (!ImageRange(creationNext, 1, module_)) return false;
-        if (!IsExecutableHookTarget(creationNext)) return false;
-        if (!PinCode(creationNext, module_)) return false;
-        return PinCode(reinterpret_cast<void*>(&HookBegin));
     }
-
-    bool PrepareChain() noexcept
-    {
-        module_ = GetModuleHandleW(L"dxgi.dll");
-        if (module_ == nullptr) return false;
-        if (!PrepareImage(L"dxgi.dll")) return false;
-        return PinCode(reinterpret_cast<void*>(module_), module_);
-    }
-
-    bool PrepareImage(std::wstring_view filename) noexcept
-    {
-        std::array<wchar_t, 32768> path{};
-        if (!SystemImagePath(module_, filename, path)) return false;
-        if (!file_.Open(path.data())) return false;
-        if (!disk_.Parse(file_.Bytes())) return false;
-        return LoadedHeaderMatches(module_, disk_);
-    }
-
-    void* Expected(void** slot) const noexcept
-    {
-        if (!DataSlot(slot, module_)) return nullptr;
-        const auto base = reinterpret_cast<std::uintptr_t>(module_);
-        const auto address = reinterpret_cast<std::uintptr_t>(slot);
-        if (address < base || address - base >= disk_.Header().OptionalHeader.SizeOfImage) return nullptr;
-        const auto expected = disk_.Expected(base, static_cast<std::uint32_t>(address - base));
-        if (expected == nullptr) return nullptr;
-        if (!ImageRange(expected, 1, module_)) return nullptr;
-        if (!IsExecutableHookTarget(expected)) return nullptr;
-        return AtomicPointerLoad(slot) == expected ? expected : nullptr;
-    }
-
-private:
-    HMODULE module_{};
-    ImageFile file_;
-    NativeImageSlots disk_;
-};
-
-template <class Alias, class Base>
-bool SameSdkAlias(Base* object) noexcept
-{
-    ComPtr<Alias> alias;
-    const auto result = object->QueryInterface(IID_PPV_ARGS(&alias));
-    if (result == E_NOINTERFACE) return true;
-    if (result != S_OK || !alias) return false;
-    if (reinterpret_cast<void*>(alias.Get()) != reinterpret_cast<void*>(object)) return false;
-    return *reinterpret_cast<void***>(alias.Get()) == *reinterpret_cast<void***>(object);
+    return true;
 }
 
-template <class... Aliases, class Base>
-bool SameSdkAliases(Base* object) noexcept
+[[nodiscard]] bool ValidateShadowPredecessors(void** current, std::span<const VtablePatch> patches) noexcept
 {
-    return (SameSdkAlias<Aliases>(object) && ...);
-}
-
-bool AdmittedAliases(const CreatedDeviceBinding& created) noexcept
-{
-    return SameSdkAliases<ID3D11Device1, ID3D11Device2, ID3D11Device3,
-        ID3D11Device4, ID3D11Device5>(created.device) &&
-        SameSdkAliases<ID3D11DeviceContext1, ID3D11DeviceContext2,
-            ID3D11DeviceContext3, ID3D11DeviceContext4>(created.context);
-}
-
-bool AdmittedChain(const CreatedDeviceBinding& created, DXGI_SWAP_CHAIN_DESC& description) noexcept
-{
-    if (created.swapChain == nullptr) return false;
-    if (!SameSdkAliases<IDXGISwapChain1, IDXGISwapChain2, IDXGISwapChain3,
-            IDXGISwapChain4>(created.swapChain)) return false;
-    if (FAILED(created.swapChain->GetDesc(&description))) return false;
-    DWORD process{};
-    const auto thread = GetWindowThreadProcessId(description.OutputWindow, &process);
-    if (thread != GetCurrentThreadId() || process != GetCurrentProcessId()) return false;
-    return IsWindow(description.OutputWindow) && description.BufferDesc.Width != 0 &&
-        description.BufferDesc.Height != 0;
+    for (const auto& patch : patches)
+        if (!ValidateNext(current[patch.index], patch.replacement)) return false;
+    return true;
 }
 
 template <std::size_t Count>
-bool CaptureOriginals(NativeSlotProof& proof, void** table,
-    const std::array<std::size_t, Count>& slots, std::array<void*, Count>& originals) noexcept
-{
-    for (std::size_t index = 0; index < slots.size(); ++index)
-    {
-        originals[index] = proof.Expected(table + slots[index]);
-        if (originals[index] == nullptr) return false;
-    }
-    return true;
-}
-
-void PublishDeviceNexts(const std::array<void*, 5>& originals) noexcept
-{
-    residentDevice.nextCreateTexture2D = reinterpret_cast<CreateTexture2D>(originals[0]);
-    residentDevice.nextCreateSrv = reinterpret_cast<CreateShaderResourceView>(originals[1]);
-    residentDevice.nextCreateUav = reinterpret_cast<CreateUnorderedAccessView>(originals[2]);
-    residentDevice.nextCreateRtv = reinterpret_cast<CreateRenderTargetView>(originals[3]);
-    residentDevice.nextCreatePixelShader = reinterpret_cast<CreatePixelShader>(originals[4]);
-}
-
-void PublishContextNexts(ContextHookRecord& record, const std::array<void*, 10>& originals) noexcept
-{
-    record.nextPsSetShader = reinterpret_cast<PsSetShader>(originals[0]);
-    record.nextDrawIndexed = reinterpret_cast<DrawIndexed>(originals[1]);
-    record.nextDraw = reinterpret_cast<Draw>(originals[2]);
-    record.nextDrawIndexedInstanced = reinterpret_cast<DrawIndexedInstanced>(originals[3]);
-    record.nextDrawInstanced = reinterpret_cast<DrawInstanced>(originals[4]);
-    record.nextBegin = reinterpret_cast<ContextQueryCall>(originals[5]);
-    record.nextEnd = reinterpret_cast<ContextQueryCall>(originals[6]);
-    record.nextOmSetRenderTargets = reinterpret_cast<OmSetRenderTargets>(originals[7]);
-    record.nextOmSetRenderTargetsAndUavs = reinterpret_cast<OmSetRenderTargetsAndUavs>(originals[8]);
-    record.nextExecuteCommandList = reinterpret_cast<ContextCommandListCall>(originals[9]);
-}
-
-template <auto Next>
-bool PublishDeviceOriginal(void* next) noexcept
-{
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    return next == reinterpret_cast<void*>(record->*Next);
-}
-
-template <auto Next>
-bool PublishContextOriginal(void* next) noexcept
-{
-    const auto* record = g_contextHooks.load(std::memory_order_acquire);
-    return next == reinterpret_cast<void*>(record->*Next);
-}
-
-template <auto Next>
-bool PublishChainOriginal(void* next) noexcept
-{
-    const auto* record = g_swapChainHooks.load(std::memory_order_acquire);
-    return next == reinterpret_cast<void*>(record->*Next);
-}
-
-struct SlotPatch
-{
-    std::size_t index;
-    void* replacement;
-    HookNextPublisher publish;
-};
-
-const std::array devicePatches{
-    SlotPatch{5, reinterpret_cast<void*>(&HookCreateTexture2D), PublishDeviceOriginal<&DeviceHookRecord::nextCreateTexture2D>},
-    SlotPatch{7, reinterpret_cast<void*>(&HookCreateSrv), PublishDeviceOriginal<&DeviceHookRecord::nextCreateSrv>},
-    SlotPatch{8, reinterpret_cast<void*>(&HookCreateUav), PublishDeviceOriginal<&DeviceHookRecord::nextCreateUav>},
-    SlotPatch{9, reinterpret_cast<void*>(&HookCreateRtv), PublishDeviceOriginal<&DeviceHookRecord::nextCreateRtv>},
-    SlotPatch{15, reinterpret_cast<void*>(&HookCreatePixelShader), PublishDeviceOriginal<&DeviceHookRecord::nextCreatePixelShader>}};
-const std::array contextPatches{
-    SlotPatch{9, reinterpret_cast<void*>(&HookPsSetShader), PublishContextOriginal<&ContextHookRecord::nextPsSetShader>},
-    SlotPatch{12, reinterpret_cast<void*>(&HookDrawIndexed), PublishContextOriginal<&ContextHookRecord::nextDrawIndexed>},
-    SlotPatch{13, reinterpret_cast<void*>(&HookDraw), PublishContextOriginal<&ContextHookRecord::nextDraw>},
-    SlotPatch{20, reinterpret_cast<void*>(&HookDrawIndexedInstanced), PublishContextOriginal<&ContextHookRecord::nextDrawIndexedInstanced>},
-    SlotPatch{21, reinterpret_cast<void*>(&HookDrawInstanced), PublishContextOriginal<&ContextHookRecord::nextDrawInstanced>},
-    SlotPatch{27, reinterpret_cast<void*>(&HookBegin), PublishContextOriginal<&ContextHookRecord::nextBegin>},
-    SlotPatch{28, reinterpret_cast<void*>(&HookEnd), PublishContextOriginal<&ContextHookRecord::nextEnd>},
-    SlotPatch{33, reinterpret_cast<void*>(&HookOmSetRenderTargets), PublishContextOriginal<&ContextHookRecord::nextOmSetRenderTargets>},
-    SlotPatch{34, reinterpret_cast<void*>(&HookOmSetRenderTargetsAndUavs), PublishContextOriginal<&ContextHookRecord::nextOmSetRenderTargetsAndUavs>},
-    SlotPatch{58, reinterpret_cast<void*>(&HookExecuteCommandList), PublishContextOriginal<&ContextHookRecord::nextExecuteCommandList>}};
-const std::array chainPatches{
-    SlotPatch{8, reinterpret_cast<void*>(&HookPresent), PublishChainOriginal<&SwapChainHookRecord::nextPresent>},
-    SlotPatch{13, reinterpret_cast<void*>(&HookResizeBuffers), PublishChainOriginal<&SwapChainHookRecord::nextResize>}};
-
-template <class Record, std::size_t Count>
-bool CaptureSlotProtection(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
+[[nodiscard]] bool ValidateCapturedPredecessors(const std::array<void*, Count>& captured,
+    const std::array<VtablePatch, Count>& patches) noexcept
 {
     for (std::size_t index = 0; index < Count; ++index)
-    {
-        MEMORY_BASIC_INFORMATION page{};
-        if (VirtualQuery(record.table + patches[index].index, &page, sizeof(page)) != sizeof(page)) return false;
-        record.slotProtection[index] = page.Protect;
-    }
+        if (!ValidateNext(captured[index], patches[index].replacement)) return false;
     return true;
 }
-
-template <class Record, std::size_t Count>
-bool InstallSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
+[[nodiscard]] bool PrepareDeviceRecord(DeviceRecord* record,
+    void** current, std::size_t slots) noexcept
 {
-    const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
-    for (std::size_t index = 0; index < patches.size(); ++index)
-    {
-        if (record.table[patches[index].index] != record.originals[index]) return false;
-        if (!record.owners[index].Install(record.table + patches[index].index,
-                patches[index].replacement, writer, patches[index].publish)) return false;
-    }
-    return true;
+    const std::array patches{
+        VtablePatch{kRelease,
+            reinterpret_cast<void*>(&HookDeviceRelease)},
+        VtablePatch{kDeviceCreateTexture2D,
+            reinterpret_cast<void*>(&HookCreateTexture2D)},
+        VtablePatch{kDeviceCreateSrv,
+            reinterpret_cast<void*>(&HookCreateSrv)},
+        VtablePatch{kDeviceCreateUav,
+            reinterpret_cast<void*>(&HookCreateUav)},
+        VtablePatch{kDeviceCreateRtv,
+            reinterpret_cast<void*>(&HookCreateRtv)},
+        VtablePatch{kDeviceCreatePixelShader,
+            reinterpret_cast<void*>(&HookCreatePixelShader)}};
+    if (!PrepareShadowVtable(
+            std::span<void* const>(current, slots),
+            std::span<void*>(record->shadow.data(), slots), patches))
+        return false;
+    record->originalVtable = current;
+    record->nextRelease =
+        reinterpret_cast<DeviceRelease>(current[kRelease]);
+    record->nextCreateTexture2D =
+        reinterpret_cast<CreateTexture2D>(current[kDeviceCreateTexture2D]);
+    record->nextCreateSrv = reinterpret_cast<CreateShaderResourceView>(
+        current[kDeviceCreateSrv]);
+    record->nextCreateUav = reinterpret_cast<CreateUnorderedAccessView>(
+        current[kDeviceCreateUav]);
+    record->nextCreateRtv = reinterpret_cast<CreateRenderTargetView>(
+        current[kDeviceCreateRtv]);
+    record->nextCreatePixelShader = reinterpret_cast<CreatePixelShader>(
+        current[kDeviceCreatePixelShader]);
+    const std::array captured{
+        reinterpret_cast<void*>(record->nextRelease),
+        reinterpret_cast<void*>(record->nextCreateTexture2D),
+        reinterpret_cast<void*>(record->nextCreateSrv),
+        reinterpret_cast<void*>(record->nextCreateUav),
+        reinterpret_cast<void*>(record->nextCreateRtv),
+        reinterpret_cast<void*>(record->nextCreatePixelShader)};
+    return ValidateCapturedPredecessors(captured, patches);
 }
 
-template <class Record, std::size_t Count>
-void RollbackSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
+[[nodiscard]] bool InstallDeviceShadow(ID3D11Device* device) noexcept
 {
-    const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
-    for (std::size_t index = patches.size(); index != 0; --index)
-    {
-        auto& owner = record.owners[index - 1];
-        if (owner.State() == HookOwnershipState::owned) static_cast<void>(owner.Remove(writer));
-        else if (owner.State() == HookOwnershipState::passive)
-            static_cast<void>(writer(record.table + patches[index - 1].index,
-                patches[index - 1].replacement, owner.Next()));
-    }
-}
-
-bool QualifiedSettingsStartup(const NativeSettingsStartup& startup) noexcept
-{
-    const auto& value = startup.configuration.settings;
-    if (!ValidatePluginConfiguration(value)) return false;
-    if (value.developerHdr10Reference) return true;
-    if (!startup.prepared) return false;
-    const auto& result = *startup.prepared;
-    if (result.request.algorithm != value.algorithm ||
-        result.request.displayPeakNits != value.display.displayPeakNits) return false;
-    return ActiveToneMapperParameters(value.algorithm, value.display.toneMapperParameters) ==
-        ActiveToneMapperParameters(result.request.algorithm, result.request.parameters) &&
-        PreparedOperatorLutMatches(result.data, result.request);
-}
-
-ScenePassConfiguration InitialSceneConfiguration(const DXGI_SWAP_CHAIN_DESC& description,
-    const NativeSettingsStartup* startup) noexcept
-{
-    ScenePassConfiguration configuration{description.BufferDesc.Width, description.BufferDesc.Height};
-    if (startup == nullptr) return configuration;
-    const auto& settings = startup->configuration.settings;
-    const auto& display = settings.display;
-    if (settings.developerHdr10Reference) return configuration;
-    configuration.whites = {static_cast<float>(display.uiPaperWhiteNits),
-        static_cast<float>(display.videoWhiteNits)};
-    configuration.operatorLut = &startup->prepared->data;
-    configuration.sceneGrade = {static_cast<float>(display.vanillaColorGradingStrengthPercent / 100.0),
-        DeriveHdrSettingsMath(display), display.colorGradingMethod, display.selectiveColor,
-        display.lutGradeProfiles};
-    return configuration;
-}
-
-bool PrepareHdrOutput(const CreatedDeviceBinding& created,
-    ScenePassConfiguration configuration, const NativeSettingsStartup& startup) noexcept
-{
-    if (FAILED(ActiveNativeOwner().renderer.AdoptPresentationScene(ActiveNativeOwner().presentationProxy, ActiveNativeOwner().presentationScene))) return false;
-    PresentationConfiguration output{configuration.width, configuration.height,
-        static_cast<float>(startup.configuration.settings.display.displayPeakNits), &ActiveNativeOwner().renderer,
-        configuration.whites, ActiveNativeOwner().settingsHost.Window()};
-    output.measurePerformance = ReadNativePerformanceProjection().requested;
-    if (!ActiveNativeOwner().presentation.Initialize(created.device, created.context, output)) return false;
-    if (FAILED(ActiveNativeOwner().presentation.PrepareNativeChain(created.swapChain))) return false;
-    ActiveNativeOwner().hdrPrepared = true;
-    return true;
-}
-
-bool PrepareNativeLayerResources(const CreatedDeviceBinding& created,
-    ScenePassConfiguration configuration, const NativeSettingsStartup* startup) noexcept
-{
-    const bool ui = ActiveNativeOwner().uiCapture.Initialize(created.device, created.context, configuration,
-        startup != nullptr && startup->configuration.settings.developerHdr10Reference);
-    const bool proxy = ActiveNativeOwner().presentationProxy.Prepare(created.device, created.context, created.swapChain);
-    if (startup == nullptr) return true;
-    if (!ui || !proxy) return false;
-    return PrepareHdrOutput(created, configuration, *startup);
-}
-
-bool PrepareRenderer(ContextHookRecord& record, const CreatedDeviceBinding& created,
-    const NativeSettingsStartup* startup) noexcept
-{
-    if (created.swapChain == nullptr) return false;
-    DXGI_SWAP_CHAIN_DESC description{};
-    if (FAILED(created.swapChain->GetDesc(&description))) return false;
-    const auto configuration = InitialSceneConfiguration(description, startup);
-    if (!ActiveNativeOwner().renderer.InitializeBorrowed(created.device, created.context, configuration)) return false;
-    if (!PrepareNativeLayerResources(created, configuration, startup)) return false;
-    const ContextQueryPredecessors next{record.nextBegin, record.nextEnd, record.nextExecuteCommandList};
-    return record.queries.Prepare(created.context, record.generation, next, &ActiveNativeOwner().renderer) ==
-        ContextQueryPreparation::coverageUnobserved;
-}
-
-template <class Call, class... Arguments>
-HRESULT NativeResult(Call next, Arguments... arguments) noexcept
-{
-    try { return next(arguments...); }
-    catch (...) { return E_FAIL; }
-}
-
-bool CurrentNativeSceneContext(ContextHookRecord& context) noexcept
-{
-    if (!ActiveNativeOwner().hdrPrepared) return false;
-    if (!NativeRoutingOwned()) return false;
-    return context.queries.CanDispatch() &&
-        ActiveNativeOwner().renderer.MatchesContext(ActiveNativeOwner().device, context.owned);
-}
-
-bool NativeSceneDimensions(const DXGI_SWAP_CHAIN_DESC& actual,
-    const DXGI_SWAP_CHAIN_DESC& expected) noexcept
-{
-    const std::array dimensions{actual.BufferDesc.Width, actual.BufferDesc.Height};
-    const std::array owned{expected.BufferDesc.Width, expected.BufferDesc.Height};
-    return actual.BufferDesc.Width != 0 && actual.BufferDesc.Height != 0 && dimensions == owned;
-}
-
-bool NativeSceneAdmission(ContextHookRecord& context) noexcept
-{
-    const auto* chain = g_swapChainHooks.load(std::memory_order_acquire);
-    const auto* device = g_deviceHooks.load(std::memory_order_acquire);
-    if (chain == nullptr) return false;
     if (device == nullptr) return false;
-    if (!chain->resourcesReady.load(std::memory_order_acquire)) return false;
-    if (!CurrentNativeSceneContext(context)) return false;
-    DXGI_SWAP_CHAIN_DESC actual{};
-    if (FAILED(chain->owned->GetDesc(&actual))) return false;
-    return NativeSceneDimensions(actual, chain->description) && CurrentNativeSceneContext(context);
-}
-
-struct PrivateNativeScene
-{
-    ComPtr<ID3D11Texture2D> texture;
-    ComPtr<ID3D11ShaderResourceView> source;
-    ComPtr<ID3D11RenderTargetView> target;
-};
-
-HRESULT PrepareNativeViews(const DeviceHookRecord& device, PrivateNativeScene& scene) noexcept
-{
-    auto result = NativeResult(device.nextCreateSrv, device.owned,
-        scene.texture.Get(), nullptr, scene.source.GetAddressOf());
-    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
-    if (!scene.source) return E_FAIL;
-    result = NativeResult(device.nextCreateRtv, device.owned,
-        scene.texture.Get(), nullptr, scene.target.GetAddressOf());
-    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
-    return scene.target ? S_OK : E_FAIL;
-}
-
-HRESULT CreatePromotedScene(const DeviceHookRecord& device, ContextHookRecord& context,
-    const D3D11_TEXTURE2D_DESC& original, ID3D11Texture2D** output) noexcept
-{
-    *output = nullptr;
-    auto promoted = original;
-    promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    PrivateNativeScene scene;
-    auto result = NativeResult(device.nextCreateTexture2D, device.owned,
-        &promoted, nullptr, scene.texture.GetAddressOf());
-    if (result != S_OK) return FAILED(result) ? result : E_FAIL;
-    if (!scene.texture) return E_FAIL;
-    result = PrepareNativeViews(device, scene);
-    if (FAILED(result)) return result;
-    NativeSceneTexture candidate;
-    const NativeSceneCreation creation{device.owned, original, context.generation};
-    if (!candidate.Prepare(creation, {scene.texture.Get(), scene.source.Get(), scene.target.Get()}))
-        return E_FAIL;
-    if (!NativeSceneAdmission(context)) return E_FAIL;
-    // Slot commit and output transfer perform no new native calls. No retry can
-    // safely assume admission survived the first private creation transaction.
-    SceneTextureHandle handle;
-    result = ActiveNativeOwner().renderer.AdoptPromotedNativeSceneTexture(candidate, handle);
-    if (FAILED(result)) return result;
-    *output = scene.texture.Detach();
-    return S_OK;
-}
-
-const ContextHookRecord* AttributedDeviceOwner(ID3D11Device* device) noexcept
-{
-    const auto* owned = g_deviceHooks.load(std::memory_order_acquire);
-    const auto* context = g_contextHooks.load(std::memory_order_acquire);
-    if (owned == nullptr) return nullptr;
-    if (context == nullptr || !context->retainedReferences.load(std::memory_order_acquire)) return nullptr;
-    if (device != owned->owned) return nullptr;
-    // Read compatibility attribution after retirement, but never inspect mutable
-    // renderer slots or use device APIs from an unqualified foreign thread.
-    return GetCurrentThreadId() == context->thread ? context : nullptr;
-}
-
-bool AttributedResource(ID3D11Device* device, ID3D11Resource* resource) noexcept
-{
-    const auto* context = AttributedDeviceOwner(device);
-    if (context == nullptr) return false;
-    if (resource == nullptr) return false;
-    ComPtr<ID3D11Texture2D> texture;
-    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture)))) return false;
-    NativeSceneAttribution record{};
-    return ReadNativeSceneAttribution(device, texture.Get(), context->generation, record);
-}
-
-bool RemappableSrv(const D3D11_SHADER_RESOURCE_VIEW_DESC& value) noexcept
-{
-    return value.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
-        value.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D &&
-        value.Texture2D.MostDetailedMip == 0 &&
-        (value.Texture2D.MipLevels == 1 || value.Texture2D.MipLevels == UINT(-1));
-}
-
-bool RemappableRtv(const D3D11_RENDER_TARGET_VIEW_DESC& value) noexcept
-{
-    return value.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
-        value.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D && value.Texture2D.MipSlice == 0;
-}
-
-bool CompatibleSrvRequest(ID3D11Device* device, ID3D11Resource* resource,
-    const D3D11_SHADER_RESOURCE_VIEW_DESC* description) noexcept
-{
-    if (description == nullptr) return false;
-    if (!RemappableSrv(*description)) return false;
-    return AttributedResource(device, resource);
-}
-
-bool CompatibleRtvRequest(ID3D11Device* device, ID3D11Resource* resource,
-    const D3D11_RENDER_TARGET_VIEW_DESC* description) noexcept
-{
-    if (description == nullptr) return false;
-    if (!RemappableRtv(*description)) return false;
-    return AttributedResource(device, resource);
-}
-
-bool NativeTextureRequest(const D3D11_TEXTURE2D_DESC* description,
-    const D3D11_SUBRESOURCE_DATA* initialData, ID3D11Texture2D** texture) noexcept
-{
-    return description != nullptr && texture != nullptr && initialData == nullptr;
-}
-
-bool PromotableNativeRequest(ContextHookRecord* context, const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    if (context == nullptr) return false;
-    return NativeSceneAdmission(*context) && ActiveNativeOwner().renderer.CanPromoteNativeSceneTexture(description);
-}
-
-template <class Record>
-bool PrepareObjectShadow(Record& record, std::size_t minimum,
-    void* releaseHook, std::uint64_t generation) noexcept
-{
-    auto* current = record.table;
-    const auto count = DiscoverCallableVtableSlots(current, minimum, record.shadow.size());
-    if (count == 0 || current[2] != reinterpret_cast<void*>(record.nextRelease)) return false;
-    const std::array patches{VtablePatch{2, releaseHook}};
-    if (!PrepareShadowVtable({current, count}, {record.shadow.data(), count}, patches)) return false;
-    record.originalTable = current;
-    record.table = record.shadow.data();
-    return record.identity.Publish(record.owned, generation);
-}
-
-template <class Record>
-bool InstallObjectShadow(Record& record) noexcept
-{
-    return WriteProtectedPointer(reinterpret_cast<void**>(record.owned),
-        record.originalTable, record.table);
-}
-
-template <class Record>
-bool RestoreObjectShadow(Record& record) noexcept
-{
-    if (record.originalTable == nullptr) return true;
-    auto* slot = reinterpret_cast<void**>(record.owned);
-    const auto current = AtomicPointerLoad(slot);
-    if (current == record.originalTable) return true;
-    if (current != record.table) return false;
-    return WriteProtectedPointer(slot, record.table, record.originalTable) &&
-        AtomicPointerLoad(slot) == record.originalTable;
-}
-
-struct NativeBindingPreparation
-{
-    NativeSlotProof proof;
-    NativeSlotProof chainProof;
-    void** deviceTable{};
-    void** contextTable{};
-    void** chainTable{};
-    std::array<void*, 5> deviceOriginals{};
-    std::array<void*, 10> contextOriginals{};
-    std::array<void*, 2> chainOriginals{};
-    void* deviceRelease{};
-    void* contextRelease{};
-    void* chainRelease{};
-    DXGI_SWAP_CHAIN_DESC description{};
-    const NativeSettingsStartup* startup{};
-
-    bool PrepareChain(const CreatedDeviceBinding& created) noexcept
-    {
-        if (!AdmittedChain(created, description)) return false;
-        if (!chainProof.PrepareChain()) return false;
-        chainTable = *reinterpret_cast<void***>(created.swapChain);
-        chainRelease = chainProof.Expected(chainTable + 2);
-        return chainRelease != nullptr && CaptureOriginals(chainProof, chainTable, chainSlots, chainOriginals);
-    }
-
-    bool Prepare(const CreatedDeviceBinding& created, void* creationNext) noexcept
-    {
-        if (!proof.Prepare(creationNext)) return false;
-        if (!AdmittedAliases(created)) return false;
-        deviceTable = *reinterpret_cast<void***>(created.device);
-        contextTable = *reinterpret_cast<void***>(created.context);
-        deviceRelease = proof.Expected(deviceTable + 2);
-        contextRelease = proof.Expected(contextTable + 2);
-        if (deviceRelease == nullptr || contextRelease == nullptr) return false;
-        if (!CaptureOriginals(proof, deviceTable, deviceSlots, deviceOriginals)) return false;
-        if (!CaptureOriginals(proof, contextTable, contextSlots, contextOriginals)) return false;
-        return PrepareChain(created);
-    }
-
-    bool PreparePublishedResources(ContextHookRecord& context,
-        const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
-    {
-        if (!PrepareObjectShadow(residentDevice, 43, reinterpret_cast<void*>(&HookDeviceRelease), generation)) return false;
-        if (!PrepareObjectShadow(context, 115, reinterpret_cast<void*>(&HookContextRelease), generation)) return false;
-        if (!PrepareObjectShadow(residentChain, 18, reinterpret_cast<void*>(&HookSwapChainRelease), generation)) return false;
-        if (!CaptureSlotProtection(residentDevice, devicePatches)) return false;
-        if (!CaptureSlotProtection(context, contextPatches)) return false;
-        if (!CaptureSlotProtection(residentChain, chainPatches)) return false;
-        return PrepareRenderer(context, created, startup);
-    }
-
-    ContextHookRecord* Publish(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
-    {
-        if (!ClaimNativeActiveOwner(created.device, created.context, created.swapChain, generation)) return nullptr;
-        auto* context = std::construct_at(reinterpret_cast<ContextHookRecord*>(residentContextStorage.data()));
-        residentDevice.nextRelease = reinterpret_cast<NativeObjectRelease>(deviceRelease);
-        context->nextRelease = reinterpret_cast<NativeObjectRelease>(contextRelease);
-        residentChain.nextRelease = reinterpret_cast<NativeObjectRelease>(chainRelease);
-        residentDevice.table = deviceTable;
-        residentDevice.originals = deviceOriginals;
-        context->table = contextTable;
-        context->originals = contextOriginals;
-        context->generation = generation;
-        context->thread = GetCurrentThreadId();
-        residentChain.table = chainTable;
-        residentChain.originals = chainOriginals;
-        residentChain.nextPresent = reinterpret_cast<SwapChainPresent>(chainOriginals[0]);
-        residentChain.nextResize = reinterpret_cast<SwapChainResize>(chainOriginals[1]);
-        residentChain.description = description;
-        PublishDeviceNexts(deviceOriginals);
-        PublishContextNexts(*context, contextOriginals);
-        // Reachable wrappers retain these objects even after generation retirement.
-        created.device->AddRef();
-        created.context->AddRef();
-        created.swapChain->AddRef();
-        residentDevice.owned = created.device;
-        context->owned = created.context;
-        residentChain.owned = created.swapChain;
-        g_deviceHooks.store(&residentDevice, std::memory_order_release);
-        g_contextHooks.store(context, std::memory_order_release);
-        context->retainedReferences.store(true, std::memory_order_release);
-        g_swapChainHooks.store(&residentChain, std::memory_order_release);
-        return PreparePublishedResources(*context, created, generation) ? context : nullptr;
-    }
-};
-
-bool InstallNativeSlots(ContextHookRecord& context) noexcept
-{
-    if (!InstallSlots(residentDevice, devicePatches)) return false;
-    if (!InstallSlots(context, contextPatches)) return false;
-    if (!InstallSlots(residentChain, chainPatches)) return false;
-    if (!InstallObjectShadow(residentDevice)) return false;
-    if (!InstallObjectShadow(context)) return false;
-    return InstallObjectShadow(residentChain);
-}
-
-bool RetireNativeOwners(ContextHookRecord& record) noexcept
-{
-    return ActiveNativeOwner().settingsHost.RetireCold() && ActiveNativeOwner().presentation.Retire() && ActiveNativeOwner().uiCapture.Retire() &&
-        ActiveNativeOwner().presentationProxy.Retire() && ActiveNativeOwner().renderer.Retire() && record.queries.Retire();
-}
-
-bool NativeRetirementSafe(const ContextHookRecord& record) noexcept
-{
-    return GetCurrentThreadId() == record.thread && !record.busy.test(std::memory_order_acquire) &&
-        !residentChain.busy.test(std::memory_order_acquire) && record.queries.CanDispatch();
-}
-
-bool SlotProtectionMatches(void** slot, DWORD protection) noexcept
-{
-    MEMORY_BASIC_INFORMATION page{};
-    return VirtualQuery(slot, &page, sizeof(page)) == sizeof(page) && page.Protect == protection;
-}
-
-template <class Record>
-bool RestoreFreshSlot(Record& record, SlotPatch patch, std::size_t index) noexcept
-{
-    auto* slot = record.table + patch.index;
-    if (!SlotProtectionMatches(slot, record.slotProtection[index])) return false;
-    const auto current = AtomicPointerLoad(slot);
-    if (current == record.originals[index]) return true;
-    if (current != patch.replacement) return false;
-    auto& owner = record.owners[index];
-    const auto writer = static_cast<HookPointerWriter>(&WriteProtectedPointer);
-    const bool changed = owner.State() == HookOwnershipState::owned
-        ? owner.Remove(writer) : writer(slot, patch.replacement, record.originals[index]);
-    return changed && AtomicPointerLoad(slot) == record.originals[index];
-}
-
-template <class Record, std::size_t Count>
-bool RestoreFreshSlots(Record& record, const std::array<SlotPatch, Count>& patches) noexcept
-{
-    bool restored = true;
-    for (std::size_t reverse = Count; reverse != 0; --reverse)
-    {
-        const auto index = reverse - 1;
-        if (!RestoreFreshSlot(record, patches[index], index)) restored = false;
-    }
-    return restored;
-}
-
-bool MatchesFreshObjects(const CreatedDeviceBinding& created, const ContextHookRecord& record) noexcept
-{
-    return created.context == record.owned && created.device == residentDevice.owned &&
-        created.swapChain == residentChain.owned;
-}
-
-bool RestoreFreshTables(ContextHookRecord& record) noexcept
-{
-    const bool chainObject = RestoreObjectShadow(residentChain);
-    const bool contextObject = RestoreObjectShadow(record);
-    const bool deviceObject = RestoreObjectShadow(residentDevice);
-    const bool objectsRestored = chainObject && contextObject && deviceObject;
-    if (!objectsRestored) return false;
-    const bool chain = RestoreFreshSlots(residentChain, chainPatches);
-    const bool context = RestoreFreshSlots(record, contextPatches);
-    const bool device = RestoreFreshSlots(residentDevice, devicePatches);
-    return chain && context && device;
-}
-
-void ReleaseFreshReferences(ContextHookRecord& record) noexcept
-{
-    if (!record.retainedReferences.exchange(false, std::memory_order_acq_rel)) return;
-    residentChain.owned->Release();
-    record.owned->Release();
-    residentDevice.owned->Release();
-}
-
-bool FreshOwnerSafe(const ContextHookRecord& record) noexcept
-{
-    return GetCurrentThreadId() == record.thread && !record.busy.test(std::memory_order_acquire) &&
-        !residentChain.busy.test(std::memory_order_acquire);
-}
-
-void WithdrawFailedInstallation(ContextHookRecord& context, bool hdr) noexcept
-{
-    RevokeNativeRouting();
-    if (hdr) return;
-    if (!RestoreFreshTables(context)) return;
-    RollbackSlots(residentChain, chainPatches);
-    RollbackSlots(context, contextPatches);
-    RollbackSlots(residentDevice, devicePatches);
-}
-
-bool ValidCreation(const CreatedDeviceBinding& created, std::uint64_t generation) noexcept
-{
-    return created.device != nullptr && created.context != nullptr && generation != 0;
-}
-
-}  // namespace
-
-namespace {
-bool NativeIdentitiesCurrent(const DeviceHookRecord& device, const ContextHookRecord& context) noexcept
-{
-    if (!context.retainedReferences.load(std::memory_order_acquire)) return false;
-    if (!device.identity.Matches(device.owned)) return false;
-    if (!context.identity.Matches(context.owned)) return false;
-    if (*reinterpret_cast<void***>(device.owned) != device.table) return false;
-    if (device.table[2] != reinterpret_cast<void*>(&HookDeviceRelease)) return false;
-    if (context.table[2] != reinterpret_cast<void*>(&HookContextRelease)) return false;
-    return *reinterpret_cast<void***>(context.owned) == context.table;
-}
-}  // namespace
-
-bool NativeRoutingOwned() noexcept
-{
-    auto* device = g_deviceHooks.load(std::memory_order_acquire);
-    auto* context = g_contextHooks.load(std::memory_order_acquire);
-    if (device == nullptr || context == nullptr) return false;
-    if (!NativeIdentitiesCurrent(*device, *context)) return false;
-    const auto owned = [](auto& slot) { return slot.Health() == HookOwnershipState::owned; };
-    return NativeChainOwned() && std::all_of(device->owners.begin(), device->owners.end(), owned) &&
-        std::all_of(context->owners.begin(), context->owners.end(), owned);
-}
-
-void RevokeNativeRouting() noexcept
-{
-    auto* chain = g_swapChainHooks.load(std::memory_order_acquire);
-    if (chain != nullptr)
-    {
-        chain->admitted.store(false, std::memory_order_release);
-        chain->resourcesReady.store(false, std::memory_order_release);
-    }
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    record->admitted.store(false, std::memory_order_release);
-    RevokeNativeActiveOwner();
-    ActiveNativeOwner().presentationProxy.RevokePublication();
-    record->queries.RevokeCoverage();
-    ActiveNativeOwner().settingsHost.Revoke();
-}
-
-bool NativeRoutingInstaller::CompleteCoverage() noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr || !NativeRoutingOwned()) return false;
-    if (record->busy.test(std::memory_order_acquire)) return false;
-    if (!record->queries.CompleteFreshCoverage(record->owned, record->generation)) return false;
-    record->admitted.store(true, std::memory_order_release);
-    residentChain.resourcesReady.store(true, std::memory_order_release);
-    residentChain.admitted.store(true, std::memory_order_release);
+    BoundedAtomicFlagGuard guard(g_installLock, kHookRegistryAttempts);
+    if (!guard.OwnsLock()) return false;
+    if (FindDevice(device) != nullptr) return true;
+    auto* record = AllocateRecord(g_devices);
+    if (record == nullptr) return false;
+    auto* current = *reinterpret_cast<void***>(device);
+    const auto slots = DiscoverVtableSlots(current, kDeviceBaseSlots);
+    if (slots == 0) return false;
+    if (!PrepareDeviceRecord(record, current, slots)) return false;
+    if (!PublishObjectShadow(device, *record, current)) return false;
+    g_evidence.deviceShadowCount.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
 
-NativeRoutingStatus NativeRoutingInstaller::Install(const CreatedDeviceBinding& created,
-    std::uint64_t generation, void* creationNext) noexcept
+[[nodiscard]] bool PrepareContextRecord(ContextRecord* record,
+    void** current, std::size_t slots) noexcept
 {
-    return InstallImpl(created, generation, creationNext, nullptr);
+    const std::array patches{
+        VtablePatch{kRelease,
+            reinterpret_cast<void*>(&HookContextRelease)},
+        VtablePatch{kContextPsSetShader,
+            reinterpret_cast<void*>(&HookPsSetShader)},
+        VtablePatch{kContextDrawIndexed,
+            reinterpret_cast<void*>(&HookDrawIndexed)},
+        VtablePatch{kContextDraw, reinterpret_cast<void*>(&HookDraw)},
+        VtablePatch{kContextDrawIndexedInstanced,
+            reinterpret_cast<void*>(&HookDrawIndexedInstanced)},
+        VtablePatch{kContextDrawInstanced,
+            reinterpret_cast<void*>(&HookDrawInstanced)},
+        VtablePatch{kContextBegin, reinterpret_cast<void*>(&HookBegin)},
+        VtablePatch{kContextEnd, reinterpret_cast<void*>(&HookEnd)},
+        VtablePatch{kContextExecuteCommandList,
+            reinterpret_cast<void*>(&HookExecuteCommandList)},
+        VtablePatch{kContextOmSetRenderTargets,
+            reinterpret_cast<void*>(&HookOmSetRenderTargets)},
+        VtablePatch{kContextOmSetRenderTargetsAndUavs,
+            reinterpret_cast<void*>(&HookOmSetRenderTargetsAndUavs)}};
+    if (!PrepareShadowVtable(
+            std::span<void* const>(current, slots),
+            std::span<void*>(record->shadow.data(), slots), patches))
+        return false;
+    record->originalVtable = current;
+    record->nextRelease =
+        reinterpret_cast<ContextRelease>(current[kRelease]);
+    record->nextPsSetShader =
+        reinterpret_cast<PsSetShader>(current[kContextPsSetShader]);
+    record->nextDrawIndexed =
+        reinterpret_cast<DrawIndexed>(current[kContextDrawIndexed]);
+    record->nextDraw = reinterpret_cast<Draw>(current[kContextDraw]);
+    record->nextDrawIndexedInstanced =
+        reinterpret_cast<DrawIndexedInstanced>(
+            current[kContextDrawIndexedInstanced]);
+    record->nextDrawInstanced =
+        reinterpret_cast<DrawInstanced>(current[kContextDrawInstanced]);
+    record->nextBegin = reinterpret_cast<BeginQuery>(current[kContextBegin]);
+    record->nextEnd = reinterpret_cast<EndQuery>(current[kContextEnd]);
+    record->nextExecuteCommandList =
+        reinterpret_cast<ExecuteCommandList>(current[kContextExecuteCommandList]);
+    record->computeQueries = {};
+    record->nextOmSetRenderTargets = reinterpret_cast<OmSetRenderTargets>(
+        current[kContextOmSetRenderTargets]);
+    record->nextOmSetRenderTargetsAndUavs =
+        reinterpret_cast<OmSetRenderTargetsAndUavs>(
+            current[kContextOmSetRenderTargetsAndUavs]);
+    return ValidateShadowPredecessors(current, patches);
 }
 
-bool NativeRoutingInstaller::InstallHdr(const CreatedDeviceBinding& created,
-    std::uint64_t generation, void* creationNext, const NativeSettingsStartup& startup) noexcept
+[[nodiscard]] bool InstallContextShadow(
+    ID3D11DeviceContext* context) noexcept
 {
-    if (!QualifiedSettingsStartup(startup)) return false;
-    return InstallImpl(created, generation, creationNext, &startup) == NativeRoutingStatus::installed;
+    if (context == nullptr) return false;
+    BoundedAtomicFlagGuard guard(g_installLock, kHookRegistryAttempts);
+    if (!guard.OwnsLock()) return false;
+    if (FindContext(context) != nullptr) return true;
+    auto* record = AllocateRecord(g_contexts);
+    if (record == nullptr) return false;
+    record->immediate = context->GetType() == D3D11_DEVICE_CONTEXT_IMMEDIATE;
+    auto* current = *reinterpret_cast<void***>(context);
+    const auto slots = DiscoverVtableSlots(current, kContextBaseSlots);
+    if (slots == 0) return false;
+    if (!PrepareContextRecord(record, current, slots)) return false;
+    return PublishObjectShadow(context, *record, current);
 }
 
-NativeRoutingStatus NativeRoutingInstaller::InstallImpl(const CreatedDeviceBinding& created,
-    std::uint64_t generation, void* creationNext, const NativeSettingsStartup* startup) noexcept
+[[nodiscard]] bool PrepareSwapChainRecord(SwapChainRecord* record,
+    void** current, std::size_t slots) noexcept
 {
-    if (g_contextHooks.load(std::memory_order_acquire) != nullptr)
-        return NativeRoutingStatus::residentRecordUnavailable;
-    if (!ValidCreation(created, generation))
-        return NativeRoutingStatus::unqualified;
-    NativeBindingPreparation preparation;
-    preparation.startup = startup;
-    if (!preparation.Prepare(created, creationNext)) return NativeRoutingStatus::unqualified;
-    if (residentClaim.test_and_set(std::memory_order_acq_rel)) return NativeRoutingStatus::residentRecordUnavailable;
-    auto* context = preparation.Publish(created, generation);
-    if (context == nullptr) return NativeRoutingStatus::preparationFailed;
-    if (InstallNativeSlots(*context) && CompleteCoverage())
-        return NativeRoutingStatus::installed;
-    WithdrawFailedInstallation(*context, startup != nullptr);
-    return NativeRoutingStatus::installationFailed;
+    const std::array patches{
+        VtablePatch{kRelease,
+            reinterpret_cast<void*>(&HookSwapChainRelease)},
+        VtablePatch{kSwapChainPresent,
+            reinterpret_cast<void*>(&HookPresent)},
+        VtablePatch{kSwapChainResizeBuffers,
+            reinterpret_cast<void*>(&HookResizeBuffers)}};
+    if (!PrepareShadowVtable(
+            std::span<void* const>(current, slots),
+            std::span<void*>(record->shadow.data(), slots), patches))
+        return false;
+    record->originalVtable = current;
+    record->nextRelease =
+        reinterpret_cast<SwapChainRelease>(current[kRelease]);
+    record->nextPresent = reinterpret_cast<Present>(current[kSwapChainPresent]);
+    record->nextResizeBuffers =
+        reinterpret_cast<ResizeBuffers>(current[kSwapChainResizeBuffers]);
+    const std::array captured{
+        reinterpret_cast<void*>(record->nextRelease),
+        reinterpret_cast<void*>(record->nextPresent),
+        reinterpret_cast<void*>(record->nextResizeBuffers)};
+    return ValidateCapturedPredecessors(captured, patches);
 }
 
-namespace {
+[[nodiscard]] bool InstallSwapChainShadow(
+    IDXGISwapChain* swapChain, bool hdrDescriptor,
+    bool ownsRendererClaim) noexcept
+{
+    if (swapChain == nullptr) return false;
+    BoundedAtomicFlagGuard guard(g_installLock, kHookRegistryAttempts);
+    if (!guard.OwnsLock()) return false;
+    if (auto* existing = FindSwapChain(swapChain))
+    {
+        existing->developerHdrDescriptor = hdrDescriptor;
+        existing->ownsRendererClaim |= ownsRendererClaim;
+        return true;
+    }
+    auto* record = AllocateRecord(g_swapChains);
+    if (record == nullptr) return false;
+    auto* current = *reinterpret_cast<void***>(swapChain);
+    const auto slots = DiscoverVtableSlots(current, kSwapChainBaseSlots);
+    if (slots == 0) return false;
+    if (!PrepareSwapChainRecord(record, current, slots)) return false;
+    record->developerHdrDescriptor = hdrDescriptor;
+    record->ownsRendererClaim = ownsRendererClaim;
+    return PublishObjectShadow(swapChain, *record, current);
+}
 
-class SettingsResourcePreparation
+template <class Object, class Record>
+void RollBackShadow(Object* object, Record* record) noexcept
+{
+    if (object == nullptr || record == nullptr) return;
+    if (record->originalVtable == nullptr)
+        return;
+    const auto generation = record->identity.Generation();
+    if (ObjectCompareExchange(reinterpret_cast<void**>(object),
+            record->shadow.data(), record->originalVtable))
+        (void)record->identity.Retire(object, generation);
+}
+
+void ClearCreationOutputs(
+    IDXGISwapChain** swapChain, ID3D11Device** device,
+    ID3D11DeviceContext** context) noexcept
+{
+    if (context != nullptr && *context != nullptr)
+    {
+        (*context)->Release();
+        *context = nullptr;
+    }
+    if (device != nullptr && *device != nullptr)
+    {
+        (*device)->Release();
+        *device = nullptr;
+    }
+    if (swapChain != nullptr && *swapChain != nullptr)
+    {
+        (*swapChain)->Release();
+        *swapChain = nullptr;
+    }
+}
+
+[[nodiscard]] bool ValidCreatedHdrDescriptor(IDXGISwapChain* swapChain) noexcept
+{
+    DXGI_SWAP_CHAIN_DESC description{};
+    if (FAILED(swapChain->GetDesc(&description))) return false;
+    return HdrFlipDescriptorSupported(description) && description.SampleDesc.Count == 1 &&
+        (description.BufferUsage & DXGI_USAGE_UNORDERED_ACCESS) != 0;
+}
+
+struct HdrCandidateValidation
+{
+    ComPtr<ID3D11Texture2D> backBuffer;
+    ComPtr<ID3D11UnorderedAccessView> outputUav;
+    ComPtr<IDXGISwapChain3> chain3;
+
+    [[nodiscard]] bool HasTypedStore(ID3D11Device* device) noexcept
+    {
+        D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{DXGI_FORMAT_R10G10B10A2_UNORM, 0};
+        return SUCCEEDED(device->CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2,
+            &support, sizeof(support))) &&
+            (support.OutFormatSupport2 & D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE) != 0;
+    }
+
+    [[nodiscard]] bool AcquireOutput(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
+    {
+        return HasTypedStore(device) && SUCCEEDED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) &&
+            SUCCEEDED(device->CreateUnorderedAccessView(backBuffer.Get(), nullptr, &outputUav));
+    }
+
+    [[nodiscard]] bool SupportsColor(DXGI_COLOR_SPACE_TYPE color) noexcept
+    {
+        UINT support{};
+        return SUCCEEDED(chain3->CheckColorSpaceSupport(color, &support)) &&
+            (support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) != 0;
+    }
+
+    [[nodiscard]] bool ValidateDisplay(IDXGISwapChain* swapChain) noexcept
+    {
+        if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&chain3)))) return false;
+        if (!SupportsColor(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)) return false;
+        DXGI_SWAP_CHAIN_DESC description{};
+        return SUCCEEDED(swapChain->GetDesc(&description)) &&
+            RefreshDisplayCapabilities(description.OutputWindow) &&
+            CurrentDisplayCapabilities().description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+    }
+
+    [[nodiscard]] bool ValidateTransitions() noexcept
+    {
+        return SupportsColor(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) &&
+            SUCCEEDED(chain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)) &&
+            SUCCEEDED(chain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709));
+    }
+};
+
+[[nodiscard]] bool ValidateCreatedHdrCandidate(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
+{
+    if (swapChain == nullptr || device == nullptr) return false;
+    if (!ValidCreatedHdrDescriptor(swapChain)) return false;
+    HdrCandidateValidation validation;
+    return validation.AcquireOutput(swapChain, device) && validation.ValidateDisplay(swapChain) &&
+        validation.ValidateTransitions();
+}
+
+struct D3dCreationRequest
+{
+    IDXGIAdapter* adapter{};
+    D3D_DRIVER_TYPE driverType{};
+    HMODULE software{};
+    UINT flags{};
+    const D3D_FEATURE_LEVEL* levels{};
+    UINT levelCount{};
+    UINT sdkVersion{};
+    const DXGI_SWAP_CHAIN_DESC* description{};
+    IDXGISwapChain** swapChain{};
+    ID3D11Device** device{};
+    D3D_FEATURE_LEVEL* featureLevel{};
+    ID3D11DeviceContext** context{};
+
+    [[nodiscard]] HRESULT Invoke(const DXGI_SWAP_CHAIN_DESC* selected) const
+    {
+        g_evidence.deviceNextCallCount.fetch_add(1, std::memory_order_relaxed);
+        return InvokeCapturedNext(g_nextD3d, adapter, driverType, software, flags,
+            levels, levelCount, sdkVersion, selected, swapChain, device, featureLevel, context);
+    }
+
+    void ClearOutputs() const noexcept { ClearCreationOutputs(swapChain, device, context); }
+};
+
+template <class Object>
+[[nodiscard]] bool HasCreatedObject(Object** output) noexcept
+{
+    return output != nullptr && *output != nullptr;
+}
+
+struct InstalledRendererObjects
+{
+    bool device{};
+    bool context{};
+    bool chain{};
+    bool proxy{};
+    [[nodiscard]] bool Complete() const noexcept { return device && context && chain && proxy; }
+};
+
+class RendererCreationTransaction
 {
 public:
-    SettingsResourcePreparation() noexcept
-    { ActiveNativeOwner().internalWork = true; }
-    ~SettingsResourcePreparation() noexcept { ActiveNativeOwner().internalWork = false; }
-    SettingsResourcePreparation(const SettingsResourcePreparation&) = delete;
-    SettingsResourcePreparation& operator=(const SettingsResourcePreparation&) = delete;
+    explicit RendererCreationTransaction(const D3dCreationRequest& request) : request_(request) {}
+
+    [[nodiscard]] HRESULT Run()
+    {
+        g_evidence.deviceCreateCount.fetch_add(1, std::memory_order_relaxed);
+        owner_ = ClaimRenderer();
+        attemptHdr_ = owner_ && HdrPathRequested();
+        if (attemptHdr_) CreateHdrCandidate();
+        else result_ = request_.Invoke(request_.description);
+        g_evidence.lastDeviceResult.store(result_, std::memory_order_release);
+        if (FAILED(result_))
+        {
+            ReleaseFailedCreationClaim();
+            return result_;
+        }
+        g_evidence.successfulDeviceCreateCount.fetch_add(1, std::memory_order_relaxed);
+        // Secondary creations must not publish into the presenting renderer.
+        if (!owner_) return result_;
+        InitializeRendererLifetime();
+        RetirePreviousDevice();
+        const auto installed = InstallObjects();
+        if (installed.Complete()) PublishInstallation();
+        ReportInstallationFailure(installed);
+        if (!installed.Complete()) RollBackInstallation(installed);
+        // Descriptor ownership only initializes the chain. Present publishes
+        // HDR after ordered heartbeat, composition, color-space and output checks.
+        g_evidence.hdrChainActive.store(false, std::memory_order_release);
+        return result_;
+    }
+
+private:    void ReleaseFailedCreationClaim()
+    {
+        if (owner_ && !attemptHdr_)
+            g_rendererCreationClaimed.store(false, std::memory_order_release);
+    }
+
+    [[nodiscard]] bool ClaimRenderer()
+    {
+        if (request_.description == nullptr || request_.description->OutputWindow == nullptr) return false;
+        bool expected{};
+        return g_rendererCreationClaimed.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
+    }
+
+    [[nodiscard]] bool CandidateUsable()
+    {
+        return SUCCEEDED(result_) && HasCreatedObject(request_.swapChain) &&
+            HasCreatedObject(request_.device) &&
+            ValidateCreatedHdrCandidate(*request_.swapChain, *request_.device) &&
+            BuildReplacementShaders(*request_.device);
+    }
+
+    void RetryOriginalDescriptor()
+    {
+        g_evidence.hdrCreationFallbackCount.fetch_add(1, std::memory_order_relaxed);
+        result_ = request_.Invoke(request_.description);
+        if (SUCCEEDED(result_))
+            g_evidence.hdrCreationFallbackSuccessCount.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void CreateHdrCandidate()
+    {
+        g_evidence.hdrCreationAttemptCount.fetch_add(1, std::memory_order_relaxed);
+        auto modified = *request_.description;
+        modified.BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+        modified.BufferUsage |= DXGI_USAGE_UNORDERED_ACCESS | DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        modified.BufferCount = std::max<UINT>(2, modified.BufferCount);
+        modified.SampleDesc.Count = 1;
+        modified.SampleDesc.Quality = 0;
+        modified.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        if (!g_configuration.forceHdrSwapChainFailure) result_ = request_.Invoke(&modified);
+        if (!CandidateUsable())
+        {
+            if (SUCCEEDED(result_)) RecordFailure(GraphicsObservationFailure::hdrAttemptFailed);
+            ResetReplacementShaders();
+            request_.ClearOutputs();
+            RetryOriginalDescriptor();
+            g_referenceHealthy = false;
+            return;
+        }
+        hdrDescriptor_ = true;
+        g_referenceHealthy.store(true, std::memory_order_release);
+        PublishActiveDisplay(CurrentDisplayCapabilities().description.Monitor, 1);
+    }
+
+    void ReadCreatedDimensions()
+    {
+        DXGI_SWAP_CHAIN_DESC actual{};
+        if (HasCreatedObject(request_.swapChain) && SUCCEEDED((*request_.swapChain)->GetDesc(&actual)))
+        {
+            g_presentation.width = actual.BufferDesc.Width;
+            g_presentation.height = actual.BufferDesc.Height;
+            g_outputWindow = actual.OutputWindow;
+        }
+    }
+
+    void InitializeRendererLifetime()
+    {
+        ReadCreatedDimensions();
+        if (g_lifecycle.Snapshot().state == HdrRendererState::deviceLost)
+            (void)g_lifecycle.BindDeviceAndSwapChain();
+        else if (g_lifecycle.Snapshot().state == HdrRendererState::detached)
+            (void)g_lifecycle.BindDeviceAndSwapChain();
+        const auto generation = PublishLifecycleGeneration();
+        g_heartbeat.Reset(generation);
+        g_frame = 1;
+        g_heartbeat.BeginFrame(generation, g_frame);
+        g_currentFrameQualifiedDrawThread.store(0, std::memory_order_release);
+        g_currentFrameQualifiedDrawThreadConflict.store(false, std::memory_order_release);
+        g_observedQualifiedDrawThread.store(0, std::memory_order_release);
+        g_observedPresentThread.store(0, std::memory_order_release);
+        g_liveSettingsThreadCompatible.store(true, std::memory_order_release);
+    }
+
+    void RetirePreviousDevice()
+    {
+        if (g_rendererDevice.activeDevice == nullptr || !HasCreatedObject(request_.device)) return;
+        if (g_rendererDevice.activeDevice == *request_.device) return;
+        ShutdownSettingsWindowBackend();
+        ResetResources();
+        ResetShaderRegistry();
+    }
+
+    [[nodiscard]] InstalledRendererObjects InstallObjects()
+    {
+        InstalledRendererObjects installed;
+        installed.device = HasCreatedObject(request_.device) && InstallDeviceShadow(*request_.device);
+        installed.context = installed.device && HasCreatedObject(request_.context) &&
+            InstallContextShadow(*request_.context);
+        installed.chain = installed.context && HasCreatedObject(request_.swapChain) &&
+            InstallSwapChainShadow(*request_.swapChain, hdrDescriptor_, owner_);
+        installed.proxy = installed.chain && (!hdrDescriptor_ ||
+            EnsureWideGamutResources(*request_.swapChain, *request_.device, *request_.context));
+        return installed;
+    }
+
+    void PublishInstallation()
+    {
+        g_rendererDevice.activeDevice = *request_.device;
+        g_rendererDevice.activeContext = *request_.context;
+        g_rendererDevice.activeContext1.Reset();
+        (void)(*request_.context)->QueryInterface(IID_PPV_ARGS(&g_rendererDevice.activeContext1));
+        ++g_deviceGeneration;
+        if (SettingsWindowBackendReady()) (void)TryActivateGraphicsSettingsInputOnCurrentThread();
+    }
+
+    static void ReportInstallationFailure(InstalledRendererObjects installed)
+    {
+        if (!installed.device)
+        {
+            g_evidence.deviceShadowInstallFailureCount.fetch_add(1, std::memory_order_relaxed);
+            RecordFailure(GraphicsObservationFailure::deviceShadowFailed);
+        }
+        else if (!installed.context) RecordFailure(GraphicsObservationFailure::contextShadowFailed);
+        else if (!installed.chain) RecordFailure(GraphicsObservationFailure::swapChainShadowFailed);
+        else if (!installed.proxy) RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
+    }
+
+    void RollBackInstallation(InstalledRendererObjects installed)
+    {
+        if (installed.chain) RollBackShadow(*request_.swapChain, FindSwapChain(*request_.swapChain));
+        if (installed.context) RollBackShadow(*request_.context, FindContext(*request_.context));
+        if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
+        ResetResources();
+        ResetReplacementShaders();
+        g_referenceHealthy = false;
+        g_rendererDevice.activeDevice = nullptr;
+        g_rendererDevice.activeContext = nullptr;
+        g_rendererDevice.activeContext1.Reset();
+        g_presentation.width = 0;
+        g_presentation.height = 0;
+        g_outputWindow = nullptr;
+        g_lifecycle.Detach();
+        if (hdrDescriptor_)
+        {
+            request_.ClearOutputs();
+            RetryOriginalDescriptor();
+            g_evidence.lastDeviceResult.store(result_, std::memory_order_release);
+        }
+    }
+
+    const D3dCreationRequest& request_;
+    bool owner_{};
+    bool attemptHdr_{};
+    bool hdrDescriptor_{};
+    HRESULT result_{E_FAIL};
 };
 
-bool ActivateNativeSettings(ContextHookRecord& record, const NativeSettingsStartup& startup) noexcept
+
+HRESULT WINAPI HookD3dCreate(
+    IDXGIAdapter* adapter, D3D_DRIVER_TYPE driverType, HMODULE software,
+    UINT flags, const D3D_FEATURE_LEVEL* levels, UINT levelCount,
+    UINT sdkVersion, const DXGI_SWAP_CHAIN_DESC* description,
+    IDXGISwapChain** swapChain, ID3D11Device** device,
+    D3D_FEATURE_LEVEL* featureLevel,
+    ID3D11DeviceContext** context) noexcept
 {
-    try
+    return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
+        const D3dCreationRequest request{adapter, driverType, software, flags, levels,
+            levelCount, sdkVersion, description, swapChain, device, featureLevel, context};
+        return RendererCreationTransaction(request).Run();
+    }, []() noexcept { RecordAbiException(); });
+}
+
+[[nodiscard]] bool PublishD3dNext(void* next) noexcept
+{
+    const auto function =
+        reinterpret_cast<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN>(next);
+    if (!ValidateNext(next, reinterpret_cast<void*>(&HookD3dCreate)))
     {
-        ComPtr<ID3D11DeviceContext1> context;
-        if (FAILED(record.owned->QueryInterface(IID_PPV_ARGS(&context)))) return false;
-        const auto& chain = residentChain.description;
-        const NativeSettingsHostConfiguration configuration{residentDevice.owned, context.Get(),
-            &ActiveNativeOwner().presentation, PresentationScope::qualifiedExclusive, chain.OutputWindow,
-            chain.BufferDesc.Width, chain.BufferDesc.Height, record.generation,
-            startup.configuration.persistencePath, startup.configuration.settings};
-        const SettingsResourcePreparation preparation;
-        return ActiveNativeOwner().settingsHost.InitializeCold(configuration, startup.prepared);
+        RecordFailure(GraphicsObservationFailure::selfReferentialNext);
+        return false;
     }
-    catch (...) { return false; }
-}
-
-bool FreshSettingsOwner(const CreatedDeviceBinding& created, const ContextHookRecord* record) noexcept
-{
-    return record != nullptr && MatchesFreshObjects(created, *record) &&
-        FreshOwnerSafe(*record) && NativeRoutingOwned();
-}
-
-}  // namespace
-
-bool NativeRoutingInstaller::ActivateSettingsHost(const CreatedDeviceBinding& created,
-    const NativeSettingsStartup& startup) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (!FreshSettingsOwner(created, record)) return false;
-    const NativeRoutingScope scope{created.context};
-    auto* admitted = scope.Record();
-    if (admitted == nullptr || !admitted->queries.CanDispatch()) return false;
-    if (!ActiveNativeOwner().hdrPrepared || !QualifiedSettingsStartup(startup)) return false;
-    return ActivateNativeSettings(*admitted, startup);
-}
-
-bool NativeRoutingInstaller::DiscardFresh(const CreatedDeviceBinding& created) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return true;
-    if (!MatchesFreshObjects(created, *record)) return true;
-    if (!FreshOwnerSafe(*record)) { RevokeNativeRouting(); return false; }
-    // Refused UI quiescence retains every published borrower and forbids retry.
-    if (!ActiveNativeOwner().settingsHost.RetireCold()) return false;
-    // Only the creation callback can discard this not-yet-escaped candidate.
-    RevokeNativeRouting();
-    if (!RestoreFreshTables(*record)) return false;
-    if (!RetireNativeOwners(*record)) return false;
-    ActiveNativeOwner().resourcesRetired = true;
-    ReleaseFreshReferences(*record);
-    // Immutable raw identity values/next pointers remain comparison-only after release.
+    g_nextD3d = function;
     return true;
 }
 
-bool NativeRoutingInstaller::Retire() noexcept
+[[nodiscard]] GraphicsObservationFailure InstallGraphicsImport() noexcept
 {
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return true;
-    if (!record->retainedReferences.load(std::memory_order_acquire)) return true;
-    ActiveNativeOwner().presentationProxy.RevokePublication();
-    if (GetCurrentThreadId() != record->thread) { RevokeNativeRouting(); return false; }
-    if (ActiveNativeOwner().resourcesRetired) return true;
-    // Query safety must be checked before revocation resets observation coverage.
-    if (!NativeRetirementSafe(*record)) { RevokeNativeRouting(); return false; }
-    if (!ActiveNativeOwner().settingsHost.RetireCold()) return false;
-    RevokeNativeRouting();
-    ActiveNativeOwner().resourcesRetired = RetireNativeOwners(*record);
-    return ActiveNativeOwner().resourcesRetired;
+    const auto image = MainImage();
+    if (image.empty()) return GraphicsObservationFailure::imageUnavailable;
+    const auto d3d = FindPe32PlusIatSlot(image, "d3d11.dll", "D3D11CreateDeviceAndSwapChain");
+    if (d3d.status != PeIatStatus::success) return GraphicsObservationFailure::importUnavailable;
+    if (!g_d3dIat.Install(d3d.slot, reinterpret_cast<void*>(&HookD3dCreate),
+            ProtectedCompareExchange, PublishD3dNext))
+        return GraphicsObservationFailure::iatInstallFailed;
+    return GraphicsObservationFailure::none;
 }
 
-namespace {
-template <class Record>
-ULONG ReleaseObservedObject(Record* record, IUnknown* object) noexcept
+HookOwnershipState GraphicsImportHealth() noexcept
 {
-    if (record == nullptr || record->nextRelease == nullptr) return 0;
-    const auto next = record->nextRelease;
-    const auto generation = record->identity.Generation();
-    ULONG remaining{};
-    try { remaining = next(object); }
-    catch (...) { RevokeNativeRouting(); return 1; }
-    if (remaining == 0 && record->identity.Retire(object, generation)) RevokeNativeRouting();
-    return remaining;
-}
-}  // namespace
-
-ULONG STDMETHODCALLTYPE HookDeviceRelease(IUnknown* object) noexcept
-{
-    return ReleaseObservedObject(g_deviceHooks.load(std::memory_order_acquire), object);
+    return g_d3dIat.Health();
 }
 
-ULONG STDMETHODCALLTYPE HookContextRelease(IUnknown* object) noexcept
+ULONG STDMETHODCALLTYPE HookDeviceRelease(ID3D11Device* device) noexcept
 {
-    return ReleaseObservedObject(g_contextHooks.load(std::memory_order_acquire), object);
+    return InvokeNoexceptBoundary<ULONG>(1, [=]() {
+        auto* record = FindDevice(device);
+        if (record == nullptr || record->nextRelease == nullptr) return 1UL;
+        const auto generation = record->identity.Generation();
+        const auto remaining = InvokeCapturedNext(record->nextRelease, device);
+        if (remaining == 0 && record->identity.Retire(device, generation))
+            g_evidence.deviceShadowRetireCount.fetch_add(
+                1, std::memory_order_relaxed);
+        return remaining;
+    }, []() noexcept { RecordAbiException(); });
 }
 
-ULONG STDMETHODCALLTYPE HookSwapChainRelease(IUnknown* object) noexcept
+bool ScenePromotionEligible(const D3D11_TEXTURE2D_DESC& desc) noexcept
 {
-    return ReleaseObservedObject(g_swapChainHooks.load(std::memory_order_acquire), object);
+    return HdrPathRequested() && g_referenceHealthy && desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
+        desc.Width != 0 && desc.Height != 0 && g_presentation.width != 0 && g_presentation.height != 0;
 }
-
-HRESULT STDMETHODCALLTYPE HookCreatePixelShader(ID3D11Device* device, const void* bytecode,
-    SIZE_T bytecodeLength, ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept
+[[nodiscard]] bool ShouldPromote(const D3D11_TEXTURE2D_DESC& desc) noexcept
 {
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return E_UNEXPECTED;
-    const NativeRoutingScope scope{device};
-    const auto result = NativeResult(record->nextCreatePixelShader, device, bytecode,
-        bytecodeLength, linkage, shader);
-    if (auto* admitted = scope.Record(); admitted != nullptr)
-    {
-        if (result == S_OK && shader != nullptr)
+    if (!ScenePromotionEligible(desc)) return false;
+    return ShouldPromoteSceneResourceToFp16(
         {
-            static_cast<void>(ActiveNativeOwner().renderer.ObserveCreatedPixelShader(
-                {static_cast<const std::byte*>(bytecode), bytecodeLength}, *shader));
-            static_cast<void>(ActiveNativeOwner().uiCapture.ObserveCreatedPixelShader(
-                {static_cast<const std::byte*>(bytecode), bytecodeLength}, *shader));
+            .format = SceneResourceFormat::r11g11b10Float,
+            .width = desc.Width,
+            .height = desc.Height
+        },
+        g_presentation.width,
+        g_presentation.height);
+}
+
+[[nodiscard]] DXGI_FORMAT RemapPromotedView(
+    ID3D11Resource* resource, DXGI_FORMAT requested) noexcept
+{
+    if (resource == nullptr || requested != DXGI_FORMAT_R11G11B10_FLOAT)
+        return requested;
+    ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture))))
+        return requested;
+    D3D11_TEXTURE2D_DESC desc{};
+    texture->GetDesc(&desc);
+    return desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ?
+        DXGI_FORMAT_R16G16B16A16_FLOAT : requested;
+}
+
+bool PresentationViewCandidate(ID3D11Resource* resource, ID3D11RenderTargetView* view) noexcept
+{
+    return resource != nullptr && view != nullptr &&
+        resource == static_cast<ID3D11Resource*>(g_presentation.presentationBackBuffer.Get());
+}
+[[nodiscard]] bool RememberPresentationView(
+    ID3D11Resource* resource, ID3D11RenderTargetView* view) noexcept
+{
+    if (!PresentationViewCandidate(resource, view))
+        return false;
+    for (auto*& known : g_presentation.presentationViews)
+    {
+        if (known == view) return true;
+        if (known == nullptr)
+        {
+            known = view;
+            return true;
         }
     }
-    return result;
+    g_referenceHealthy = false;
+    RecordFailure(GraphicsObservationFailure::registryExhausted);
+    return false;
 }
 
-HRESULT STDMETHODCALLTYPE HookCreateTexture2D(ID3D11Device* device,
-    const D3D11_TEXTURE2D_DESC* description, const D3D11_SUBRESOURCE_DATA* initialData,
+bool UninitializedScenePromotion(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
+    const D3D11_SUBRESOURCE_DATA* initialData) noexcept
+{
+    return device == g_rendererDevice.activeDevice && description != nullptr && initialData == nullptr &&
+        ShouldPromote(*description);
+}
+HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
+    ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
+    const D3D11_SUBRESOURCE_DATA* initialData,
     ID3D11Texture2D** texture) noexcept
 {
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return E_UNEXPECTED;
-    const bool ownedRequest = device == record->owned && NativeTextureRequest(description, initialData, texture);
-    if (!ownedRequest)
-        return NativeResult(record->nextCreateTexture2D, device, description, initialData, texture);
-    const NativeRoutingScope scope{device};
-    auto* context = scope.Record();
-    if (PromotableNativeRequest(context, *description))
-        return CreatePromotedScene(*record, *context, *description, texture);
-    return NativeResult(record->nextCreateTexture2D, device, description, initialData, texture);
+    return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
+        auto* record = FindDevice(device);
+        if (record == nullptr || record->nextCreateTexture2D == nullptr)
+            return E_FAIL;
+        // R11G11B10 and FP16 have different byte/row layouts. The trusted
+        // aspect-ratio promotion is safe only for uninitialized render
+        // targets; initialized resources keep their exact original format.
+        if (!UninitializedScenePromotion(device, description, initialData))
+            return InvokeCapturedNext(record->nextCreateTexture2D, device,
+                description, initialData, texture);
+        auto promoted = *description;
+        promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        const auto result = InvokeCapturedNext(record->nextCreateTexture2D,
+            device, &promoted, initialData, texture);
+        if (SUCCEEDED(result))
+            g_evidence.promotedResourceCount.fetch_add(
+                1, std::memory_order_relaxed);
+        return result;
+    }, []() noexcept { RecordAbiException(); });
+}
+
+template <auto NextMember, class Description, class View>
+HRESULT CreatePromotedView(ID3D11Device* device, ID3D11Resource* resource,
+    const Description* description, View** view) noexcept
+{
+    return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
+        auto* record = FindDevice(device);
+        if (record == nullptr || record->*NextMember == nullptr) return E_FAIL;
+        if (device != g_rendererDevice.activeDevice || description == nullptr)
+            return InvokeCapturedNext(record->*NextMember, device, resource, description, view);
+        auto remapped = *description;
+        remapped.Format = RemapPromotedView(resource, remapped.Format);
+        return InvokeCapturedNext(record->*NextMember, device, resource, &remapped, view);
+    }, []() noexcept { RecordAbiException(); });
 }
 
 HRESULT STDMETHODCALLTYPE HookCreateSrv(ID3D11Device* device, ID3D11Resource* resource,
     const D3D11_SHADER_RESOURCE_VIEW_DESC* description, ID3D11ShaderResourceView** view) noexcept
 {
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return E_UNEXPECTED;
-    if (CompatibleSrvRequest(device, resource, description))
-    {
-        auto compatible = *description;
-        compatible.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        return NativeResult(record->nextCreateSrv, device, resource, &compatible, view);
-    }
-    return NativeResult(record->nextCreateSrv, device, resource, description, view);
+    return CreatePromotedView<&DeviceRecord::nextCreateSrv>(device, resource, description, view);
 }
 
 HRESULT STDMETHODCALLTYPE HookCreateUav(ID3D11Device* device, ID3D11Resource* resource,
     const D3D11_UNORDERED_ACCESS_VIEW_DESC* description, ID3D11UnorderedAccessView** view) noexcept
 {
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return E_UNEXPECTED;
-    return NativeResult(record->nextCreateUav, device, resource, description, view);
+    return CreatePromotedView<&DeviceRecord::nextCreateUav>(device, resource, description, view);
 }
-
-HRESULT STDMETHODCALLTYPE HookCreateRtv(ID3D11Device* device, ID3D11Resource* resource,
-    const D3D11_RENDER_TARGET_VIEW_DESC* description, ID3D11RenderTargetView** view) noexcept
+bool CreatedRenderTargetView(HRESULT result, ID3D11RenderTargetView** view) noexcept
 {
-    const auto* record = g_deviceHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return E_UNEXPECTED;
-    if (CompatibleRtvRequest(device, resource, description))
-    {
-        auto compatible = *description;
-        compatible.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        return NativeResult(record->nextCreateRtv, device, resource, &compatible, view);
-    }
-    return NativeResult(record->nextCreateRtv, device, resource, description, view);
+    return SUCCEEDED(result) && view != nullptr && *view != nullptr;
+}
+HRESULT STDMETHODCALLTYPE HookCreateRtv(
+    ID3D11Device* device, ID3D11Resource* resource,
+    const D3D11_RENDER_TARGET_VIEW_DESC* description,
+    ID3D11RenderTargetView** view) noexcept
+{
+    return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
+        auto* record = FindDevice(device);
+        if (record == nullptr || record->nextCreateRtv == nullptr)
+            return E_FAIL;
+        if (device != g_rendererDevice.activeDevice)
+            return InvokeCapturedNext(record->nextCreateRtv, device,
+                resource, description, view);
+        D3D11_RENDER_TARGET_VIEW_DESC remapped{};
+        const D3D11_RENDER_TARGET_VIEW_DESC* selected = description;
+        if (description != nullptr)
+        {
+            remapped = *description;
+            remapped.Format = RemapPromotedView(resource, remapped.Format);
+            selected = &remapped;
+        }
+        const auto result = InvokeCapturedNext(record->nextCreateRtv,
+            device, resource, selected, view);
+        if (CreatedRenderTargetView(result, view))
+            (void)RememberPresentationView(resource, *view);
+        return result;
+    }, []() noexcept { RecordAbiException(); });
 }
 
-static_assert(std::is_convertible_v<decltype(&HookCreatePixelShader), CreatePixelShader>);
-static_assert(std::is_convertible_v<decltype(&HookCreateTexture2D), CreateTexture2D>);
-static_assert(std::is_convertible_v<decltype(&HookCreateSrv), CreateShaderResourceView>);
-static_assert(std::is_convertible_v<decltype(&HookCreateUav), CreateUnorderedAccessView>);
-static_assert(std::is_convertible_v<decltype(&HookCreateRtv), CreateRenderTargetView>);
 
-}  // namespace fo4hdr
+
+HRESULT STDMETHODCALLTYPE HookCreatePixelShader(
+    ID3D11Device* device, const void* bytecode, SIZE_T bytecodeLength,
+    ID3D11ClassLinkage* linkage, ID3D11PixelShader** shader) noexcept
+{
+    return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
+        auto* record = FindDevice(device);
+        if (record == nullptr || record->nextCreatePixelShader == nullptr)
+            return E_FAIL;
+        if (device != g_rendererDevice.activeDevice)
+            return InvokeCapturedNext(record->nextCreatePixelShader, device,
+                bytecode, bytecodeLength, linkage, shader);
+        g_evidence.pixelShaderCreateCount.fetch_add(
+            1, std::memory_order_relaxed);
+
+        CreatedShaderIdentity identity;
+        identity.Observe(bytecode, static_cast<std::size_t>(bytecodeLength), g_configuration.developerMode);
+
+        // Always create and return the game's original shader exactly once.
+        // Replacement shaders are pre-created transactionally before the
+        // device shadow is installed, so fallback can bind this original
+        // object without recreating it or forwarding twice.
+        const auto result = InvokeCapturedNext(record->nextCreatePixelShader,
+            device, bytecode, bytecodeLength, linkage, shader);
+        g_evidence.lastPixelShaderResult.store(result,
+            std::memory_order_release);
+        identity.Register(result, shader);
+        return result;
+    }, []() noexcept { RecordAbiException(); });
+}
+
+} // namespace fo4hdr

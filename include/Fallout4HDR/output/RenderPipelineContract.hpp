@@ -2,37 +2,11 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
 namespace fo4hdr {
-
-enum class NativeUiShaderRole : std::uint8_t
-{
-    unknown,
-    hudComposite,
-    gammaBackdrop
-};
-
-struct NativeUiShaderFact
-{
-    NativeUiShaderRole role{};
-    std::array<std::uint32_t, 4> dxbcHash{};
-};
-
-// Exact Fallout 4 1.10.163 pixel-shader identities. HUD input is straight sRGB
-// R8 RGBA at presentation extent; backdrop is SDR code contribution plus coverage.
-inline constexpr std::array<NativeUiShaderFact, 2> kNativeUiShaders{{
-    {NativeUiShaderRole::hudComposite, {0x525eaea9u, 0xaf037d1bu, 0x3ca0d381u, 0x8531a8b3u}},
-    {NativeUiShaderRole::gammaBackdrop, {0xb939134cu, 0xc0f28bacu, 0x1a7e28c1u, 0xf4aff2feu}}}};
-
-[[nodiscard]] constexpr NativeUiShaderRole FindNativeUiShaderRole(
-    const std::array<std::uint32_t, 4>& dxbcHash) noexcept
-{
-    for (const auto& fact : kNativeUiShaders)
-        if (fact.dxbcHash == dxbcHash) return fact.role;
-    return NativeUiShaderRole::unknown;
-}
 
 enum class RenoDxShaderPass : std::uint8_t
 {
@@ -74,6 +48,64 @@ enum class UnknownShaderOutcome : std::uint8_t
     disableOptionalFeature,
     disableHdrGeneration
 };
+
+// Plain-data domain tag tied to the existing renderer resource generation.
+// It prevents raw SDR codes, developer BT.709, and production BT.2020 proxy
+// values from being interpreted through the wrong output branch.
+enum class LinearColorDomain : std::uint8_t
+{
+    unknown,
+    vanillaSdrCodes,
+    linearBt709Relative,
+    linearBt2020UiRelative
+};
+
+struct WideGamutResourceReadiness
+{
+    bool replacementShaderSet{};
+    bool presentationProxySet{};
+    bool compositionSet{};
+    bool uiSet{};
+    bool outputSet{};
+
+    [[nodiscard]] constexpr bool Complete() const noexcept
+    {
+        return replacementShaderSet && presentationProxySet &&
+            compositionSet && uiSet && outputSet;
+    }
+};
+
+[[nodiscard]] constexpr bool IsWideGamutGenerationReady(
+    const WideGamutResourceReadiness& readiness,
+    std::uint64_t colorDomainGeneration,
+    std::uint64_t resourceGeneration) noexcept
+{
+    return readiness.Complete() && colorDomainGeneration != 0 &&
+        colorDomainGeneration == resourceGeneration;
+}
+
+enum class SdrHandoffAction : std::uint8_t
+{
+    none,
+    copyVanillaSdr,
+    clearBlack,
+    clearBlackAndDisable
+};
+
+[[nodiscard]] constexpr SdrHandoffAction DecideSdrHandoff(
+    bool hdrRendered,
+    bool frameWasRedirected,
+    LinearColorDomain frameDomain,
+    bool proxyStillAvailable) noexcept
+{
+    if (hdrRendered || !frameWasRedirected) return SdrHandoffAction::none;
+    if (frameDomain == LinearColorDomain::unknown)
+        return SdrHandoffAction::clearBlackAndDisable;
+    if (frameDomain == LinearColorDomain::vanillaSdrCodes &&
+        proxyStillAvailable)
+        return SdrHandoffAction::copyVanillaSdr;
+    return SdrHandoffAction::clearBlack;
+}
 
 struct RenoDxShaderDescriptor
 {
@@ -139,15 +171,11 @@ FindRenoDxFallout4Shader(std::uint32_t crc32) noexcept
 {
     for (const auto& descriptor : kRenoDxFallout4Shaders)
     {
-        if (descriptor.crc32 == crc32)
-        {
-            return &descriptor;
-        }
+        if (descriptor.crc32 == crc32) return &descriptor;
     }
     return nullptr;
 }
 
-// Required and optional roles need independent qualification before an unknown lookup.
 [[nodiscard]] constexpr UnknownShaderOutcome DecideUnknownShaderOutcome(
     PipelinePassRequirement requirement) noexcept
 {
@@ -161,6 +189,157 @@ FindRenoDxFallout4Shader(std::uint32_t crc32) noexcept
         return UnknownShaderOutcome::disableHdrGeneration;
     }
     return UnknownShaderOutcome::disableHdrGeneration;
+}
+
+struct PipelineHeartbeatEvaluation
+{
+    bool currentGeneration{};
+    bool currentFrame{};
+    bool toneMapFamilyObserved{};
+    bool lutObserved{};
+    bool ordered{};
+    enum class Outcome : std::uint8_t
+    {
+        ready,
+        incomplete,
+        staleGeneration,
+        staleFrame
+    } outcome{Outcome::incomplete};
+    bool ready{};
+};
+
+enum class PipelineHeartbeatAction : std::uint8_t
+{
+    renderHdr,
+    waitInSdr,
+    disableGeneration
+};
+
+enum class TemporalSceneAction : std::uint8_t
+{
+    ignoreUnqualifiedBranch,
+    acceptProxy,
+    rejectMissingProxy
+};
+
+enum class LateGameUiAction : std::uint8_t
+{
+    passThrough,
+    captureSeparately
+};
+
+struct LateGameUiFrame
+{
+    bool hdrPathRequested{};
+    bool referenceHealthy{};
+    bool gameplayReady{};
+    bool productionOperatorApplied{};
+    bool qualifiedSceneSelected{};
+    bool exactSinglePresentationTarget{};
+
+    [[nodiscard]] constexpr bool Ready() const noexcept
+    {
+        return hdrPathRequested && referenceHealthy && gameplayReady &&
+            productionOperatorApplied && qualifiedSceneSelected && exactSinglePresentationTarget;
+    }
+};
+
+struct LateGameUiBackdrop
+{
+    bool allowlistedBackdropShader{};
+    bool exactIndexedQuad{};
+    bool texture2dMaskSource{};
+    bool depthDetached{};
+
+    [[nodiscard]] constexpr bool Qualified() const noexcept
+    {
+        return allowlistedBackdropShader && exactIndexedQuad && texture2dMaskSource && depthDetached;
+    }
+};
+
+[[nodiscard]] constexpr LateGameUiAction DecideLateGameUiAction(
+    const LateGameUiFrame& frame,
+    bool allowlistedUiShader,
+    bool fullResolutionSdrUiSource) noexcept
+{
+    return frame.Ready() && allowlistedUiShader && fullResolutionSdrUiSource ?
+        LateGameUiAction::captureSeparately :
+        LateGameUiAction::passThrough;
+}
+
+[[nodiscard]] constexpr LateGameUiAction DecideLateGameUiBackdropAction(
+    const LateGameUiFrame& frame, const LateGameUiBackdrop& backdrop) noexcept
+{
+    return frame.Ready() && backdrop.Qualified() ?
+        LateGameUiAction::captureSeparately :
+        LateGameUiAction::passThrough;
+}
+
+[[nodiscard]] constexpr PipelineHeartbeatAction DecidePipelineHeartbeatAction(
+    const PipelineHeartbeatEvaluation& evaluation) noexcept
+{
+    switch (evaluation.outcome)
+    {
+    case PipelineHeartbeatEvaluation::Outcome::ready:
+        return PipelineHeartbeatAction::renderHdr;
+    case PipelineHeartbeatEvaluation::Outcome::incomplete:
+        return PipelineHeartbeatAction::waitInSdr;
+    case PipelineHeartbeatEvaluation::Outcome::staleGeneration:
+    case PipelineHeartbeatEvaluation::Outcome::staleFrame:
+        return PipelineHeartbeatAction::disableGeneration;
+    }
+    return PipelineHeartbeatAction::disableGeneration;
+}
+
+struct TemporalSceneEvidence
+{
+    bool qualifiedSceneSelected{};
+    bool consumesSelectedScene{};
+    bool presentationTarget{};
+    bool exactProxyReady{};
+
+    [[nodiscard]] constexpr bool Qualified() const noexcept
+    {
+        return qualifiedSceneSelected && consumesSelectedScene && presentationTarget;
+    }
+};
+
+[[nodiscard]] constexpr TemporalSceneAction DecideTemporalSceneAction(
+    const PipelineHeartbeatEvaluation& evaluation,
+    const TemporalSceneEvidence& evidence) noexcept
+{
+    if (!evaluation.ready ||
+        evaluation.outcome != PipelineHeartbeatEvaluation::Outcome::ready)
+    {
+        return TemporalSceneAction::ignoreUnqualifiedBranch;
+    }
+    if (!evidence.Qualified()) return TemporalSceneAction::ignoreUnqualifiedBranch;
+    return evidence.exactProxyReady ? TemporalSceneAction::acceptProxy
+                                   : TemporalSceneAction::rejectMissingProxy;
+}
+
+class PipelineHeartbeat
+{
+public:
+    void Reset(std::uint64_t generation) noexcept;
+    void BeginFrame(std::uint64_t generation, std::uint64_t frame) noexcept;
+    void Observe(RenoDxShaderPass pass) noexcept;
+    [[nodiscard]] PipelineHeartbeatEvaluation Evaluate(
+        std::uint64_t generation,
+        std::uint64_t frame) const noexcept;
+
+private:
+    std::uint64_t generation_{};
+    std::uint64_t frame_{};
+    bool toneMapFamilyObserved_{};
+    bool lutObserved_{};
+    bool orderedPairObserved_{};
+};
+
+[[nodiscard]] constexpr std::uint32_t RenoDxShaderBit(
+    RenoDxShaderPass pass) noexcept
+{
+    return std::uint32_t{1} << static_cast<std::uint8_t>(pass);
 }
 
 }  // namespace fo4hdr

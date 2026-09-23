@@ -4,7 +4,7 @@
 #include "HdrSettingsTestSupport.hpp"
 
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "config/SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <array>
 #include <limits>
@@ -158,17 +158,17 @@ void TestGradeProfileParsing()
         "[LUT:Textures\\Effects\\Night.DDS]\nColor=35\n"
         "[LUT:textures/effects/day.dds]\nLuminance=65\nColor=75\n"
         "[IMGS:Fallout4.ESM|00ABCD]\nLuminance=55\n");
-    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(!parsed.value.display.lutGradeProfiles.enabled);
-    FO4HDR_CHECK(parsed.value.display.lutGradeProfiles.count == 3);
+    FO4HDR_CHECK(parsed.valid == true);
+    FO4HDR_CHECK(!parsed.value.lutGradeProfiles.enabled);
+    FO4HDR_CHECK(parsed.value.lutGradeProfiles.count == 3);
     const auto* night = FindLutGradeProfile(
-        parsed.value.display.lutGradeProfiles, "textures/effects/night.dds");
+        parsed.value.lutGradeProfiles, "textures/effects/night.dds");
     FO4HDR_CHECK(night != nullptr);
     if (!night) throw std::runtime_error("Parsed LUT profile missing");
     FO4HDR_CHECK(night->overrideColor && !night->overrideLuminance);
     FO4HDR_CHECK(night->colorPercent == 35.0);
     const auto* imageSpace = FindImageSpaceGradeProfile(
-        parsed.value.display.lutGradeProfiles, "fallout4.esm|00abcd");
+        parsed.value.lutGradeProfiles, "fallout4.esm|00abcd");
     FO4HDR_CHECK(imageSpace != nullptr);
     if (!imageSpace) throw std::runtime_error("Parsed ImageSpace profile missing");
     FO4HDR_CHECK(imageSpace->overrideLuminance &&
@@ -188,13 +188,13 @@ void TestGradeProfileParsing()
              "[IMGS:Fallout4.ESM|00ABCD]\nColor=1\n"
              "[IMGS:fallout4.esm|00abcd]\nLuminance=2\n"})
         FO4HDR_CHECK(ParsePluginConfiguration(
-            GradeConfiguration() + "\n" + invalid).status == PluginConfigurationStatus::invalid);
+            GradeConfiguration() + "\n" + invalid).valid == false);
 }
 
 void TestGradeProfileRoundTrip()
 {
     PluginConfiguration configuration;
-    auto& settings = configuration.display;
+    auto& settings = configuration;
     settings.lutGradeProfiles.enabled = false;
     FO4HDR_CHECK(SetLutGradeProfile(settings.lutGradeProfiles,
         "Textures\\Effects\\Night.DDS", {65.0, true, 35.0, true}));
@@ -204,7 +204,7 @@ void TestGradeProfileRoundTrip()
         "[LUT:stale.dds]\nColor=1\nStaleOwnedValue=removed\n"
         "[IMGS:stale.esm|000001]\nColor=2\n"
         "[Unrelated]\nKeep=1\n";
-    const auto saved = RewritePluginConfigurationIni(original, configuration);
+    const auto saved = RewriteHdrSettingsIni(original, configuration);
     FO4HDR_CHECK(saved.find("stale.dds") == std::string::npos);
     FO4HDR_CHECK(saved.find("stale.esm|000001") == std::string::npos);
     FO4HDR_CHECK(saved.find("StaleOwnedValue") == std::string::npos);
@@ -218,10 +218,10 @@ void TestGradeProfileRoundTrip()
         "[IMGS:fallout4.esm|00abcd]\nColor=45\nLuminance=55\n") !=
         std::string::npos);
     const auto roundTrip = ParsePluginConfiguration(saved);
-    FO4HDR_CHECK(roundTrip.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(roundTrip.value.display.lutGradeProfiles ==
+    FO4HDR_CHECK(roundTrip.valid == true);
+    FO4HDR_CHECK(roundTrip.value.lutGradeProfiles ==
         settings.lutGradeProfiles);
-    const auto resaved = RewritePluginConfigurationIni(saved, configuration);
+    const auto resaved = RewriteHdrSettingsIni(saved, configuration);
     FO4HDR_CHECK(resaved == saved);
 }
 
@@ -232,16 +232,16 @@ void TestPersonalProfileRewrite()
         "Textures\\Effects\\Night.DDS", {65.0, true, 35.0, true}));
     const auto original = "[LUT:stale.dds]\nColor=1\nStaleOwnedValue=removed\n"
         "[Unrelated]\nKeep=1\n";
-    const auto saved = RewriteGradeProfilesIni(original, profiles);
+    const auto saved = RewriteGradeProfilesIni(original, profiles, {});
     FO4HDR_CHECK(saved.find("stale.dds") == std::string::npos);
     FO4HDR_CHECK(saved.find("StaleOwnedValue") == std::string::npos);
     FO4HDR_CHECK(saved.find("[Unrelated]\nKeep=1\n") != std::string::npos);
     FO4HDR_CHECK(saved.find(
         "[LUT:textures/effects/night.dds]\nColor=35\nLuminance=65\n") != std::string::npos);
     const auto parsed = ParseGradeProfileConfiguration(saved);
-    FO4HDR_CHECK(parsed.status == PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(parsed.value.display.lutGradeProfiles == profiles);
-    FO4HDR_CHECK(RewriteGradeProfilesIni(saved, profiles) == saved);
+    FO4HDR_CHECK(parsed.valid == true);
+    FO4HDR_CHECK(parsed.value.lutGradeProfiles == profiles);
+    FO4HDR_CHECK(RewriteGradeProfilesIni(saved, profiles, {}) == saved);
 }
 
 }  // namespace

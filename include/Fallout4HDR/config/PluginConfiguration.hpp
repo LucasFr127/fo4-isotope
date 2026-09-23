@@ -11,51 +11,74 @@
 
 namespace fo4hdr {
 
-struct PluginConfiguration
+struct PluginConfiguration : HdrSettings
 {
-    HdrSettings display;
-    OperatorLutAlgorithm algorithm{OperatorLutAlgorithm::aces2};
-    bool measurePerformance{};
+    PluginConfiguration() noexcept
+    {
+        // Default construction must remain a neutral, non-production request.
+        exposureEv = 0.0;
+    }
+
     bool enabled{};
+    bool productionRequested{};
+    double sceneExposureMultiplier{1.0};
     bool developerMode{};
     bool traceRenderPipeline{};
+    bool measurePerformance{};
+    // Numerical/display reference validation is independent of production HDR.
     bool developerHdr10Reference{};
     bool showDeveloperOverlay{};
     bool forceHdrSwapChainFailure{};
-    [[nodiscard]] bool operator==(const PluginConfiguration& other) const noexcept;
+    bool operator==(const PluginConfiguration&) const = default;
 };
 
-enum class PluginConfigurationStatus : std::uint8_t
+enum class PluginConfigurationError
 {
-    loaded,
-    missing,
-    invalid,
-    ioError
+    none,
+    fileUnavailable,
+    invalidSyntax,
+    missingKey,
+    duplicateKey,
+    invalidBoolean,
+    invalidNumber,
+    valueOutOfRange,
+    unsupportedAlgorithm,
+    unsupportedColorGradingMethod,
+    invalidCombination
 };
 
 struct GradeProfileFileIssue
 {
     std::filesystem::path path;
-    PluginConfigurationStatus status{PluginConfigurationStatus::invalid};
+    PluginConfigurationError error{};
     std::size_t line{};
 };
 
 struct PluginConfigurationResult
 {
-    PluginConfiguration value;
-    PluginConfigurationStatus status{PluginConfigurationStatus::invalid};
+    PluginConfiguration value{};
+    PluginConfigurationError error{
+        PluginConfigurationError::fileUnavailable};
     std::size_t line{};
-    LutGradeProfiles profileInheritances;
-    LutGradeProfiles distributedProfiles;
+    bool valid{};
+    // Parsing keeps inheritance masks separate from renderable profiles.
+    LutGradeProfiles profileInheritances{};
+    LutGradeProfiles distributedProfiles{};
     std::vector<GradeProfileFileIssue> profileIssues;
 };
 
-[[nodiscard]] bool ValidatePluginConfiguration(const PluginConfiguration& value) noexcept;
-[[nodiscard]] PluginConfigurationResult ParsePluginConfiguration(std::string_view text) noexcept;
-[[nodiscard]] PluginConfigurationResult ParseGradeProfileConfiguration(std::string_view text) noexcept;
-[[nodiscard]] PluginConfigurationResult LoadPluginConfiguration(
+[[nodiscard]] PluginConfigurationResult
+ParsePluginConfiguration(std::string_view text) noexcept;
+[[nodiscard]] PluginConfigurationResult
+ParseGradeProfileConfiguration(std::string_view text) noexcept;
+[[nodiscard]] PluginConfigurationResult
+LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;
-[[nodiscard]] std::string_view ToString(OperatorLutAlgorithm algorithm) noexcept;
-[[nodiscard]] std::string_view ToString(ColorGradingMethod method) noexcept;
+[[nodiscard]] std::string_view ToString(
+    ProductionToneMapperAlgorithm algorithm) noexcept;
+[[nodiscard]] std::string_view ToString(
+    ColorGradingMethod method) noexcept;
+[[nodiscard]] std::string_view ToString(
+    PluginConfigurationError error) noexcept;
 
 }  // namespace fo4hdr

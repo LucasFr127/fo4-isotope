@@ -12,11 +12,11 @@
 namespace fo4hdr::test {
 namespace {
 
-LinearRgb SanitizeInput(LinearRgb scene, OperatorLutAlgorithm algorithm) noexcept
+LinearRgb SanitizeInput(LinearRgb scene, ProductionToneMapperAlgorithm algorithm) noexcept
 {
     const auto channel = [algorithm](double value) noexcept {
         if (std::isnan(value)) return 0.0;
-        if (algorithm == OperatorLutAlgorithm::aces2)
+        if (algorithm == ProductionToneMapperAlgorithm::aces2Lmt)
             if (!std::isfinite(value)) return 0.0;
         return std::clamp(value, 0.0, 65504.0);
     };
@@ -33,7 +33,7 @@ CubicAxis CoefficientAxis(double value, const OperatorLutData& lut) noexcept
 {
     const auto shaper = OperatorLutShaperParameters(lut.algorithm, lut.displayPeakNits);
     const auto logarithm = std::log2(value + 1.0 / 65536.0);
-    const auto width = lut.algorithm == OperatorLutAlgorithm::gt7 ? 2.5 : 3.0;
+    const auto width = lut.algorithm == ProductionToneMapperAlgorithm::gt7 ? 2.5 : 3.0;
     const auto coordinate = std::clamp(std::atan((logarithm - shaper[2]) / width) *
         shaper[0] + logarithm * shaper[3] + shaper[1], 0.0, 1.0);
     const auto position = coordinate * static_cast<double>(lut.edge - 1U);
@@ -99,7 +99,7 @@ LinearRgb SampleOperatorLut(const OperatorLutData& lut, LinearRgb scene) noexcep
     // Only full exact black bypasses quantized coefficient cancellation.
     if (std::max({scene.red, scene.green, scene.blue}) == 0.0) return {};
     const auto raw = SampleOperatorLutRaw(lut, scene);
-    return lut.algorithm == OperatorLutAlgorithm::agX ?
+    return lut.algorithm == ProductionToneMapperAlgorithm::agX ?
         ApplyAgxDisplayGamut(raw, lut.displayPeakNits) :
         ContainBt2020Nits(raw, lut.displayPeakNits);
 }

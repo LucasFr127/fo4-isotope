@@ -25,8 +25,9 @@ if ($fileVersion -cne "10.0.26100.8249") {
 }
 
 $flags = @("/WX", "/Ges", "/Gis", "/O3")
-$shaderDirectory = [IO.Path]::Combine($projectRoot, "build/include/fo4hdr-shaders")
+$shaderDirectory = [IO.Path]::Combine($projectRoot, "build/include/Fallout4HDR")
 $fixtureDirectory = [IO.Path]::GetDirectoryName($outputPath)
+$headerPath = [IO.Path]::Combine($shaderDirectory, "ShippingShaders.generated.hpp")
 function Get-ShaderPrograms {
     $programs = [Collections.Generic.List[object]]::new()
     $programs.Add(@{
@@ -37,44 +38,24 @@ function Get-ShaderPrograms {
         "NativeReferenceGrade", "TemporalAa", "TemporalAa2", "Fxaa", "Video")) {
         $programs.Add(@{
             Source = "shaders/fallout4/$name.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"
-            Symbol = "k$($name)Bytecode"; Destination = [IO.Path]::Combine($shaderDirectory, "$name.hpp")
+            Symbol = "k$name"; Destination = [IO.Path]::Combine($fixtureDirectory, "$name.dxbc")
         })
     }
-    foreach ($entry in @("main", "CopySdrCodes")) {
-        $name = if ($entry -ceq "main") { "PresentPixels" } else { $entry }
-        $programs.Add(@{
-            Source = "shaders/output/PresentPixels.cs.hlsl"; Profile = "cs_5_0"; Entry = $entry
-            Symbol = "k$($name)Bytecode"; Destination = [IO.Path]::Combine($shaderDirectory, "$name.hpp")
-        })
-    }
-    $programs.Add(@{
-        Source = "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
-        Symbol = "kDeveloperExposureCaptureBytecode"
-        Destination = [IO.Path]::Combine($shaderDirectory, "DeveloperExposureCapture.hpp")
-    })
-    $programs.Add(@{
-        Source = "shaders/armor/EncodedComposition.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
-        Symbol = "kArmorEncodedCompositionBytecode"
-        Destination = [IO.Path]::Combine($shaderDirectory, "ArmorEncodedComposition.hpp")
-    })
-    $programs.Add(@{
-        Source = "shaders/fallout4/NativeReferencePrepare.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
-        Symbol = "kNativeReferencePrepareBytecode"
-        Destination = [IO.Path]::Combine($shaderDirectory, "NativeReferencePrepare.hpp")
-    })
-    foreach ($fixture in @(
-        @{ Source = "tests/shader/shaders/HdrGradeTransfer.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "HdrGradeTransfer" },
-        @{ Source = "tests/shader/shaders/Gt7Evaluation.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "Gt7Evaluation" },
-        @{ Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"; Name = "OperatorLut" },
-        @{ Source = "tests/shader/shaders/ArmorEncodedSource.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ArmorEncodedSource" },
-        @{ Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; Entry = "main"; Name = "Fullscreen" },
-        @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "main"; Name = "ScenePassSentinel" },
-        @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "ps_5_0"; Entry = "plainMain"; Name = "ScenePassPlain" },
-        @{ Source = "tests/shader/shaders/ScenePassSentinel.ps.hlsl"; Profile = "cs_5_0"; Entry = "computeMain"; Name = "ScenePassCompute" }
+    foreach ($shader in @(
+        @{ Source = "shaders/output/PresentPixels.cs.hlsl"; Name = "PresentPixels"; Symbol = "kPresentPixelsCs" },
+        @{ Source = "shaders/diagnostics/DeveloperExposureCapture.cs.hlsl"; Name = "DeveloperExposureCapture"; Symbol = "kDeveloperExposureCaptureCs" },
+        @{ Source = "shaders/armor/EncodedComposition.cs.hlsl"; Name = "ArmorEncodedComposition"; Symbol = "kArmorEncodedCompositionComputeShader" },
+        @{ Source = "shaders/fallout4/NativeReferencePrepare.cs.hlsl"; Name = "NativeReferencePrepare"; Symbol = "kNativeReferencePrepare" }
     )) {
         $programs.Add(@{
-            Source = $fixture.Source; Profile = $fixture.Profile; Entry = $fixture.Entry
-            Destination = [IO.Path]::Combine($fixtureDirectory, "$($fixture.Name).dxbc")
+            Source = $shader.Source; Profile = "cs_5_0"; Entry = "main"; Symbol = $shader.Symbol
+            Destination = [IO.Path]::Combine($fixtureDirectory, "$($shader.Name).dxbc")
+        })
+    }
+    foreach ($name in @("HdrGradeTransfer", "Gt7Evaluation", "OperatorLut")) {
+        $programs.Add(@{
+            Source = "tests/shader/shaders/$name.cs.hlsl"; Profile = "cs_5_0"; Entry = "main"
+            Destination = [IO.Path]::Combine($fixtureDirectory, "$name.dxbc")
         })
     }
     return $programs.ToArray()
@@ -88,7 +69,7 @@ function Get-ShaderInputs {
     }
     foreach ($include in @("shaders/fallout4/GradeTransfer.hlsli",
         "shaders/fallout4/ImageControls.hlsli", "shaders/fallout4/SelectiveColor.hlsli",
-        "shaders/fallout4/NativeReferenceGrade.hlsli",
+        "shaders/fallout4/NativeReferenceGrade.hlsli", "shaders/fallout4/LiveSettingsConstants.hlsli",
         "shaders/fallout4/TemporalIntermediate.hlsli", "shaders/fallout4/ToneMapBypassCommon.hlsli",
         "shaders/output/DisplayMath.hlsli", "shaders/output/SceneLayers.hlsli",
         "shaders/tonemap/Gt7.hlsli", "shaders/tonemap/OperatorLut.hlsli")) {
@@ -104,7 +85,7 @@ if ($PrintDependencyInfo) {
             sha256 = (Get-FileHash -LiteralPath $compilerPath -Algorithm SHA256).Hash
         }
         flags = @("/nologo") + $flags; inputs = $inputs
-        outputs = @($programs | ForEach-Object { $_.Destination })
+        outputs = @($programs | ForEach-Object { $_.Destination }) + @($headerPath)
         outputRoot = $fixtureDirectory
         programs = @($programs | ForEach-Object {
             [ordered]@{ source = $_.Source; profile = $_.Profile; entry = $_.Entry; symbol = $_.Symbol }
@@ -117,8 +98,7 @@ function Invoke-ShaderCompilation {
     param([hashtable]$Program, [string]$Destination)
 
     $arguments = @("/nologo", "/T", $Program.Profile, "/E", $Program.Entry) + $flags
-    if ($Program.Symbol) { $arguments += @("/Fh", $Destination, "/Vn", $Program.Symbol) }
-    else { $arguments += @("/Fo", $Destination) }
+    $arguments += @("/Fo", $Destination)
     $arguments += [IO.Path]::Combine($projectRoot, $Program.Source)
     & $compilerPath @arguments
     if ($LASTEXITCODE -ne 0 -or -not [IO.File]::Exists($Destination)) {
@@ -139,6 +119,37 @@ function Publish-ChangedOutputs {
     }
 }
 
+function Add-ShaderBytecodeDeclaration {
+    param([Text.StringBuilder]$Header, [string]$Symbol, [byte[]]$Bytes)
+    [void]$Header.AppendLine("inline constexpr std::array<std::byte, $($Bytes.Length)> $Symbol = {")
+    for ($offset = 0; $offset -lt $Bytes.Length; $offset += 12) {
+        $count = [Math]::Min(12, $Bytes.Length - $offset)
+        $values = for ($index = 0; $index -lt $count; ++$index) {
+            "std::byte{0x$($Bytes[$offset + $index].ToString('X2'))}"
+        }
+        [void]$Header.AppendLine("    " + ($values -join ", ") + ",")
+    }
+    [void]$Header.AppendLine("};")
+}
+
+function Write-AggregateHeader {
+    param([object[]]$Staged, [string]$Destination)
+    $header = [Text.StringBuilder]::new()
+    [void]$header.AppendLine("// Generated by scripts/compile-shaders.ps1. Do not edit.")
+    [void]$header.AppendLine("#pragma once")
+    [void]$header.AppendLine("#include <array>")
+    [void]$header.AppendLine("#include <cstddef>")
+    [void]$header.AppendLine("namespace fo4hdr::generated {")
+    foreach ($item in $Staged) {
+        if ($item.Symbol) {
+            $bytes = [IO.File]::ReadAllBytes($item.Temporary)
+            Add-ShaderBytecodeDeclaration -Header $header -Symbol $item.Symbol -Bytes $bytes
+        }
+    }
+    [void]$header.AppendLine("}")
+    [IO.File]::WriteAllText($Destination, $header.ToString().Replace("`r", ""), [Text.UTF8Encoding]::new($false))
+}
+
 function Publish-ShaderPrograms {
     $staged = [Collections.Generic.List[object]]::new()
     try {
@@ -146,10 +157,15 @@ function Publish-ShaderPrograms {
             $directory = [IO.Path]::GetDirectoryName($program.Destination)
             [IO.Directory]::CreateDirectory($directory) | Out-Null
             $temporary = [IO.Path]::Combine($directory, ".fo4hdr-" + [Guid]::NewGuid().ToString("N") + ".tmp")
-            $staged.Add(@{ Temporary = $temporary; Destination = $program.Destination })
+            $staged.Add(@{ Temporary = $temporary; Destination = $program.Destination; Symbol = $program.Symbol })
             Invoke-ShaderCompilation -Program $program -Destination $temporary
         }
-        # Preserve good prior outputs until every program has compiled successfully.
+        [IO.Directory]::CreateDirectory($shaderDirectory) | Out-Null
+        $headerTemporary = [IO.Path]::Combine($shaderDirectory, ".fo4hdr-" + [Guid]::NewGuid().ToString("N") + ".tmp")
+        $compiled = $staged.ToArray()
+        $staged.Add(@{ Temporary = $headerTemporary; Destination = $headerPath })
+        Write-AggregateHeader -Staged $compiled -Destination $headerTemporary
+        # Preserve good prior outputs until every program and the header are ready.
         Publish-ChangedOutputs -Staged $staged.ToArray()
     }
     finally {

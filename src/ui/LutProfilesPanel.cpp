@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "LutProfilesPanel.hpp"
-#include "HdrRenderer.hpp"
+#include "Fallout4HDR/ui/SettingsWindow.hpp"
 
 #include <imgui.h>
 
@@ -117,7 +117,7 @@ bool DrawProfileValue(const char* label, double& value, double inherited) noexce
 class ProfilePanel
 {
 public:
-    ProfilePanel(HdrSettings& settings, const LutProfileDrawSnapshot& view,
+    ProfilePanel(HdrSettings& settings, const LutProfilesView& view,
         GradeProfileSelection& selection) noexcept : settings_(settings), view_(view), selection_(selection) {}
 
     bool Draw() noexcept
@@ -326,13 +326,13 @@ private:
     }
 
     HdrSettings& settings_;
-    const LutProfileDrawSnapshot& view_;
+    const LutProfilesView& view_;
     GradeProfileSelection& selection_;
 };
 
 }  // namespace
 
-bool DrawLutProfilesPanel(HdrSettings& settings, const LutProfileDrawSnapshot& view,
+bool DrawLutProfilesPanel(HdrSettings& settings, const LutProfilesView& view,
     GradeProfileSelection& selection) noexcept
 {
     return ProfilePanel(settings, view, selection).Draw();

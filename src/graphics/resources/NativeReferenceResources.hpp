@@ -6,9 +6,9 @@
 
 namespace fo4hdr {
 
-// Private views never escape the renderer or remain bound after preparation.
 struct NativeReferenceResources
 {
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> preblendShader;
     Microsoft::WRL::ComPtr<ID3D11Texture3D> preblendTexture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> preblendSrv;

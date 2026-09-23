@@ -2,7 +2,7 @@
 
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "config/SettingsPersistence.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
@@ -112,7 +112,7 @@ void TestIndependentWhites()
 
 void TestToneMapperControlRanges()
 {
-    using Algorithm = fo4hdr::OperatorLutAlgorithm;
+    using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
     using Parameters = fo4hdr::ToneMapperParameters;
     struct Range
     {
@@ -145,8 +145,9 @@ void TestToneMapperControlRanges()
             parameters.*range.member = invalid;
             FO4HDR_CHECK(!fo4hdr::ValidateToneMapperParameters(range.algorithm, parameters));
             fo4hdr::PluginConfiguration configuration;
-            configuration.display.toneMapperParameters = parameters;
-            FO4HDR_CHECK(!fo4hdr::ValidatePluginConfiguration(configuration));
+            configuration.productionAlgorithm = range.algorithm;
+            configuration.toneMapperParameters = parameters;
+            FO4HDR_CHECK(!(fo4hdr::ValidateHdrSettings(configuration) == fo4hdr::HdrSettingsValidationError::none));
         }
     }
     FO4HDR_CHECK(!fo4hdr::ValidateToneMapperParameters(static_cast<Algorithm>(255), {}));
@@ -154,12 +155,12 @@ void TestToneMapperControlRanges()
 
 void TestToneMapperEffectiveParameters()
 {
-    using Algorithm = fo4hdr::OperatorLutAlgorithm;
+    using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
     const fo4hdr::ToneMapperParameters defaults;
     auto parameters = defaults;
     parameters.agxContrast = 3.0;
     parameters.gt7ColorBlend = 0.8;
-    FO4HDR_CHECK(fo4hdr::ActiveToneMapperParameters(Algorithm::aces2, parameters) == defaults);
+    FO4HDR_CHECK(fo4hdr::ActiveToneMapperParameters(Algorithm::aces2Lmt, parameters) == defaults);
     const auto agx = fo4hdr::ActiveToneMapperParameters(Algorithm::agX, parameters);
     FO4HDR_CHECK(agx.agxContrast == 3.0);
     FO4HDR_CHECK(agx.gt7ColorBlend == defaults.gt7ColorBlend);
@@ -184,48 +185,48 @@ void TestVanillaGradeRemovalMath()
 void TestToneMapperPersistence()
 {
     constexpr auto original = "[Output]\nDisplayPeakNits=1000\nUiPaperWhiteNits=203\n"
-        "VideoWhiteNits=203\n[ToneMapper]\nAlgorithm=ACES2\n[Other]\nKeep=unchanged\n";
+        "VideoWhiteNits=203\n[ToneMapper]\nAlgorithm=ACES2LMT\n[Other]\nKeep=unchanged\n";
     const auto parsed = fo4hdr::ParsePluginConfiguration(original);
-    FO4HDR_CHECK(parsed.status == fo4hdr::PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(parsed.value.display.toneMapperParameters == fo4hdr::ToneMapperParameters{});
-    FO4HDR_CHECK(parsed.value.display.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(parsed.value.display.contrast == 0);
-    FO4HDR_CHECK(parsed.value.display.saturationPercent == 100);
+    FO4HDR_CHECK(parsed.valid == true);
+    FO4HDR_CHECK(parsed.value.toneMapperParameters == fo4hdr::ToneMapperParameters{});
+    FO4HDR_CHECK(parsed.value.vanillaColorGradingStrengthPercent == 100.0);
+    FO4HDR_CHECK(parsed.value.contrast == 0);
+    FO4HDR_CHECK(parsed.value.saturationPercent == 100);
     auto requested = parsed.value;
-    requested.display.vanillaColorGradingStrengthPercent = 50.0;
-    requested.display.vanillaGradeLuminancePercent = 65.0;
-    requested.display.vanillaGradeColorPercent = 20.0;
-    requested.display.exposureEv = 1;
-    requested.display.bloomStrengthPercent = 50;
-    requested.display.contrast = 25;
-    requested.display.blacks = -20;
-    requested.display.highlights = 30;
-    requested.display.shadows = -40;
-    requested.display.saturationPercent = 120;
-    requested.display.temperature = 15;
-    requested.display.tint = -10;
-    requested.display.toneMapperParameters.agxContrast = 3.0;
-    requested.display.toneMapperParameters.gt7ToeStrength = 1.5;
+    requested.vanillaColorGradingStrengthPercent = 50.0;
+    requested.vanillaGradeLuminancePercent = 65.0;
+    requested.vanillaGradeColorPercent = 20.0;
+    requested.exposureEv = 1;
+    requested.bloomStrengthPercent = 50;
+    requested.contrast = 25;
+    requested.blacks = -20;
+    requested.highlights = 30;
+    requested.shadows = -40;
+    requested.saturationPercent = 120;
+    requested.temperature = 15;
+    requested.tint = -10;
+    requested.toneMapperParameters.agxContrast = 3.0;
+    requested.toneMapperParameters.gt7ToeStrength = 1.5;
     FO4HDR_CHECK(!(requested == parsed.value));
-    const auto rewritten = fo4hdr::RewritePluginConfigurationIni(original, requested);
+    const auto rewritten = fo4hdr::RewriteHdrSettingsIni(original, requested);
     const auto restored = fo4hdr::ParsePluginConfiguration(rewritten);
-    FO4HDR_CHECK(restored.status == fo4hdr::PluginConfigurationStatus::loaded);
-    FO4HDR_CHECK(restored.value == requested);
+    FO4HDR_CHECK(restored.valid == true);
+    FO4HDR_CHECK(static_cast<const HdrSettings&>(restored.value) == static_cast<const HdrSettings&>(requested));
     FO4HDR_CHECK(rewritten.find("Keep=unchanged") != std::string::npos);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Effects]\nVanillaColorGradingStrength=101\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nVanillaColorGradingStrength=50\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(std::string(original) + "[Image]\nExposure=5\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nBloomStrength=100\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Image]\nShadows=101\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Image]\nTint=0\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[AgX]\nContrast=2.7\n").status ==
-        fo4hdr::PluginConfigurationStatus::invalid);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Effects]\nVanillaColorGradingStrength=101\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nVanillaColorGradingStrength=50\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(std::string(original) + "[Image]\nExposure=5\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nBloomStrength=100\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Image]\nShadows=101\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Image]\nTint=0\n").valid ==
+        false);
+    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[AgX]\nContrast=2.7\n").valid ==
+        false);
 }
 
 void TestNeutralImageMath()

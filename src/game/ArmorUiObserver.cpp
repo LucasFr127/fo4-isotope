@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "ArmorUiObserver.hpp"
 #include "DirectCallPatch.hpp"
 #include "Fallout4HDR/output/ArmorUiComposition.hpp"
@@ -10,6 +10,10 @@
 #include <atomic>
 #include <cstring>
 #include <span>
+#if defined(FO4HDR_RUNTIME_1_10_163)
+#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
+#endif
+
 namespace {
 namespace detail = fo4hdr::game::direct_call_patch;
 using ScreenSubmit = void (*)(RE::Interface3D::Renderer*, std::uint32_t);
@@ -72,8 +76,8 @@ bool MatchesBytes(std::uintptr_t address, std::span<const std::uint8_t> expected
         actual.data(), expected.size()) && std::equal(expected.begin(), expected.end(), actual.begin());
 }
 
-// Caller admission proves a pre-use exclusive mutation window. A five-byte
-// write is not atomic; the F4SE load event alone provides no such proof.
+// Startup-only mutation. Each patch is contained in one memory region/page,
+// and the F4SE load stage precedes use of the two native rendering callers.
 bool WriteBytes(std::uintptr_t address, std::span<const std::uint8_t> bytes,
     DWORD originalProtection) noexcept
 {
@@ -122,8 +126,7 @@ bool IsArmorName(const char* name) noexcept
 }
 
 // No registry lookup/lock recursion, NiPointer copy, root dereference, or
-// retained pointer. Installation admission must prove the caller-held registry
-// lifetime; matching code bytes alone does not establish it.
+// retained pointer. Native callers hold the registry read lock for this scope.
 // Fault containment is for these optional reads only, never native submission.
 bool Observe(RE::Interface3D::Renderer* renderer, RendererObservation& result) noexcept
 {
@@ -141,7 +144,8 @@ bool Observe(RE::Interface3D::Renderer* renderer, RendererObservation& result) n
 
 bool ObserveScope() noexcept
 {
-    return g_installed.load(std::memory_order_acquire);
+    return g_installed.load(std::memory_order_acquire) &&
+        (fo4hdr::ArmorUiScopeEnabled() || fo4hdr::CurrentArmorUiScope().serial != 0);
 }
 void SubmitObserved(RE::Interface3D::Renderer* renderer, std::uint32_t argument, ScreenSubmit next)
 {
@@ -168,6 +172,8 @@ void ScreenSubmitHook(RE::Interface3D::Renderer* renderer, std::uint32_t argumen
         g_installed.store(false, std::memory_order_release);
     }
 }
+#if defined(FO4HDR_RUNTIME_1_10_163)
+using namespace fo4hdr::generated;
 class ArmorInstallation
 {
     REX::FModule module_{REX::FModule::GetExecutingModule()};
@@ -176,8 +182,7 @@ class ArmorInstallation
     REL::Offset2ID mappings_;
     TrampolineInterface allocator_{};
     std::array<detail::Site, 2> sites_{};
-    const fo4hdr::game::ArmorUiRuntimeFacts& facts_;
-    std::uintptr_t target_{};
+    std::uintptr_t target_{base_ + kArmorUiTargetRva};
     std::uintptr_t hook_{reinterpret_cast<std::uintptr_t>(&ScreenSubmitHook)};
 
     bool Code(std::uintptr_t address, std::size_t size) const
@@ -193,31 +198,25 @@ class ArmorInstallation
     }
     bool Target() const
     {
-        return Mapping(facts_.targetId, facts_.targetRva) && target_ != hook_ &&
-            Code(target_, facts_.targetBytes.size()) && MatchesBytes(target_, facts_.targetBytes);
+        return Mapping(kArmorUiTargetId, kArmorUiTargetRva) && target_ != hook_ &&
+            Code(target_, kArmorUiTargetBytes.size()) && MatchesBytes(target_, kArmorUiTargetBytes);
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
     {
         return Read(allocatorInterface, &allocator_, sizeof(allocator_)) && allocator_.version == 1 &&
             handle != UINT32_MAX && Executable(reinterpret_cast<void*>(allocator_.branch), 1);
     }
-    bool CallMatches(std::size_t i, std::uintptr_t address) const
-    {
-        const auto& call = facts_.calls[i];
-        return Mapping(call.callerId, call.callerRva) && Code(base_ + call.callerRva, 1) &&
-            Code(address, 5) && MatchesBytes(address, call.bytes) &&
-            detail::CallTarget(address, call.bytes) == target_;
-    }
     bool PrepareSite(std::size_t i)
     {
-        if (facts_.calls[i].callRva > UINTPTR_MAX - base_ ||
-            facts_.calls[i].callerRva > UINTPTR_MAX - base_) return false;
-        const auto address = base_ + facts_.calls[i].callRva;
+        const auto address = base_ + kArmorUiCallRvas[i];
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = CallMatches(i, address) &&
+        const bool valid = Mapping(kArmorUiCallerIds[i], kArmorUiCallerRvas[i]) &&
+            Code(base_ + kArmorUiCallerRvas[i], 1) && Code(address, 5) &&
+            MatchesBytes(address, kArmorUiCallBytes[i]) &&
+            detail::CallTarget(address, kArmorUiCallBytes[i]) == target_ &&
             Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites_[i] = {address, facts_.calls[i].bytes, {}, info.Protect};
+        sites_[i] = {address, kArmorUiCallBytes[i], {}, info.Protect};
         return true;
     }
     bool PrepareRelay(detail::Site& site, std::uint32_t handle)
@@ -247,7 +246,7 @@ class ArmorInstallation
     }
     bool Publish()
     {
-        if (!MatchesBytes(target_, facts_.targetBytes)) return false;
+        if (!MatchesBytes(target_, kArmorUiTargetBytes)) return false;
         g_next.store(reinterpret_cast<ScreenSubmit>(target_), std::memory_order_release);
         PatchBackend backend;
         if (!detail::InstallPair(sites_, backend)) return false;
@@ -255,50 +254,35 @@ class ArmorInstallation
         return true;
     }
 public:
-    explicit ArmorInstallation(const fo4hdr::game::ArmorUiRuntimeFacts& facts)
-        : facts_(facts) {}
-    bool PrepareModule()
-    {
-        if (!base_ || module_.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
-        if (facts_.targetRva > UINTPTR_MAX - base_) return false;
-        target_ = base_ + facts_.targetRva;
-        text_ = module_.GetSection(".text");
-        return true;
-    }
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        HMODULE resident{};
-        if (!::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
-                reinterpret_cast<LPCWSTR>(&ScreenSubmitHook), &resident)) return false;
-        if (!PrepareModule()) return false;
+        if (!base_ || module_.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
+        text_ = module_.GetSection(".text");
         // The pinned ID lookup terminates on a missing ID. Its public inverse
         // container permits recoverable verification without a second parser.
         mappings_.load_v2();
-        if (facts_.calls[0].callRva == facts_.calls[1].callRva) return false;
         if (!Target() || !Allocator(allocatorInterface, handle)) return false;
         if (!PrepareSites(handle)) return false;
         return Publish();
     }
 };
+#endif
 }
 
 namespace fo4hdr::game {
-namespace {
-bool Admitted(const ArmorUiInstallation& installation) noexcept
+bool InitializeArmorUiObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept
 {
-    return installation.runtimeAuthorized && installation.preUseExclusive &&
-        installation.abiAndRegistryLifetimeProven && installation.addressLibraryAvailable &&
-        installation.trampolineOwned;
-}
-}
-bool InitializeArmorUiObserver(const ArmorUiInstallation& installation) noexcept
-{
-    if (!Admitted(installation)) return false;
     if (g_attempted.exchange(true, std::memory_order_acq_rel))
         return g_installed.load(std::memory_order_acquire);
+    if (!requested) return false;
+#if !defined(FO4HDR_RUNTIME_1_10_163)
+    return false;
+#else
     try {
-        ArmorInstallation installer(installation.facts);
-        return installer.Install(installation.trampolineInterface, installation.pluginHandle);
+        ArmorInstallation installation;
+        return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
+#endif
 }
 }

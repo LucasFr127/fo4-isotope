@@ -1,551 +1,466 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) 2025 Carlos Lopez Jr.
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
+//
+// Fallout 4 shader identities and tone/LUT seams use the pinned RenoDX facts.
+// The exact-backbuffer FP16 proxy and UI-relative transport adapt
+// clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/
+// src/games/fallout4/addon.cpp and src/mods/swapchain_v2.hpp.
+// RenoDX material retains its MIT permission in THIRD_PARTY_NOTICES.md.
+// Native hooks, generation ownership, settings, grading integration and direct
+// display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "ContextHooks.hpp"
+
+#include "DeviceHooks.hpp"
 #include "HookRecords.hpp"
-#include "../HdrRenderer.hpp"
-#include "Fallout4HDR/game/GameHdrSnapshot.hpp"
+#include "../DisplayDiscovery.hpp"
+#include "../GraphicsDiagnostics.hpp"
+#include "../LiveSettings.hpp"
+#include "../RendererLifetime.hpp"
+#include "../ShaderRegistry.hpp"
+#include "../passes/ArmorCompositionPass.hpp"
+#include "../passes/ObservedDraw.hpp"
+#include "../resources/ArmorCompositionResources.hpp"
+#include "../resources/PresentationResources.hpp"
+#include "../resources/ReplacementShaders.hpp"
+#include "../resources/SceneResources.hpp"
 
-#include <d3d11_1.h>
 #include <wrl/client.h>
-
-#include <algorithm>
 #include <array>
-#include <type_traits>
 
 namespace fo4hdr {
-namespace {
 
 using Microsoft::WRL::ComPtr;
 
-enum class QueryKind
+ULONG STDMETHODCALLTYPE HookContextRelease(
+    ID3D11DeviceContext* context) noexcept
 {
-    unknown,
-    untracked,
-    scoped,
-    endOnly
-};
-
-QueryKind ClassifyQuery(D3D11_QUERY kind) noexcept
-{
-    if (kind == D3D11_QUERY_TIMESTAMP_DISJOINT) return QueryKind::untracked;
-    if (kind == D3D11_QUERY_EVENT || kind == D3D11_QUERY_TIMESTAMP)
-        return QueryKind::endOnly;
-    constexpr std::array scoped{
-        D3D11_QUERY_OCCLUSION, D3D11_QUERY_PIPELINE_STATISTICS,
-        D3D11_QUERY_OCCLUSION_PREDICATE, D3D11_QUERY_SO_STATISTICS,
-        D3D11_QUERY_SO_OVERFLOW_PREDICATE, D3D11_QUERY_SO_STATISTICS_STREAM0,
-        D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM0, D3D11_QUERY_SO_STATISTICS_STREAM1,
-        D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM1, D3D11_QUERY_SO_STATISTICS_STREAM2,
-        D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM2, D3D11_QUERY_SO_STATISTICS_STREAM3,
-        D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM3};
-    return std::find(scoped.begin(), scoped.end(), kind) != scoped.end()
-        ? QueryKind::scoped : QueryKind::unknown;
+    return InvokeNoexceptBoundary<ULONG>(1, [=]() {
+        auto* record = FindContext(context);
+        if (record == nullptr || record->nextRelease == nullptr) return 1UL;
+        const auto generation = record->identity.Generation();
+        const auto remaining = InvokeCapturedNext(record->nextRelease, context);
+        if (remaining == 0)
+        {
+            (void)record->identity.Retire(context, generation);
+            if (g_pipboyWatchedContext.load(std::memory_order_acquire) == generation)
+                g_pipboyRetiredContext.store(generation, std::memory_order_release);
+        }
+        return remaining;
+    }, []() noexcept { RecordAbiException(); });
 }
 
-QueryKind Classify(ID3D11Asynchronous* asynchronous) noexcept
+void ObserveQueryBegin(
+    ContextQuerySafety& queries, ID3D11Asynchronous* asynchronous)
 {
-    if (asynchronous == nullptr) return QueryKind::unknown;
     ComPtr<ID3D11Query> query;
-    if (FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&query)))) return QueryKind::unknown;
-    if (!query) return QueryKind::unknown;
+    if (asynchronous == nullptr ||
+        FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&query))))
+    {
+        queries.unknown = true;
+        return;
+    }
     D3D11_QUERY_DESC description{};
     query->GetDesc(&description);
-    return ClassifyQuery(description.Query);
+    if (IsComputeSensitiveQuery(description.Query))
+        queries.Begin(asynchronous);
+    else if (description.Query != D3D11_QUERY_TIMESTAMP_DISJOINT)
+        queries.unknown = true;
 }
 
-template <class Call, class... Arguments>
-bool CallCaptured(Call next, Arguments... arguments) noexcept
+void STDMETHODCALLTYPE HookBegin(
+    ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
 {
-    if (next == nullptr) return false;
-    try { next(arguments...); return true; }
-    catch (...) { return false; }
-}
-
-class ContextObservationScope
-{
-public:
-    ContextObservationScope(std::atomic_flag& flag, bool entered) noexcept
-        : flag_(flag), entered_(entered) {}
-    ~ContextObservationScope() noexcept
+    auto* record = FindContext(context);
+    if (record == nullptr || record->nextBegin == nullptr) return;
+    try
     {
-        if (entered_) flag_.clear(std::memory_order_release);
+        ObserveQueryBegin(record->computeQueries, asynchronous);
     }
-    ContextObservationScope(const ContextObservationScope&) = delete;
-    ContextObservationScope& operator=(const ContextObservationScope&) = delete;
-
-private:
-    std::atomic_flag& flag_;
-    bool entered_;
-};
-
-bool SupportsContextWindows(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    ComPtr<ID3D11DeviceContext1> context1;
-    if (FAILED(context->QueryInterface(IID_PPV_ARGS(&context1)))) return false;
-    if (!context1) return false;
-    D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
-    if (FAILED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS,
-            &options, sizeof(options)))) return false;
-    return options.ConstantBufferOffsetting;
-}
-
-bool IsDeviceImmediateContext(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    ComPtr<ID3D11DeviceContext> immediate;
-    ComPtr<IUnknown> suppliedIdentity, immediateIdentity;
-    device->GetImmediateContext(&immediate);
-    if (!immediate) return false;
-    if (FAILED(context->QueryInterface(IID_PPV_ARGS(&suppliedIdentity)))) return false;
-    if (FAILED(immediate->QueryInterface(IID_PPV_ARGS(&immediateIdentity)))) return false;
-    return suppliedIdentity && suppliedIdentity.Get() == immediateIdentity.Get();
-}
-
-bool QualifiedContext(ID3D11DeviceContext* context) noexcept
-{
-    if (context == nullptr) return false;
-    if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
-    ComPtr<ID3D11Device> device;
-    context->GetDevice(&device);
-    if (!device) return false;
-    if (device->GetFeatureLevel() != D3D_FEATURE_LEVEL_11_0) return false;
-    if (!IsDeviceImmediateContext(device.Get(), context)) return false;
-    return SupportsContextWindows(device.Get(), context);
-}
-
-}  // namespace
-
-bool ContextQueryObserver::CompleteFreshCoverage(ID3D11DeviceContext* context,
-    std::uint64_t generation) noexcept
-{
-    if (context != context_ || generation != generation_) return false;
-    if (ownerThread_ != std::this_thread::get_id()) return false;
-    if (lostCoverage_.load(std::memory_order_acquire)) return false;
-    if (observing_.test(std::memory_order_acquire)) return false;
-    if (queries_.executionDepth != 0) return false;
-    if (!std::all_of(queries_.active.begin(), queries_.active.end(),
-            [](const void* key) { return key == nullptr; })) return false;
-    // Only the installer can reach this after its complete pre-escape transaction.
-    queries_.unknown = false;
-    return queries_.CanDispatch();
-}
-
-ContextQueryPreparation ContextQueryObserver::Prepare(ID3D11DeviceContext* context,
-    std::uint64_t generation, ContextQueryPredecessors next, ScenePassRenderer* renderer) noexcept
-{
-    if (context_ || generation == 0) return ContextQueryPreparation::invalidContext;
-    if (!QualifiedContext(context)) return ContextQueryPreparation::invalidContext;
-    if (renderer != nullptr)
+    catch (...)
     {
-        ComPtr<ID3D11Device> device;
-        context->GetDevice(&device);
-        if (!renderer->MatchesContext(device.Get(), context))
-            return ContextQueryPreparation::invalidContext;
+        record->computeQueries.unknown = true;
+        RecordAbiException();
     }
-    context_ = context;
-    renderer_ = renderer;
-    generation_ = generation;
-    ownerThread_ = std::this_thread::get_id();
-    next_ = next;
-    // Positive Context1 facts do not prove that every Begin/End was observed.
-    queries_.unknown = true;
-    return ContextQueryPreparation::coverageUnobserved;
-}
-
-bool ContextQueryObserver::Retire() noexcept
-{
-    if (context_ && ownerThread_ != std::this_thread::get_id()) return false;
-    if (observing_.test(std::memory_order_acquire)) return false;
-    context_ = nullptr;
-    renderer_ = nullptr;
-    generation_ = 0;
-    next_ = {};
-    queries_ = {};
-    lostCoverage_.store(false, std::memory_order_relaxed);
-    return true;
-}
-
-bool ContextQueryObserver::CanDispatch() const noexcept
-{
-    if (ownerThread_ != std::this_thread::get_id()) return false;
-    if (!context_ || generation_ == 0) return false;
-    if (lostCoverage_.load(std::memory_order_acquire)) return false;
-    if (observing_.test(std::memory_order_acquire)) return false;
-    return queries_.CanDispatch();
-}
-
-bool ContextQueryObserver::Enter(ID3D11DeviceContext* context) noexcept
-{
-    if (context != context_ || ownerThread_ != std::this_thread::get_id())
+    try { InvokeCapturedNext(record->nextBegin, context, asynchronous); }
+    catch (...)
     {
-        lostCoverage_.store(true, std::memory_order_release);
-        return false;
+        record->computeQueries.unknown = true;
+        RecordAbiException();
     }
-    if (observing_.test_and_set(std::memory_order_acquire))
+}
+
+void STDMETHODCALLTYPE HookEnd(
+    ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
+{
+    auto* record = FindContext(context);
+    if (record == nullptr || record->nextEnd == nullptr) return;
+    // Retire only after next: a downstream hook can issue draws during End.
+    try
     {
-        lostCoverage_.store(true, std::memory_order_release);
-        return false;
+        InvokeCapturedNext(record->nextEnd, context, asynchronous);
+        record->computeQueries.End(asynchronous);
     }
-    return true;
+    catch (...)
+    {
+        record->computeQueries.unknown = true;
+        RecordAbiException();
+    }
 }
 
-void ContextQueryObserver::ObserveBegin(ID3D11Asynchronous* asynchronous) noexcept
-{
-    const auto kind = Classify(asynchronous);
-    // Timing queries include private work; only count/statistics scopes inhibit it.
-    if (kind == QueryKind::untracked) return;
-    if (kind != QueryKind::scoped) { queries_.unknown = true; return; }
-    queries_.Begin(asynchronous);
-}
-
-void ContextQueryObserver::ObserveEnd(ID3D11Asynchronous* asynchronous) noexcept
-{
-    const auto kind = Classify(asynchronous);
-    if (kind == QueryKind::unknown) { queries_.unknown = true; return; }
-    if (kind == QueryKind::scoped) queries_.End(asynchronous);
-}
-
-void ContextQueryObserver::Begin(ID3D11DeviceContext* context,
-    ID3D11Asynchronous* asynchronous) noexcept
-{
-    const bool observing = Enter(context);
-    const ContextObservationScope observation{observing_, observing};
-    if (observing) ObserveBegin(asynchronous);
-    if (!CallCaptured(next_.begin, context, asynchronous))
-        lostCoverage_.store(true, std::memory_order_release);
-}
-
-void ContextQueryObserver::End(ID3D11DeviceContext* context,
-    ID3D11Asynchronous* asynchronous) noexcept
-{
-    const bool observing = Enter(context);
-    const ContextObservationScope observation{observing_, observing};
-    const bool completed = CallCaptured(next_.end, context, asynchronous);
-    if (!completed) lostCoverage_.store(true, std::memory_order_release);
-    // Downstream End callbacks still execute inside the active query interval.
-    if (observing && completed) ObserveEnd(asynchronous);
-}
-
-void ContextQueryObserver::FinishCommandList(bool entered, bool completed,
+void STDMETHODCALLTYPE HookExecuteCommandList(
+    ID3D11DeviceContext* context, ID3D11CommandList* commands,
     BOOL restoreState) noexcept
 {
-    if (entered) queries_.LeaveCommandList();
-    if (restoreState && completed) return;
-    // FALSE resets bindings; retained scene publication must not outlive that reset.
-    if (renderer_ != nullptr) static_cast<void>(renderer_->InvalidateObservedBindings());
+    auto* record = FindContext(context);
+    if (record == nullptr || record->nextExecuteCommandList == nullptr) return;
+    // FinishCommandList closes deferred query scopes. Executing a finished
+    // list therefore does not introduce an unbounded unknown immediate scope.
+    // Block re-entrant compute only while next executes; preserve our immediate
+    // Begin/End set, including scopes that make a conflicting list invalid.
+    const bool entered = record->computeQueries.EnterCommandList();
+    bool completed{};
+    try
+    {
+        InvokeCapturedNext(record->nextExecuteCommandList,
+            context, commands, restoreState);
+        completed = true;
+    }
+    catch (...)
+    {
+        record->computeQueries.unknown = true;
+        RecordAbiException();
+    }
+    if (entered) record->computeQueries.LeaveCommandList();
+    if (!restoreState || !completed)
+    {
+        // FALSE resets the API pipeline to defaults; do not retain cached
+        // pre-list shader/target observations as though they were still bound.
+        record->currentPrimaryRtv = nullptr;
+        record->currentSecondaryRtv = nullptr;
+        record->currentSinglePresentationTarget = false;
+        record->currentPass = {};
+        record->currentPassKnown = false;
+        record->currentReplacementActive = false;
+        record->expectedBoundShader = nullptr;
+        record->currentRequirement = PipelinePassRequirement::untracked;
+    }
 }
 
-void ContextQueryObserver::ExecuteCommandList(ID3D11DeviceContext* context,
-    ID3D11CommandList* commands, BOOL restoreState) noexcept
+bool ArmorScopeOnPresentThread(ID3D11DeviceContext* context) noexcept
 {
-    const bool observing = Enter(context);
-    const ContextObservationScope observation{observing_, observing};
-    const bool entered = observing && queries_.EnterCommandList();
-    if (observing && commands == nullptr) queries_.unknown = true;
-    const bool completed = CallCaptured(next_.executeCommandList, context, commands, restoreState);
-    if (!completed) lostCoverage_.store(true, std::memory_order_release);
-    if (observing) FinishCommandList(entered, completed, restoreState);
+    return g_armor.armorEncodedActive && context == g_rendererDevice.activeContext &&
+        GetCurrentThreadId() == g_observedPresentThread.load(std::memory_order_acquire);
 }
 
-namespace {
-
-bool EnterRouting(ContextHookRecord& context) noexcept
+void CloseArmorForSceneShader(ID3D11DeviceContext* context)
 {
-    if (GetCurrentThreadId() != context.thread) { RevokeNativeRouting(); return false; }
-    if (ActiveNativeOwner().internalWork) return false;
-    if (context.busy.test_and_set(std::memory_order_acquire)) { RevokeNativeRouting(); return false; }
-    if (NativeRoutingOwned() && NativeActiveOwnerMatches(context.owned, context.generation)) return true;
-    RevokeNativeRouting();
-    context.busy.clear(std::memory_order_release);
+    if (ArmorScopeOnPresentThread(context))
+    {
+        ArmorUiScopeToken outer{};
+        outer.serial = g_armor.armorEncodedScope;
+        ArmorEncodedBoundary(outer, false);
+        g_armor.armorEncodedFailed = true;
+        g_armor.armorEncodedStatus = "Disabled: scene shader inside armor scope";
+    }
+}
+
+bool PixelReplacementEligible()
+{
+    return !g_armor.armorEncodedActive && HdrPathRequested() &&
+        g_referenceHealthy && g_gameplayReadyApplied.load(std::memory_order_acquire) &&
+        ReferenceDisplayStillEligible();
+}
+
+void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
+    DrawObservation& record, ID3D11PixelShader*& selectedShader)
+{
+    if (const auto* descriptor = FindShader(shader))
+    {
+        CloseArmorForSceneShader(context);
+        record.currentPass = descriptor->pass;
+        record.currentPassKnown = true;
+        record.currentRequirement = descriptor->requirement;
+        if (PixelReplacementEligible())
+        {
+            if (auto* replacement = FindReplacement(descriptor->pass))
+                selectedShader = replacement;
+        }
+    }
+    else
+    {
+        record.currentPassKnown = false;
+        record.currentRequirement =
+            PipelinePassRequirement::untracked;
+    }
+}
+
+void STDMETHODCALLTYPE HookPsSetShader(
+    ID3D11DeviceContext* context, ID3D11PixelShader* shader,
+    ID3D11ClassInstance* const* classes, UINT classCount) noexcept
+{
+    auto* record = FindContext(context);
+    if (record == nullptr || record->nextPsSetShader == nullptr) return;
+    if (context != g_rendererDevice.activeContext)
+    {
+        InvokeCapturedNext(record->nextPsSetShader, context, shader, classes, classCount);
+        return;
+    }
+    auto* selectedShader = shader;
+    try
+    {
+        SelectPixelShader(context, shader, *record, selectedShader);
+        record->currentReplacementActive = selectedShader != shader;
+        record->expectedBoundShader = selectedShader;
+    }
+    catch (...)
+    {
+        record->currentPassKnown = false;
+        record->currentReplacementActive = false;
+        record->expectedBoundShader = nullptr;
+        record->currentRequirement = PipelinePassRequirement::untracked;
+        RecordAbiException();
+    }
+    InvokeCapturedNext(record->nextPsSetShader, context, selectedShader,
+        classes, classCount);
+}
+
+bool HasExpectedShaderBinding(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    return context != nullptr && record.currentPassKnown && record.currentReplacementActive &&
+        record.expectedBoundShader != nullptr;
+}
+
+[[nodiscard]] bool ValidateExpectedShaderBinding(
+    ID3D11DeviceContext* context,
+    DrawObservation& record) noexcept
+{
+    if (!HasExpectedShaderBinding(context, record))
+        return true;
+    ComPtr<ID3D11PixelShader> actual;
+    context->PSGetShader(&actual, nullptr, nullptr);
+    if (actual.Get() == record.expectedBoundShader) return true;
+
+    // A downstream owner changed a shader after Fallout4HDR selected its
+    // replacement. Required-pass collisions disable this generation; an
+    // optional collision disables only scene continuation for this draw.
+    if (DecideUnknownShaderOutcome(record.currentRequirement) ==
+        UnknownShaderOutcome::disableHdrGeneration)
+    {
+        g_referenceHealthy = false;
+        RecordFailure(GraphicsObservationFailure::requiredHeartbeatMissing);
+    }
+    record.currentPassKnown = false;
+    record.currentReplacementActive = false;
+    record.expectedBoundShader = actual.Get();
     return false;
 }
 
-}  // namespace
-
-NativeRoutingScope::NativeRoutingScope(IUnknown* object) noexcept
+bool CanRedirectPresentation(ID3D11RenderTargetView* view) noexcept
 {
-    auto* context = g_contextHooks.load(std::memory_order_acquire);
-    const auto* device = g_deviceHooks.load(std::memory_order_acquire);
-    if (context == nullptr || device == nullptr) return;
-    if (object != context->owned && object != device->owned) return;
-    if (!context->admitted.load(std::memory_order_acquire)) return;
-    if (!EnterRouting(*context)) return;
-    record_ = context;
+    return view != nullptr && HdrPathRequested() && g_referenceHealthy &&
+        g_gameplayReadyApplied.load(std::memory_order_acquire) &&
+        g_scene.currentScene != nullptr && g_presentation.presentationProxyRtv &&
+        g_presentation.presentationBackBuffer &&
+        g_scene.currentSceneDomain != LinearColorDomain::unknown;
 }
 
-NativeRoutingScope::~NativeRoutingScope() noexcept
+bool AcceptPresentationDomain() noexcept
 {
-    if (record_ != nullptr) record_->busy.clear(std::memory_order_release);
-}
-
-namespace {
-
-class InternalRoutingWork
-{
-public:
-    InternalRoutingWork() noexcept
+    if (g_presentation.presentationProxyDomain != LinearColorDomain::unknown &&
+        g_presentation.presentationProxyDomain != g_scene.currentSceneDomain)
     {
-        ActiveNativeOwner().internalWork = true;
+        g_evidence.colorDomainMismatchCount.fetch_add(1, std::memory_order_relaxed);
+        RecordFailure(GraphicsObservationFailure::colorDomainMismatch);
+        g_referenceHealthy = false;
+        return false;
     }
-    ~InternalRoutingWork() noexcept { ActiveNativeOwner().internalWork = false; }
-    InternalRoutingWork(const InternalRoutingWork&) = delete;
-    InternalRoutingWork& operator=(const InternalRoutingWork&) = delete;
+    return true;
+}
 
-};
-
-class NativeCallbackWork
+ID3D11RenderTargetView* PublishPresentationRedirect() noexcept
 {
-public:
-    explicit NativeCallbackWork(ContextHookRecord* record) noexcept : record_(record)
+    g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
+    g_presentation.presentationRedirectedThisFrame = true;
+    g_evidence.presentationRedirectCount.fetch_add(1, std::memory_order_relaxed);
+    return g_presentation.presentationProxyRtv.Get();
+}
+
+[[nodiscard]] ID3D11RenderTargetView* RedirectPresentationView(
+    ID3D11RenderTargetView* view) noexcept
+{
+    if (!CanRedirectPresentation(view)) return view;
+
+    for (const auto* known : g_presentation.presentationViews)
     {
-        if (record_ == nullptr) return;
-        previous_ = ActiveNativeOwner().internalWork;
-        ActiveNativeOwner().internalWork = false;
+        if (known == view)
+        {
+            if (!AcceptPresentationDomain()) return view;
+            return PublishPresentationRedirect();
+        }
     }
-    ~NativeCallbackWork() noexcept
-    {
-        if (record_ != nullptr) ActiveNativeOwner().internalWork = previous_;
-    }
-    NativeCallbackWork(const NativeCallbackWork&) = delete;
-    NativeCallbackWork& operator=(const NativeCallbackWork&) = delete;
 
-private:
-    ContextHookRecord* record_{};
-    bool previous_{};
-};
-
-ContextHookRecord* OwnedQueryContext(ContextHookRecord& record,
-    ID3D11DeviceContext* context) noexcept
-{
-    if (!record.retainedReferences.load(std::memory_order_acquire)) return nullptr;
-    if (context != record.owned) return nullptr;
-    return GetCurrentThreadId() == record.thread ? &record : nullptr;
+    // Existing game RTVs survive a display-generation reset even when the
+    // proxy is recreated. Recover their exact backbuffer identity once.
+    D3D11_RENDER_TARGET_VIEW_DESC description{};
+    view->GetDesc(&description);
+    if (description.Format != DXGI_FORMAT_R10G10B10A2_UNORM)
+        return view;
+    ComPtr<ID3D11Resource> resource;
+    view->GetResource(&resource);
+    if (!RememberPresentationView(resource.Get(), view)) return view;
+    return PublishPresentationRedirect();
 }
 
-template <class Call, class... Arguments>
-void ForwardContext(Call next, ID3D11DeviceContext* context, Arguments... arguments) noexcept
-{
-    if (CallCaptured(next, context, arguments...)) return;
-    const auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record != nullptr && context == record->owned) RevokeNativeRouting();
-}
+using RenderTargetArray = std::array<ID3D11RenderTargetView*,
+    D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT>;
 
-void PublishPresentationUi() noexcept
+bool RedirectRenderTargetArray(UINT count, ID3D11RenderTargetView* const* views,
+    RenderTargetArray& redirected) noexcept
 {
-    ActiveNativeOwner().uiCapture.WithdrawLostPresentationScene();
-    if (!ActiveNativeOwner().hdrPrepared) return;
-    const auto status = ActiveNativeOwner().uiCapture.Status();
-    if (status != NativeUiFrameStatus::targetUnqualified && status != NativeUiFrameStatus::unprepared) return;
-    static_cast<void>(ActiveNativeOwner().uiCapture.BeginPresentationFrame(ActiveNativeOwner().presentationProxy,
-        ActiveNativeOwner().renderer, NativeUiCaptureScope::qualifiedExclusive));
-}
-
-void ObserveNativeScene(FiniteDrawInvocation invocation) noexcept
-{
-    const auto scenes = ActiveNativeOwner().renderer.BoundNativeSceneHandles();
-    const auto result = ActiveNativeOwner().renderer.ExecuteObserved(scenes.input, scenes.destination, invocation);
-    if (result == SceneDrawOutcome::callbackFailed) RevokeNativeRouting();
-    PublishPresentationUi();
-}
-
-bool ContinueAfterUi(ContextHookRecord& record, SceneDrawOutcome captured) noexcept
-{
-    if (!NativeRoutingOwned()) RevokeNativeRouting();
-    if (!record.queries.CanDispatch()) { ActiveNativeOwner().uiCapture.CloseFrame(); return false; }
-    if (captured == SceneDrawOutcome::callbackFailed) { RevokeNativeRouting(); return false; }
-    return captured != SceneDrawOutcome::replaced;
-}
-
-void ObserveFiniteDraw(ContextHookRecord* record, NativeUiDrawKind kind,
-    FiniteDrawInvocation invocation) noexcept
-{
-    if (record == nullptr) return;
-    if (!ActiveNativeOwner().hdrPrepared) return;
-    if (!record->queries.CanDispatch()) return;
-    const InternalRoutingWork internal;
-    if (ActiveNativeOwner().hdrPrepared && !NativeGameplayReady(*record)) return;
-    const auto captured = ActiveNativeOwner().uiCapture.ExecuteObserved(ActiveNativeOwner().renderer.FrameGeneration(), kind, invocation);
-    if (ContinueAfterUi(*record, captured)) ObserveNativeScene(invocation);
-}
-
-bool CanRedirect(ContextHookRecord* record, UINT count, ID3D11RenderTargetView* const* targets) noexcept
-{
-    if (record == nullptr || !ActiveNativeOwner().hdrPrepared) return false;
-    if (count > D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT) return false;
-    if (count != 0 && targets == nullptr) return false;
-    return record->queries.CanDispatch() && NativeGameplayReady(*record);
-}
-
-bool RedirectTargets(ContextHookRecord* record, UINT count, ID3D11RenderTargetView* const* targets,
-    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT>& redirected) noexcept
-{
-    if (!CanRedirect(record, count, targets)) return false;
     bool changed{};
     for (UINT index = 0; index < count; ++index)
     {
-        auto* replacement = ActiveNativeOwner().presentationProxy.ResolveRenderTarget(targets[index]);
-        redirected[index] = replacement != nullptr ? replacement : targets[index];
-        changed = changed || replacement != nullptr;
+        redirected[index] = RedirectPresentationView(views[index]);
+        changed |= redirected[index] != views[index];
     }
-    if (!changed) return false;
-    const InternalRoutingWork internal;
-    if (!ActiveNativeOwner().frameRedirected &&
-        !ActiveNativeOwner().presentation.PrepareNativeRedirect(PresentationScope::qualifiedExclusive)) return false;
-    return true;
+    return changed;
 }
 
-template <class Call>
-void InvokeFiniteDraw(Call& draw, bool admitted) noexcept
+bool IsSinglePresentationTarget(UINT count, ID3D11RenderTargetView* const* views,
+    const RenderTargetArray& redirected) noexcept
 {
-    try { draw(); }
-    catch (...) { if (admitted) RevokeNativeRouting(); }
+    return count == 1 && redirected[0] != views[0] &&
+        redirected[0] == g_presentation.presentationProxyRtv.Get();
 }
 
-template <auto Next, class... Arguments>
-void ForwardFiniteDraw(ID3D11DeviceContext* context, NativeUiDrawKind kind, Arguments... arguments) noexcept
+ID3D11RenderTargetView* RenderTargetAt(UINT count,
+    ID3D11RenderTargetView* const* selected, UINT index) noexcept
 {
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const auto next = record->*Next;
-    NativeRoutingScope scope{context};
-    bool invoked{};
-    auto draw = [&]() {
-        const NativeCallbackWork native{scope.Record()};
-        invoked = true;
-        next(context, arguments...);
-    };
-    const FiniteDrawInvocation invocation{
-        [](ID3D11DeviceContext*, void* payload) { (*static_cast<decltype(draw)*>(payload))(); }, &draw};
-    ObserveFiniteDraw(scope.Record(), kind, invocation);
-    if (!invoked) InvokeFiniteDraw(draw, scope.Record() != nullptr);
+    return count > index && selected != nullptr ? selected[index] : nullptr;
 }
 
-}  // namespace
-
-bool NativeGameplayReady(ContextHookRecord& record) noexcept
+[[nodiscard]] ID3D11RenderTargetView* const* PrepareRenderTargets(
+    DrawObservation& record, UINT count,
+    ID3D11RenderTargetView* const* views,
+    RenderTargetArray& redirected) noexcept
 {
-    const auto lifecycle = ReadGraphicsLifecycle();
-    const bool changed = lifecycle.resetEpoch != ActiveNativeOwner().lifecycleEpoch;
-    ActiveNativeOwner().lifecycleEpoch = lifecycle.resetEpoch;
-    if (changed || !lifecycle.gameplayReady)
+    auto* selected = views;
+    record.currentSinglePresentationTarget = false;
+    if (views != nullptr && count <= redirected.size())
     {
-        ActiveNativeOwner().presentationProxy.InvalidateFrame();
-        ActiveNativeOwner().uiCapture.CloseFrame();
-        static_cast<void>(ActiveNativeOwner().renderer.EndFrame());
+        if (RedirectRenderTargetArray(count, views, redirected))
+            selected = redirected.data();
+        record.currentSinglePresentationTarget =
+            IsSinglePresentationTarget(count, views, redirected);
     }
-    if (!lifecycle.gameplayReady) return false;
-    if (ActiveNativeOwner().renderer.FrameGeneration() == 0)
-        return ActiveNativeOwner().presentation.BeginNativeFrame(PresentationScope::qualifiedExclusive);
-    return true;
+    record.currentPrimaryRtv = RenderTargetAt(count, selected, 0);
+    record.currentSecondaryRtv = RenderTargetAt(count, selected, 1);
+    return selected;
 }
 
-void STDMETHODCALLTYPE HookBegin(ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
+void STDMETHODCALLTYPE HookOmSetRenderTargets(
+    ID3D11DeviceContext* context, UINT count,
+    ID3D11RenderTargetView* const* views,
+    ID3D11DepthStencilView* depth) noexcept
 {
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
-    const NativeRoutingScope scope{context};
-    if (auto* admitted = scope.Record()) admitted->queries.Begin(context, asynchronous);
-    else ForwardContext(record->nextBegin, context, asynchronous);
-}
-
-void STDMETHODCALLTYPE HookEnd(ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
-    const NativeRoutingScope scope{context};
-    if (auto* admitted = scope.Record()) admitted->queries.End(context, asynchronous);
-    else ForwardContext(record->nextEnd, context, asynchronous);
-}
-
-void STDMETHODCALLTYPE HookExecuteCommandList(ID3D11DeviceContext* context,
-    ID3D11CommandList* commands, BOOL restoreState) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeCallbackWork native{OwnedQueryContext(*record, context)};
-    const NativeRoutingScope scope{context};
-    if (auto* admitted = scope.Record()) admitted->queries.ExecuteCommandList(context, commands, restoreState);
-    else ForwardContext(record->nextExecuteCommandList, context, commands, restoreState);
-}
-
-void STDMETHODCALLTYPE HookPsSetShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
-    ID3D11ClassInstance* const* classes, UINT classCount) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeRoutingScope scope{context};
-    // The draw consumer rechecks the actual shader and class tuple; retain no duplicate cache.
-    ForwardContext(record->nextPsSetShader, context, shader, classes, classCount);
-}
-
-void STDMETHODCALLTYPE HookOmSetRenderTargets(ID3D11DeviceContext* context, UINT count,
-    ID3D11RenderTargetView* const* targets, ID3D11DepthStencilView* depth) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeRoutingScope scope{context};
-    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> redirected{};
-    const bool changed = RedirectTargets(scope.Record(), count, targets, redirected);
-    auto* selected = changed ? redirected.data() : targets;
-    const bool completed = CallCaptured(record->nextOmSetRenderTargets, context, count, selected, depth);
-    if (!completed) RevokeNativeRouting();
-    else if (changed) ActiveNativeOwner().frameRedirected = true;
-}
-
-void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(ID3D11DeviceContext* context, UINT count,
-    ID3D11RenderTargetView* const* targets, ID3D11DepthStencilView* depth, UINT firstUav, UINT uavCount,
-    ID3D11UnorderedAccessView* const* uavs, const UINT* initialCounts) noexcept
-{
-    auto* record = g_contextHooks.load(std::memory_order_acquire);
-    if (record == nullptr) return;
-    const NativeRoutingScope scope{context};
-    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> redirected{};
-    const auto* selected = targets;
-    if (RedirectTargets(scope.Record(), count, targets, redirected))
+    auto* record = FindContext(context);
+    if (record == nullptr || record->nextOmSetRenderTargets == nullptr) return;
+    if (context != g_rendererDevice.activeContext)
     {
-        selected = redirected.data();
-        ActiveNativeOwner().frameRedirected = true;
+        InvokeCapturedNext(record->nextOmSetRenderTargets, context, count, views, depth);
+        return;
     }
-    ForwardContext(record->nextOmSetRenderTargetsAndUavs, context, count, selected, depth,
-        firstUav, uavCount, uavs, initialCounts);
+    RenderTargetArray redirected{};
+    auto* selected = PrepareRenderTargets(*record, count, views, redirected);
+    InvokeCapturedNext(record->nextOmSetRenderTargets, context, count,
+        selected, depth);
 }
 
-void STDMETHODCALLTYPE HookDraw(ID3D11DeviceContext* context, UINT vertices, UINT start) noexcept
+struct RenderTargetsAndUavsRequest
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDraw>(context, NativeUiDrawKind::finite, vertices, start);
-}
+    ID3D11DeviceContext* context;
+    UINT rtvCount;
+    ID3D11RenderTargetView* const* rtvs;
+    ID3D11DepthStencilView* depth;
+    UINT uavStart;
+    UINT uavCount;
+    ID3D11UnorderedAccessView* const* uavs;
+    const UINT* initialCounts;
+};
 
-void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext* context, UINT indices, UINT start,
-    INT baseVertex) noexcept
+void BindRenderTargetsAndUavs(const RenderTargetsAndUavsRequest& request) noexcept
 {
-    const auto kind = indices == 6 ? NativeUiDrawKind::indexedSix : NativeUiDrawKind::finite;
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexed>(context, kind, indices, start, baseVertex);
+    const auto& [context, rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts] = request;
+    auto* record = FindContext(context);
+    if (record == nullptr ||
+        record->nextOmSetRenderTargetsAndUavs == nullptr)
+        return;
+    if (context != g_rendererDevice.activeContext)
+    {
+        InvokeCapturedNext(record->nextOmSetRenderTargetsAndUavs, context,
+            rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts);
+        return;
+    }
+    RenderTargetArray redirected{};
+    auto* selected = rtvs;
+    if (rtvCount != D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL)
+        selected = PrepareRenderTargets(*record, rtvCount, rtvs, redirected);
+    InvokeCapturedNext(record->nextOmSetRenderTargetsAndUavs, context,
+        rtvCount, selected, depth, uavStart, uavCount, uavs, initialCounts);
 }
 
-void STDMETHODCALLTYPE HookDrawInstanced(ID3D11DeviceContext* context, UINT vertices, UINT instances,
-    UINT start, UINT firstInstance) noexcept
+
+void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(
+    ID3D11DeviceContext* context, UINT rtvCount,
+    ID3D11RenderTargetView* const* rtvs,
+    ID3D11DepthStencilView* depth, UINT uavStart, UINT uavCount,
+    ID3D11UnorderedAccessView* const* uavs,
+    const UINT* initialCounts) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawInstanced>(context, NativeUiDrawKind::finite,
-        vertices, instances, start, firstInstance);
+    BindRenderTargetsAndUavs({context, rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts});
 }
 
-void STDMETHODCALLTYPE HookDrawIndexedInstanced(ID3D11DeviceContext* context, UINT indices,
-    UINT instances, UINT start, INT baseVertex, UINT firstInstance) noexcept
+template <auto NextMember, class... Arguments>
+void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad,
+    Arguments... arguments) noexcept
 {
-    ForwardFiniteDraw<&ContextHookRecord::nextDrawIndexedInstanced>(context, NativeUiDrawKind::finite, indices, instances,
-        start, baseVertex, firstInstance);
+    auto* record = FindContext(context);
+    if (record == nullptr || record->*NextMember == nullptr) return;
+    const auto next = record->*NextMember;
+    auto draw = [=]() { InvokeCapturedNext(next, context, arguments...); };
+    const DrawInvocation invocation{
+        [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw};
+    ExecuteObservedDraw(*record, context, exactIndexedQuad, invocation);
 }
 
-static_assert(std::is_convertible_v<decltype(&HookBegin), ContextQueryCall>);
-static_assert(std::is_convertible_v<decltype(&HookEnd), ContextQueryCall>);
-static_assert(std::is_convertible_v<decltype(&HookExecuteCommandList), ContextCommandListCall>);
-static_assert(std::is_convertible_v<decltype(&HookPsSetShader), PsSetShader>);
-static_assert(std::is_convertible_v<decltype(&HookOmSetRenderTargets), OmSetRenderTargets>);
-static_assert(std::is_convertible_v<decltype(&HookOmSetRenderTargetsAndUavs), OmSetRenderTargetsAndUavs>);
-static_assert(std::is_convertible_v<decltype(&HookDraw), Draw>);
-static_assert(std::is_convertible_v<decltype(&HookDrawIndexed), DrawIndexed>);
-static_assert(std::is_convertible_v<decltype(&HookDrawInstanced), DrawInstanced>);
-static_assert(std::is_convertible_v<decltype(&HookDrawIndexedInstanced), DrawIndexedInstanced>);
+void STDMETHODCALLTYPE HookDraw(
+    ID3D11DeviceContext* context, UINT vertexCount, UINT startVertex) noexcept
+{
+    ForwardDrawCall<&ContextRecord::nextDraw>(context, false, vertexCount, startVertex);
+}
 
-}  // namespace fo4hdr
+void STDMETHODCALLTYPE HookDrawIndexed(
+    ID3D11DeviceContext* context, UINT indexCount, UINT startIndex, INT baseVertex) noexcept
+{
+    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context, indexCount == 6, indexCount, startIndex, baseVertex);
+}
+
+void STDMETHODCALLTYPE HookDrawIndexedInstanced(
+    ID3D11DeviceContext* context, UINT indices, UINT instances,
+    UINT startIndex, INT baseVertex, UINT startInstance) noexcept
+{
+    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, false,
+        indices, instances, startIndex, baseVertex, startInstance);
+}
+
+void STDMETHODCALLTYPE HookDrawInstanced(
+    ID3D11DeviceContext* context, UINT vertices, UINT instances,
+    UINT startVertex, UINT startInstance) noexcept
+{
+    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, false,
+        vertices, instances, startVertex, startInstance);
+}
+
+} // namespace fo4hdr

@@ -7,7 +7,7 @@
 
 namespace fo4hdr {
 
-struct LutProfileDrawSnapshot;
+struct LutProfilesView;
 
 struct GradeProfileSelection
 {
@@ -18,6 +18,6 @@ struct GradeProfileSelection
 // The window owns selection independently of changing native slot order.
 // Return value joins the host's existing request-before-save dispatch.
 [[nodiscard]] bool DrawLutProfilesPanel(HdrSettings& settings,
-    const LutProfileDrawSnapshot& view, GradeProfileSelection& selection) noexcept;
+    const LutProfilesView& view, GradeProfileSelection& selection) noexcept;
 
 }  // namespace fo4hdr

@@ -1,24 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
-#include <atomic>
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <optional>
-#include <thread>
 
 namespace fo4hdr {
 
 struct OperatorLutBuildRequest
 {
-    OperatorLutAlgorithm algorithm{};
+    ProductionToneMapperAlgorithm algorithm{};
     double displayPeakNits{};
+    std::uint64_t deviceGeneration{};
+    std::uint64_t settingsGeneration{};
     std::uint64_t requestGeneration{};
-    ToneMapperParameters parameters{};
+    ToneMapperParameters toneMapperParameters{};
 };
 
 struct OperatorLutBuildResult
@@ -27,8 +25,50 @@ struct OperatorLutBuildResult
     OperatorLutData data{};
 };
 
-[[nodiscard]] bool PreparedOperatorLutMatches(const OperatorLutData& data,
-    const OperatorLutBuildRequest& request) noexcept;
+[[nodiscard]] inline bool PreparedOperatorLutMatches(
+    const OperatorLutData& data,
+    const OperatorLutBuildRequest& request) noexcept
+{
+    return data.IsValid() && data.algorithm == request.algorithm &&
+        data.displayPeakNits == request.displayPeakNits &&
+        data.toneMapperParameters == ActiveToneMapperParameters(
+            request.algorithm, request.toneMapperParameters);
+}
+
+enum class OperatorLutCompletionAction : std::uint8_t
+{
+    retire,
+    publish
+};
+
+[[nodiscard]] constexpr bool OperatorLutContentMatches(
+    const OperatorLutBuildRequest& left,
+    const OperatorLutBuildRequest& right) noexcept
+{
+    return left.algorithm == right.algorithm &&
+        left.displayPeakNits == right.displayPeakNits &&
+        ActiveToneMapperParameters(left.algorithm, left.toneMapperParameters) ==
+            ActiveToneMapperParameters(right.algorithm, right.toneMapperParameters);
+}
+
+// Classify a completed CPU build without touching worker or D3D state.
+// CPU data has no device identity; upload it only to the current device.
+// Stale completions are retired because a newer content-key request owns
+// publication. The request-time settings generation is diagnostic only:
+// Image/Effects constants may advance while the same LUT is being built.
+[[nodiscard]] constexpr OperatorLutCompletionAction
+ClassifyOperatorLutCompletion(
+    const OperatorLutBuildRequest& completed,
+    const OperatorLutBuildRequest& desired,
+    bool pending) noexcept
+{
+    if (!pending ||
+        completed.requestGeneration != desired.requestGeneration)
+        return OperatorLutCompletionAction::retire;
+    if (!OperatorLutContentMatches(completed, desired))
+        return OperatorLutCompletionAction::retire;
+    return OperatorLutCompletionAction::publish;
+}
 
 enum class OperatorLutRequestStatus : std::uint8_t
 {
@@ -37,34 +77,21 @@ enum class OperatorLutRequestStatus : std::uint8_t
     failed
 };
 
-// One caller owns initialization, submission, cancellation and consumption.
-// Use increasing nonzero request generations. Destruction cancels and joins
-// on the cold owner path; the worker must not be destroyed under loader lock.
-class OperatorLutWorker
+// Contention is retried on later Present boundaries, never by waiting.
+[[nodiscard]] constexpr bool RetryOperatorLutSubmission(
+    OperatorLutRequestStatus status, unsigned& attempts) noexcept
 {
-public:
-    ~OperatorLutWorker() noexcept;
-    [[nodiscard]] bool Initialize() noexcept;
-    [[nodiscard]] OperatorLutRequestStatus Request(
-        const OperatorLutBuildRequest& request) noexcept;
-    void Cancel(std::uint64_t generation) noexcept;
-    [[nodiscard]] std::unique_ptr<OperatorLutBuildResult> TakeCompleted() noexcept;
-    [[nodiscard]] std::uint64_t TakeFailedGeneration() noexcept;
+    return status == OperatorLutRequestStatus::busy && ++attempts < 4;
+}
 
-private:
-    void Run() noexcept;
-    void Publish(std::unique_ptr<OperatorLutBuildResult> result,
-        const OperatorLutBuildRequest& request) noexcept;
-
-    std::mutex mutex_;
-    std::condition_variable wake_;
-    std::thread thread_;
-    std::atomic<std::uint64_t> generation_{};
-    std::optional<OperatorLutBuildRequest> pending_;
-    std::unique_ptr<OperatorLutBuildResult> completed_;
-    std::uint64_t failedGeneration_{};
-    std::uint64_t lastGeneration_{};
-    bool stopping_{};
-};
+// One process-lifetime CPU worker with a replace-latest request slot. D3D
+// creation and publication remain exclusively on the render thread.
+[[nodiscard]] bool InitializeOperatorLutWorker() noexcept;
+[[nodiscard]] OperatorLutRequestStatus RequestOperatorLutBuild(
+    const OperatorLutBuildRequest& request) noexcept;
+void CancelOperatorLutBuild(std::uint64_t generation) noexcept;
+[[nodiscard]] std::unique_ptr<OperatorLutBuildResult>
+TakeCompletedOperatorLutBuild() noexcept;
+[[nodiscard]] std::uint64_t TakeFailedOperatorLutBuildGeneration() noexcept;
 
 }  // namespace fo4hdr

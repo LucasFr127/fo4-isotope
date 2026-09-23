@@ -2,145 +2,177 @@
 
 #include "OperatorLutWorker.hpp"
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include <Windows.h>
 
-#include <cmath>
+#include <atomic>
+#include <cstdint>
+#include <memory>
 #include <new>
 #include <utility>
 
 namespace fo4hdr {
 namespace {
 
-bool ValidAlgorithm(OperatorLutAlgorithm algorithm) noexcept
+OperatorLutBuildRequest g_request{};
+std::atomic_flag g_requestLock = ATOMIC_FLAG_INIT;
+std::atomic<std::uint64_t> g_requestGeneration{};
+std::atomic<std::uint64_t> g_failedRequestGeneration{};
+std::atomic<OperatorLutBuildResult*> g_completed{};
+std::atomic<bool> g_started{};
+HANDLE g_requestEvent{};
+
+[[nodiscard]] bool TryLockRequest() noexcept
 {
-    switch (algorithm)
+    for (unsigned attempt = 0; attempt < 16; ++attempt)
     {
-    case OperatorLutAlgorithm::aces2:
-    case OperatorLutAlgorithm::aces2Lmt:
-    case OperatorLutAlgorithm::agX:
-    case OperatorLutAlgorithm::gt7: return true;
-    default: return false;
+        if (!g_requestLock.test_and_set(std::memory_order_acquire)) return true;
+        YieldProcessor();
     }
+    return false;
 }
 
-bool ValidRequest(const OperatorLutBuildRequest& request) noexcept
+[[nodiscard]] bool ReadStableRequest(OperatorLutBuildRequest& request) noexcept
 {
-    return request.requestGeneration != 0 && ValidAlgorithm(request.algorithm) &&
-        std::isfinite(request.displayPeakNits) &&
-        request.displayPeakNits >= kMinimumDisplayPeakNits &&
-        request.displayPeakNits <= kMaximumDisplayPeakNits &&
-        ValidateToneMapperParameters(request.algorithm, request.parameters);
+    if (!TryLockRequest()) return false;
+    request = g_request;
+    g_requestLock.clear(std::memory_order_release);
+    return true;
 }
 
-std::unique_ptr<OperatorLutBuildResult> BuildResult(
-    const OperatorLutBuildRequest& request,
-    const std::atomic<std::uint64_t>& generation) noexcept
+[[nodiscard]] std::unique_ptr<OperatorLutBuildResult> BuildResult(
+    const OperatorLutBuildRequest& request) noexcept
 {
     auto result = std::unique_ptr<OperatorLutBuildResult>(
         new (std::nothrow) OperatorLutBuildResult{});
     if (!result) return result;
     result->request = request;
-    result->request.parameters = ActiveToneMapperParameters(request.algorithm, request.parameters);
-    result->data = BuildOperatorLut(request.algorithm, request.displayPeakNits,
-        result->request.parameters, {&generation, request.requestGeneration});
+    try
+    {
+        result->data = BuildOperatorLut(request.algorithm, request.displayPeakNits,
+            request.toneMapperParameters,
+            {&g_requestGeneration, request.requestGeneration});
+    }
+    catch (...)
+    {
+        result->data = {};
+    }
     return result;
+}
+
+void PublishResult(std::unique_ptr<OperatorLutBuildResult> result,
+    std::uint64_t requestGeneration) noexcept
+{
+    if (result)
+    {
+        auto* retired = g_completed.exchange(
+            result.release(), std::memory_order_acq_rel);
+        delete retired;
+    }
+    else
+    {
+        g_failedRequestGeneration.store(requestGeneration, std::memory_order_release);
+    }
+}
+
+[[nodiscard]] bool IsValidRequest(const OperatorLutBuildRequest& request) noexcept
+{
+    HdrSettings settings{};
+    settings.productionAlgorithm = request.algorithm;
+    settings.displayPeakNits = request.displayPeakNits;
+    settings.toneMapperParameters = request.toneMapperParameters;
+    return request.requestGeneration != 0 &&
+        ValidateHdrSettings(settings) == HdrSettingsValidationError::none;
+}
+
+void BuildLatestRequest(std::uint64_t& builtGeneration, DWORD& waitMilliseconds) noexcept
+{
+    OperatorLutBuildRequest request{};
+    for (;;)
+    {
+        // Retry only contention; a quiescent worker needs no periodic wakeup.
+        waitMilliseconds = ReadStableRequest(request) ? INFINITE : 1;
+        if (waitMilliseconds != INFINITE) break;
+        if (request.requestGeneration == 0 ||
+            request.requestGeneration == builtGeneration)
+            break;
+        builtGeneration = request.requestGeneration;
+        auto result = BuildResult(request);
+
+        // A newer request makes this result irrelevant before it crosses
+        // the thread boundary. Build only the newest observed value.
+        if (request.requestGeneration !=
+            g_requestGeneration.load(std::memory_order_acquire))
+            continue;
+        PublishResult(std::move(result), request.requestGeneration);
+        break;
+    }
+}
+
+DWORD WINAPI WorkerMain(void*) noexcept
+{
+    std::uint64_t builtGeneration{};
+    DWORD waitMilliseconds = INFINITE;
+    for (;;)
+    {
+        (void)WaitForSingleObject(g_requestEvent, waitMilliseconds);
+        BuildLatestRequest(builtGeneration, waitMilliseconds);
+    }
 }
 
 }  // namespace
 
-bool PreparedOperatorLutMatches(const OperatorLutData& data,
+bool InitializeOperatorLutWorker() noexcept
+{
+    if (g_started.load(std::memory_order_acquire)) return true;
+    g_requestEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (g_requestEvent == nullptr) return false;
+    const auto thread = CreateThread(
+        nullptr, 0, WorkerMain, nullptr, 0, nullptr);
+    if (thread == nullptr)
+    {
+        CloseHandle(g_requestEvent);
+        g_requestEvent = nullptr;
+        return false;
+    }
+    CloseHandle(thread);
+    // The plugin is process-lifetime; deliberately avoid a static jthread
+    // destructor that could join while the Windows loader lock is held.
+    g_started.store(true, std::memory_order_release);
+    return true;
+}
+
+OperatorLutRequestStatus RequestOperatorLutBuild(
     const OperatorLutBuildRequest& request) noexcept
 {
-    return ValidRequest(request) && data.IsValid() &&
-        data.algorithm == request.algorithm && data.displayPeakNits == request.displayPeakNits &&
-        data.parameters == ActiveToneMapperParameters(request.algorithm, request.parameters);
+    auto canonicalRequest = request;
+    canonicalRequest.toneMapperParameters = ActiveToneMapperParameters(
+        request.algorithm, request.toneMapperParameters);
+    if (!g_started.load(std::memory_order_acquire) ||
+        !IsValidRequest(canonicalRequest)) return OperatorLutRequestStatus::failed;
+    g_requestGeneration.store(
+        canonicalRequest.requestGeneration, std::memory_order_release);
+    if (!TryLockRequest()) return OperatorLutRequestStatus::busy;
+    g_request = canonicalRequest;
+    g_requestLock.clear(std::memory_order_release);
+    return SetEvent(g_requestEvent) != FALSE ?
+        OperatorLutRequestStatus::accepted : OperatorLutRequestStatus::failed;
 }
 
-OperatorLutWorker::~OperatorLutWorker() noexcept
+void CancelOperatorLutBuild(std::uint64_t generation) noexcept
 {
-    {
-        const std::lock_guard lock{mutex_};
-        stopping_ = true;
-        generation_.store(0, std::memory_order_release);
-    }
-    wake_.notify_one();
-    if (thread_.joinable()) thread_.join();
+    g_requestGeneration.store(generation, std::memory_order_release);
 }
 
-bool OperatorLutWorker::Initialize() noexcept
+std::uint64_t TakeFailedOperatorLutBuildGeneration() noexcept
 {
-    if (thread_.joinable()) return true;
-    try
-    {
-        thread_ = std::thread{&OperatorLutWorker::Run, this};
-        return true;
-    }
-    catch (...) { return false; }
+    return g_failedRequestGeneration.exchange(0, std::memory_order_acq_rel);
 }
 
-OperatorLutRequestStatus OperatorLutWorker::Request(
-    const OperatorLutBuildRequest& request) noexcept
+std::unique_ptr<OperatorLutBuildResult>
+TakeCompletedOperatorLutBuild() noexcept
 {
-    if (!thread_.joinable() || !ValidRequest(request)) return OperatorLutRequestStatus::failed;
-    const std::unique_lock lock{mutex_, std::try_to_lock};
-    if (!lock.owns_lock()) return OperatorLutRequestStatus::busy;
-    if (request.requestGeneration <= lastGeneration_) return OperatorLutRequestStatus::failed;
-    pending_ = request;
-    pending_->parameters = ActiveToneMapperParameters(request.algorithm, request.parameters);
-    lastGeneration_ = request.requestGeneration;
-    generation_.store(request.requestGeneration, std::memory_order_release);
-    wake_.notify_one();
-    return OperatorLutRequestStatus::accepted;
-}
-
-void OperatorLutWorker::Cancel(std::uint64_t generation) noexcept
-{
-    generation_.compare_exchange_strong(generation, 0, std::memory_order_acq_rel);
-}
-
-std::unique_ptr<OperatorLutBuildResult> OperatorLutWorker::TakeCompleted() noexcept
-{
-    const std::unique_lock lock{mutex_, std::try_to_lock};
-    if (!lock.owns_lock()) return {};
-    if (!completed_) return {};
-    auto result = std::move(completed_);
-    if (result->request.requestGeneration != generation_.load(std::memory_order_acquire)) return {};
-    return result;
-}
-
-std::uint64_t OperatorLutWorker::TakeFailedGeneration() noexcept
-{
-    const std::unique_lock lock{mutex_, std::try_to_lock};
-    if (!lock.owns_lock()) return 0;
-    const auto failed = std::exchange(failedGeneration_, 0);
-    return failed == generation_.load(std::memory_order_acquire) ? failed : 0;
-}
-
-void OperatorLutWorker::Publish(std::unique_ptr<OperatorLutBuildResult> result,
-    const OperatorLutBuildRequest& request) noexcept
-{
-    const std::lock_guard lock{mutex_};
-    if (request.requestGeneration != generation_.load(std::memory_order_acquire)) return;
-    if (!result || !PreparedOperatorLutMatches(result->data, request))
-    {
-        failedGeneration_ = request.requestGeneration;
-        return;
-    }
-    completed_ = std::move(result);
-}
-
-void OperatorLutWorker::Run() noexcept
-{
-    for (;;)
-    {
-        std::unique_lock lock{mutex_};
-        wake_.wait(lock, [this] { return stopping_ || pending_.has_value(); });
-        if (stopping_) return;
-        const auto request = *pending_;
-        pending_.reset();
-        lock.unlock();
-        Publish(BuildResult(request, generation_), request);
-    }
+    return std::unique_ptr<OperatorLutBuildResult>(
+        g_completed.exchange(nullptr, std::memory_order_acq_rel));
 }
 
 }  // namespace fo4hdr

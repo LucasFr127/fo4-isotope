@@ -100,16 +100,16 @@ void DrawChecks(std::uint32_t& mode) noexcept
         14, mode);
 }
 
-bool DrawReportedDisplay(HdrSettings& settings, DisplayCalibrationView display) noexcept
+bool DrawReportedDisplay(HdrSettings& settings, const DisplayCalibrationView& display) noexcept
 {
-    if (!display.known)
+    if (!display.identityAvailable)
     {
         ImGui::TextUnformatted("Display information unavailable.");
         return false;
     }
-    if (display.name) ImGui::Text("Display: %ls", display.name);
+    if (display.displayNameUtf8) ImGui::TextUnformatted(display.displayNameUtf8);
     ImGui::Text("Last-observed peak: %.0f nits; full frame: %.0f nits; OS SDR white: %.0f nits",
-        display.reportedPeakNits, display.reportedFullFrameNits, display.sdrWhiteNits);
+        display.reportedPeakNits, display.reportedFullFrameNits, display.osSdrWhiteNits);
     const bool usable = display.identityAvailable && std::isfinite(display.reportedPeakNits) &&
         display.reportedPeakNits > 0;
     ImGui::BeginDisabled(!usable);
@@ -124,40 +124,27 @@ bool DrawReportedDisplay(HdrSettings& settings, DisplayCalibrationView display) 
     return changed;
 }
 
-const char* ProfileStatusText(SettingsPersistenceState state) noexcept
+void DrawProfileActions(const DisplayCalibrationView& display, DisplayCalibrationActions& actions) noexcept
 {
-    switch (state)
-    {
-    case SettingsPersistenceState::loading: return "Reading display profile...";
-    case SettingsPersistenceState::saving: return "Saving display profile...";
-    case SettingsPersistenceState::saved: return "Display profile saved.";
-    case SettingsPersistenceState::loaded: return "Display profile read completed.";
-    case SettingsPersistenceState::missing: return "No profile for this display.";
-    case SettingsPersistenceState::failed: return "Display profile operation failed.";
-    default: return nullptr;
-    }
-}
-
-void DrawProfileActions(DisplayCalibrationView display, DisplayCalibrationActions& actions) noexcept
-{
-    ImGui::BeginDisabled(!display.identityAvailable || !display.profileAvailable);
-    actions.saveProfile = ImGui::Button("Save active calibration for this display");
-    actions.loadProfile = ImGui::Button("Load calibration for this display");
+    ImGui::BeginDisabled(!display.identityAvailable || display.profileBusy);
+    ImGui::BeginDisabled(!display.saveReady);
+    actions.save = ImGui::Button("Save active calibration for this display");
     ImGui::EndDisabled();
-    if (const auto status = ProfileStatusText(display.profileState)) ImGui::TextUnformatted(status);
+    actions.load = ImGui::Button("Load calibration for this display");
+    ImGui::EndDisabled();
+    if (display.status) ImGui::TextUnformatted(display.status);
 }
 
 }  // namespace
 
 DisplayCalibrationActions DrawDisplayCalibrationPanel(
-    HdrSettings& settings, std::uint32_t& mode, DisplayCalibrationView display) noexcept
+    HdrSettings& settings, std::uint32_t& mode, const DisplayCalibrationView& display) noexcept
 {
     if (!ValidCalibrationMode(mode)) mode = 0;
     DisplayCalibrationActions actions;
     ImGui::PushID("display-calibration");
     ImGui::TextWrapped("Use the patterns on a qualified HDR output. They do not measure display capability. "
         "Pending brightness changes use the active values until applied.");
-    actions.refreshDisplay = ImGui::Button("Refresh display details");
     actions.changed |= DrawReportedDisplay(settings, display);
     DrawProfileActions(display, actions);
     DrawPatternControls(mode, actions);

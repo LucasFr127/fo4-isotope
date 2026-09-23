@@ -1,42 +1,52 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 #include "RuntimeIdentityFiles.hpp"
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
 
-#include <Windows.h>
-#include <winver.h>
-
-#include <span>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
 namespace fo4hdr::tests {
+namespace {
+class HashFixture
+{
+public:
+    HashFixture()
+    {
+        const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = std::filesystem::temp_directory_path() / ("Fallout4HDR-hash-" + std::to_string(token));
+        if (!std::filesystem::create_directory(path)) throw std::runtime_error("Hash fixture collision");
+    }
+    ~HashFixture() noexcept { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+    std::filesystem::path path;
+};
+
+void WriteHashInput(const std::filesystem::path& path, const char* text)
+{
+    std::ofstream file(path, std::ios::binary);
+    file << text;
+    file.close();
+    if (!file) throw std::runtime_error("Hash fixture write failed");
+}
+} // namespace
 
 void RunRuntimeIdentityFilesTests()
 {
-    VS_FIXEDFILEINFO info{};
-    info.dwSignature = VS_FFI_SIGNATURE;
-    info.dwStrucVersion = VS_FFI_STRUCVERSION;
-    info.dwFileVersionMS = MAKELONG(10, 1);
-    info.dwFileVersionLS = MAKELONG(0, 163);
-    const auto bytes = std::as_bytes(std::span{&info, 1});
-    const RuntimeVersion expected{1, 10, 163, 0};
-    FO4HDR_CHECK(DecodeFixedFileVersion(bytes) == expected);
-    FO4HDR_CHECK(!DecodeFixedFileVersion({}));
-    FO4HDR_CHECK(!DecodeFixedFileVersion(bytes.first(bytes.size() - 1)));
-
-    info.dwSignature = 0;
-    FO4HDR_CHECK(!DecodeFixedFileVersion(bytes));
-    info.dwSignature = VS_FFI_SIGNATURE;
-    info.dwStrucVersion = 0;
-    FO4HDR_CHECK(!DecodeFixedFileVersion(bytes));
-    info.dwStrucVersion = VS_FFI_STRUCVERSION;
-    info.dwFileVersionMS = MAKELONG(65535, 65535);
-    info.dwFileVersionLS = MAKELONG(65535, 65535);
-    const RuntimeVersion maximum{65535, 65535, 65535, 65535};
-    FO4HDR_CHECK(DecodeFixedFileVersion(bytes) == maximum);
-
-    const RuntimeVersion executableVersion{1, 10, 163, FO4HDR_TEST_EXECUTABLE_BUILD};
-    FO4HDR_CHECK(ReadCurrentExecutableVersion() == executableVersion);
+    HashFixture fixture;
+    const auto crlf = fixture.path / "crlf.txt";
+    const auto lf = fixture.path / "lf.txt";
+    WriteHashInput(crlf, "authored\r\n");
+    WriteHashInput(lf, "authored\n");
+    FO4HDR_CHECK(!Sha256File(fixture.path / "absent.txt"));
+    const auto raw = Sha256File(crlf);
+    const auto canonical = Sha256CanonicalTextFile(crlf);
+    FO4HDR_CHECK(raw && raw->size() == 64);
+    FO4HDR_CHECK(canonical && canonical->size() == 64);
+    FO4HDR_CHECK(raw != Sha256File(lf));
+    FO4HDR_CHECK(canonical == Sha256CanonicalTextFile(lf));
 }
-
-}  // namespace fo4hdr::tests
+} // namespace fo4hdr::tests

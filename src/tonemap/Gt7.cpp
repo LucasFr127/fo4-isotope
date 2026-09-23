@@ -198,6 +198,7 @@ FloatRgb Gt7ColorVolume::Apply(
     constexpr float fadeEnd = 1.16F;
 
     const FloatRgb skewed = curve.Evaluate(input);
+    if (blendRatio == 0.0F) return skewed;
     const FloatRgb original = RgbToIctcp(input);
     const FloatRgb skewedUcs = RgbToIctcp(skewed);
     const float chromaScale = 1.0F - SmoothStep(
@@ -280,15 +281,10 @@ Gt7TransformHandle CreateGt7Transform(
     double displayPeakNits, const ToneMapperParameters& parameters) noexcept
 {
     if (!IsValidPeak(displayPeakNits)) return {};
-    if (!ValidateToneMapperParameters(OperatorLutAlgorithm::gt7, parameters)) return {};
+    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::gt7, parameters)) return {};
     auto transform = Gt7TransformHandle{
         new (std::nothrow) Gt7Transform(displayPeakNits, parameters)};
     if (!transform) return {};
-    const auto& volume = transform->volume;
-    const std::array fields{volume.curve.shoulderA, volume.curve.shoulderB,
-        volume.curve.shoulderC, volume.targetIntensity};
-    if (!std::ranges::all_of(fields, [](float field) { return std::isfinite(field); })) return {};
-    if (volume.targetIntensity <= 0.0F) return {};
     return transform;
 }
 

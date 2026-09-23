@@ -4,6 +4,7 @@
 
 #include <wrl/client.h>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cwchar>
 #include <span>
@@ -11,6 +12,12 @@
 namespace fo4hdr {
 namespace {
 using Microsoft::WRL::ComPtr;
+HMONITOR g_activeMonitor{};
+std::atomic<int> g_activeDisplayHdrState{-1};
+DisplayCapabilities g_displayCapabilities;
+ComPtr<IDXGIFactory1> g_displayFactory;
+HMONITOR g_displayDiscoveryMonitor{};
+ULONGLONG g_displayRetryAfter{};
 
 [[nodiscard]] constexpr std::uint64_t DisplayIntersectionArea(
     RECT window, RECT display) noexcept
@@ -96,30 +103,9 @@ void ReadDisplayConfiguration(DisplayCapabilities& capabilities) noexcept
 
 struct DisplayOutputSearch
 {
-    ComPtr<IDXGIFactory1> factory;
     RECT bounds{};
     DisplayCapabilities candidate{};
     std::uint64_t bestArea{};
-    bool ambiguous{};
-
-    bool ReadWindow(HWND window) noexcept
-    {
-        if (window == nullptr || !GetWindowRect(window, &bounds)) return false;
-        return SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)));
-    }
-
-    bool SelectArea(std::uint64_t area) noexcept
-    {
-        if (area == 0 || area < bestArea) return false;
-        if (area == bestArea)
-        {
-            ambiguous = true;
-            return false;
-        }
-        bestArea = area;
-        ambiguous = false;
-        return true;
-    }
 
     bool ConsiderOutput(const ComPtr<IDXGIOutput>& output) noexcept
     {
@@ -127,7 +113,8 @@ struct DisplayOutputSearch
         if (FAILED(output->GetDesc(&description))) return false;
         if (!description.AttachedToDesktop) return true;
         const auto area = DisplayIntersectionArea(bounds, description.DesktopCoordinates);
-        if (!SelectArea(area)) return true;
+        if (area <= bestArea) return true;
+        bestArea = area;
         candidate = {};
         ComPtr<IDXGIOutput6> output6;
         candidate.known = SUCCEEDED(output.As(&output6)) && output6 &&
@@ -154,7 +141,7 @@ struct DisplayOutputSearch
         for (UINT adapterIndex = 0; adapterIndex < 32; ++adapterIndex)
         {
             ComPtr<IDXGIAdapter1> adapter;
-            const auto result = factory->EnumAdapters1(adapterIndex, &adapter);
+            const auto result = g_displayFactory->EnumAdapters1(adapterIndex, &adapter);
             if (result == DXGI_ERROR_NOT_FOUND) return true;
             if (FAILED(result) || !adapter) return false;
             if (!ReadOutputs(adapter.Get())) return false;
@@ -162,86 +149,97 @@ struct DisplayOutputSearch
         return false;
     }
 
-    bool Publish(DisplayCapabilities& capabilities) noexcept
+    bool Publish() noexcept
     {
-        if (ambiguous) return false;
-        if (!candidate.known || !factory->IsCurrent()) return false;
+        if (!candidate.known || !g_displayFactory->IsCurrent()) return false;
         ReadDisplayConfiguration(candidate);
-        if (!factory->IsCurrent()) return false;
-        capabilities = candidate;
+        if (!g_displayFactory->IsCurrent()) return false;
+        g_displayCapabilities = candidate;
+        g_displayRetryAfter = 0;
         return true;
     }
 };
 
-}  // namespace
-
-DisplayCapabilities QueryDisplayCapabilities(HWND window) noexcept
+bool CachedDisplayMatches(HMONITOR monitor, bool factoryCurrent) noexcept
 {
-    DisplayOutputSearch search;
-    DisplayCapabilities capabilities;
-    if (!search.ReadWindow(window)) return capabilities;
-    if (!search.ReadAdapters()) return capabilities;
-    search.Publish(capabilities);
-    return capabilities;
+    return factoryCurrent && monitor == g_displayDiscoveryMonitor && g_displayCapabilities.known;
 }
 
-void DisplayDiscovery::Reset() noexcept
+bool RefreshDisplayFactory(bool factoryCurrent) noexcept
 {
-    if (std::this_thread::get_id() != owner_) return;
-    capabilities_ = {};
-    factory_.Reset();
-    monitor_ = nullptr;
-    lastAttempt_ = 0;
-    attempted_ = false;
+    if (factoryCurrent) return true;
+    g_displayFactory.Reset();
+    return SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&g_displayFactory)));
 }
 
-bool DisplayDiscovery::MatchesMonitor(HMONITOR monitor) const noexcept
+bool BeginDisplayDiscovery(HMONITOR monitor, bool factoryCurrent) noexcept
 {
-    if (monitor != monitor_) return false;
-    return factory_ && factory_->IsCurrent();
-}
-
-bool DisplayDiscovery::BeginDiscovery() noexcept
-{
+    g_displayCapabilities = {};
     const auto now = GetTickCount64();
-    if (attempted_ && now - lastAttempt_ < 1000) return false;
-    attempted_ = true;
-    lastAttempt_ = now;
-    factory_.Reset();
-    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory_)))) return false;
-    return factory_ != nullptr;
-}
-
-void DisplayDiscovery::Discover(HWND window) noexcept
-{
-    const auto candidate = QueryDisplayCapabilities(window);
-    if (!candidate.known) return;
-    if (candidate.description.Monitor != monitor_) return;
-    if (!factory_->IsCurrent()) return;
-    capabilities_ = candidate;
-}
-
-bool DisplayDiscovery::SelectMonitor(HMONITOR monitor) noexcept
-{
-    if (!monitor)
-    {
-        Reset();
-        return false;
-    }
-    if (monitor != monitor_) Reset();
-    if (factory_ && !factory_->IsCurrent()) Reset();
-    monitor_ = monitor;
+    if (now < g_displayRetryAfter) return false;
+    g_displayRetryAfter = now + 1000;
+    g_displayDiscoveryMonitor = monitor;
+    if (!RefreshDisplayFactory(factoryCurrent)) return false;
     return true;
 }
 
-DisplayCapabilities DisplayDiscovery::Refresh(HWND window) noexcept
+}  // namespace
+
+[[nodiscard]] bool RefreshDisplayCapabilities(HWND window) noexcept
 {
-    if (std::this_thread::get_id() != owner_) return {};
     const auto monitor = window ? MonitorFromWindow(window, MONITOR_DEFAULTTONULL) : nullptr;
-    if (!SelectMonitor(monitor)) return {};
-    if (MatchesMonitor(monitor) && capabilities_.known) return capabilities_;
-    if (BeginDiscovery()) Discover(window);
-    return capabilities_;
+    const bool factoryCurrent = g_displayFactory && g_displayFactory->IsCurrent();
+    if (CachedDisplayMatches(monitor, factoryCurrent)) return true;
+    if (!BeginDisplayDiscovery(monitor, factoryCurrent)) return false;
+    DisplayOutputSearch search;
+    if (monitor == nullptr || !GetWindowRect(window, &search.bounds)) return false;
+    if (!search.ReadAdapters()) return false;
+    return search.Publish();
+}
+[[nodiscard]] bool ReferenceDisplayStillEligible() noexcept
+{
+    const auto observed = g_activeDisplayHdrState.load(
+        std::memory_order_acquire);
+    if (observed >= 0) return observed == 1;
+    return g_displayCapabilities.known &&
+        g_displayCapabilities.description.ColorSpace ==
+            DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+}
+
+const DisplayCapabilities& CurrentDisplayCapabilities() noexcept
+{
+    return g_displayCapabilities;
+}
+
+void InvalidateDisplayCapabilities() noexcept
+{
+    g_displayCapabilities = {};
+}
+
+void ResetDisplayDiscovery() noexcept
+{
+    g_activeMonitor = nullptr;
+    g_displayFactory.Reset();
+    g_displayCapabilities = {};
+    g_displayDiscoveryMonitor = nullptr;
+    g_displayRetryAfter = 0;
+    g_activeDisplayHdrState.store(-1, std::memory_order_release);
+}
+
+HMONITOR ActiveDisplayMonitor() noexcept
+{
+    return g_activeMonitor;
+}
+
+int ActiveDisplayHdrState() noexcept
+{
+    return g_activeDisplayHdrState.load(std::memory_order_acquire);
+}
+
+void PublishActiveDisplay(HMONITOR monitor, int hdrState) noexcept
+{
+    g_activeMonitor = monitor;
+    g_activeDisplayHdrState.store(hdrState, std::memory_order_release);
 }
 
 }  // namespace fo4hdr

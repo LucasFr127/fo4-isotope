@@ -35,13 +35,13 @@ struct AnalyticReference
         return aces && agx && gt7;
     }
 
-    [[nodiscard]] LinearRgb Sample(OperatorLutAlgorithm algorithm, LinearRgb scene) const noexcept
+    [[nodiscard]] LinearRgb Sample(ProductionToneMapperAlgorithm algorithm, LinearRgb scene) const noexcept
     {
         switch (algorithm)
         {
-        case OperatorLutAlgorithm::aces2: return MapAces2ToBt2020Nits(*aces, scene);
-        case OperatorLutAlgorithm::agX: return MapAgxToBt2020Nits(*agx, scene);
-        case OperatorLutAlgorithm::gt7: return MapGt7ToBt2020Nits(*gt7, scene);
+        case ProductionToneMapperAlgorithm::aces2Lmt: return MapAces2LmtToBt2020Nits(*aces, scene);
+        case ProductionToneMapperAlgorithm::agX: return MapAgxToBt2020Nits(*agx, scene);
+        case ProductionToneMapperAlgorithm::gt7: return MapGt7ToBt2020Nits(*gt7, scene);
         }
         return {};
     }
@@ -104,7 +104,7 @@ void CheckShaper(const OperatorLutData& lut)
     const auto parameters = OperatorLutShaperParameters(lut.algorithm, kReferencePeak);
     for (const auto value : parameters) FO4HDR_CHECK(std::isfinite(value));
     FO4HDR_CHECK(parameters[0] > 0.0F && parameters[3] > 0.0F);
-    const auto width = lut.algorithm == OperatorLutAlgorithm::gt7 ? 2.5 : 3.0;
+    const auto width = lut.algorithm == ProductionToneMapperAlgorithm::gt7 ? 2.5 : 3.0;
     const auto coordinate = [&](double input) {
         const auto logarithm = std::log2(input + 1.0 / 65536.0);
         return std::atan((logarithm - parameters[2]) / width) * parameters[0] +
@@ -124,7 +124,7 @@ void CheckInputPolicy(const OperatorLutData& lut)
         std::numeric_limits<double>::quiet_NaN(),
         -std::numeric_limits<double>::infinity()}), {});
     const auto infinity = std::numeric_limits<double>::infinity();
-    const auto expected = lut.algorithm == OperatorLutAlgorithm::aces2 ? LinearRgb{} :
+    const auto expected = lut.algorithm == ProductionToneMapperAlgorithm::aces2Lmt ? LinearRgb{} :
         test::SampleOperatorLut(lut, {65504.0, 65504.0, 65504.0});
     CheckSameRgb(test::SampleOperatorLut(lut, {infinity, infinity, infinity}), expected);
 }
@@ -138,7 +138,7 @@ void CheckInterpolation(const OperatorLutData& lut, const AnalyticReference& ana
         const auto scene = corpus[index];
         const auto raw = test::SampleOperatorLutRaw(lut, scene);
         FO4HDR_CHECK(std::isfinite(raw.red) && std::isfinite(raw.green) && std::isfinite(raw.blue));
-        const auto contained = lut.algorithm == OperatorLutAlgorithm::agX ?
+        const auto contained = lut.algorithm == ProductionToneMapperAlgorithm::agX ?
             ApplyAgxDisplayGamut(raw, kReferencePeak) : ContainBt2020Nits(raw, kReferencePeak);
         const auto actual = test::SampleOperatorLut(lut, scene);
         if (index != 0U) CheckSameRgb(actual, contained);
@@ -196,8 +196,8 @@ void RunOperatorLutTests()
     const AnalyticReference analytic;
     FO4HDR_CHECK(analytic.IsValid());
     if (!analytic.IsValid()) return;
-    for (const auto algorithm : {OperatorLutAlgorithm::aces2, OperatorLutAlgorithm::agX,
-             OperatorLutAlgorithm::gt7})
+    for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2Lmt, ProductionToneMapperAlgorithm::agX,
+             ProductionToneMapperAlgorithm::gt7})
     {
         auto lut = BuildOperatorLut(algorithm, kReferencePeak);
         FO4HDR_CHECK(lut.IsValid());
@@ -206,7 +206,7 @@ void RunOperatorLutTests()
         CheckShaper(lut);
         CheckInputPolicy(lut);
         CheckInterpolation(lut, analytic);
-        if (algorithm == OperatorLutAlgorithm::gt7) CheckSignedReconstruction(lut);
+        if (algorithm == ProductionToneMapperAlgorithm::gt7) CheckSignedReconstruction(lut);
     }
 }
 

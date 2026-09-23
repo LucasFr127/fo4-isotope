@@ -14,8 +14,6 @@ void RunPipboyScreenObservationTests()
     FO4HDR_CHECK(IdentifyPipboyScreenShader(0xB7FC78BBu, 1840) == PipboyScreenShader::producer);
     FO4HDR_CHECK(IdentifyPipboyScreenShader(0x807CFBC4u, 3768) == PipboyScreenShader::consumer);
     FO4HDR_CHECK(IdentifyPipboyScreenShader(0x807CFBC4u, 1840) == PipboyScreenShader::unknown);
-    const std::array<std::byte, 20> unrelated{};
-    FO4HDR_CHECK(MatchPipboyScreenBytecode(unrelated, 0) == PipboyScreenShader::unknown);
     PipboyScreenObservation observation;
     observation.Producer(1);
     FO4HDR_CHECK(observation.producerDraws == 0);

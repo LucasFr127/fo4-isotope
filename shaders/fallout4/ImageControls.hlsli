@@ -1,24 +1,45 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
 // Copyright (c) 2025 Carlos Lopez Jr.
-// Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/games/fallout4/12_luts_0x80802E60.ps_5_0.hlsl
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/12_luts_0x80802E60.ps_5_0.hlsl
 // Retains the origin and notices of the containing creative-grade adaptation.
-// Modification: apply scene-only image controls before the independent operator.
+// Modification: extract its project-authored image controls for both grade methods.
 #ifndef FO4HDR_IMAGE_CONTROLS_HLSLI
 #define FO4HDR_IMAGE_CONTROLS_HLSLI
 
-#include "GradeTransfer.hlsli"
-#include "../tonemap/OperatorLut.hlsli"
+#include "LiveSettingsConstants.hlsli"
 
 static const float3 kBt709Luma =
     float3(0.212500006f, 0.715399981f, 0.0720999986f);
 static const float kFo4HdrImagePivot = 0.18f;
+static const float kFo4HdrMaximumFiniteFp16 = 65504.0f;
+
+float Fo4HdrSanitizeImageChannel(float value)
+{
+    if (value != value)
+    {
+        return 0.0f;
+    }
+    if (abs(value) > kFo4HdrMaximumFiniteFp16)
+    {
+        return value < 0.0f ? 0.0f : kFo4HdrMaximumFiniteFp16;
+    }
+    return max(value, 0.0f);
+}
+
+float3 Fo4HdrSanitizeImage(float3 value)
+{
+    return float3(
+        Fo4HdrSanitizeImageChannel(value.r),
+        Fo4HdrSanitizeImageChannel(value.g),
+        Fo4HdrSanitizeImageChannel(value.b));
+}
 
 float3 Fo4HdrScaleLuminance(float3 color, float scale)
 {
     // A common scale preserves channel ratios until per-channel FP16
     // containment is needed; values are not clipped to the SDR [0,1] range.
-    return Fo4HdrGradeCleanScene(color * max(scale, 0.0f));
+    return Fo4HdrSanitizeImage(color * max(scale, 0.0f));
 }
 
 float3 Fo4HdrSetLuminance(float3 color, float targetLuminance)
@@ -115,7 +136,7 @@ float3 Fo4HdrApplyImageControls(float3 color)
             dot(Fo4HdrColorAdaptationRow0.xyz, color),
             dot(Fo4HdrColorAdaptationRow1.xyz, color),
             dot(Fo4HdrColorAdaptationRow2.xyz, color));
-        controlled = Fo4HdrGradeCleanScene(color);
+        controlled = Fo4HdrSanitizeImage(color);
     }
     return controlled;
 }

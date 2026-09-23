@@ -2,8 +2,6 @@
 
 #include "NativeReferenceGradePass.hpp"
 
-#include "../HdrRenderer.hpp"
-
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 
 #include <algorithm>
@@ -13,14 +11,6 @@ namespace fo4hdr {
 namespace {
 
 using Microsoft::WRL::ComPtr;
-
-[[nodiscard]] bool OnDevice(ID3D11DeviceChild* child, IUnknown* identity) noexcept
-{
-    ComPtr<ID3D11Device> device;
-    child->GetDevice(&device);
-    ComPtr<IUnknown> actual;
-    return device && SUCCEEDED(device.As(&actual)) && actual.Get() == identity;
-}
 
 [[nodiscard]] bool IsNativeReferenceView(const D3D11_SHADER_RESOURCE_VIEW_DESC& description) noexcept
 {
@@ -33,83 +23,63 @@ using Microsoft::WRL::ComPtr;
 [[nodiscard]] bool IsNativeReferenceTexture(const D3D11_TEXTURE3D_DESC& description) noexcept
 {
     const bool cube = description.Width == 16 && description.Height == 16 && description.Depth == 16;
-    return cube && description.MipLevels == 1 && description.Format == DXGI_FORMAT_R8G8B8A8_UNORM;
+    return cube && description.MipLevels >= 1 && description.Format == DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
 [[nodiscard]] bool CaptureNativeReferenceConstants(ID3D11DeviceContext1* context1,
     NativeReferenceInputs& inputs) noexcept
 {
     ID3D11Buffer* constants{};
-    context1->PSGetConstantBuffers(2, 1, &constants);
-    context1->PSGetConstantBuffers1(2, 1, nullptr,
+    context1->PSGetConstantBuffers1(2, 1, &constants,
         &inputs.firstConstant, &inputs.constantCount);
     inputs.constants.Attach(constants);
-    if (!inputs.constants || inputs.constantCount == 0) return false;
-    if (inputs.firstConstant % 16 != 0 || inputs.constantCount % 16 != 0) return false;
-    if (inputs.constantCount > D3D11_REQ_CONSTANT_BUFFER_ELEMENT_COUNT) return false;
+    if (!inputs.constants || inputs.constantCount < 2) return false;
     D3D11_BUFFER_DESC description{};
     inputs.constants->GetDesc(&description);
     return inputs.firstConstant <= description.ByteWidth / 16 &&
         description.ByteWidth - inputs.firstConstant * 16 >= 32;
 }
 
-[[nodiscard]] ComPtr<IUnknown> ContextDeviceIdentity(ID3D11DeviceContext1* context) noexcept
-{
-    ComPtr<ID3D11Device> device;
-    context->GetDevice(&device);
-    ComPtr<IUnknown> identity;
-    if (device) (void)device.As(&identity);
-    return identity;
-}
-
 class ScopedNativeReferenceComputeState
 {
 public:
-    ScopedNativeReferenceComputeState(ID3D11DeviceContext1* context) noexcept : context_(context), constant_(context, 2)
+    ScopedNativeReferenceComputeState(ID3D11DeviceContext* context,
+        ID3D11DeviceContext1* context1) noexcept : context_(context)
     {
-        std::array<ID3D11ClassInstance*, 256> instances{};
+        std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> instances{};
         instanceCount_ = static_cast<UINT>(instances.size());
         ID3D11ComputeShader* shader{};
         context_->CSGetShader(&shader, instances.data(), &instanceCount_);
         shader_.Attach(shader);
-        for (UINT i = 0; i < std::min<UINT>(instanceCount_, 256); ++i) instances_[i].Attach(instances[i]);
+        for (UINT i = 0; i < instanceCount_; ++i) instances_[i].Attach(instances[i]);
         std::array<ID3D11ShaderResourceView*, 4> resources{};
         context_->CSGetShaderResources(0, static_cast<UINT>(resources.size()), resources.data());
         for (std::size_t i = 0; i < resources.size(); ++i) resources_[i].Attach(resources[i]);
         ID3D11UnorderedAccessView* unordered{};
         context_->CSGetUnorderedAccessViews(0, 1, &unordered);
         unordered_.Attach(unordered);
-        constant_.Capture();
+        constant_.Capture(context_, context1, 2);
     }
 
     ScopedNativeReferenceComputeState(const ScopedNativeReferenceComputeState&) = delete;
     ScopedNativeReferenceComputeState& operator=(const ScopedNativeReferenceComputeState&) = delete;
     ~ScopedNativeReferenceComputeState() noexcept { Restore(); }
 
-    [[nodiscard]] bool Ready() const noexcept { return instanceCount_ <= instances_.size() && constant_.Ready(); }
-
-    void BindConstants(const NativeReferenceInputs& inputs) noexcept
-    {
-        constant_.BindRange(inputs.constants.Get(), inputs.firstConstant, inputs.constantCount);
-        mutated_ = true;
-    }
-
     void Restore() noexcept
     {
-        if (!context_ || !mutated_) return;
+        if (!context_) return;
         std::array<ID3D11ShaderResourceView*, 4> clearResources{};
         ID3D11UnorderedAccessView* clearUnordered{};
         context_->CSSetShaderResources(0, static_cast<UINT>(clearResources.size()),
             clearResources.data());
-        constexpr UINT preserveCounter = UINT(-1);
-        context_->CSSetUnorderedAccessViews(0, 1, &clearUnordered, &preserveCounter);
+        context_->CSSetUnorderedAccessViews(0, 1, &clearUnordered, nullptr);
         std::array<ID3D11ShaderResourceView*, 4> resources{};
         for (std::size_t i = 0; i < resources.size(); ++i) resources[i] = resources_[i].Get();
         auto* unordered = unordered_.Get();
         context_->CSSetShaderResources(0, static_cast<UINT>(resources.size()), resources.data());
-        context_->CSSetUnorderedAccessViews(0, 1, &unordered, &preserveCounter);
+        context_->CSSetUnorderedAccessViews(0, 1, &unordered, nullptr);
         constant_.Restore();
-        std::array<ID3D11ClassInstance*, 256> instances{};
+        std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> instances{};
         for (UINT i = 0; i < instanceCount_; ++i) instances[i] = instances_[i].Get();
         context_->CSSetShader(shader_.Get(), instanceCount_ ? instances.data() : nullptr,
             instanceCount_);
@@ -119,9 +89,8 @@ public:
 private:
     ID3D11DeviceContext* context_{};
     ComPtr<ID3D11ComputeShader> shader_;
-    std::array<ComPtr<ID3D11ClassInstance>, 256> instances_{};
+    std::array<ComPtr<ID3D11ClassInstance>, D3D11_SHADER_MAX_INTERFACES> instances_{};
     UINT instanceCount_{};
-    bool mutated_{};
     std::array<ComPtr<ID3D11ShaderResourceView>, 4> resources_{};
     ComPtr<ID3D11UnorderedAccessView> unordered_;
     fo4hdr::ScopedD3D11ComputeConstantBuffer constant_;
@@ -144,120 +113,39 @@ private:
     return IsNativeReferenceTexture(description);
 }
 
-[[nodiscard]] bool CaptureBoundLooks(ID3D11DeviceContext1* context,
-    NativeReferenceInputs& inputs, ComPtr<IUnknown>& identity) noexcept
+[[nodiscard]] bool CaptureNativeReferenceInputs(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, NativeReferenceInputs& inputs) noexcept
 {
-    identity = ContextDeviceIdentity(context);
-    if (!identity) return false;
-    std::array<ID3D11ShaderResourceView*, 4> looks{};
-    context->PSGetShaderResources(3, static_cast<UINT>(looks.size()), looks.data());
-    for (std::size_t i = 0; i < looks.size(); ++i) inputs.looks[i].Attach(looks[i]);
-    // Actual nonnull whole-volume PS inputs are already qualified by D3D hazard
-    // tracking; exclusive ownership prevents mutation before their CS binding.
-    return std::ranges::all_of(inputs.looks, [&](const auto& view) {
-            return IsQualifiedNativeReferenceLook(view.Get()) && OnDevice(view.Get(), identity.Get());
-        });
-}
-
-[[nodiscard]] bool CaptureNativeReferenceInputs(ID3D11DeviceContext1* context, NativeReferenceInputs& inputs) noexcept
-{
-    if (!context) return false;
+    if (!context || !context1) return false;
     if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
     ComPtr<ID3D11Predicate> predicate;
     BOOL predicateValue{};
     context->GetPredication(&predicate, &predicateValue);
     if (predicate) return false;
-    ComPtr<IUnknown> identity;
-    if (!CaptureBoundLooks(context, inputs, identity)) return false;
-    if (!CaptureNativeReferenceConstants(context, inputs)) return false;
-    return OnDevice(inputs.constants.Get(), identity.Get());
+    std::array<ID3D11ShaderResourceView*, 4> looks{};
+    context->PSGetShaderResources(3, static_cast<UINT>(looks.size()), looks.data());
+    for (std::size_t i = 0; i < looks.size(); ++i) inputs.looks[i].Attach(looks[i]);
+    if (!std::ranges::all_of(inputs.looks,
+            [](const auto& view) { return IsQualifiedNativeReferenceLook(view.Get()); })) return false;
+    return CaptureNativeReferenceConstants(context1, inputs);
 }
 
-[[nodiscard]] bool DispatchNativeReferencePrepare(ID3D11DeviceContext1* context, const NativeReferenceInputs& inputs,
+void DispatchNativeReferencePrepare(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, const NativeReferenceInputs& inputs,
     const NativeReferenceResources& state) noexcept
 {
-    ScopedNativeReferenceComputeState previous(context);
-    if (!previous.Ready()) return false;
-    previous.BindConstants(inputs);
+    ScopedNativeReferenceComputeState previous(context, context1);
     std::array<ID3D11ShaderResourceView*, 4> resources{};
     for (std::size_t i = 0; i < resources.size(); ++i) resources[i] = inputs.looks[i].Get();
     context->CSSetShaderResources(0, static_cast<UINT>(resources.size()), resources.data());
+    auto* constants = inputs.constants.Get();
+    context1->CSSetConstantBuffers1(2, 1, &constants,
+        &inputs.firstConstant, &inputs.constantCount);
     auto* output = state.preblendUav.Get();
-    constexpr UINT preserveCounter = UINT(-1);
-    context->CSSetUnorderedAccessViews(0, 1, &output, &preserveCounter);
+    context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
     context->CSSetShader(state.preblendShader.Get(), nullptr, 0);
     context->Dispatch(2, 2, 2);
     previous.Restore();
-    return true;
-}
-
-bool ScenePassRenderer::PrepareNativeReferenceLook(NativeReferencePreparationScope scope) noexcept
-{
-    if (!Active()) return false;
-    if (invoking_ || !frameOpen_) return false;
-    nativeReferenceFrame_ = 0;
-    if (scope != NativeReferencePreparationScope::qualifiedExclusive) return false;
-    invoking_ = true;
-    const bool prepared = PrepareNativeReferenceInputs();
-    invoking_ = false;
-    return prepared;
-}
-
-bool ScenePassRenderer::PrepareNativeReferenceInputs() noexcept
-{
-    nativeReferenceFrame_ = 0;
-    if (!frameOpen_ || !NativeReferenceResourcesReady(nativeReference_)) return false;
-    NativeReferenceInputs inputs;
-    if (!CaptureNativeReferenceInputs(context_.Get(), inputs)) return false;
-    if (!DispatchNativeReferencePrepare(context_.Get(), inputs, nativeReference_)) return false;
-    nativeReferenceFrame_ = frameGeneration_;
-    return true;
-}
-
-ScenePassRenderer::NativeReferenceSource::NativeReferenceSource(ID3D11DeviceContext* context) noexcept
-    : context_(context) {}
-
-ScenePassRenderer::NativeReferenceSource::~NativeReferenceSource() noexcept
-{
-    if (!bound_) return;
-    auto* previous = previous_.Get();
-    context_->PSSetShaderResources(3, 1, &previous);
-}
-
-void ScenePassRenderer::NativeReferenceSource::Bind(ID3D11ShaderResourceView* prepared) noexcept
-{
-    if (!prepared) return;
-    context_->PSGetShaderResources(3, 1, &previous_);
-    context_->PSSetShaderResources(3, 1, &prepared);
-    bound_ = true;
-}
-
-void ScenePassRenderer::ConfigureNativeReferenceReplacement(DrawReplacement& replacement,
-    RenoDxShaderPass pass) const noexcept
-{
-    if (!replacement.shader || pass != RenoDxShaderPass::lut) return;
-    if (sceneGrade_.method != ColorGradingMethod::nativeReference || !nativeReferenceShader_) return;
-    replacement.radialFallback = replacement.shader;
-    replacement.shader = nativeReferenceShader_.Get();
-    replacement.prepareNativeReference = sceneGrade_.vanillaColorGradingStrength > 0.0F;
-}
-
-ID3D11ShaderResourceView* ScenePassRenderer::NativeReferenceSourceForDraw(
-    const DrawReplacement& replacement, bool prepared) const noexcept
-{
-    if (!prepared || !replacement.prepareNativeReference) return nullptr;
-    return nativeReference_.preblendSrv.Get();
-}
-
-bool ScenePassRenderer::PrepareNativeReferenceDraw(const DrawReplacement& replacement) noexcept
-{
-    if (!replacement.radialFallback) return true;
-    ComPtr<ID3D11PixelShader> actual;
-    context_->PSGetShader(&actual, nullptr, nullptr);
-    if (actual.Get() != nativeReferenceShader_.Get()) return false;
-    if (!replacement.prepareNativeReference) return true;
-    // Requalify after the shader setter; a captured setter may alter native inputs.
-    return PrepareNativeReferenceInputs();
 }
 
 } // namespace fo4hdr

@@ -1,99 +1,163 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-
+#include "GameSnapshotStore.hpp"
+#include <REX/LOG.h>
+// CommonLib's Win32 declarations must precede the Windows SDK headers.
 #include <REX/W32/KERNEL32.h>
 #include <Windows.h>
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <span>
+#include <limits>
+#include <string_view>
 #include <type_traits>
 
 namespace fo4hdr::game::observation {
-
-[[nodiscard]] inline bool ValidMemoryBounds(const void* address, std::size_t size) noexcept
+inline bool ReadableProtection(DWORD flags) noexcept
 {
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    return start != 0 && size != 0 && size <= UINTPTR_MAX - start;
-}
-
-[[nodiscard]] inline bool ReadableProtection(const MEMORY_BASIC_INFORMATION& region) noexcept
-{
-    if (region.State != MEM_COMMIT || (region.Protect & PAGE_GUARD) != 0) return false;
-    constexpr std::array readable{PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
+    constexpr std::array protections{PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY,
         PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY};
-    for (const auto protection : readable)
-        if ((region.Protect & 0xFFU) == protection) return true;
-    return false;
+    return std::ranges::find(protections, flags & 0xFF) != protections.end();
 }
 
-[[nodiscard]] inline bool AdvanceReadableRegion(std::uintptr_t& cursor) noexcept
+inline bool QueryReadableRegion(std::uintptr_t cursor, MEMORY_BASIC_INFORMATION& region) noexcept
 {
-    MEMORY_BASIC_INFORMATION region{};
-    if (::VirtualQuery(reinterpret_cast<const void*>(cursor), &region, sizeof(region)) == 0 ||
-        !ReadableProtection(region)) return false;
-    const auto base = reinterpret_cast<std::uintptr_t>(region.BaseAddress);
-    if (base > cursor || region.RegionSize > UINTPTR_MAX - base) return false;
-    const auto end = base + region.RegionSize;
-    if (end <= cursor) return false;
-    cursor = end;
+    if (VirtualQuery(reinterpret_cast<const void*>(cursor), &region, sizeof(region)) != sizeof(region))
+        return false;
+    if (region.State != MEM_COMMIT || (region.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+        return false;
+    return ReadableProtection(region.Protect);
+}
+inline bool AdvanceRegion(const MEMORY_BASIC_INFORMATION& region, std::uintptr_t end,
+    std::uintptr_t& cursor) noexcept
+{
+    const auto regionStart =
+        reinterpret_cast<std::uintptr_t>(region.BaseAddress);
+    if (regionStart >
+        (std::numeric_limits<std::uintptr_t>::max)() - region.RegionSize)
+    {
+        return false;
+    }
+    const auto regionEnd = regionStart + region.RegionSize;
+    if (regionEnd <= cursor)
+    {
+        return false;
+    }
+    cursor = (std::min)(end, regionEnd);
     return true;
 }
 
-[[nodiscard]] inline bool IsReadableMemory(const void* address, std::size_t size) noexcept
+inline bool ValidReadRange(const void* memory, std::size_t size) noexcept
 {
-    const auto start = reinterpret_cast<std::uintptr_t>(address);
-    if (!ValidMemoryBounds(address, size)) return false;
+    return memory != nullptr && size != 0 && reinterpret_cast<std::uintptr_t>(memory) <=
+        (std::numeric_limits<std::uintptr_t>::max)() - size;
+}
+[[nodiscard]] inline bool IsReadableMemory(
+    const void* memory,
+    std::size_t size,
+    bool requireGameImage) noexcept
+{
+    if (!ValidReadRange(memory, size)) return false;
+    const auto start = reinterpret_cast<std::uintptr_t>(memory);
+    const auto end = start + size;
+    const auto gameModule = REX::W32::GetModuleHandleW(nullptr);
     auto cursor = start;
-    while (cursor < start + size)
+
+    while (cursor < end)
     {
-        if (!AdvanceReadableRegion(cursor)) return false;
+        MEMORY_BASIC_INFORMATION region{};
+        if (!QueryReadableRegion(cursor, region)) return false;
+        if (requireGameImage && region.AllocationBase != gameModule) return false;
+        if (!AdvanceRegion(region, end, cursor)) return false;
     }
     return true;
 }
 
-[[nodiscard]] inline bool ReadBytes(const void* source, void* destination, std::size_t size) noexcept
+template <class T>
+[[nodiscard]] bool GuardedReadValue(
+    const void* source,
+    T& destination) noexcept
 {
-    if (!IsReadableMemory(source, size)) return false;
+    static_assert(std::is_trivially_copyable_v<T>);
     SIZE_T copied{};
-    return ::ReadProcessMemory(::GetCurrentProcess(), source, destination, size, &copied) != FALSE &&
-        copied == size;
+    return source != nullptr &&
+           ReadProcessMemory(
+               GetCurrentProcess(),
+               source,
+               &destination,
+               sizeof(destination),
+               &copied) != FALSE &&
+           copied == sizeof(destination);
 }
 
-// The caller supplies object lifetime and synchronization. A guarded byte copy
-// bounds a failed read; it cannot make unsynchronized engine mutation safe.
-template<class T>
-[[nodiscard]] bool GuardedReadValue(const void* source, T& destination) noexcept
+template <class T, std::size_t Size>
+[[nodiscard]] bool ReadSnapshotField(
+    const std::array<std::byte, Size>& snapshot,
+    std::size_t offset,
+    T& destination) noexcept
 {
     static_assert(std::is_trivially_copyable_v<T>);
-    T candidate{};
-    if (!ReadBytes(source, &candidate, sizeof(T))) return false;
-    destination = candidate;
-    return true;
-}
-
-template<class T>
-[[nodiscard]] bool ReadSnapshotField(std::span<const std::byte> source,
-    std::size_t offset, T& destination) noexcept
-{
-    static_assert(std::is_trivially_copyable_v<T>);
-    if (offset > source.size() || sizeof(T) > source.size() - offset) return false;
-    std::memcpy(&destination, source.data() + offset, sizeof(T));
-    return true;
-}
-
-template<std::size_t Size>
-[[nodiscard]] bool ReadBoundedText(const char* source, std::array<char, Size>& destination) noexcept
-{
-    if (!ValidMemoryBounds(source, Size)) return false;
-    const auto start = reinterpret_cast<std::uintptr_t>(source);
-    for (std::size_t index = 0; index < Size; ++index)
+    if (offset > Size || sizeof(T) > Size - offset)
     {
-        if (!GuardedReadValue(reinterpret_cast<const void*>(start + index), destination[index])) return false;
-        if (destination[index] == '\0') return true;
+        return false;
     }
-    return false;
+    std::memcpy(&destination, snapshot.data() + offset, sizeof(T));
+    return true;
 }
 
-}  // namespace fo4hdr::game::observation
+template <class T>
+[[nodiscard]] T* ValidateCommonLibObject(
+    T* object,
+    std::size_t objectSize,
+    std::string_view symbol)
+{
+    // PluginMain accepts the exact executable and pinned Address Library
+    // hashes before registering this observer. CommonLib therefore owns IDDB
+    // resolution; this boundary validates only the resulting live object.
+    const auto objectValid =
+        object != nullptr &&
+        reinterpret_cast<std::uintptr_t>(object) % alignof(T) == 0 &&
+        IsReadableMemory(object, objectSize, false);
+
+    REX::INFO(
+        "m6 commonlib_mapping symbol={} object_valid={}",
+        symbol,
+        objectValid);
+    return objectValid ? object : nullptr;
+}
+
+inline void ReportFeatureFailure(
+    fo4hdr::GameSnapshotStore& store,
+    fo4hdr::GameSnapshotFeature feature,
+    std::string_view name,
+    std::string_view reason) noexcept
+{
+    try
+    {
+        store.Update(
+            [feature](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
+                fo4hdr::MarkGameSnapshotFeatureFailed(snapshot, feature);
+            });
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA(
+            "Fallout4HDR: snapshot failure-state publication failed.\n");
+    }
+    try
+    {
+        REX::WARN(
+            "m2 feature={} available=false reason={}",
+            name,
+            reason);
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA(
+            "Fallout4HDR: feature failure logging failed.\n");
+    }
+}
+
+}
