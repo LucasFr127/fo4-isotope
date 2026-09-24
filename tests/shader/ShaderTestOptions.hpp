@@ -9,8 +9,7 @@ namespace fo4hdr::tests::gpu {
 enum class ShaderTestMode : std::uint8_t
 {
     invalid,
-    transfer,
-    gt7Reference,
+    defaultCorpus,
     operatorLutBenchmark
 };
 

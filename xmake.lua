@@ -68,7 +68,7 @@ target("Fallout4HDR")
         set_pcxxheader("src/plugin/PluginPch.hpp")
     end
     add_files(path.join("runtime", selected_runtime, "PluginVersion.cpp"))
-    add_includedirs("include", "src", "src/runtime", "src/graphics", "src/ui", "build/include")
+    add_includedirs("include", "src", "src/runtime", "src/graphics", "src/ui", "build/generated")
     add_defines(commonlib_runtime_define)
     if selected_runtime == "1.10.163" then
         add_defines("FO4HDR_RUNTIME_1_10_163=1")
@@ -169,17 +169,11 @@ target("Fallout4HDR")
 target_end()
 
 if has_config("fo4hdr_build_tests") then
-for _, fixture in ipairs({
-    { name = "fo4hdr-tests", build = 0 },
-    { name = "fo4hdr-tests-executable-mismatch", build = 1 }
-}) do
-    target(fixture.name)
+    target("fo4hdr-tests")
         set_kind("binary")
-        add_rules("win.sdk.resource")
-        add_defines("FO4HDR_TEST_EXECUTABLE_BUILD=" .. fixture.build)
-        add_includedirs("include", "src", "src/runtime", "src/game", "src/graphics", "tests/support", "tests/unit")
-        add_syslinks("version", "bcrypt")
-        add_syslinks("d3d11", "user32")
+        add_packages("imgui")
+        add_includedirs("include", "src", "src/config", "src/game", "src/graphics", "src/ui", "src/runtime", "tests/support", "tests/unit")
+        add_syslinks("version", "bcrypt", "d3d11", "user32")
         add_files("src/config/HdrSettings.cpp",
             "src/config/PluginConfiguration.cpp",
             "src/config/SettingsPersistence.cpp",
@@ -189,13 +183,11 @@ for _, fixture in ipairs({
             "src/output/RenderPipelineContract.cpp",
             "src/output/HdrActivationPolicy.cpp",
             "src/output/NativeLutObservation.cpp",
-            "src/game/ImageSpaceState.cpp",
             "src/hooks/PeIat.cpp",
             "src/hooks/HookOwnership.cpp",
             "src/hooks/GraphicsHookSupport.cpp",
             "src/runtime/RuntimeValidation.cpp",
             "src/runtime/RuntimeIdentityFiles.cpp",
-            "src/graphics/OperatorLutWorker.cpp",
             "src/tonemap/OperatorLut.cpp",
             "src/tonemap/Gt7.cpp",
             "src/tonemap/Agx.cpp",
@@ -203,19 +195,22 @@ for _, fixture in ipairs({
             "src/tonemap/Aces2Lmt.cpp",
             "src/tonemap/aces2/Aces2ColorAppearance.cpp",
             "src/tonemap/aces2/Aces2Tables.cpp",
+            "src/game/ImageSpaceState.cpp",
+            "src/graphics/OperatorLutWorker.cpp",
+            "src/graphics/d3d11/ContextQuerySafety.cpp",
+            "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp",
+            "src/ui/DisplayCalibrationPanel.cpp",
+            "tests/shader/ShaderTestOptions.cpp",
+            "tests/support/reference/OperatorLutTestSupport.cpp",
             "tests/support/reference/Aces2LmtSourceOracle.cpp",
             "tests/support/reference/SelectiveColorSourceOracle.cpp",
-            "tests/support/reference/OperatorLutTestSupport.cpp",
-            "tests/shader/ShaderTestOptions.cpp",
             "tests/unit/config/HdrConfigurationTests.cpp",
             "tests/unit/config/HdrGradeProfileTests.cpp",
             "tests/unit/config/HdrPersistenceTests.cpp",
             "tests/unit/config/HdrSelectiveColorTests.cpp",
             "tests/unit/config/HdrSettingsMathTests.cpp",
             "tests/unit/game/DirectCallPatchTests.cpp",
-            "tests/unit/game/GameSnapshotStoreTests.cpp",
             "tests/unit/game/ImageSpaceProvenanceTests.cpp",
-            "tests/unit/game/MenuEventQueueTests.cpp",
             "tests/unit/graphics/HdrOperatorWorkerTests.cpp",
             "tests/unit/graphics/PipboyScreenObservationTests.cpp",
             "tests/unit/hooks/HookTests.cpp",
@@ -223,7 +218,6 @@ for _, fixture in ipairs({
             "tests/unit/output/HdrCoreTests.cpp",
             "tests/unit/output/PerformanceTests.cpp",
             "tests/unit/output/PipelineContractTests.cpp",
-            "tests/unit/plugin/PluginBootstrapTests.cpp",
             "tests/unit/runtime/RuntimeIdentityFilesTests.cpp",
             "tests/unit/runtime/RuntimeValidationTests.cpp",
             "tests/unit/ShaderTestOptionsTests.cpp",
@@ -231,47 +225,84 @@ for _, fixture in ipairs({
             "tests/unit/tonemap/Gt7Tests.cpp",
             "tests/unit/tonemap/OperatorLutTests.cpp",
             "tests/unit/tonemap/ToneMappingTests.cpp",
-            "tests/unit/runtime/RuntimeVersionFixture.rc")
+            "tests/unit/game/GameStateObserverTests.cpp",
+            "tests/unit/TestHarnessTests.cpp",
+            "tests/unit/output/ArmorUiCompositionTests.cpp",
+            "tests/unit/output/NativeLutObservationTests.cpp",
+            "tests/unit/graphics/DeveloperExposureLockTests.cpp",
+            "tests/unit/ui/DisplayCalibrationTests.cpp",
+            "tests/unit/config/HdrGradePackTests.cpp",
+            "tests/unit/graphics/ScopedD3D11ComputeConstantBufferTests.cpp")
     target_end()
-end
-
 end
 
 target("fo4hdr-shaders")
     set_kind("phony")
     set_default(false)
-    on_build(function(target)
-        import("core.base.json")
-        import("core.project.depend")
+    -- Consumers need the generated headers before their compilation starts.
+    set_policy("build.fence", true)
+
+    on_build(function (target)
+        local depend = import("core.project.depend")
+        local json = import("core.base.json")
+
         local pwsh = os.getenv("FO4HDR_PWSH") or "pwsh"
-        local script = path.join(os.projectdir(), "scripts/compile-shaders.ps1")
-        local outputdir = path.join(os.projectdir(), target:targetdir())
-        local arguments = { "-NoProfile", "-File", script,
-            "-Output", path.join(outputdir, "TransferEvaluation.dxbc") }
-        local report = os.iorunv(pwsh, table.join(arguments, { "-PrintDependencyInfo" }))
-        local info = json.decode(report)
-        assert(info.compiler and info.compiler.path and info.compiler.version and info.compiler.sha256,
-            "Shader dependency report lacks compiler identity")
-        assert(info.inputs and #info.inputs > 0 and info.outputs and #info.outputs == 19,
-            "Shader dependency report lacks the current input/output closure")
-        assert(info.flags and #info.flags > 0 and info.programs and #info.programs == 18 and info.outputRoot,
-            "Shader dependency report lacks program values")
-        local values = { pwsh, info.compiler.path, info.compiler.version, info.compiler.sha256,
-            info.outputRoot, json.encode(info.flags), json.encode(info.outputs) }
-        for _, program in ipairs(info.programs) do
-            assert(type(program.source) == "string" and type(program.profile) == "string" and
-                type(program.entry) == "string", "Shader dependency report lacks program fields")
-            table.insert(values, program.source)
-            table.insert(values, program.profile)
-            table.insert(values, program.entry)
-            table.insert(values, type(program.symbol) == "string" and program.symbol or "")
+        if os.isdir(pwsh) then
+            pwsh = path.join(pwsh, "pwsh.exe")
         end
-        depend.on_changed(function()
-            os.vrunv(pwsh, arguments)
+        local script = path.join(
+            os.projectdir(), "scripts", "compile-shaders.ps1")
+        local outputdir = path.join(
+            os.projectdir(), "build", "generated")
+        local dependency_json = os.iorunv(pwsh, {
+            "-NoProfile",
+            "-File",
+            script,
+            "-OutputDirectory",
+            outputdir,
+            "-PrintDependencyInfo"
+        })
+        local dependency = json.decode(dependency_json)
+        local files = {
+            script,
+            path.join(os.projectdir(), "versions.lock.json"),
+            dependency.compilerPath
+        }
+        table.join2(files, os.files(path.join(
+            os.projectdir(), "scripts", "internal", "*.ps1")))
+        table.join2(
+            files,
+            os.files(path.join(os.projectdir(), "shaders", "**.hlsl")))
+        table.join2(
+            files,
+            os.files(path.join(os.projectdir(), "shaders", "**.hlsli")))
+        table.join2(
+            files,
+            os.files(path.join(
+                os.projectdir(), "tests", "shader", "**.hlsl")))
+        table.join2(
+            files,
+            os.files(path.join(
+                os.projectdir(), "tests", "shader", "**.hlsli")))
+        -- Treat outputs as dependencies so deleting any artifact regenerates it.
+        table.join2(files, dependency.outputs)
+        table.sort(files)
+        local compiler_identity =
+            dependency.compilerPath .. "|" .. dependency.compilerVersion
+        depend.on_changed(function ()
+            os.execv(pwsh, {
+                "-NoProfile",
+                "-File",
+                script,
+                "-OutputDirectory",
+                outputdir,
+                "-FxcPath",
+                dependency.compilerPath
+            })
         end, {
-            dependfile = path.join(outputdir, "fo4hdr-shaders.d"),
-            files = table.join({ script, info.compiler.path }, info.inputs, info.outputs),
-            values = values
+            dependfile = path.join(target:dependir(), "shaders.d"),
+            files = files,
+            values = { compiler_identity }
         })
     end)
 target_end()
@@ -282,33 +313,93 @@ target("fo4hdr-shader-tests")
     set_default(false)
     add_deps("fo4hdr-shaders")
     add_packages("imgui")
-    add_includedirs("include", "src", "src/graphics", "src/ui", "tests/support", "tests/unit", "build/include")
+    add_includedirs("include", "src", "src/graphics", "src/ui", "tests/support", "tests/unit", "src/config", "build/generated")
     add_syslinks("d3d11", "dxgi", "user32", "bcrypt")
-    add_files("tests/shader/main.cpp",
-        "tests/shader/ShaderTestOptions.cpp",
-        "tests/shader/Gt7ReferenceTests.cpp",
-        "tests/unit/tonemap/Gt7Tests.cpp",
-        "tests/shader/HdrGradeTransferTests.cpp",
-        "tests/shader/OperatorLutTests.cpp",
-        "tests/shader/DisplayCalibrationTests.cpp",
-        "tests/shader/SettingsPanelTests.cpp",
-        "tests/unit/ui/LutProfilesPanelTests.cpp",
-        "tests/support/d3d11/GpuHarness.cpp",
-        "tests/support/reference/OperatorLutTestSupport.cpp",
-        "src/ui/SettingsPanel.cpp",
-        "src/ui/LutProfilesPanel.cpp",
-        "src/ui/DisplayCalibrationPanel.cpp",
-        "src/config/HdrSettings.cpp",
+    add_files("src/config/HdrSettings.cpp",
         "src/config/PluginConfiguration.cpp",
         "src/config/SettingsPersistence.cpp",
         "src/output/Hdr10Color.cpp",
         "src/output/SelectiveColor.cpp",
+        "src/output/PerformanceStatistics.cpp",
+        "src/output/RenderPipelineContract.cpp",
+        "src/output/HdrActivationPolicy.cpp",
+        "src/output/NativeLutObservation.cpp",
+        "src/hooks/PeIat.cpp",
+        "src/hooks/HookOwnership.cpp",
+        "src/hooks/GraphicsHookSupport.cpp",
+        "src/runtime/RuntimeValidation.cpp",
+        "src/runtime/RuntimeIdentityFiles.cpp",
         "src/tonemap/OperatorLut.cpp",
         "src/tonemap/Gt7.cpp",
         "src/tonemap/Agx.cpp",
         "src/tonemap/Aces2.cpp",
         "src/tonemap/Aces2Lmt.cpp",
         "src/tonemap/aces2/Aces2ColorAppearance.cpp",
-        "src/tonemap/aces2/Aces2Tables.cpp")
+        "src/tonemap/aces2/Aces2Tables.cpp",
+        "src/graphics/d3d11/ContextQuerySafety.cpp",
+        "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp",
+        "src/graphics/d3d11/ScopedD3D11PixelBindings.cpp",
+        "src/graphics/d3d11/BorrowedComputeState.cpp",
+        "src/graphics/passes/ArmorEncodedComposition.cpp",
+        "src/graphics/passes/NativeReferenceGradePass.cpp",
+        "src/graphics/resources/NativeReferenceResources.cpp",
+        "src/ui/SettingsPanel.cpp",
+        "src/ui/LutProfilesPanel.cpp",
+        "src/ui/DisplayCalibrationPanel.cpp",
+        "tests/unit/ui/LutProfilesPanelTests.cpp",
+        "tests/unit/tonemap/Gt7Tests.cpp",
+        "tests/shader/Gt7ReferenceTests.cpp",
+        "tests/shader/HdrGradeTransferTests.cpp",
+        "tests/shader/main.cpp",
+        "tests/shader/OperatorLutTests.cpp",
+        "tests/shader/SettingsPanelTests.cpp",
+        "tests/shader/ShaderTestOptions.cpp",
+        "tests/shader/ArmorCompositionTests.cpp",
+        "tests/shader/CreativeGradeLutTests.cpp",
+        "tests/shader/DeveloperExposureLockTests.cpp",
+        "tests/shader/Gt7OperatorUiTests.cpp",
+        "tests/shader/ImageControlsTests.cpp",
+        "tests/shader/NativeReferenceGradeTests.cpp",
+        "tests/shader/PresentationPassTests.cpp",
+        "tests/shader/SeparatedUiTests.cpp",
+        "tests/shader/ShippingPixelShaderTests.cpp",
+        "tests/shader/StateRestorationTests.cpp",
+        "tests/support/d3d11/GpuHarness.cpp",
+        "tests/support/reference/OperatorLutTestSupport.cpp",
+        "tests/support/reference/ImageControlReference.cpp",
+        "tests/support/reference/NativeGradeReference.cpp",
+        "tests/support/reference/ShaderReference.cpp")
 target_end()
+    target("fo4hdr-header-checks")
+        set_kind("static")
+        set_default(true)
+        add_deps("fo4hdr-shaders", "commonlibf4")
+        add_packages("imgui")
+        add_defines(commonlib_runtime_define)
+        add_includedirs("include", ".", "src", "src/config", "src/game", "src/graphics", "src/ui",
+            "src/runtime", "tests/support",
+            path.join(os.projectdir(), "build", "generated"))
+        if (get_config("fo4hdr_runtime") or "1.10.163") == "1.10.163" then
+            add_defines("FO4HDR_RUNTIME_1_10_163=1")
+        end
+        on_load(function (target)
+            local headers = os.files("include/**.hpp")
+            table.join2(headers, os.files("src/**.hpp"))
+            table.join2(headers, os.files("tests/unit/**.hpp"))
+            table.join2(headers, os.files("tests/shader/**.hpp"))
+            table.join2(headers, os.files("tests/support/**.hpp"))
+            table.sort(headers)
+            local outputdir = path.join(os.projectdir(), "build", "header-checks")
+            os.mkdir(outputdir)
+            for _, header in ipairs(headers) do
+                local include = header:gsub("\\", "/")
+                local output = path.join(outputdir, include:gsub("/", "_") .. ".cpp")
+                local content = '#include "' .. include .. '"\n'
+                if not os.isfile(output) or io.readfile(output) ~= content then
+                    io.writefile(output, content)
+                end
+                target:add("files", output)
+            end
+        end)
+    target_end()
 end

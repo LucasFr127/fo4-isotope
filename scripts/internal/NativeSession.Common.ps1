@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#requires -Version 7.4.6
 
 function Get-Fo4HdrNativeSessionExitStatus {
     param(

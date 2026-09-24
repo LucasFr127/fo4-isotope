@@ -1,36 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "Fallout4HDR/config/HdrSettings.hpp"
 
 #include <optional>
 
 namespace fo4hdr {
 
+// Small immutable AgX state prepared once for a display peak and parameter
+// set. Production LUT generation reuses it for every lattice sample.
 class AgxTransform
 {
 public:
     struct SigmoidSegment
     {
-        double scale;
-        double power;
+        double scale{};
+        double power{};
     };
+
     struct Sigmoid
     {
-        double transitionX;
-        double transitionY;
-        SigmoidSegment toe;
-        SigmoidSegment shoulder;
-        double slope;
-        double intercept;
+        double transitionX{};
+        double transitionY{};
+        SigmoidSegment toe{};
+        SigmoidSegment shoulder{};
+        double slope{};
+        double intercept{};
     };
+
+    [[nodiscard]] double DisplayPeakNits() const noexcept;
+    [[nodiscard]] double HdrSdrRatio() const noexcept;
+    [[nodiscard]] double DarkMaximumExponent() const noexcept;
+    [[nodiscard]] double HdrPurity() const noexcept;
+    [[nodiscard]] const Sigmoid& FormationSigmoid() const noexcept;
+    [[nodiscard]] const Sigmoid& DarkeningSigmoid() const noexcept;
 
 private:
     friend std::optional<AgxTransform> CreateAgxTransform(
         double, const ToneMapperParameters&) noexcept;
-    friend LinearRgb MapAgxToBt2020Nits(const AgxTransform&, LinearRgb) noexcept;
-    friend LinearRgb EvaluateAgxLutNits(const AgxTransform&, LinearRgb) noexcept;
+
     AgxTransform() noexcept = default;
 
     double displayPeakNits_{};
@@ -41,26 +50,46 @@ private:
     Sigmoid darkeningSigmoid_{};
 };
 
-// Small prepared value state avoids allocation and repeated sigmoid formation.
-// Invalid peaks/selected controls or preparation return no context.
 [[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(
-    double displayPeakNits, const ToneMapperParameters& parameters = {}) noexcept;
-// Raw prepared operator output preserves slopes before display gamut containment.
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
+// The production AgX adapter consumes scene-linear BT.709 and returns bounded
+// absolute display-linear BT.2020 nits. It uses the fixed scene-reference white;
+// UI paper white is a separate presentation input.
+[[nodiscard]] LinearRgb MapAgxToBt2020Nits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
+[[nodiscard]] LinearRgb MapAgxToBt2020Nits(
+    const AgxTransform& transform,
+    LinearRgb sceneLinear) noexcept;
+
+// LUT-bake intermediate only: retains the pinned source's finite signed and
+// over-peak result. The LUT consumer applies ApplyAgxDisplayGamut after
+// interpolation; this result is not suitable for presentation.
 [[nodiscard]] LinearRgb EvaluateAgxLutNits(
-    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept;
-[[nodiscard]] LinearRgb MapAgxToBt2020Nits(
-    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept;
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
 
-// Final AgX gamut containment also applies after coefficient reconstruction.
+[[nodiscard]] LinearRgb EvaluateAgxLutNits(
+    const AgxTransform& transform,
+    LinearRgb sceneLinear) noexcept;
+
+// Production display-gamut stage for an interpolated AgX result. Negative
+// channels contract smoothly about BT.2020 luminance; upper highlights scale
+// RGB uniformly to retain color ratios. Invalid input or peak fails black.
 [[nodiscard]] LinearRgb ApplyAgxDisplayGamut(
-    LinearRgb displayLinearBt2020Nits, double displayPeakNits) noexcept;
+    LinearRgb displayLinearBt2020Nits,
+    double displayPeakNits) noexcept;
 
-// Scene-linear BT.709/D65 uses the fixed 203-nit scene reference white.
-// Returns contained absolute display-linear BT.2020 nits, without display encoding.
-// Fixed AgX response: EV 0, contrast 2.7, HDR purity 0.5 and shoulder power 2.
-// NaN/negative channels use zero; positive infinity and values above 65504
-// use 65504. Peaks outside 400-2000 nits fail black.
-[[nodiscard]] LinearRgb MapAgxToBt2020Nits(
-    LinearRgb sceneLinearBt709, double displayPeakNits) noexcept;
+// Explicit pinned-source reference. This bypasses Fallout4HDR's production
+// gamut containment and retains the source's final per-channel clamp.
+[[nodiscard]] LinearRgb MapAgxSourceToBt2020Nits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
 
 }  // namespace fo4hdr

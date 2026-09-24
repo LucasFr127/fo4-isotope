@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#requires -Version 7.4.6
 [CmdletBinding()]
 param()
 
@@ -80,41 +79,6 @@ function Start-TestTarget {
     return [Diagnostics.Process]::Start($startInfo)
 }
 
-function Stop-TestChildProcess {
-    param([Diagnostics.Process]$Process)
-
-    try {
-        if (-not $Process.HasExited) { $Process.Kill($true) }
-    }
-    catch [InvalidOperationException] {
-        if (-not $Process.HasExited) { throw }
-    }
-    if (-not $Process.WaitForExit(5000)) { throw 'Synthetic child cleanup expired.' }
-}
-
-function Report-TestCleanup {
-    param([object[]]$Errors, [object]$PrimaryFailure)
-
-    if (-not $Errors.Count) { return }
-    $message = $Errors -join '; '
-    if ($PrimaryFailure) { Write-Warning $message -WarningAction Continue }
-    else { throw $message }
-}
-
-function Stop-TestChild {
-    param([Diagnostics.Process]$Process)
-
-    if ($null -eq $Process) { return }
-    $errors = @()
-    try { Stop-TestChildProcess $Process }
-    catch { $errors += $_.Exception.Message }
-    finally {
-        try { $Process.Dispose() }
-        catch { $errors += $_.Exception.Message }
-    }
-    return $errors
-}
-
 function Assert-MonitorRecords {
     param($Records, [string]$ProcessName, [int]$TargetId, [int]$TargetExitCode)
 
@@ -185,48 +149,37 @@ function Invoke-MonitorCase {
         -MonitorScript $MonitorScript `
         -ProcessName $processName `
         -EvidencePath $evidencePath
-    $target = $null
-    $primaryFailure = $null
-    try {
-        $ready = $monitor.StandardOutput.ReadLineAsync()
-        Assert-Condition ($ready.Wait(15000)) 'Monitor readiness wait expired.'
-        $readyLine = $ready.Result
-        Assert-Condition ($readyLine -like "*waiting_for_start=true*") (
-            "Monitor did not become ready: $readyLine"
+    $readyLine = $monitor.StandardOutput.ReadLine()
+    Assert-Condition ($readyLine -like "*waiting_for_start=true*") (
+        "Monitor did not become ready: $readyLine"
+    )
+    $target = Start-TestTarget `
+        -ExecutablePath $testExecutable `
+        -ExitCode $TargetExitCode
+    $targetId = $target.Id
+    $target.WaitForExit()
+    Assert-Condition ($monitor.WaitForExit(15000)) (
+        "Monitor did not finish for target exit code $TargetExitCode."
+    )
+    $standardOutput = $monitor.StandardOutput.ReadToEnd()
+    $standardError = $monitor.StandardError.ReadToEnd()
+    Assert-Condition (Test-Path -LiteralPath $evidencePath) (
+        "Monitor did not retain evidence: $standardOutput $standardError"
+    )
+    $records = @(
+        Get-Content -LiteralPath $evidencePath |
+            ForEach-Object { $_ | ConvertFrom-Json }
+    )
+    Assert-MonitorRecords $records $processName $targetId $TargetExitCode
+    if ($TargetExitCode -eq 0) {
+        Assert-Condition ($monitor.ExitCode -eq 0) (
+            "Successful target made the monitor fail: $standardError"
         )
-        $target = Start-TestTarget `
-            -ExecutablePath $testExecutable `
-            -ExitCode $TargetExitCode
-        $targetId = $target.Id
-        Assert-Condition ($target.WaitForExit(15000)) 'Synthetic target wait expired.'
-        Assert-Condition ($monitor.WaitForExit(15000)) (
-            "Monitor did not finish for target exit code $TargetExitCode."
-        )
-        $standardOutput = $monitor.StandardOutput.ReadToEnd()
-        $standardError = $monitor.StandardError.ReadToEnd()
-        Assert-Condition (Test-Path -LiteralPath $evidencePath) (
-            "Monitor did not retain evidence: $standardOutput $standardError"
-        )
-        $records = @(
-            Get-Content -LiteralPath $evidencePath |
-                ForEach-Object { $_ | ConvertFrom-Json }
-        )
-        Assert-MonitorRecords $records $processName $targetId $TargetExitCode
-        if ($TargetExitCode -eq 0) {
-            Assert-Condition ($monitor.ExitCode -eq 0) (
-                "Successful target made the monitor fail: $standardError"
-            )
-        }
-        else {
-            Assert-Condition ($monitor.ExitCode -ne 0) (
-                "Nonzero target did not fail the monitor."
-            )
-        }
     }
-    catch { $primaryFailure = $_; throw }
-    finally {
-        $cleanupErrors = @((Stop-TestChild $target); (Stop-TestChild $monitor))
-        Report-TestCleanup $cleanupErrors $primaryFailure
+    else {
+        Assert-Condition ($monitor.ExitCode -ne 0) (
+            "Nonzero target did not fail the monitor."
+        )
     }
 }
 
@@ -335,8 +288,6 @@ try {
         -ExecutablePath $runningExecutable `
         -ExitCode 0
     $runningEvidence = Join-Path $resolvedTemporaryRoot "running.jsonl"
-    $runningMonitor = $null
-    $primaryFailure = $null
     try {
         $runningMonitor = Start-MonitorProcess `
             -PowerShellPath $powerShellPath `
@@ -359,10 +310,15 @@ try {
             "Already-running rejection created an evidence artifact."
         )
     }
-    catch { $primaryFailure = $_; throw }
     finally {
-        $cleanupErrors = @((Stop-TestChild $runningTarget); (Stop-TestChild $runningMonitor))
-        Report-TestCleanup $cleanupErrors $primaryFailure
+        if (-not $runningTarget.HasExited) {
+            $runningTarget.Kill($true)
+        }
+        $runningTarget.WaitForExit()
+        $runningTarget.Dispose()
+        if ($null -ne $runningMonitor) {
+            $runningMonitor.Dispose()
+        }
     }
 }
 finally {

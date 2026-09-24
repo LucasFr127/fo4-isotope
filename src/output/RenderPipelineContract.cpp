@@ -7,6 +7,34 @@
 
 namespace fo4hdr {
 
+namespace {
+
+constexpr double kMaximumFiniteFp16 = 65504.0;
+constexpr double kMaximumTemporalCode =
+    kMaximumFiniteFp16 / (1.0 + kMaximumFiniteFp16);
+
+}  // namespace
+
+double EncodeTemporalIntermediate(double linear) noexcept
+{
+    if (std::isnan(linear) || linear <= 0.0) return 0.0;
+    if (!std::isfinite(linear)) return std::pow(kMaximumTemporalCode, 1.0 / 2.2);
+    const auto positive = std::min(linear, kMaximumFiniteFp16);
+    return std::pow(positive / (1.0 + positive), 1.0 / 2.2);
+}
+
+double DecodeTemporalIntermediate(double encoded) noexcept
+{
+    if (std::isnan(encoded) || encoded <= 0.0) return 0.0;
+    if (!std::isfinite(encoded)) return kMaximumFiniteFp16;
+    const auto compressed = std::min(
+        std::pow(std::clamp(encoded, 0.0, 1.0), 2.2),
+        kMaximumTemporalCode);
+    return std::min(
+        compressed / std::max(1.0 - compressed, 1.0 / 65505.0),
+        kMaximumFiniteFp16);
+}
+
 void PipelineHeartbeat::Reset(std::uint64_t generation) noexcept
 {
     generation_ = generation;

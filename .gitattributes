@@ -1,7 +1,15 @@
 * text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
 *.cpp text eol=lf
+*.h text eol=lf
 *.hpp text eol=lf
+*.hlsl text eol=lf
+*.hlsli text eol=lf
 *.lua text eol=lf
+*.json text eol=lf
+*.ini text eol=crlf
 
-# Preserve the exact upstream source oracle bytes.
+# Retain the exact pinned upstream bytes.
 /third_party/gt7/upstream/gt7_tone_mapping.cpp -text

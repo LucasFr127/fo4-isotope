@@ -1,52 +1,83 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "RuntimeIdentityFiles.hpp"
-#include "TestHarness.hpp"
-#include "UnitTestSuite.hpp"
 
-#include <chrono>
+#include "../UnitTestSuite.hpp"
+
+#include "TestHarness.hpp"
+
+#include "RuntimeIdentityFiles.hpp"
+
+#include <Windows.h>
+
 #include <filesystem>
 #include <fstream>
-#include <stdexcept>
 #include <string>
-#include <system_error>
+#include <string_view>
 
 namespace fo4hdr::tests {
-namespace {
-class HashFixture
-{
-public:
-    HashFixture()
-    {
-        const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = std::filesystem::temp_directory_path() / ("Fallout4HDR-hash-" + std::to_string(token));
-        if (!std::filesystem::create_directory(path)) throw std::runtime_error("Hash fixture collision");
-    }
-    ~HashFixture() noexcept { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
-    std::filesystem::path path;
-};
-
-void WriteHashInput(const std::filesystem::path& path, const char* text)
-{
-    std::ofstream file(path, std::ios::binary);
-    file << text;
-    file.close();
-    if (!file) throw std::runtime_error("Hash fixture write failed");
-}
-} // namespace
 
 void RunRuntimeIdentityFilesTests()
 {
-    HashFixture fixture;
-    const auto crlf = fixture.path / "crlf.txt";
-    const auto lf = fixture.path / "lf.txt";
-    WriteHashInput(crlf, "authored\r\n");
-    WriteHashInput(lf, "authored\n");
-    FO4HDR_CHECK(!Sha256File(fixture.path / "absent.txt"));
-    const auto raw = Sha256File(crlf);
-    const auto canonical = Sha256CanonicalTextFile(crlf);
-    FO4HDR_CHECK(raw && raw->size() == 64);
-    FO4HDR_CHECK(canonical && canonical->size() == 64);
-    FO4HDR_CHECK(raw != Sha256File(lf));
-    FO4HDR_CHECK(canonical == Sha256CanonicalTextFile(lf));
+    const auto root = std::filesystem::temp_directory_path() /
+        ("Fallout4HDR-runtime-identity-files-" +
+         std::to_string(GetCurrentProcessId()) + "-" +
+         std::to_string(GetTickCount64()));
+    std::error_code error;
+    const auto created = std::filesystem::create_directory(root, error);
+    FO4HDR_CHECK(created && !error);
+    if (!created || error)
+    {
+        return;
+    }
+
+    const auto write = [](const std::filesystem::path& path,
+                          std::string_view bytes) {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        return output.good();
+    };
+
+    const auto binaryPath = root / "known.bin";
+    FO4HDR_CHECK(write(binaryPath, std::string_view{"a\0b", 3}));
+    FO4HDR_CHECK(
+        Sha256File(binaryPath).value_or("") ==
+        "59b271ae1bbcb1d31d41929817f4b16f"
+        "b439eb4f31520b5ad1d5ce98920a7138");
+
+    const auto missingPath = root / "missing.bin";
+    FO4HDR_CHECK(!Sha256File(missingPath).has_value());
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(missingPath).has_value());
+    FO4HDR_CHECK(!Sha256File(root).has_value());
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(root).has_value());
+
+    const auto lfPath = root / "lf.txt";
+    const auto crlfPath = root / "crlf.txt";
+    FO4HDR_CHECK(write(lfPath, "alpha\nbeta\n"));
+    FO4HDR_CHECK(write(crlfPath, "alpha\r\nbeta\r\n"));
+    const auto lfHash = Sha256CanonicalTextFile(lfPath);
+    const auto crlfHash = Sha256CanonicalTextFile(crlfPath);
+    FO4HDR_CHECK(lfHash.has_value());
+    FO4HDR_CHECK(crlfHash.has_value());
+    FO4HDR_CHECK(
+        lfHash.value_or("") ==
+        "e49c81e2d2f84e259d40e2fb8192f3bc"
+        "d198b355184845d76d8f58807d0d78ee");
+    FO4HDR_CHECK(lfHash == crlfHash);
+
+    const auto bomPath = root / "bom.txt";
+    const auto loneCrPath = root / "lone-cr.txt";
+    const auto noFinalLfPath = root / "no-final-lf.txt";
+    const auto emptyPath = root / "empty.txt";
+    FO4HDR_CHECK(write(bomPath, "\xEF\xBB\xBF" "alpha\n"));
+    FO4HDR_CHECK(write(loneCrPath, "alpha\rbeta\n"));
+    FO4HDR_CHECK(write(noFinalLfPath, "alpha\nbeta"));
+    FO4HDR_CHECK(write(emptyPath, ""));
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(bomPath).has_value());
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(loneCrPath).has_value());
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(noFinalLfPath).has_value());
+    FO4HDR_CHECK(!Sha256CanonicalTextFile(emptyPath).has_value());
+
+    std::filesystem::remove_all(root, error);
+    FO4HDR_CHECK(!error);
 }
-} // namespace fo4hdr::tests
+
+}  // namespace fo4hdr::tests

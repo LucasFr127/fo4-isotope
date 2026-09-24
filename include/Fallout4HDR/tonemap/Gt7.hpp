@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "Fallout4HDR/config/HdrSettings.hpp"
 
 #include <memory>
 
@@ -13,30 +13,43 @@ struct Gt7TransformDeleter
 {
     void operator()(const Gt7Transform* transform) const noexcept;
 };
-using Gt7TransformHandle = std::unique_ptr<const Gt7Transform, Gt7TransformDeleter>;
+using Gt7TransformHandle =
+    std::unique_ptr<const Gt7Transform, Gt7TransformDeleter>;
 
-// Retain one immutable peak-specific context across a reference sample loop.
-// Invalid peaks/selected controls, preparation or allocation return an empty handle.
+// Retain one immutable context per LUT bake; invalid settings fail creation.
 [[nodiscard]] Gt7TransformHandle CreateGt7Transform(
-    double displayPeakNits, const ToneMapperParameters& parameters = {}) noexcept;
-// Scene input policy and source-order operator math precede final display containment.
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
 [[nodiscard]] LinearRgb EvaluateGt7LutNits(
-    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept;
-[[nodiscard]] LinearRgb MapGt7ReferenceRec2020(
-    const Gt7Transform& transform, LinearRgb framebufferRec2020) noexcept;
-[[nodiscard]] LinearRgb MapGt7ToBt2020Nits(
-    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept;
+    const Gt7Transform& transform, LinearRgb sceneLinear) noexcept;
 
-// Linear Rec.2020 framebuffer input and output use 1.0 = 100 cd/m².
-// Both scalar interfaces require finite peaks in [250,10000] nits and fix
-// toe 1.280, shoulder start 0.444 and color blend 0.6. NaN/nonpositive inputs
-// use zero; positive infinity and inputs above 65504 use 65504.
+// Preserves the official HDR/ICtCp input and output contract: linear Rec.2020
+// framebuffer values where 1.0 represents 100 cd/m². Valid peaks are 250-10000.
 [[nodiscard]] LinearRgb MapGt7ReferenceRec2020(
-    LinearRgb framebufferRec2020, double displayPeakNits) noexcept;
+    LinearRgb framebufferRec2020,
+    double displayPeakNits) noexcept;
 
-// Scene-linear BT.709/D65 uses the fixed 203-nit reference white. Returns
-// contained absolute display-linear BT.2020 nits, without display encoding.
+// Scene-linear BT.709 uses a fixed 203-nit reference. The native Rec.2020
+// result is published as contained absolute linear BT.2020 nits. UI white
+// remains independent.
 [[nodiscard]] LinearRgb MapGt7ToBt2020Nits(
-    LinearRgb sceneLinearBt709, double displayPeakNits) noexcept;
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
+// LUT-bake intermediate only. The official final peak clamp is deferred to
+// sampling, so interpolation does not smooth across an already clipped knee.
+// This is not a composition-ready output or a different artistic operator.
+[[nodiscard]] LinearRgb EvaluateGt7LutNits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
+// Comparison oracle only. Never use this inverse-BT.709 gamut fit in the
+// production shader graph.
+[[nodiscard]] LinearRgb MapGt7ToBt709NitsM12(
+    LinearRgb sceneLinear,
+    double displayPeakNits) noexcept;
 
 }  // namespace fo4hdr

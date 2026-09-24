@@ -2,9 +2,29 @@
 // Copyright Contributors to the ACES Project.
 // Upstream: aces-aswf/aces-core@ee380496a201fd008841ff9399b29241bcd27a3a/lib/Lib.Academy.OutputTransform.ctl
 // Upstream: aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad/d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
-// Adapted to dimensionless scene-linear BT.709/D65 and absolute display-linear
-// BT.2020 for 400-2000 nit peaks; neutral anchors are preserved and display
-// encoding is omitted. Required Academy terms are in THIRD_PARTY_NOTICES.md.
+//
+// Adapted from the ACES 2.0 forward Output Transform at:
+// aces-aswf/aces-core@ee380496a201fd008841ff9399b29241bcd27a3a
+//   lib/Lib.Academy.Utilities.ctl
+//   lib/Lib.Academy.ColorSpaces.ctl
+//   lib/Lib.Academy.Tonescale.ctl
+//   lib/Lib.Academy.OutputTransform.ctl
+// and the Rec.2100/D65 1000-nit parameterization at:
+// aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad
+//   d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
+//
+// Modified by Fallout4HDR: parameterize the same Rec.2100 limiting gamut for
+// 400-2000 nits and adapt dimensionless scene-linear BT.709/D65 to AP0/D60
+// without changing neutral scene values, and stop at absolute display-linear
+// Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
+// the shared forward path retains the official AP1 formation clamp.
+// ACES2LMT alone blends a recomputed zero-toe shadow response into the scalar
+// tone scale below internal 0.18 and uses a fixed-width gamut shoulder to avoid
+// the reference reach/gamut crossing discontinuity.
+// The official display-encoding/PQ stage is intentionally omitted because the
+// renderer owns the single final ST 2084 boundary. Normalized upper-hull hue
+// interpolation and a full bounded interval search correct the pinned CTL's
+// hue interpolation/search issues. See THIRD_PARTY_NOTICES.md.
 
 #pragma once
 
@@ -171,18 +191,6 @@ struct CompressionRay
     double slope;
 };
 
-struct GamutRay
-{
-    CompressionRay compression;
-    double cuspIntersectJ;
-};
-
-struct FocusRegion
-{
-    double lightness;
-    double threshold;
-};
-
 struct GamutHull
 {
     Vec2 cusp;
@@ -227,7 +235,7 @@ struct GamutHull
     const Chromaticities& primaries) noexcept;
 
 [[nodiscard]] ToneScaleParams InitializeToneScale(
-    double peak) noexcept;
+    double peak, double toe = 0.04) noexcept;
 
 [[nodiscard]] double SolveJIntersect(
     Vec2 jm,
@@ -239,10 +247,12 @@ struct GamutHull
 
 [[nodiscard]] double FindBoundaryIntersectionM(
     const GamutHull& hull,
-    GamutRay ray) noexcept;
+    CompressionRay ray,
+    double cuspIntersectJ) noexcept;
 
 [[nodiscard]] double FocusGain(
-    FocusRegion region,
+    double j,
+    double analyticalThreshold,
     const OdtParams& params) noexcept;
 
 [[nodiscard]] OdtParams InitializeOdt(double peak) noexcept;

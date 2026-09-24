@@ -66,8 +66,7 @@ try {
         --commonlib_ini=n `
         --commonlib_json=n `
         --commonlib_toml=n `
-        --commonlib_xbyak=n `
-        --commonlib_random=n
+        --commonlib_xbyak=n
 
     if ($LASTEXITCODE -ne 0) {
         throw "XMake configure failed."

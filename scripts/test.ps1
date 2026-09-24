@@ -1,82 +1,149 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#requires -Version 7.4.6
-
 [CmdletBinding()]
 param(
-    [ValidateSet('debug', 'releasedbg')][string]$Mode = 'releasedbg',
-    [ValidateSet('unit', 'shader', 'all')][string]$Scope = 'unit',
-    [ValidateRange(1, 2147483)][int]$TimeoutSeconds = 120,
-    [switch]$AllowShaderSkip,
-    [switch]$Gt7Reference,
-    [switch]$SourceChecks
+    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [string]$Runtime = $env:FO4HDR_RUNTIME,
+
+    [ValidateSet("debug", "releasedbg")]
+    [string]$Mode = "debug",
+
+    [switch]$AllowUnvalidatedRuntime,
+
+    [ValidateSet("all", "compiled", "repository")]
+    [string]$Scope = "all",
+
+    [switch]$SkipConfigure,
+
+    [ValidateRange(1, 2147483)]
+    [int]$TestTimeoutSeconds = 600
 )
 
-$ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, '..'))
-. ([IO.Path]::Combine($PSScriptRoot, 'internal/Project.Process.ps1'))
-$build = [IO.Path]::Combine($root, "build/windows/x64/$Mode")
+$ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
-function Invoke-SelectedTest {
-    param([string]$Executable, [string[]]$Arguments, [bool]$Shader = $false)
+if ([string]::IsNullOrWhiteSpace($Runtime)) { $Runtime = "1.10.163" }
+$repoRoot = Get-Fo4HdrRepoRoot
+$runCompiled = $Scope -in @("all", "compiled")
+$runRepository = $Scope -in @("all", "repository")
+$testArguments = @()
 
-    if (-not [IO.File]::Exists($Executable)) { throw "Missing test executable: $Executable" }
-    $result = Invoke-Fo4HdrTestProcess -FilePath $Executable -Arguments $Arguments `
-        -WorkingDirectory $root -TimeoutSeconds $TimeoutSeconds `
-        -AllowShaderSkip:($Shader -and $AllowShaderSkip)
-    if ($result.stdout) { Write-Output $result.stdout }
-    if ($result.stderr) { [Console]::Error.Write($result.stderr) }
-    if ($result.category -notin @('passed', 'skipped')) {
-        throw "Test $($result.category), exit=$($result.exitCode), cleanup=$($result.cleanup): $Executable. $($result.detail)"
+if ($runCompiled) {
+    if ($SkipConfigure) {
+        $configurationPath = Join-Path `
+            $repoRoot `
+            ".xmake\windows\x64\xmake.conf"
+        if (-not (Test-Path -LiteralPath $configurationPath -PathType Leaf)) {
+            throw "-SkipConfigure requires an existing x64 XMake configuration."
+        }
+        $configuration = Get-Content -LiteralPath $configurationPath -Raw
+        $lock = Get-Content (Join-Path $repoRoot "versions.lock.json") -Raw | ConvertFrom-Json
+        $expected = [ordered]@{
+            arch = '"x64"'
+            plat = '"windows"'
+            toolchain = '"msvc"'
+            vs_toolset = '"' + (Get-Fo4HdrMsvcToolset -Lock $lock) + '"'
+            vs_sdkver = '"' + $lock.toolchain.observed.windowsSdk.version + '"'
+            mode = '"' + $Mode + '"'
+            fo4hdr_runtime = '"' + $Runtime + '"'
+            fo4hdr_allow_unvalidated_runtime = if ($AllowUnvalidatedRuntime) {
+                'true'
+            } else {
+                'false'
+            }
+            fo4hdr_build_tests = 'true'
+            commonlib_ini = 'false'
+            commonlib_json = 'false'
+            commonlib_toml = 'false'
+            commonlib_xbyak = 'false'
+        }
+        foreach ($entry in $expected.GetEnumerator()) {
+            $pattern = '(?m)^\s*' + [regex]::Escape($entry.Key) +
+                '\s*=\s*' + [regex]::Escape($entry.Value) + '\s*,?\s*$'
+            if ($configuration -notmatch $pattern) {
+                throw (
+                    "Existing XMake configuration does not match " +
+                    "$($entry.Key)=$($entry.Value). Run build.ps1 for " +
+                    "the requested configuration before test.ps1 " +
+                    "-SkipConfigure."
+                )
+            }
+        }
+        Assert-Fo4HdrConfiguredMsvc -Lock $lock
+    } else {
+        & (Join-Path $PSScriptRoot "configure.ps1") `
+            -Runtime $Runtime `
+            -Mode $Mode `
+            -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime
     }
-    Write-Host "$($result.category): $Executable"
+} elseif ($SkipConfigure) {
+    throw "-SkipConfigure is unnecessary with -Scope repository."
 }
 
-function Invoke-UnitTests {
-    $plugin = [IO.Path]::Combine($build, 'Fallout4HDR.dll')
-    if (-not [IO.File]::Exists($plugin)) { throw "Missing plugin fixture: $plugin" }
-    foreach ($name in @('fo4hdr-tests', 'fo4hdr-tests-executable-mismatch')) {
-        Invoke-SelectedTest ([IO.Path]::Combine($build, "$name.exe")) @($plugin)
+Push-Location $repoRoot
+try {
+    if ($runCompiled) {
+        $targets = @("fo4hdr-tests", "fo4hdr-shader-tests")
+        foreach ($target in $targets) {
+            xmake build $target
+            if ($LASTEXITCODE -ne 0) { throw "Test build failed: $target" }
+            $targetInfo = xmake show -t $target --format=json
+            if ($LASTEXITCODE -ne 0) { throw "Unable to inspect test target: $target" }
+            $targetFile = ($targetInfo -join "`n" | ConvertFrom-Json).targetfile
+            if (-not $targetFile) { throw "Test target has no executable: $target" }
+            # Launch the resolved executable directly to preserve its skip exit code.
+            Invoke-Fo4HdrTestProcess -FilePath ([IO.Path]::GetFullPath($targetFile, $repoRoot)) `
+                -Arguments $testArguments -AllowSkip:($target -eq 'fo4hdr-shader-tests') `
+                -WorkingDirectory $repoRoot -TimeoutSeconds $TestTimeoutSeconds
+        }
+    }
+
+    if ($runRepository) {
+        $approvedPowerShell = Get-Fo4HdrPowerShellPath
+        $processOptions = @{
+            FilePath = $approvedPowerShell
+            WorkingDirectory = $repoRoot
+            TimeoutSeconds = $TestTimeoutSeconds
+        }
+        foreach ($relativePath in @(
+            "tests\runtime\AddressLibraryV0.Tests.ps1",
+            "tests\source\SourceText.Tests.ps1",
+            "tests\runtime\RuntimeStatusPolicy.Tests.ps1",
+            "tests\runtime\RuntimePinning.Tests.ps1",
+            "tests\source\StagePolicy.Tests.ps1",
+            "tests\runtime\ImageSpaceProfile.Tests.ps1",
+            "tests\runtime\CommonLibRelocationProfile.Tests.ps1",
+            "tests\runtime\CommonLibIntegrity.Tests.ps1",
+            "tests\source\PluginBoundarySource.Tests.ps1",
+            "tests\source\ArchitectureLayout.Tests.ps1",
+            "tests\source\SourceTree.Tests.ps1",
+            "tests\source\SourceArchive.Tests.ps1",
+            "tests\source\PackageSource.Tests.ps1",
+            "tests\source\TestProcess.Tests.ps1",
+            "tests\source\ToolchainPolicy.Tests.ps1",
+            "tests\runtime\MonitorNativeSession.Tests.ps1"
+        )) {
+            Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
+                '-NoProfile', '-NonInteractive', '-File', (Join-Path $repoRoot $relativePath))
+        }
+
+        Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
+            '-NoProfile', '-NonInteractive', '-File',
+            (Join-Path $repoRoot 'tests/source/ArchitectureLayout.Tests.ps1'), '-SelfTest')
+
+        $auditScript = Join-Path $repoRoot 'scripts/audit-f4se-project.ps1'
+        Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
+            '-NoProfile', '-NonInteractive', '-File', $auditScript, '-SelfTest')
+        Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
+            '-NoProfile', '-NonInteractive', '-File', $auditScript,
+            '-Root', $repoRoot, '-FailOn', 'high', '-ReRoot', 'src/game',
+            '-F4seFile', (
+                "src/plugin/PluginMain.cpp," +
+                "runtime/1.10.163/PluginVersion.cpp," +
+                "runtime/1.10.984/PluginVersion.cpp," +
+                "runtime/1.11.221/PluginVersion.cpp"
+            ), '-PluginPchFile', 'src/plugin/PluginPch.hpp')
     }
 }
-
-function Invoke-ShaderTests {
-    $inputName = if ($Gt7Reference) { 'Gt7Evaluation.dxbc' } else { 'TransferEvaluation.dxbc' }
-    $shader = [IO.Path]::Combine($build, $inputName)
-    if (-not [IO.File]::Exists($shader)) { throw "Missing shader input: $shader" }
-    $arguments = if ($Gt7Reference) { @('--gt7-reference', $shader) } else { @($shader) }
-    Invoke-SelectedTest ([IO.Path]::Combine($build, 'fo4hdr-shader-tests.exe')) $arguments $true
+finally {
+    Pop-Location
 }
-
-function Invoke-SourceChecks {
-    $powerShell = if ($env:FO4HDR_PWSH) { $env:FO4HDR_PWSH }
-        else { (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source }
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/source/SourceTree.Tests.ps1'))
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/source/PackageSource.Tests.ps1'))
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/source/SourceArchive.Tests.ps1'))
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/source/StagePolicy.Tests.ps1'), '-Mode', $Mode)
-    foreach ($check in @('tests/runtime/CommonLibIntegrity.Tests.ps1',
-        'tests/runtime/CommonLibRelocationProfile.Tests.ps1', 'tests/runtime/RuntimeStatusPolicy.Tests.ps1',
-        'tests/runtime/AddressLibraryV0.Tests.ps1', 'tests/source/ToolchainPolicy.Tests.ps1')) {
-        Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-            [IO.Path]::Combine($root, $check))
-    }
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/source/TestProcess.Tests.ps1'))
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/runtime/MonitorNativeSession.Tests.ps1'))
-    Invoke-SelectedTest $powerShell @('-NoProfile', '-NonInteractive', '-File',
-        [IO.Path]::Combine($root, 'tests/runtime/RuntimePinning.Tests.ps1'))
-}
-
-function Invoke-RequestedTests {
-    if ($Gt7Reference -and $Scope -eq 'unit') { throw 'Gt7Reference requires shader scope.' }
-    if ($Scope -in @('unit', 'all')) { Invoke-UnitTests }
-    if ($Scope -in @('shader', 'all')) { Invoke-ShaderTests }
-    if ($SourceChecks) { Invoke-SourceChecks }
-}
-
-Invoke-RequestedTests

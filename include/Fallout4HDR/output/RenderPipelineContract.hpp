@@ -191,6 +191,12 @@ FindRenoDxFallout4Shader(std::uint32_t crc32) noexcept
     return UnknownShaderOutcome::disableHdrGeneration;
 }
 
+// The reversible positive-HDR adapter keeps Fallout 4's temporal body in its
+// original normalized gamma domain without selecting a display peak or
+// production tone mapper. The shipping HLSL uses the same equations.
+[[nodiscard]] double EncodeTemporalIntermediate(double linear) noexcept;
+[[nodiscard]] double DecodeTemporalIntermediate(double encoded) noexcept;
+
 struct PipelineHeartbeatEvaluation
 {
     bool currentGeneration{};

@@ -7,18 +7,18 @@ namespace {
 
 bool HasArgumentStorage(int argumentCount, const wchar_t* const* arguments) noexcept
 {
-    if (argumentCount != 2 && argumentCount != 3) return false;
+    if (argumentCount != 1 && argumentCount != 3) return false;
     if (arguments == nullptr) return false;
     if (arguments[0] == nullptr) return false;
     return arguments[0][0] != L'\0';
 }
 
-ShaderTestOptions WithBytecodePath(ShaderTestMode mode, const wchar_t* path) noexcept
+ShaderTestOptions WithBenchmarkPath(const wchar_t* value) noexcept
 {
-    if (path == nullptr) return {};
-    const std::wstring_view value{path};
-    if (value.empty() || value.front() == L'-') return {};
-    return {mode, value};
+    if (value == nullptr) return {};
+    const std::wstring_view path{value};
+    if (path.empty() || path.front() == L'-') return {};
+    return {ShaderTestMode::operatorLutBenchmark, path};
 }
 
 }  // namespace
@@ -27,15 +27,10 @@ ShaderTestOptions ParseShaderTestOptions(
     int argumentCount, const wchar_t* const* arguments) noexcept
 {
     if (!HasArgumentStorage(argumentCount, arguments)) return {};
+    if (argumentCount == 1) return {ShaderTestMode::defaultCorpus, {}};
     if (arguments[1] == nullptr) return {};
-    if (argumentCount == 2)
-        return WithBytecodePath(ShaderTestMode::transfer, arguments[1]);
-    const std::wstring_view flag{arguments[1]};
-    if (flag == L"--gt7-reference")
-        return WithBytecodePath(ShaderTestMode::gt7Reference, arguments[2]);
-    if (flag == L"--operator-lut-benchmark")
-        return WithBytecodePath(ShaderTestMode::operatorLutBenchmark, arguments[2]);
-    return {};
+    if (std::wstring_view{arguments[1]} != L"--operator-lut-benchmark") return {};
+    return WithBenchmarkPath(arguments[2]);
 }
 
 }  // namespace fo4hdr::tests::gpu

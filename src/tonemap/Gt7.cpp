@@ -2,17 +2,20 @@
 // Copyright (c) 2025 Polyphony Digital Inc.
 // Upstream: https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp sha256=94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822
 // Fallout4HDR modification: retain the official default ICtCp/HDR algorithm;
-// add finite-input validation and the BT.709/203-nit to Rec.2020/100-nit
-// scene adapter. Defaults retain toe 1.280, shoulder start 0.444 and color blend 0.6;
-// prepared contexts accept validated controls.
+// expose bounded toe, shoulder-start, and color-blend controls only in the
+// production adapter; add finite-input validation and the BT.709/203-nit to
+// Rec.2020/100-nit adapter. The native BT.2020 result is the production output;
+// the inverse-BT.709 fit remains a comparison oracle only.
+// LUT baking may defer the final peak clamp until after interpolation.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.
 
 #include "Fallout4HDR/tonemap/Gt7.hpp"
 
+#include "Fallout4HDR/output/Hdr10Color.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <new>
 
 namespace fo4hdr {
@@ -135,7 +138,8 @@ struct Gt7Curve
     float shoulderC{};
 
     explicit Gt7Curve(
-        float framebufferPeak, const ToneMapperParameters& parameters = {}) noexcept
+        float framebufferPeak,
+        const ToneMapperParameters& parameters = {}) noexcept
         : peakIntensity(framebufferPeak),
           midPoint(0.538F),
           linearSection(static_cast<float>(parameters.gt7ShoulderStart)),
@@ -176,7 +180,7 @@ struct Gt7Curve
 
 struct Gt7ColorVolume
 {
-    explicit Gt7ColorVolume(Gt7Curve preparedCurve, float colorBlend = 0.6F) noexcept :
+    Gt7ColorVolume(Gt7Curve preparedCurve, float colorBlend) noexcept :
         curve(preparedCurve),
         targetIntensity(RgbToIctcp({curve.peakIntensity,
             curve.peakIntensity, curve.peakIntensity})[0]),
@@ -188,17 +192,23 @@ struct Gt7ColorVolume
     float blendRatio;
 
     [[nodiscard]] FloatRgb Apply(
-        const FloatRgb& input) const noexcept;
+        const FloatRgb& input, bool containOutput) const noexcept;
 };
 
 FloatRgb Gt7ColorVolume::Apply(
-    const FloatRgb& input) const noexcept
+    const FloatRgb& input, bool containOutput) const noexcept
 {
     constexpr float fadeStart = 0.98F;
     constexpr float fadeEnd = 1.16F;
 
     const FloatRgb skewed = curve.Evaluate(input);
-    if (blendRatio == 0.0F) return skewed;
+    if (blendRatio == 0.0F)
+    {
+        if (!containOutput) return skewed;
+        return {std::min(skewed[0], curve.peakIntensity),
+            std::min(skewed[1], curve.peakIntensity),
+            std::min(skewed[2], curve.peakIntensity)};
+    }
     const FloatRgb original = RgbToIctcp(input);
     const FloatRgb skewedUcs = RgbToIctcp(skewed);
     const float chromaScale = 1.0F - SmoothStep(
@@ -215,18 +225,18 @@ FloatRgb Gt7ColorVolume::Apply(
     {
         const float blended = (1.0F - blendRatio) * skewed[index] +
             blendRatio * scaled[index];
-        result[index] = blended;
+        result[index] = containOutput ?
+            std::min(blended, curve.peakIntensity) : blended;
     }
     return result;
 }
 
 [[nodiscard]] FloatRgb ApplyOfficialHdr(
-    const FloatRgb& input, const Gt7ColorVolume& volume) noexcept
+    const FloatRgb& input, float displayPeakNits) noexcept
 {
-    const auto mapped = volume.Apply(input);
-    return {std::min(mapped[0], volume.curve.peakIntensity),
-        std::min(mapped[1], volume.curve.peakIntensity),
-        std::min(mapped[2], volume.curve.peakIntensity)};
+    const float framebufferPeak = displayPeakNits / kReferenceLuminance;
+    const Gt7Curve curve(framebufferPeak);
+    return Gt7ColorVolume{curve, 0.6F}.Apply(input, true);
 }
 
 [[nodiscard]] LinearRgb SanitizeScene(LinearRgb value) noexcept
@@ -260,16 +270,46 @@ FloatRgb Gt7ColorVolume::Apply(
         peakNits <= kMaximumDisplayPeakNits;
 }
 
+[[nodiscard]] LinearRgb FitBt709DisplayGamut(
+    LinearRgb color,
+    double displayPeakNits) noexcept
+{
+    const double luminance = 0.2126 * color.red +
+        0.7152 * color.green + 0.0722 * color.blue;
+    if (!std::isfinite(luminance) || luminance <= 0.0) return {};
+    if (luminance >= displayPeakNits)
+        return {displayPeakNits, displayPeakNits, displayPeakNits};
+
+    double chroma = 1.0;
+    for (const double channel : {color.red, color.green, color.blue})
+    {
+        if (channel < 0.0)
+            chroma = std::min(chroma, luminance / (luminance - channel));
+        else if (channel > displayPeakNits)
+            chroma = std::min(chroma,
+                (displayPeakNits - luminance) / (channel - luminance));
+    }
+    std::array channels{color.red, color.green, color.blue};
+    for (double& channel : channels)
+        channel = std::clamp(
+            luminance + chroma * (channel - luminance),
+            0.0,
+            displayPeakNits);
+    return {channels[0], channels[1], channels[2]};
+}
+
 }  // namespace
 
 class Gt7Transform
 {
 public:
-    Gt7Transform(double peak, const ToneMapperParameters& parameters) noexcept :
-        volume(Gt7Curve(static_cast<float>(peak) / kReferenceLuminance, parameters),
-            static_cast<float>(parameters.gt7ColorBlend)), peakNits(peak) {}
+    Gt7Transform(double peak, const ToneMapperParameters& parameters) noexcept
+        : volume{Gt7Curve(static_cast<float>(peak) / kReferenceLuminance,
+              parameters),
+          static_cast<float>(parameters.gt7ColorBlend)}
+    {}
+
     const Gt7ColorVolume volume;
-    const double peakNits;
 };
 
 void Gt7TransformDeleter::operator()(const Gt7Transform* transform) const noexcept
@@ -280,70 +320,74 @@ void Gt7TransformDeleter::operator()(const Gt7Transform* transform) const noexce
 Gt7TransformHandle CreateGt7Transform(
     double displayPeakNits, const ToneMapperParameters& parameters) noexcept
 {
-    if (!IsValidPeak(displayPeakNits)) return {};
-    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::gt7, parameters)) return {};
-    auto transform = Gt7TransformHandle{
-        new (std::nothrow) Gt7Transform(displayPeakNits, parameters)};
-    if (!transform) return {};
-    return transform;
+    if (!IsValidPeak(displayPeakNits) || !ValidateToneMapperParameters(
+            ProductionToneMapperAlgorithm::gt7, parameters)) return {};
+    return Gt7TransformHandle(new (std::nothrow)
+        Gt7Transform(displayPeakNits, parameters));
 }
 
 LinearRgb MapGt7ReferenceRec2020(
-    const Gt7Transform& transform, LinearRgb framebufferRec2020) noexcept
-{
-    const auto sanitized = SanitizeScene(framebufferRec2020);
-    const FloatRgb input{static_cast<float>(sanitized.red), static_cast<float>(sanitized.green),
-        static_cast<float>(sanitized.blue)};
-    const auto result = ApplyOfficialHdr(input, transform.volume);
-    return {result[0], result[1], result[2]};
-}
-
-LinearRgb EvaluateGt7LutNits(
-    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept
-{
-    const auto input = SceneToGt7Framebuffer(SanitizeScene(sceneLinearBt709));
-    const auto mapped = transform.volume.Apply(input);
-    return {static_cast<double>(mapped[0]) * kReferenceLuminance,
-        static_cast<double>(mapped[1]) * kReferenceLuminance,
-        static_cast<double>(mapped[2]) * kReferenceLuminance};
-}
-
-LinearRgb MapGt7ToBt2020Nits(
-    const Gt7Transform& transform, LinearRgb sceneLinearBt709) noexcept
-{
-    return ContainBt2020Nits(EvaluateGt7LutNits(transform, sceneLinearBt709), transform.peakNits);
-}
-
-LinearRgb MapGt7ReferenceRec2020(
-    LinearRgb framebufferRec2020, double displayPeakNits) noexcept
+    LinearRgb framebufferRec2020,
+    double displayPeakNits) noexcept
 {
     if (!IsValidPeak(displayPeakNits)) return {};
+
     const auto sanitized = SanitizeScene(framebufferRec2020);
     const FloatRgb input{
         static_cast<float>(sanitized.red),
         static_cast<float>(sanitized.green),
         static_cast<float>(sanitized.blue)
     };
-    const Gt7ColorVolume volume{Gt7Curve(
-        static_cast<float>(displayPeakNits) / kReferenceLuminance)};
-    const auto result = ApplyOfficialHdr(input, volume);
+    const auto result = ApplyOfficialHdr(
+        input, static_cast<float>(displayPeakNits));
     return {result[0], result[1], result[2]};
 }
 
-LinearRgb MapGt7ToBt2020Nits(
-    LinearRgb sceneLinearBt709, double displayPeakNits) noexcept
+LinearRgb EvaluateGt7LutNits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
 {
-    if (!IsValidPeak(displayPeakNits)) return {};
-    const auto sanitized = SanitizeScene(sceneLinearBt709);
+    if (!IsValidPeak(displayPeakNits) ||
+        !ValidateToneMapperParameters(
+            ProductionToneMapperAlgorithm::gt7, parameters))
+        return {};
+
+    return EvaluateGt7LutNits(Gt7Transform(displayPeakNits, parameters), sceneLinear);
+}
+
+LinearRgb EvaluateGt7LutNits(
+    const Gt7Transform& transform, LinearRgb sceneLinear) noexcept
+{
+    const auto sanitized = SanitizeScene(sceneLinear);
     const auto input = SceneToGt7Framebuffer(sanitized);
-    const Gt7ColorVolume volume{Gt7Curve(
-        static_cast<float>(displayPeakNits) / kReferenceLuminance)};
-    const auto mapped = volume.Apply(input);
-    return ContainBt2020Nits({
+    const auto mapped = transform.volume.Apply(input, false);
+    return {
         static_cast<double>(mapped[0]) * kReferenceLuminance,
         static_cast<double>(mapped[1]) * kReferenceLuminance,
         static_cast<double>(mapped[2]) * kReferenceLuminance
-    }, displayPeakNits);
+    };
+}
+
+LinearRgb MapGt7ToBt2020Nits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
+{
+    return ContainBt2020Nits(
+        EvaluateGt7LutNits(sceneLinear, displayPeakNits, parameters),
+        displayPeakNits);
+}
+
+LinearRgb MapGt7ToBt709NitsM12(
+    LinearRgb sceneLinear,
+    double displayPeakNits) noexcept
+{
+    const auto absoluteBt2020 = MapGt7ToBt2020Nits(
+        sceneLinear, displayPeakNits);
+    return FitBt709DisplayGamut(
+        ConvertBt2020ToBt709ForComparison(absoluteBt2020),
+        displayPeakNits);
 }
 
 }  // namespace fo4hdr

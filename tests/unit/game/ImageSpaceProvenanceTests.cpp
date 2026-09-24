@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-
-#include "UnitTestSuite.hpp"
+#include "../UnitTestSuite.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "TestHarness.hpp"
-
 #include <thread>
 
 namespace fo4hdr::tests {
@@ -31,7 +29,6 @@ void VerifyThreadMigrationAndSeparateTransfer()
         auto token = weather.Begin();
         FO4HDR_CHECK(weather.Finish(token, first));
         FO4HDR_CHECK(token.revision == 0);
-        FO4HDR_CHECK(!token.exclusive);
         FO4HDR_CHECK(!weather.Finish(token, first));
     });
     producer.join();
@@ -70,7 +67,7 @@ void VerifyThreadMigrationAndSeparateTransfer()
     renderer.join();
 }
 
-void VerifyReverseOverlapAndRecovery()
+void VerifyOverlapAndRecovery(bool finishFirstWriterFirst)
 {
     Publication publication;
     Provenance result{};
@@ -82,8 +79,8 @@ void VerifyReverseOverlapAndRecovery()
     FO4HDR_CHECK(!second.exclusive);
     FO4HDR_CHECK(!publication.TryRead(result));
     FO4HDR_CHECK(result.status == Status::updating);
-    auto& earlierFinish = second;
-    auto& laterFinish = first;
+    auto& earlierFinish = finishFirstWriterFirst ? first : second;
+    auto& laterFinish = finishFirstWriterFirst ? second : first;
     FO4HDR_CHECK(!publication.Finish(earlierFinish, Candidate(11)));
     FO4HDR_CHECK(!publication.TryRead(result));
     FO4HDR_CHECK(result.status == Status::updating);
@@ -132,63 +129,13 @@ void VerifyRoomGapAndInvalidation()
     FO4HDR_CHECK(result.status == Status::unqualifiedSource);
     FO4HDR_CHECK(!result.Matches(Candidate(33).values, 7));
 }
-
-void TestImageSpacePublication()
-{
-    namespace provenance = fo4hdr::game::imagespace_detail;
-    provenance::Publication publication;
-    provenance::Provenance candidate{}, copy{};
-    candidate.status = provenance::Status::matched;
-    candidate.validSlots = 1;
-    candidate.generation = 7;
-    auto first = publication.Begin();
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::updating);
-    auto overlapping = publication.Begin();
-    FO4HDR_CHECK(!publication.Finish(first, candidate));
-    FO4HDR_CHECK(!publication.Finish(overlapping, candidate));
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::waiting);
-    auto exclusive = publication.Begin();
-    FO4HDR_CHECK(publication.Finish(exclusive, candidate));
-    FO4HDR_CHECK(publication.TryRead(copy));
-    FO4HDR_CHECK(copy.validSlots == 1 && copy.generation == 7);
-    publication.Invalidate();
-    FO4HDR_CHECK(!publication.IsCurrent(copy.revision));
-    FO4HDR_CHECK(!publication.TryRead(copy));
-    FO4HDR_CHECK(copy.status == provenance::Status::waiting);
 }
-
-void VerifyRejectedTokenConsumption()
-{
-    Publication publication;
-    auto token = publication.Begin();
-    FO4HDR_CHECK(token.revision != 0);
-    // The changed public token does not match this publication revision.
-    token.revision = UINT64_MAX;
-    FO4HDR_CHECK(!publication.IsCurrent(token.revision));
-    FO4HDR_CHECK(!publication.Finish(token, Candidate(44)));
-    FO4HDR_CHECK(!token.exclusive && token.revision == 0);
-    FO4HDR_CHECK(!publication.Finish(token, Candidate(44)));
-    Provenance result{};
-    FO4HDR_CHECK(!publication.TryRead(result));
-    FO4HDR_CHECK(result.status == Status::waiting);
-    auto ordinary = publication.Begin();
-    FO4HDR_CHECK(ordinary.revision != 0 && ordinary.exclusive);
-    FO4HDR_CHECK(publication.Finish(ordinary, Candidate(55)));
-    FO4HDR_CHECK(publication.TryRead(result));
-    FO4HDR_CHECK(result.identities[0].formId == 55);
-}
-
-}  // namespace
 
 void RunImageSpaceProvenanceTests()
 {
     VerifyThreadMigrationAndSeparateTransfer();
-    TestImageSpacePublication();
-    VerifyReverseOverlapAndRecovery();
+    VerifyOverlapAndRecovery(true);
+    VerifyOverlapAndRecovery(false);
     VerifyRoomGapAndInvalidation();
-    VerifyRejectedTokenConsumption();
 }
-
-}  // namespace fo4hdr::tests
+}

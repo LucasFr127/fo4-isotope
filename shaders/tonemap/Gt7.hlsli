@@ -2,8 +2,8 @@
 // Copyright (c) 2025 Polyphony Digital Inc.
 // Upstream: https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp sha256=94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822
 // Fallout4HDR modification: translate the official default ICtCp/HDR color
-// volume mapper to SM5. Input and output are linear Rec.2020 framebuffer
-// values where 1.0 represents 100 cd/m²; no display encoding is returned.
+// volume mapper to SM5 and adapt BT.709 scene units to its Rec.2020 framebuffer
+// convention. The native BT.2020 path is the analytical GPU oracle.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.
 
 #ifndef FO4HDR_GT7_INCLUDED
@@ -11,6 +11,13 @@
 
 static const float kFo4HdrGt7ReferenceLuminance = 100.0f;
 // The official HDR curve's fixed SDR-reference lower bound is 250.0 nits.
+
+static const float3x3 kFo4HdrGt7Bt709ToBt2020 =
+{
+    {0.6274039149284363f, 0.3292830288410187f, 0.04331306740641594f},
+    {0.06909728795289993f, 0.9195404052734375f, 0.01136231515556574f},
+    {0.01639143936336040f, 0.08801330626010895f, 0.8955952525138855f}
+};
 
 float Fo4HdrGt7SmoothStep(float value, float edge0, float edge1)
 {
@@ -123,8 +130,6 @@ float3 Fo4HdrGt7OfficialRec2020(
     float3 rec2020Framebuffer,
     float displayPeakNits)
 {
-    if (!isfinite(displayPeakNits) || displayPeakNits < 250.0f ||
-        displayPeakNits > 10000.0f) return 0.0f.xxx;
     const float3 input = min(max(rec2020Framebuffer, 0.0f), 65504.0f);
     const float framebufferPeak =
         displayPeakNits / kFo4HdrGt7ReferenceLuminance;
@@ -148,6 +153,22 @@ float3 Fo4HdrGt7OfficialRec2020(
     precise float3 blended =
         (1.0f - blendRatio) * skewed + blendRatio * scaled;
     return min(blended, framebufferPeak.xxx);
+}
+
+float3 Fo4HdrGt7Bt2020AbsoluteNits(
+    float3 sceneLinear,
+    float displayPeakNits,
+    float sceneReferenceWhiteNits)
+{
+    const float3 sanitized = min(max(sceneLinear, 0.0f), 65504.0f);
+    precise float3 sceneRec2020 = mul(kFo4HdrGt7Bt709ToBt2020, sanitized);
+    precise float3 framebuffer = sceneRec2020 *
+        (sceneReferenceWhiteNits / kFo4HdrGt7ReferenceLuminance);
+    precise float3 mapped = Fo4HdrGt7OfficialRec2020(
+        framebuffer, displayPeakNits);
+    precise float3 absoluteRec2020 =
+        mapped * kFo4HdrGt7ReferenceLuminance;
+    return min(max(absoluteRec2020, 0.0f), displayPeakNits.xxx);
 }
 
 #endif

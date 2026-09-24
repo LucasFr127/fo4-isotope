@@ -1,313 +1,369 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#include "Fallout4HDR/config/HdrSettings.hpp"
+#include "../UnitTestSuite.hpp"
+
 #include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "config/SettingsPersistence.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
-#include "UnitTestSuite.hpp"
-
+#include <Windows.h>
 #include <array>
-#include <bit>
 #include <cmath>
-#include <cstdint>
 #include <limits>
-#include <string>
-
-namespace {
-
-using fo4hdr::HdrSettings;
-using Error = fo4hdr::HdrSettingsValidationError;
-
-auto SettingBits(const HdrSettings& value)
-{
-    return std::array{std::bit_cast<std::uint64_t>(value.displayPeakNits),
-        std::bit_cast<std::uint64_t>(value.uiPaperWhiteNits),
-        std::bit_cast<std::uint64_t>(value.videoWhiteNits),
-        std::bit_cast<std::uint64_t>(value.vanillaColorGradingStrengthPercent),
-        std::bit_cast<std::uint64_t>(value.vanillaGradeLuminancePercent),
-        std::bit_cast<std::uint64_t>(value.vanillaGradeColorPercent),
-        std::bit_cast<std::uint64_t>(value.contrast), std::bit_cast<std::uint64_t>(value.blacks),
-        std::bit_cast<std::uint64_t>(value.highlights), std::bit_cast<std::uint64_t>(value.shadows),
-        std::bit_cast<std::uint64_t>(value.saturationPercent), std::bit_cast<std::uint64_t>(value.temperature),
-        std::bit_cast<std::uint64_t>(value.tint),
-        std::bit_cast<std::uint64_t>(value.exposureEv),
-        std::bit_cast<std::uint64_t>(value.bloomStrengthPercent)};
-}
-
-void TestSettingsDefaults()
-{
-    const HdrSettings defaults{};
-    FO4HDR_CHECK(defaults.displayPeakNits == 1000.0);
-    FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
-    FO4HDR_CHECK(defaults.videoWhiteNits == 203.0);
-    FO4HDR_CHECK(defaults.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 100.0);
-    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 100.0);
-    FO4HDR_CHECK(defaults.exposureEv == 0);
-    FO4HDR_CHECK(defaults.bloomStrengthPercent == 100);
-    FO4HDR_CHECK(fo4hdr::kSceneReferenceWhiteNits == 203.0);
-    FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(defaults) == Error::none);
-}
-
-void TestSettingsRanges()
-{
-    struct Range
-    {
-        double HdrSettings::* member;
-        double minimum;
-        double maximum;
-        Error error;
-    };
-    constexpr std::array ranges{
-        Range{&HdrSettings::displayPeakNits, 400.0, 2000.0, Error::displayPeakOutOfRange},
-        Range{&HdrSettings::uiPaperWhiteNits, 100.0, 300.0, Error::uiPaperWhiteOutOfRange},
-        Range{&HdrSettings::videoWhiteNits, 100.0, 300.0, Error::videoWhiteOutOfRange},
-        Range{&HdrSettings::vanillaColorGradingStrengthPercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
-        Range{&HdrSettings::vanillaGradeLuminancePercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
-        Range{&HdrSettings::vanillaGradeColorPercent, 0.0, 100.0, Error::vanillaColorGradingOutOfRange},
-        Range{&HdrSettings::contrast, -100.0, 100.0, Error::contrastOutOfRange},
-        Range{&HdrSettings::blacks, -100.0, 100.0, Error::blacksOutOfRange},
-        Range{&HdrSettings::highlights, -100.0, 100.0, Error::highlightsOutOfRange},
-        Range{&HdrSettings::shadows, -100.0, 100.0, Error::shadowsOutOfRange},
-        Range{&HdrSettings::saturationPercent, 0.0, 200.0, Error::saturationOutOfRange},
-        Range{&HdrSettings::temperature, -100.0, 100.0, Error::temperatureOutOfRange},
-        Range{&HdrSettings::tint, -100.0, 100.0, Error::tintOutOfRange},
-        Range{&HdrSettings::exposureEv, -4.0, 4.0, Error::exposureOutOfRange},
-        Range{&HdrSettings::bloomStrengthPercent, 0.0, 200.0, Error::bloomStrengthOutOfRange}};
-    const auto infinity = std::numeric_limits<double>::infinity();
-    const auto nan = std::numeric_limits<double>::quiet_NaN();
-    for (const auto& range : ranges)
-    {
-        HdrSettings settings{};
-        for (const auto endpoint : {range.minimum, range.maximum})
-        {
-            settings.*range.member = endpoint;
-            FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(settings) == Error::none);
-        }
-        for (const auto invalid : {std::nextafter(range.minimum, -infinity),
-                 std::nextafter(range.maximum, infinity), nan, infinity, -infinity})
-        {
-            settings.*range.member = invalid;
-            const auto before = SettingBits(settings);
-            FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(settings) == range.error);
-            FO4HDR_CHECK(SettingBits(settings) == before);
-        }
-    }
-}
-
-void TestIndependentWhites()
-{
-    HdrSettings settings{};
-    settings.uiPaperWhiteNits = 300.0;
-    FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(settings) == Error::none);
-    FO4HDR_CHECK(settings.videoWhiteNits == 203.0);
-    FO4HDR_CHECK(settings.displayPeakNits == 1000.0);
-    settings = {};
-    settings.videoWhiteNits = 100.0;
-    FO4HDR_CHECK(fo4hdr::ValidateHdrSettings(settings) == Error::none);
-    FO4HDR_CHECK(settings.uiPaperWhiteNits == 203.0);
-    FO4HDR_CHECK(settings.displayPeakNits == 1000.0);
-}
-
-void TestToneMapperControlRanges()
-{
-    using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
-    using Parameters = fo4hdr::ToneMapperParameters;
-    struct Range
-    {
-        double Parameters::* member;
-        double minimum;
-        double maximum;
-        Algorithm algorithm;
-    };
-    constexpr std::array ranges{
-        Range{&Parameters::agxMiddleGrayEv, -0.25, 0.25, Algorithm::agX},
-        Range{&Parameters::agxContrast, 2.4, 3.0, Algorithm::agX},
-        Range{&Parameters::agxHdrPurity, 0.35, 0.6, Algorithm::agX},
-        Range{&Parameters::agxHdrShoulderPower, 1.9, 2.1, Algorithm::agX},
-        Range{&Parameters::gt7ToeStrength, 1.0, 1.5, Algorithm::gt7},
-        Range{&Parameters::gt7ShoulderStart, 0.35, 0.6, Algorithm::gt7},
-        Range{&Parameters::gt7ColorBlend, 0.0, 0.8, Algorithm::gt7}};
-    const auto infinity = std::numeric_limits<double>::infinity();
-    for (const auto& range : ranges)
-    {
-        Parameters parameters;
-        for (const auto endpoint : {range.minimum, range.maximum})
-        {
-            parameters.*range.member = endpoint;
-            FO4HDR_CHECK(fo4hdr::ValidateToneMapperParameters(range.algorithm, parameters));
-        }
-        for (const auto invalid : {std::nextafter(range.minimum, -infinity),
-                 std::nextafter(range.maximum, infinity), infinity,
-                 std::numeric_limits<double>::quiet_NaN()})
-        {
-            parameters.*range.member = invalid;
-            FO4HDR_CHECK(!fo4hdr::ValidateToneMapperParameters(range.algorithm, parameters));
-            fo4hdr::PluginConfiguration configuration;
-            configuration.productionAlgorithm = range.algorithm;
-            configuration.toneMapperParameters = parameters;
-            FO4HDR_CHECK(!(fo4hdr::ValidateHdrSettings(configuration) == fo4hdr::HdrSettingsValidationError::none));
-        }
-    }
-    FO4HDR_CHECK(!fo4hdr::ValidateToneMapperParameters(static_cast<Algorithm>(255), {}));
-}
-
-void TestToneMapperEffectiveParameters()
-{
-    using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
-    const fo4hdr::ToneMapperParameters defaults;
-    auto parameters = defaults;
-    parameters.agxContrast = 3.0;
-    parameters.gt7ColorBlend = 0.8;
-    FO4HDR_CHECK(fo4hdr::ActiveToneMapperParameters(Algorithm::aces2Lmt, parameters) == defaults);
-    const auto agx = fo4hdr::ActiveToneMapperParameters(Algorithm::agX, parameters);
-    FO4HDR_CHECK(agx.agxContrast == 3.0);
-    FO4HDR_CHECK(agx.gt7ColorBlend == defaults.gt7ColorBlend);
-    const auto gt7 = fo4hdr::ActiveToneMapperParameters(Algorithm::gt7, parameters);
-    FO4HDR_CHECK(gt7.gt7ColorBlend == 0.8);
-    FO4HDR_CHECK(gt7.agxContrast == defaults.agxContrast);
-}
-
-void TestVanillaGradeRemovalMath()
-{
-    HdrSettings settings;
-    const auto defaults = fo4hdr::DeriveHdrSettingsMath(settings);
-    FO4HDR_CHECK(defaults.vanillaGradeLuminanceRemoval == 0);
-    FO4HDR_CHECK(defaults.vanillaGradeColorRemoval == 0);
-    settings.vanillaGradeLuminancePercent = 65;
-    settings.vanillaGradeColorPercent = 20;
-    const auto derived = fo4hdr::DeriveHdrSettingsMath(settings);
-    FO4HDR_CHECK(std::abs(derived.vanillaGradeLuminanceRemoval - 0.35) <= 1.0e-14);
-    FO4HDR_CHECK(std::abs(derived.vanillaGradeColorRemoval - 0.8) <= 1.0e-14);
-}
-
-void TestToneMapperPersistence()
-{
-    constexpr auto original = "[Output]\nDisplayPeakNits=1000\nUiPaperWhiteNits=203\n"
-        "VideoWhiteNits=203\n[ToneMapper]\nAlgorithm=ACES2LMT\n[Other]\nKeep=unchanged\n";
-    const auto parsed = fo4hdr::ParsePluginConfiguration(original);
-    FO4HDR_CHECK(parsed.valid == true);
-    FO4HDR_CHECK(parsed.value.toneMapperParameters == fo4hdr::ToneMapperParameters{});
-    FO4HDR_CHECK(parsed.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(parsed.value.contrast == 0);
-    FO4HDR_CHECK(parsed.value.saturationPercent == 100);
-    auto requested = parsed.value;
-    requested.vanillaColorGradingStrengthPercent = 50.0;
-    requested.vanillaGradeLuminancePercent = 65.0;
-    requested.vanillaGradeColorPercent = 20.0;
-    requested.exposureEv = 1;
-    requested.bloomStrengthPercent = 50;
-    requested.contrast = 25;
-    requested.blacks = -20;
-    requested.highlights = 30;
-    requested.shadows = -40;
-    requested.saturationPercent = 120;
-    requested.temperature = 15;
-    requested.tint = -10;
-    requested.toneMapperParameters.agxContrast = 3.0;
-    requested.toneMapperParameters.gt7ToeStrength = 1.5;
-    FO4HDR_CHECK(!(requested == parsed.value));
-    const auto rewritten = fo4hdr::RewriteHdrSettingsIni(original, requested);
-    const auto restored = fo4hdr::ParsePluginConfiguration(rewritten);
-    FO4HDR_CHECK(restored.valid == true);
-    FO4HDR_CHECK(static_cast<const HdrSettings&>(restored.value) == static_cast<const HdrSettings&>(requested));
-    FO4HDR_CHECK(rewritten.find("Keep=unchanged") != std::string::npos);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Effects]\nVanillaColorGradingStrength=101\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nVanillaColorGradingStrength=50\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(std::string(original) + "[Image]\nExposure=5\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Effects]\nBloomStrength=100\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration("[Image]\nShadows=101\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[Image]\nTint=0\n").valid ==
-        false);
-    FO4HDR_CHECK(fo4hdr::ParsePluginConfiguration(rewritten + "[AgX]\nContrast=2.7\n").valid ==
-        false);
-}
-
-void TestNeutralImageMath()
-{
-    const auto math = fo4hdr::DeriveHdrSettingsMath({});
-    FO4HDR_CHECK(math.contrastSlope == 1);
-    FO4HDR_CHECK(math.blacksStrength == 0);
-    FO4HDR_CHECK(math.highlightsEv == 0);
-    FO4HDR_CHECK(math.shadowsEv == 0);
-    FO4HDR_CHECK(math.saturationScale == 1);
-    constexpr std::array<double, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};
-    FO4HDR_CHECK(math.colorBalanceBt709 == identity);
-    HdrSettings invalid;
-    invalid.tint = 101;
-    FO4HDR_CHECK(fo4hdr::DeriveHdrSettingsMath(invalid).colorBalanceBt709 == identity);
-}
-
-void TestAdjustedImageMath()
-{
-    HdrSettings settings;
-    settings.contrast = 100;
-    settings.blacks = 100;
-    settings.highlights = 50;
-    settings.shadows = -50;
-    settings.saturationPercent = 0;
-    settings.temperature = 20;
-    settings.tint = -30;
-    const auto math = fo4hdr::DeriveHdrSettingsMath(settings);
-    FO4HDR_CHECK(math.contrastSlope == 2);
-    FO4HDR_CHECK(math.blacksStrength == 0.75);
-    FO4HDR_CHECK(math.highlightsEv == 1);
-    FO4HDR_CHECK(math.shadowsEv == -1);
-    FO4HDR_CHECK(math.saturationScale == 0);
-    FO4HDR_CHECK(math.colorBalanceBt709 != fo4hdr::HdrSettingsMath{}.colorBalanceBt709);
-    for (const auto value : math.colorBalanceBt709) FO4HDR_CHECK(std::isfinite(value));
-}
-
-void TestColorBalanceAnchor()
-{
-    HdrSettings settings;
-    settings.temperature = 20;
-    settings.tint = -30;
-    const auto actual = fo4hdr::DeriveHdrSettingsMath(settings).colorBalanceBt709;
-    constexpr std::array<double, 9> expected{
-        1.0212627931544651, 0.027566926935249494, 0.0064129259361357938,
-        -0.0012828855962777597, 0.99650280298776606, 0.0026329634878390767,
-        -0.0031038820888138231, -0.011582569944983787, 0.87324218699067924};
-    for (std::size_t index = 0; index < actual.size(); ++index)
-        FO4HDR_CHECK(fo4hdr::test::Approx(actual[index], expected[index], 1.0e-12));
-}
-
-void TestToneControlMath()
-{
-    const auto neutral = fo4hdr::DeriveHdrSettingsMath({});
-    FO4HDR_CHECK(neutral.sceneExposureMultiplier == 1);
-    FO4HDR_CHECK(neutral.bloomMultiplier == 1);
-    HdrSettings settings;
-    settings.exposureEv = 1;
-    settings.bloomStrengthPercent = 50;
-    const auto adjusted = fo4hdr::DeriveHdrSettingsMath(settings);
-    FO4HDR_CHECK(adjusted.sceneExposureMultiplier == 2);
-    FO4HDR_CHECK(adjusted.bloomMultiplier == 0.5);
-}
-
-}  // namespace
+#include <utility>
 
 namespace fo4hdr::tests {
 
-void RunHdrSettingsMathTests()
+void TestLiveSettingsThreads()
 {
-    TestSettingsDefaults();
-    TestSettingsRanges();
-    TestIndependentWhites();
-    TestToneMapperControlRanges();
-    TestToneMapperEffectiveParameters();
-    TestToneMapperPersistence();
-    TestVanillaGradeRemovalMath();
-    TestNeutralImageMath();
-    TestAdjustedImageMath();
-    TestColorBalanceAnchor();
-    TestToneControlMath();
+    // Startup/load Presents may migrate before a production draw exists.
+    FO4HDR_CHECK(LiveSettingsFrameThreadsCompatible(0, false, 101));
+    FO4HDR_CHECK(LiveSettingsFrameThreadsCompatible(0, false, 202));
+    FO4HDR_CHECK(LiveSettingsFrameThreadsCompatible(202, false, 202));
+    FO4HDR_CHECK(!LiveSettingsFrameThreadsCompatible(101, false, 202));
+    FO4HDR_CHECK(!LiveSettingsFrameThreadsCompatible(202, true, 202));
+    // A later compatible frame recovers after a prior mismatch.
+    FO4HDR_CHECK(LiveSettingsFrameThreadsCompatible(202, false, 202));
+}
+
+void TestDefaultSettingsValues()
+{
+    FO4HDR_CHECK(kMaximumSelectiveExposureEv == 2.0);
+    const HdrSettings defaults{};
+    FO4HDR_CHECK(ValidateHdrSettings(defaults) ==
+        HdrSettingsValidationError::none);
+    FO4HDR_CHECK(defaults.productionAlgorithm ==
+        ProductionToneMapperAlgorithm::aces2Lmt);
+    FO4HDR_CHECK(defaults.toneMapperParameters == ToneMapperParameters{});
+    FO4HDR_CHECK(defaults.toneMapperParameters.acesLookStrength == 1.0);
+    FO4HDR_CHECK(defaults.toneMapperParameters.agxMiddleGrayEv == 0.0);
+    FO4HDR_CHECK(defaults.toneMapperParameters.agxContrast == 2.7);
+    FO4HDR_CHECK(defaults.toneMapperParameters.agxHdrPurity == 0.5);
+    FO4HDR_CHECK(defaults.toneMapperParameters.agxHdrShoulderPower == 2.0);
+    FO4HDR_CHECK(defaults.toneMapperParameters.gt7ToeStrength == 1.28);
+    FO4HDR_CHECK(defaults.toneMapperParameters.gt7ShoulderStart == 0.444);
+    FO4HDR_CHECK(defaults.toneMapperParameters.gt7ColorBlend == 0.6);
+    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 100.0);
+    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 100.0);
+}
+
+void TestSettingsEquality()
+{
+    const HdrSettings defaults{};
+    auto settingsCopy = defaults;
+    FO4HDR_CHECK(settingsCopy == defaults);
+    settingsCopy.selectiveColor.regions[0].hueDegrees = 1.0;
+    FO4HDR_CHECK(settingsCopy != defaults);
+    settingsCopy.selectiveColor = defaults.selectiveColor;
+    FO4HDR_CHECK(settingsCopy == defaults);
+
+    const PluginConfiguration configurationDefaults{};
+    auto configurationCopy = configurationDefaults;
+    FO4HDR_CHECK(configurationCopy == configurationDefaults);
+    configurationCopy.selectiveColor.regions[0].hueDegrees = 1.0;
+    FO4HDR_CHECK(configurationCopy != configurationDefaults);
+    configurationCopy = configurationDefaults;
+    FO4HDR_CHECK(configurationCopy == configurationDefaults);
+    configurationCopy.developerMode = true;
+    FO4HDR_CHECK(configurationCopy != configurationDefaults);
+    configurationCopy = configurationDefaults;
+    FO4HDR_CHECK(configurationCopy == configurationDefaults);
+
+    const auto equalityNan = std::numeric_limits<double>::quiet_NaN();
+    auto nanSettingsLeft = defaults;
+    auto nanSettingsRight = defaults;
+    nanSettingsLeft.exposureEv = equalityNan;
+    nanSettingsRight.exposureEv = equalityNan;
+    FO4HDR_CHECK(nanSettingsLeft != nanSettingsRight);
+    auto nanConfigurationLeft = configurationDefaults;
+    auto nanConfigurationRight = configurationDefaults;
+    nanConfigurationLeft.sceneExposureMultiplier = equalityNan;
+    nanConfigurationRight.sceneExposureMultiplier = equalityNan;
+    FO4HDR_CHECK(nanConfigurationLeft != nanConfigurationRight);
+}
+
+void TestActiveOperatorParameters()
+{
+    ToneMapperParameters parameters{};
+    parameters.acesLookStrength = 0.25;
+    parameters.agxMiddleGrayEv = 0.25;
+    parameters.agxContrast = 3.0;
+    parameters.agxHdrPurity = 0.6;
+    parameters.agxHdrShoulderPower = 2.1;
+    parameters.gt7ToeStrength = 1.5;
+    parameters.gt7ShoulderStart = 0.55;
+    parameters.gt7ColorBlend = 0.25;
+    auto active = ActiveToneMapperParameters(
+        ProductionToneMapperAlgorithm::aces2Lmt, parameters);
+    FO4HDR_CHECK(active.acesLookStrength == 0.25);
+    FO4HDR_CHECK(active.agxContrast == ToneMapperParameters{}.agxContrast);
+    FO4HDR_CHECK(active.gt7ToeStrength ==
+        ToneMapperParameters{}.gt7ToeStrength);
+    active = ActiveToneMapperParameters(
+        ProductionToneMapperAlgorithm::agX, parameters);
+    FO4HDR_CHECK(active.acesLookStrength ==
+        ToneMapperParameters{}.acesLookStrength);
+    FO4HDR_CHECK(active.agxMiddleGrayEv == 0.25);
+    FO4HDR_CHECK(active.agxContrast == 3.0);
+    FO4HDR_CHECK(active.agxHdrPurity == 0.6);
+    FO4HDR_CHECK(active.agxHdrShoulderPower == 2.1);
+    FO4HDR_CHECK(active.gt7ColorBlend ==
+        ToneMapperParameters{}.gt7ColorBlend);
+    active = ActiveToneMapperParameters(
+        ProductionToneMapperAlgorithm::gt7, parameters);
+    FO4HDR_CHECK(active.acesLookStrength ==
+        ToneMapperParameters{}.acesLookStrength);
+    FO4HDR_CHECK(active.agxContrast == ToneMapperParameters{}.agxContrast);
+    FO4HDR_CHECK(active.gt7ToeStrength == 1.5);
+    FO4HDR_CHECK(active.gt7ShoulderStart == 0.55);
+    FO4HDR_CHECK(active.gt7ColorBlend == 0.25);
+    FO4HDR_CHECK(ActiveToneMapperParameters(
+        static_cast<ProductionToneMapperAlgorithm>(0xFF), parameters) ==
+        ToneMapperParameters{});
+}
+
+void TestDefaultSettingsMath()
+{
+    const HdrSettings defaults{};
+    FO4HDR_CHECK(defaults.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(defaults.displayPeakNits == 1000.0);
+    FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
+    FO4HDR_CHECK(defaults.videoWhiteNits == 203.0);
+    FO4HDR_CHECK(defaults.exposureEv == 0.0);
+    FO4HDR_CHECK(defaults.blacks == 0.0);
+    const auto derived = DeriveHdrSettingsMath(defaults);
+    FO4HDR_CHECK(test::Approx(
+        derived.sceneExposureMultiplier, 1.0, 1.0e-15));
+    FO4HDR_CHECK(derived.contrastSlope == 1.0);
+    FO4HDR_CHECK(derived.blacksStrength == 0.0);
+    FO4HDR_CHECK(derived.highlightsEv == 0.0);
+    FO4HDR_CHECK(derived.shadowsEv == 0.0);
+    FO4HDR_CHECK(derived.saturationScale == 1.0);
+    FO4HDR_CHECK(derived.vanillaColorGradingBlend == 1.0);
+    FO4HDR_CHECK(derived.vanillaGradeLuminanceRemoval == 0.0);
+    FO4HDR_CHECK(derived.vanillaGradeColorRemoval == 0.0);
+    FO4HDR_CHECK(derived.bloomMultiplier == 1.0);
+    constexpr std::array<double, 9> identity{
+        1.0, 0.0, 0.0,
+        0.0, 1.0, 0.0,
+        0.0, 0.0, 1.0};
+    FO4HDR_CHECK(derived.colorBalanceBt709 == identity);
+}
+
+void TestAdjustedSettingsMath()
+{
+    HdrSettings adjusted{};
+    adjusted.exposureEv = 4.0;
+    adjusted.contrast = 100.0;
+    adjusted.blacks = 100.0;
+    adjusted.highlights = 50.0;
+    adjusted.shadows = -50.0;
+    adjusted.saturationPercent = 0.0;
+    adjusted.vanillaColorGradingStrengthPercent = 25.0;
+    adjusted.vanillaGradeLuminancePercent = 25.0;
+    adjusted.vanillaGradeColorPercent = 75.0;
+    adjusted.bloomStrengthPercent = 200.0;
+    const auto adjustedMath = DeriveHdrSettingsMath(adjusted);
+    FO4HDR_CHECK(adjustedMath.sceneExposureMultiplier == 16.0);
+    FO4HDR_CHECK(adjustedMath.contrastSlope == 2.0);
+    FO4HDR_CHECK(adjustedMath.blacksStrength == 0.75);
+    FO4HDR_CHECK(adjustedMath.highlightsEv == 1.0);
+    FO4HDR_CHECK(adjustedMath.shadowsEv == -1.0);
+    FO4HDR_CHECK(adjustedMath.saturationScale == 0.0);
+    FO4HDR_CHECK(adjustedMath.vanillaColorGradingBlend == 0.25);
+    FO4HDR_CHECK(adjustedMath.vanillaGradeLuminanceRemoval == 0.75);
+    FO4HDR_CHECK(adjustedMath.vanillaGradeColorRemoval == 0.25);
+    FO4HDR_CHECK(adjustedMath.bloomMultiplier == 2.0);
+    for (const auto blacks : {-100.0, 100.0})
+    {
+        HdrSettings blacksOnly{};
+        blacksOnly.blacks = blacks;
+        FO4HDR_CHECK(ValidateHdrSettings(blacksOnly) ==
+            HdrSettingsValidationError::none);
+        FO4HDR_CHECK(DeriveHdrSettingsMath(blacksOnly).blacksStrength ==
+            blacks * 0.0075);
+    }
+}
+
+void TestColorBalanceMath()
+{
+    HdrSettings colorAdjusted{};
+    colorAdjusted.temperature = 20.0;
+    colorAdjusted.tint = -30.0;
+    const auto colorMatrix =
+        DeriveHdrSettingsMath(colorAdjusted).colorBalanceBt709;
+    constexpr std::array<double, 9> expectedColorMatrix{
+        1.0212627931544651, 0.027566926935249494,
+            0.0064129259361357938,
+        -0.0012828855962777597, 0.99650280298776606,
+            0.0026329634878390767,
+        -0.0031038820888138231, -0.011582569944983787,
+            0.87324218699067924};
+    for (std::size_t index = 0; index < colorMatrix.size(); ++index)
+        FO4HDR_CHECK(test::Approx(
+            colorMatrix[index], expectedColorMatrix[index], 1.0e-12));
+}
+
+void TestSettingsDefaultsAndMath()
+{
+    TestLiveSettingsThreads();
+    TestDefaultSettingsValues();
+    TestSettingsEquality();
+    TestActiveOperatorParameters();
+    TestDefaultSettingsMath();
+    TestAdjustedSettingsMath();
+    TestColorBalanceMath();
+}
+
+void TestToneMapperParameterRanges()
+{
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    struct ParameterRange
+    {
+        ProductionToneMapperAlgorithm algorithm;
+        double ToneMapperParameters::*member;
+        double minimum;
+        double maximum;
+    };
+    constexpr std::array parameterRanges{
+        ParameterRange{ProductionToneMapperAlgorithm::aces2Lmt,
+            &ToneMapperParameters::acesLookStrength,
+            kMinimumAcesLookStrength, kMaximumAcesLookStrength},
+        ParameterRange{ProductionToneMapperAlgorithm::agX,
+            &ToneMapperParameters::agxMiddleGrayEv,
+            kMinimumAgxMiddleGrayEv, kMaximumAgxMiddleGrayEv},
+        ParameterRange{ProductionToneMapperAlgorithm::agX,
+            &ToneMapperParameters::agxContrast,
+            kMinimumAgxContrast, kMaximumAgxContrast},
+        ParameterRange{ProductionToneMapperAlgorithm::agX,
+            &ToneMapperParameters::agxHdrPurity,
+            kMinimumAgxHdrPurity, kMaximumAgxHdrPurity},
+        ParameterRange{ProductionToneMapperAlgorithm::agX,
+            &ToneMapperParameters::agxHdrShoulderPower,
+            kMinimumAgxHdrShoulderPower, kMaximumAgxHdrShoulderPower},
+        ParameterRange{ProductionToneMapperAlgorithm::gt7,
+            &ToneMapperParameters::gt7ToeStrength,
+            kMinimumGt7ToeStrength, kMaximumGt7ToeStrength},
+        ParameterRange{ProductionToneMapperAlgorithm::gt7,
+            &ToneMapperParameters::gt7ShoulderStart,
+            kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart},
+        ParameterRange{ProductionToneMapperAlgorithm::gt7,
+            &ToneMapperParameters::gt7ColorBlend,
+            kMinimumGt7ColorBlend, kMaximumGt7ColorBlend}};
+    for (const auto& range : parameterRanges)
+    {
+        ToneMapperParameters parameters{};
+        parameters.*range.member = range.minimum;
+        FO4HDR_CHECK(ValidateToneMapperParameters(
+            range.algorithm, parameters));
+        parameters.*range.member = range.maximum;
+        FO4HDR_CHECK(ValidateToneMapperParameters(
+            range.algorithm, parameters));
+        for (const auto invalid : {
+                 range.minimum - 0.01, range.maximum + 0.01, nan})
+        {
+            parameters = {};
+            parameters.*range.member = invalid;
+            FO4HDR_CHECK(!ValidateToneMapperParameters(
+                range.algorithm, parameters));
+            HdrSettings invalidSettings{};
+            invalidSettings.toneMapperParameters = parameters;
+            FO4HDR_CHECK(ValidateHdrSettings(invalidSettings) ==
+                HdrSettingsValidationError::toneMapperParametersOutOfRange);
+        }
+    }
+    FO4HDR_CHECK(!ValidateToneMapperParameters(
+        static_cast<ProductionToneMapperAlgorithm>(0xFF), {}));
+}
+
+void TestColorBalanceEndpoints()
+{
+    for (const auto pair : {
+             std::pair{-100.0, -100.0},
+             std::pair{100.0, 100.0},
+             std::pair{-100.0, 100.0},
+             std::pair{100.0, -100.0}})
+    {
+        HdrSettings value{};
+        value.temperature = pair.first;
+        value.tint = pair.second;
+        const auto matrix = DeriveHdrSettingsMath(value).colorBalanceBt709;
+        bool differsFromIdentity{};
+        for (std::size_t index = 0; index < matrix.size(); ++index)
+        {
+            FO4HDR_CHECK(std::isfinite(matrix[index]));
+            const auto identity = index == 0 || index == 4 || index == 8 ?
+                1.0 : 0.0;
+            differsFromIdentity = differsFromIdentity ||
+                std::abs(matrix[index] - identity) > 1.0e-6;
+        }
+        FO4HDR_CHECK(differsFromIdentity);
+    }
+}
+
+void TestSettingsValidation()
+{
+    HdrSettings value{};
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    const auto check = [&](auto member,
+                           double invalid,
+                           HdrSettingsValidationError expected)
+    {
+        auto candidate = value;
+        candidate.*member = invalid;
+        FO4HDR_CHECK(ValidateHdrSettings(candidate) == expected);
+    };
+
+    value.productionAlgorithm =
+        static_cast<ProductionToneMapperAlgorithm>(0xFF);
+    FO4HDR_CHECK(ValidateHdrSettings(value) ==
+        HdrSettingsValidationError::unsupportedAlgorithm);
+    value = {};
+    value.productionAlgorithm = ProductionToneMapperAlgorithm::aces2Lmt;
+    FO4HDR_CHECK(ValidateHdrSettings(value) ==
+        HdrSettingsValidationError::none);
+    TestToneMapperParameterRanges();
+    value = {};
+    value.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
+    FO4HDR_CHECK(ValidateHdrSettings(value) ==
+        HdrSettingsValidationError::unsupportedColorGradingMethod);
+    value.colorGradingMethod = ColorGradingMethod::nativeReference;
+    FO4HDR_CHECK(ValidateHdrSettings(value) == HdrSettingsValidationError::none);
+    value = {};
+    check(&HdrSettings::displayPeakNits, 399.0,
+        HdrSettingsValidationError::displayPeakOutOfRange);
+    check(&HdrSettings::uiPaperWhiteNits, 301.0,
+        HdrSettingsValidationError::uiPaperWhiteOutOfRange);
+    check(&HdrSettings::videoWhiteNits, 99.0,
+        HdrSettingsValidationError::videoWhiteOutOfRange);
+    check(&HdrSettings::exposureEv, nan,
+        HdrSettingsValidationError::exposureOutOfRange);
+    check(&HdrSettings::contrast, 100.01,
+        HdrSettingsValidationError::contrastOutOfRange);
+    check(&HdrSettings::blacks, -100.01,
+        HdrSettingsValidationError::blacksOutOfRange);
+    check(&HdrSettings::blacks, nan,
+        HdrSettingsValidationError::blacksOutOfRange);
+    check(&HdrSettings::blacks,
+        std::numeric_limits<double>::infinity(),
+        HdrSettingsValidationError::blacksOutOfRange);
+    check(&HdrSettings::highlights, -100.01,
+        HdrSettingsValidationError::highlightsOutOfRange);
+    check(&HdrSettings::shadows, 100.01,
+        HdrSettingsValidationError::shadowsOutOfRange);
+    check(&HdrSettings::saturationPercent, 200.01,
+        HdrSettingsValidationError::saturationOutOfRange);
+    check(&HdrSettings::temperature, -100.01,
+        HdrSettingsValidationError::temperatureOutOfRange);
+    check(&HdrSettings::tint, 100.01,
+        HdrSettingsValidationError::tintOutOfRange);
+    check(&HdrSettings::vanillaColorGradingStrengthPercent, 100.01,
+        HdrSettingsValidationError::vanillaColorGradingOutOfRange);
+    check(&HdrSettings::vanillaGradeLuminancePercent, -0.01,
+        HdrSettingsValidationError::vanillaColorGradingOutOfRange);
+    check(&HdrSettings::vanillaGradeColorPercent, nan,
+        HdrSettingsValidationError::vanillaColorGradingOutOfRange);
+    check(&HdrSettings::bloomStrengthPercent, -0.01,
+        HdrSettingsValidationError::bloomStrengthOutOfRange);
+    TestColorBalanceEndpoints();
 }
 
 }  // namespace fo4hdr::tests

@@ -13,50 +13,57 @@
 // aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad
 //   d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
 //
-// Modified by Fallout4HDR: parameterize the Rec.2100/D65 limiting gamut for
-// 400-2000 nit peaks and adapt dimensionless BT.709/D65 scene values to
-// AP0/D60 without moving the neutral gray anchor. Return absolute display-
-// linear BT.2020 before display encoding. Preserve normalized upper-hull hue
-// interpolation and the complete bounded interval search. Academy terms are
-// retained in THIRD_PARTY_NOTICES.md. ACES2LMT alone applies the pinned J2M2
-// look, a recomputed zero-toe shadow blend, and a fixed-width gamut shoulder.
-// Direct Academy APIs retain their response and compression.
+// Modified by Fallout4HDR: parameterize the same Rec.2100 limiting gamut for
+// 400-2000 nits and adapt dimensionless scene-linear BT.709/D65 to AP0/D60
+// without changing neutral scene values, and stop at absolute display-linear
+// Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
+// the shared forward path retains the official AP1 formation clamp.
+// ACES2LMT alone blends a recomputed zero-toe shadow response into the scalar
+// tone scale below internal 0.18 and uses a fixed-width gamut shoulder to avoid
+// the reference reach/gamut crossing discontinuity.
+// The official display-encoding/PQ stage is intentionally omitted because the
+// renderer owns the single final ST 2084 boundary. Normalized upper-hull hue
+// interpolation and a full bounded interval search correct the pinned CTL's
+// hue interpolation/search issues. See THIRD_PARTY_NOTICES.md.
 
 #include "Fallout4HDR/tonemap/Aces2.hpp"
+
 #include "aces2/Aces2Model.hpp"
+
 #include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
+
+#include "Fallout4HDR/output/Hdr10Color.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <memory>
+#include <limits>
 #include <new>
 
 namespace fo4hdr {
 using namespace aces2;
 namespace aces2 {
 
-struct ToneScaleInput
+[[nodiscard]] double ToneScaleHit(double peak) noexcept
 {
-    double peak;
-    double toe;
-};
+    constexpr double normalizedWhite = 100.0;
+    constexpr double hitMinimum = 128.0;
+    constexpr double hitMaximum = 896.0;
+    return hitMinimum + (hitMaximum - hitMinimum) *
+        (std::log(peak / normalizedWhite) /
+         std::log(10000.0 / normalizedWhite));
+}
 
-[[nodiscard]] ToneScaleParams InitializeToneScale(ToneScaleInput input) noexcept
+[[nodiscard]] ToneScaleParams InitializeToneScale(
+    double peak, double toe) noexcept
 {
-    const double peak = input.peak;
-    const double toe = input.toe;
     constexpr double normalizedWhite = 100.0;
     constexpr double contrast = 1.15;
     constexpr double grayAnchor = 0.18;
     constexpr double grayDisplay = 10.013;
     constexpr double grayChange = 0.14;
-    constexpr double hitMinimum = 128.0;
-    constexpr double hitMaximum = 896.0;
-    const double hit = hitMinimum + (hitMaximum - hitMinimum) *
-        (std::log(peak / normalizedWhite) /
-         std::log(10000.0 / normalizedWhite));
+    const double hit = ToneScaleHit(peak);
     const double m0 = peak / normalizedWhite;
     const double m1 = 0.5 * (m0 + std::sqrt(m0 * (m0 + 4.0 * toe)));
     const double u = std::pow(
@@ -85,38 +92,51 @@ struct ToneScaleInput
     };
 }
 
-[[nodiscard]] ToneScaleParams InitializeToneScale(double peak) noexcept
-{
-    return InitializeToneScale(ToneScaleInput{peak, 0.04});
-}
-
-[[nodiscard]] double ToneScaleForward(double value, const ToneScaleParams& curve) noexcept
+[[nodiscard]] double ToneScaleForward(
+    double value,
+    const ToneScaleParams& params) noexcept
 {
     const double positive = std::max(0.0, value);
-    const double formation = curve.m2 * std::pow(
-        positive / (value + curve.s2), curve.g);
-    // Recomputed zero-toe parameters have this finite exact-black limit.
-    if (curve.t1 == 0.0) return formation * curve.nR;
-    return std::max(0.0, formation * formation / (formation + curve.t1)) * curve.nR;
+    const double formation = params.m2 * std::pow(
+        positive / (value + params.s2), params.g);
+    // The recomputed zero-toe response has this finite limit at exact black.
+    if (params.t1 == 0.0) return formation * params.nR;
+    const double flared =
+        std::max(0.0, formation * formation / (formation + params.t1));
+    return flared * params.nR;
 }
 
-struct ChromaToe
+[[nodiscard]] double Toe(
+    double value,
+    double limit,
+    double k1Input,
+    double k2Input) noexcept
 {
-    double limit;
-    double strength;
-    double smoothness;
-};
-
-[[nodiscard]] double Toe(double value, ChromaToe curve) noexcept
-{
-    if (value > curve.limit) return value;
-    const double k2 = std::max(curve.smoothness, 0.001);
-    const double k1 = std::sqrt(curve.strength * curve.strength + k2 * k2);
-    const double k3 = (curve.limit + k1) / (curve.limit + k2);
+    if (value > limit) return value;
+    const double k2 = std::max(k2Input, 0.001);
+    const double k1 = std::sqrt(k1Input * k1Input + k2 * k2);
+    const double k3 = (limit + k1) / (limit + k2);
     const double minusB = k3 * value - k1;
     const double minusC = k2 * k3 * value;
     return 0.5 *
            (minusB + std::sqrt(minusB * minusB + 4.0 * minusC));
+}
+
+[[nodiscard]] double ChromaCompressionNorm(
+    double hue,
+    const OdtParams& params) noexcept
+{
+    const double radians = hue * kPi / 180.0;
+    const double a = std::cos(radians);
+    const double b = std::sin(radians);
+    const double cos2 = a * a - b * b;
+    const double sin2 = 2.0 * a * b;
+    const double cos3 = 4.0 * a * a * a - 3.0 * a;
+    const double sin3 = 3.0 * b - 4.0 * b * b * b;
+    return (11.34072 * a + 16.46899 * cos2 + 7.88380 * cos3 +
+            14.66441 * b - 6.37224 * sin2 + 9.19364 * sin3 +
+            77.12896) *
+           params.chromaCompressionScale;
 }
 
 [[nodiscard]] double ReachMFromTable(
@@ -137,8 +157,9 @@ struct ChromaToe
     const double linear = JToY(jmh[0], params.input) /
                           kReferenceLuminance;
     double toneMappedY = ToneScaleForward(linear, params.toneScale);
-    // LMT-only fixed shadow blend, after AP1 formation and before chroma/gamut.
-    // The direct Academy path retains its original scalar response.
+    // This scalar is evaluated after the Look and AP1 formation clamp. Keep
+    // the Academy response exact above the transition, then let its complete
+    // chroma and gamut processing respond to the modified lightness.
     if (shadowToneScale != nullptr && linear < 0.18)
     {
         const double q = std::clamp(linear / 0.18, 0.0, 1.0);
@@ -153,17 +174,8 @@ struct ChromaToe
     {
         const double normalizedJ = toneMappedJ / params.limitJMax;
         const double shadowJ = std::max(0.0, 1.0 - normalizedJ);
-        const double radians = jmh[2] * kPi / 180.0;
-        const double a = std::cos(radians);
-        const double b = std::sin(radians);
-        const double cos2 = a * a - b * b;
-        const double sin2 = 2.0 * a * b;
-        const double cos3 = 4.0 * a * a * a - 3.0 * a;
-        const double sin3 = 3.0 * b - 4.0 * b * b * b;
-        const double normalization =
-            (11.34072 * a + 16.46899 * cos2 + 7.88380 * cos3 +
-             14.66441 * b - 6.37224 * sin2 + 9.19364 * sin3 +
-             77.12896) * params.chromaCompressionScale;
+        const double normalization = ChromaCompressionNorm(
+            jmh[2], params);
         const double limit =
             std::pow(normalizedJ, params.modelGammaInverse) *
             ReachMFromTable(jmh[2], params.reachM) /
@@ -174,13 +186,15 @@ struct ChromaToe
         compressedM /= normalization;
         compressedM = limit - Toe(
             limit - compressedM,
-            {limit - 0.001,
-             shadowJ * params.saturation,
-             std::sqrt(normalizedJ * normalizedJ +
-                       params.saturationThreshold)});
+            limit - 0.001,
+            shadowJ * params.saturation,
+            std::sqrt(normalizedJ * normalizedJ +
+                      params.saturationThreshold));
         compressedM = Toe(
             compressedM,
-            {limit, normalizedJ * params.compression, shadowJ});
+            limit,
+            normalizedJ * params.compression,
+            shadowJ);
         compressedM *= normalization;
     }
 
@@ -217,50 +231,58 @@ struct ChromaToe
     return direction * (intersectJ - axis.focusJ) / (axis.focusJ * axis.slopeGain);
 }
 
-struct BoundaryCurve
+[[nodiscard]] double SmoothMinimumScaled(
+    double a,
+    double b,
+    double scaleReference) noexcept
 {
-    Vec2 maximum;
-    double inverseGamma;
-    double intersectionJ;
-};
+    const double scale = kSmoothCusps * scaleReference;
+    const double h = std::max(scale - std::abs(a - b), 0.0) / scale;
+    return std::min(a, b) - h * h * h * scale / 6.0;
+}
 
 [[nodiscard]] double EstimateBoundaryIntersectionM(
     CompressionRay ray,
-    const BoundaryCurve& curve) noexcept
+    double inverseGamma,
+    Vec2 maximum,
+    double jIntersectionReference) noexcept
 {
-    const double normalizedJ = ray.jAxisIntersect / curve.intersectionJ;
+    const double normalizedJ = ray.jAxisIntersect / jIntersectionReference;
     const double shiftedIntersection =
-        curve.intersectionJ * std::pow(normalizedJ, curve.inverseGamma);
-    return shiftedIntersection * curve.maximum[1] /
-           (curve.maximum[0] - ray.slope * curve.maximum[1]);
+        jIntersectionReference * std::pow(normalizedJ, inverseGamma);
+    return shiftedIntersection * maximum[1] /
+           (maximum[0] - ray.slope * maximum[1]);
 }
 
 [[nodiscard]] double FindBoundaryIntersectionM(
     const GamutHull& hull,
-    GamutRay ray) noexcept
+    CompressionRay ray,
+    double cuspIntersectJ) noexcept
 {
     const double lower = EstimateBoundaryIntersectionM(
-        ray.compression,
-        {hull.cusp, hull.lowerGammaInverse, ray.cuspIntersectJ});
+        ray,
+        hull.lowerGammaInverse,
+        hull.cusp,
+        cuspIntersectJ);
     const double upper = EstimateBoundaryIntersectionM(
-        {hull.jMax - ray.compression.jAxisIntersect, -ray.compression.slope},
-        {{hull.jMax - hull.cusp[0], hull.cusp[1]},
-         hull.upperGammaInverse, hull.jMax - ray.cuspIntersectJ});
-    const double scale = kSmoothCusps * hull.cusp[1];
-    const double h = std::max(scale - std::abs(lower - upper), 0.0) / scale;
-    return std::min(lower, upper) - h * h * h * scale / 6.0;
+        {hull.jMax - ray.jAxisIntersect, -ray.slope},
+        hull.upperGammaInverse,
+        {hull.jMax - hull.cusp[0], hull.cusp[1]},
+        hull.jMax - cuspIntersectJ);
+    return SmoothMinimumScaled(lower, upper, hull.cusp[1]);
 }
 
 [[nodiscard]] double FocusGain(
-    FocusRegion region,
+    double j,
+    double analyticalThreshold,
     const OdtParams& params) noexcept
 {
     double gain = params.limitJMax * params.focusDistance;
-    if (region.lightness > region.threshold)
+    if (j > analyticalThreshold)
     {
         double adjustment = std::log10(
-            (params.limitJMax - region.threshold) /
-            std::max(0.0001, params.limitJMax - region.lightness));
+            (params.limitJMax - analyticalThreshold) /
+            std::max(0.0001, params.limitJMax - j));
         adjustment = adjustment * adjustment + 1.0;
         gain *= adjustment;
     }
@@ -292,25 +314,24 @@ struct GamutChromaBounds
                            (1.0 + mOffset / scale);
 }
 
-[[nodiscard]] double RemapProductionM(double m, GamutChromaBounds bounds) noexcept
+[[nodiscard]] double RemapProductionM(
+    double m,
+    GamutChromaBounds bounds) noexcept
 {
     const double threshold = kCompressionThreshold * bounds.gamut;
     if (m <= threshold || bounds.reach <= bounds.gamut) return m;
-    // Keep the shoulder width fixed as reach approaches gamut; reciprocal scale
-    // tends to zero, joining identity continuously while mapping reach to gamut.
+
+    // A fixed shoulder width avoids the reference threshold collapsing to
+    // the gamut boundary as reach approaches gamut. Its reciprocal scale
+    // tends to zero there, so this rational curve joins identity continuously
+    // while mapping reach to gamut and retaining unit slope at the shoulder.
     const double inverseScale = (bounds.reach - bounds.gamut) /
         ((bounds.reach - threshold) * (bounds.gamut - threshold));
     const double offset = m - threshold;
     return threshold + offset / (1.0 + offset * inverseScale);
 }
 
-struct GamutSample
-{
-    Vec2 cusp;
-    double upperGammaInverse;
-};
-
-[[nodiscard]] GamutSample SampleGamut(
+[[nodiscard]] std::size_t LookupHueInterval(
     double hue,
     const OdtParams& params) noexcept
 {
@@ -329,30 +350,65 @@ struct GamutSample
             high = position;
         position = (low + high) / 2;
     }
-    const auto upperIndex = static_cast<std::size_t>(std::max(1, high));
-    const Vec3& lower = params.gamutCusps[upperIndex - 1];
-    const Vec3& upper = params.gamutCusps[upperIndex];
-    // Cusp and upper-hull tables share the same nonuniform padded hue grid.
-    const double weight = (hue - params.hues[upperIndex - 1]) /
-        (params.hues[upperIndex] - params.hues[upperIndex - 1]);
+    return static_cast<std::size_t>(std::max(1, high));
+}
+
+[[nodiscard]] Vec2 CuspFromTable(
+    double hue,
+    const std::array<Vec3, kTotalTableSize>& table) noexcept
+{
+    std::size_t low = 0;
+    std::size_t high = kBaseIndex + kTableSize;
+    std::size_t position = HuePosition(hue) + kBaseIndex;
+    while (low + 1 < high)
+    {
+        if (hue > table[position][2]) low = position;
+        else high = position;
+        position = (low + high) / 2;
+    }
+    const Vec3& lower = table[high - 1];
+    const Vec3& upper = table[high];
+    const double weight =
+        (hue - lower[2]) / (upper[2] - lower[2]);
     return {
-        {std::lerp(lower[0], upper[0], weight),
-         std::lerp(lower[1], upper[1], weight)},
-        std::lerp(params.upperHullGamma[upperIndex - 1],
-                  params.upperHullGamma[upperIndex], weight)
+        std::lerp(lower[0], upper[0], weight),
+        std::lerp(lower[1], upper[1], weight)
     };
+}
+
+void RecordCompressionBoundary(
+    Aces2CompressionBoundary* boundary,
+    GamutChromaBounds bounds,
+    double sourceM) noexcept
+{
+    if (boundary == nullptr) return;
+    if (!std::isfinite(bounds.gamut)) return;
+    if (!std::isfinite(bounds.reach) || bounds.reach <= 0.0) return;
+    *boundary = {bounds.gamut - bounds.reach, sourceM - bounds.gamut, true};
 }
 
 [[nodiscard]] Vec3 CompressGamut(
     Vec3 jmh,
-    const OdtParams& params, bool production = false) noexcept
+    const OdtParams& params,
+    Aces2CompressionBoundary* boundary = nullptr,
+    bool production = false) noexcept
 {
     if (jmh[0] <= 0.0) return {0.0, 0.0, jmh[2]};
     if (jmh[1] < 0.0 || jmh[0] > params.limitJMax)
         return {jmh[0], 0.0, jmh[2]};
 
-    const GamutSample sample = SampleGamut(jmh[2], params);
-    const Vec2 cusp = sample.cusp;
+    const std::size_t high = LookupHueInterval(jmh[2], params);
+    // Both tables use the same nonuniform hue grid, including padded wrap.
+    const double weight = (jmh[2] - params.hues[high - 1]) /
+        (params.hues[high] - params.hues[high - 1]);
+    const Vec2 cusp = production ? Vec2{
+        std::lerp(params.gamutCusps[high - 1][0], params.gamutCusps[high][0], weight),
+        std::lerp(params.gamutCusps[high - 1][1], params.gamutCusps[high][1], weight)
+    } : CuspFromTable(jmh[2], params.gamutCusps);
+    const double upperGammaInverse = std::lerp(
+        params.upperHullGamma[high - 1],
+        params.upperHullGamma[high],
+        weight);
     const double focusJ = std::lerp(
         cusp[0],
         params.midJ,
@@ -361,7 +417,7 @@ struct GamutSample
     const double analyticalThreshold =
         std::lerp(cusp[0], params.limitJMax, kFocusGainBlend);
     const double slopeGain = FocusGain(
-        {jmh[0], analyticalThreshold}, params);
+        jmh[0], analyticalThreshold, params);
     const CompressionAxis axis{focusJ, params.limitJMax, slopeGain};
     const double sourceIntersectJ = SolveJIntersect(
         {jmh[0], jmh[1]}, axis);
@@ -370,18 +426,22 @@ struct GamutSample
     const double cuspIntersectJ = SolveJIntersect(
         cusp, axis);
     const double gamutBoundaryM = FindBoundaryIntersectionM(
-        {cusp, params.limitJMax, sample.upperGammaInverse, params.lowerHullGammaInverse},
-        {{sourceIntersectJ, gamutSlope}, cuspIntersectJ});
+        {cusp, params.limitJMax, upperGammaInverse, params.lowerHullGammaInverse},
+        {sourceIntersectJ, gamutSlope},
+        cuspIntersectJ);
     if (gamutBoundaryM <= 0.0)
         return {jmh[0], 0.0, jmh[2]};
 
     const double reachBoundaryM = EstimateBoundaryIntersectionM(
         {sourceIntersectJ, gamutSlope},
-        {{params.limitJMax, ReachMFromTable(jmh[2], params.reachM)},
-         params.modelGammaInverse, params.limitJMax});
+        params.modelGammaInverse,
+        {params.limitJMax, ReachMFromTable(jmh[2], params.reachM)},
+        params.limitJMax);
     const GamutChromaBounds bounds{gamutBoundaryM, reachBoundaryM};
+    RecordCompressionBoundary(boundary, bounds, jmh[1]);
     const double remappedM = production ?
-        RemapProductionM(jmh[1], bounds) : RemapM(jmh[1], bounds);
+        RemapProductionM(jmh[1], bounds) :
+        RemapM(jmh[1], bounds);
     const Vec3 result{
         sourceIntersectJ + remappedM * gamutSlope,
         remappedM,
@@ -390,18 +450,35 @@ struct GamutSample
     return result;
 }
 
+[[nodiscard]] double SanitizeScene(double value) noexcept
+{
+    if (!std::isfinite(value) || value <= 0.0) return 0.0;
+    return value;
+}
+
+[[nodiscard]] bool IsPeakValid(double peak) noexcept
+{
+    return std::isfinite(peak) &&
+           peak >= kMinimumDisplayPeakNits &&
+           peak <= kMaximumDisplayPeakNits;
+}
+
+[[nodiscard]] bool IsLookStrengthValid(double strength) noexcept
+{
+    return std::isfinite(strength) && strength >= 0.0 && strength <= 1.0;
+}
+
 }  // namespace
 
-namespace {
-
-struct PeakTransform
+class Aces2Transform
 {
-    explicit PeakTransform(double peak) noexcept
+public:
+    explicit Aces2Transform(double peak) noexcept
         : bt709ToAp0(CalculateRgbToRgb(kBt709, kAp0)),
           ap0ToAp1(Multiply(RgbToXyz(kAp0), Invert(RgbToXyz(kAp1)))),
           ap1ToAp0(Multiply(RgbToXyz(kAp1), Invert(RgbToXyz(kAp0)))),
           odt(InitializeOdt(peak)),
-          shadowToneScale(InitializeToneScale(ToneScaleInput{peak, 0.0}))
+          shadowToneScale(InitializeToneScale(peak, 0.0))
     {
     }
 
@@ -412,27 +489,67 @@ struct PeakTransform
     ToneScaleParams shadowToneScale;
 };
 
-[[nodiscard]] Vec3 FormAcesInput(const PeakTransform& transform, Vec3 ap0) noexcept
+void Aces2TransformDeleter::operator()(
+    const Aces2Transform* transform) const noexcept
 {
-    Vec3 ap1 = Multiply(ap0, transform.ap0ToAp1);
+    delete transform;
+}
+
+Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept
+{
+    if (!IsPeakValid(displayPeakNits)) return {nullptr};
+    return Aces2TransformHandle(
+        new (std::nothrow) Aces2Transform(displayPeakNits));
+}
+
+namespace {
+
+[[nodiscard]] Vec3 EvaluateAces2Ap1GamutInput(
+    const Aces2Transform& transform,
+    Vec3 ap1,
+    const ToneScaleParams* shadowToneScale = nullptr) noexcept
+{
     for (double& channel : ap1)
-        channel = std::clamp(channel, 0.0, transform.odt.toneScale.forwardLimit);
-    return Multiply(ap1, transform.ap1ToAp0);
+        channel = std::clamp(
+            channel, 0.0, transform.odt.toneScale.forwardLimit);
+    const Vec3 aces = Multiply(ap1, transform.ap1ToAp0);
+
+    return ToneMapAndCompress(
+        RgbToJMh(aces, transform.odt.input), transform.odt, shadowToneScale);
 }
 
-[[nodiscard]] Vec3 SceneToAp0(const PeakTransform& transform, LinearRgb input) noexcept
+[[nodiscard]] Vec3 EvaluateAces2Ap0GamutInput(
+    const Aces2Transform& transform,
+    Vec3 aces,
+    const ToneScaleParams* shadowToneScale = nullptr) noexcept
 {
-    Vec3 scene{input.red, input.green, input.blue};
-    for (double& channel : scene)
-        if (!std::isfinite(channel) || channel <= 0.0) channel = 0.0;
-    return Multiply(scene, transform.bt709ToAp0);
+    return EvaluateAces2Ap1GamutInput(
+        transform, Multiply(aces, transform.ap0ToAp1), shadowToneScale);
 }
 
-[[nodiscard]] LinearRgb GamutOutputNits(
-    const PeakTransform& transform, Vec3 toneMapped, bool production = false) noexcept
+[[nodiscard]] Vec3 EvaluateAces2GamutInput(
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709) noexcept
 {
-    const Vec3 compressed = CompressGamut(toneMapped, transform.odt, production);
+    const Vec3 scene{
+        SanitizeScene(sceneLinearBt709.red),
+        SanitizeScene(sceneLinearBt709.green),
+        SanitizeScene(sceneLinearBt709.blue)
+    };
+    return EvaluateAces2Ap0GamutInput(
+        transform, Multiply(scene, transform.bt709ToAp0));
+}
+
+[[nodiscard]] LinearRgb EvaluateAces2GamutOutputNits(
+    const Aces2Transform& transform,
+    Vec3 toneMapped,
+    bool production = false) noexcept
+{
+    const Vec3 compressed = CompressGamut(toneMapped, transform.odt, nullptr, production);
     Vec3 output = JMhToRgb(compressed, transform.odt.limit);
+
+    // Preserve the gamut fit's small boundary excursions while interpolating
+    // the LUT. Containing individual lattice vertices biases boundary cells.
     for (double& channel : output)
     {
         channel *= kReferenceLuminance;
@@ -441,112 +558,125 @@ struct PeakTransform
     return {output[0], output[1], output[2]};
 }
 
-[[nodiscard]] LinearRgb EvaluateSceneNits(const PeakTransform& transform, LinearRgb input) noexcept
+[[nodiscard]] Vec3 EvaluateAces2LmtGamutInput(
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709,
+    double lookStrength) noexcept
 {
-    const Vec3 aces = FormAcesInput(transform, SceneToAp0(transform, input));
-    return GamutOutputNits(transform,
-        ToneMapAndCompress(RgbToJMh(aces, transform.odt.input), transform.odt));
-}
-
-[[nodiscard]] LinearRgb EvaluateLookNits(
-    const PeakTransform& transform, LinearRgb input, double strength) noexcept
-{
-    if (!std::isfinite(strength)) return {};
-    if (strength < 0.0 || strength > 1.0) return {};
-    Vec3 ap0 = SceneToAp0(transform, input);
-    if (strength != 0.0)
+    const Vec3 scene{
+        SanitizeScene(sceneLinearBt709.red),
+        SanitizeScene(sceneLinearBt709.green),
+        SanitizeScene(sceneLinearBt709.blue)
+    };
+    const Vec3 ap0 = Multiply(scene, transform.bt709ToAp0);
+    Vec3 blended = ap0;
+    if (lookStrength != 0.0)
     {
-        const auto looked = ApplyAces2ContrastLmt({ap0[0], ap0[1], ap0[2]});
-        ap0 = {std::lerp(ap0[0], looked.red, strength),
-            std::lerp(ap0[1], looked.green, strength),
-            std::lerp(ap0[2], looked.blue, strength)};
+        const auto looked = ApplyAces2ContrastLmt(
+            {ap0[0], ap0[1], ap0[2]});
+        blended = lookStrength == 1.0 ?
+            Vec3{looked.red, looked.green, looked.blue} : Vec3{
+                std::lerp(ap0[0], looked.red, lookStrength),
+                std::lerp(ap0[1], looked.green, lookStrength),
+                std::lerp(ap0[2], looked.blue, lookStrength)};
     }
-    const Vec3 aces = FormAcesInput(transform, ap0);
-    return GamutOutputNits(transform,
-        ToneMapAndCompress(RgbToJMh(aces, transform.odt.input), transform.odt,
-            &transform.shadowToneScale), true);
-}
-
-[[nodiscard]] LinearRgb EvaluateScene(const PeakTransform& transform, LinearRgb input) noexcept
-{
-    const auto evaluated = EvaluateSceneNits(transform, input);
-    Vec3 output{evaluated.red, evaluated.green, evaluated.blue};
-    for (double& channel : output)
-    {
-        channel = std::clamp(channel, 0.0, transform.odt.peakLuminance);
-    }
-    return {output[0], output[1], output[2]};
+    return EvaluateAces2Ap0GamutInput(
+        transform, blended, &transform.shadowToneScale);
 }
 
 }  // namespace
 
-class Aces2Transform
+Aces2CompressionBoundary EvaluateAces2LmtCompressionBoundary(
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709,
+    double lookStrength) noexcept
 {
-public:
-    explicit Aces2Transform(double peak) noexcept : state(peak) {}
-    const PeakTransform state;
-};
-
-void Aces2TransformDeleter::operator()(const Aces2Transform* transform) const noexcept
-{
-    delete transform;
-}
-
-Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept
-{
-    if (!std::isfinite(displayPeakNits)) return {};
-    if (displayPeakNits < kMinimumDisplayPeakNits || displayPeakNits > kMaximumDisplayPeakNits)
-        return {};
-    return Aces2TransformHandle{new (std::nothrow) Aces2Transform(displayPeakNits)};
+    if (!IsLookStrengthValid(lookStrength)) return {};
+    Aces2CompressionBoundary boundary{};
+    static_cast<void>(CompressGamut(
+        EvaluateAces2LmtGamutInput(transform, sceneLinearBt709, lookStrength),
+        transform.odt, &boundary, true));
+    return boundary;
 }
 
 LinearRgb EvaluateAces2LutNits(
-    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709) noexcept
 {
-    return EvaluateSceneNits(transform.state, sceneLinearBt709);
-}
-
-LinearRgb MapAces2ToBt2020Nits(
-    const Aces2Transform& transform, LinearRgb sceneLinearBt709) noexcept
-{
-    return EvaluateScene(transform.state, sceneLinearBt709);
+    const Vec3 toneMapped = EvaluateAces2GamutInput(
+        transform, sceneLinearBt709);
+    return EvaluateAces2GamutOutputNits(transform, toneMapped);
 }
 
 LinearRgb EvaluateAces2LmtLutNits(
-    const Aces2Transform& transform, LinearRgb sceneLinearBt709, double lookStrength) noexcept
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709,
+    double lookStrength) noexcept
 {
-    return EvaluateLookNits(transform.state, sceneLinearBt709, lookStrength);
+    if (!IsLookStrengthValid(lookStrength)) return {};
+    return EvaluateAces2GamutOutputNits(transform,
+        EvaluateAces2LmtGamutInput(transform, sceneLinearBt709, lookStrength), true);
 }
 
 LinearRgb MapAces2LmtToBt2020Nits(
-    const Aces2Transform& transform, LinearRgb sceneLinearBt709, double lookStrength) noexcept
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709,
+    double lookStrength) noexcept
 {
-    const auto evaluated = EvaluateAces2LmtLutNits(transform, sceneLinearBt709, lookStrength);
-    Vec3 output{evaluated.red, evaluated.green, evaluated.blue};
-    for (double& channel : output)
-        channel = std::clamp(channel, 0.0, transform.state.odt.peakLuminance);
-    return {output[0], output[1], output[2]};
+    const auto output = EvaluateAces2LmtLutNits(
+        transform, sceneLinearBt709, lookStrength);
+    return {
+        std::clamp(output.red, 0.0, transform.odt.peakLuminance),
+        std::clamp(output.green, 0.0, transform.odt.peakLuminance),
+        std::clamp(output.blue, 0.0, transform.odt.peakLuminance)
+    };
 }
 
-LinearRgb MapAces2ToBt2020Nits(LinearRgb sceneLinearBt709, double displayPeakNits) noexcept
+LinearRgb EvaluateAces2Ap0LutNits(
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearAp0) noexcept
 {
-    if (!std::isfinite(displayPeakNits)) return {};
-    if (displayPeakNits < kMinimumDisplayPeakNits || displayPeakNits > kMaximumDisplayPeakNits)
-        return {};
+    Vec3 aces{
+        sceneLinearAp0.red, sceneLinearAp0.green, sceneLinearAp0.blue};
+    for (double& channel : aces)
+        if (!std::isfinite(channel)) channel = 0.0;
+    return EvaluateAces2GamutOutputNits(
+        transform, EvaluateAces2Ap0GamutInput(transform, aces));
+}
+
+LinearRgb MapAces2ToBt2020Nits(
+    const Aces2Transform& transform,
+    LinearRgb sceneLinearBt709) noexcept
+{
+    const auto output = EvaluateAces2LutNits(
+        transform, sceneLinearBt709);
+    // The pinned preset contains display-linear RGB before encoding. LUT
+    // sampling performs this same containment after interpolation instead.
+    return {
+        std::clamp(output.red, 0.0, transform.odt.peakLuminance),
+        std::clamp(output.green, 0.0, transform.odt.peakLuminance),
+        std::clamp(output.blue, 0.0, transform.odt.peakLuminance)
+    };
+}
+
+LinearRgb MapAces2ToBt2020Nits(
+    LinearRgb sceneLinearBt709,
+    double displayPeakNits) noexcept
+{
     struct Cache
     {
         double peak{};
-        std::unique_ptr<PeakTransform> transform;
+        Aces2TransformHandle transform{};
     };
-    thread_local Cache cache;
+    thread_local Cache cache{};
+    if (!IsPeakValid(displayPeakNits)) return {};
     if (!cache.transform || cache.peak != displayPeakNits)
     {
-        cache.transform.reset(new (std::nothrow) PeakTransform(displayPeakNits));
+        cache.transform = CreateAces2Transform(displayPeakNits);
         cache.peak = displayPeakNits;
     }
     if (!cache.transform) return {};
-    return EvaluateScene(*cache.transform, sceneLinearBt709);
+    return MapAces2ToBt2020Nits(*cache.transform, sceneLinearBt709);
 }
 
 }  // namespace fo4hdr
-

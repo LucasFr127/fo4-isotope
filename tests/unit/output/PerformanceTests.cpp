@@ -1,13 +1,82 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "../UnitTestSuite.hpp"
+
+#include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "Fallout4HDR/output/PerformanceStatistics.hpp"
 #include "TestHarness.hpp"
-#include "UnitTestSuite.hpp"
 
 #include <limits>
+#include <string_view>
 
 namespace fo4hdr::tests {
 namespace {
+
+constexpr std::string_view kBaseConfiguration = R"ini(
+[General]
+DeveloperMode=0
+
+[Debug]
+TraceRenderPipeline=0
+DeveloperHdr10Reference=0
+ShowDeveloperOverlay=0
+ForceHdrSwapChainFailure=0
+)ini";
+
+void TestOptionalPerformanceConfiguration()
+{
+    auto parsed = ParsePluginConfiguration(kBaseConfiguration);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(!parsed.value.measurePerformance);
+
+    constexpr std::string_view enabled = R"ini(
+[General]
+DeveloperMode=1
+
+[Debug]
+TraceRenderPipeline=0
+MeasurePerformance=1
+DeveloperHdr10Reference=0
+ShowDeveloperOverlay=0
+ForceHdrSwapChainFailure=0
+)ini";
+    parsed = ParsePluginConfiguration(enabled);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(parsed.value.measurePerformance);
+
+    constexpr std::string_view withoutDeveloperMode = R"ini(
+[General]
+DeveloperMode=0
+
+[Debug]
+TraceRenderPipeline=0
+MeasurePerformance=1
+DeveloperHdr10Reference=0
+ShowDeveloperOverlay=0
+ForceHdrSwapChainFailure=0
+)ini";
+    parsed = ParsePluginConfiguration(withoutDeveloperMode);
+    FO4HDR_CHECK(!parsed.valid);
+    FO4HDR_CHECK(parsed.error ==
+        PluginConfigurationError::invalidCombination);
+
+    constexpr std::string_view duplicate = R"ini(
+[General]
+DeveloperMode=1
+
+[Debug]
+TraceRenderPipeline=0
+MeasurePerformance=0
+MeasurePerformance=1
+DeveloperHdr10Reference=0
+ShowDeveloperOverlay=0
+ForceHdrSwapChainFailure=0
+)ini";
+    parsed = ParsePluginConfiguration(duplicate);
+    FO4HDR_CHECK(!parsed.valid);
+    FO4HDR_CHECK(parsed.error ==
+        PluginConfigurationError::duplicateKey);
+}
 
 void TestFixedPerformanceStatistics()
 {
@@ -64,7 +133,7 @@ void TestFixedPerformanceStatistics()
     FO4HDR_CHECK(statistics.Percentiles().p99Milliseconds == 0.0);
 }
 
-void TestCpuBudgets()
+void TestFrozenM6Budgets()
 {
     const auto disabled = GetFrozenM6PerformanceBudget(
         FrozenM6PerformancePath::disabledBoundaryCpu);
@@ -87,6 +156,16 @@ void TestCpuBudgets()
         FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.25, .p99Milliseconds = 0.501}));
 
+    FO4HDR_CHECK(PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeGpu,
+        {.p95Milliseconds = 1.0, .p99Milliseconds = 1.5}));
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeGpu,
+        {.p95Milliseconds = 1.01, .p99Milliseconds = 1.5}));
+    FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
+        FrozenM6PerformancePath::activeGpu,
+        {.p95Milliseconds = 1.0, .p99Milliseconds = 1.51}));
+
     FO4HDR_CHECK(!PassesFrozenM6PerformanceBudget(
         FrozenM6PerformancePath::activeCpu,
         {.p95Milliseconds = 0.4, .p99Milliseconds = 0.3}));
@@ -104,8 +183,9 @@ void TestCpuBudgets()
 
 void RunPerformanceTests()
 {
+    TestOptionalPerformanceConfiguration();
     TestFixedPerformanceStatistics();
-    TestCpuBudgets();
+    TestFrozenM6Budgets();
 }
 
 }  // namespace fo4hdr::tests

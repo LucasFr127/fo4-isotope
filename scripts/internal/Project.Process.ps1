@@ -1,118 +1,84 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#requires -Version 7.4.6
 
 Set-StrictMode -Version Latest
 
-function Stop-Fo4HdrTestProcess {
-    param([Diagnostics.Process]$Process, [object]$Result)
-
-    try {
-        if ($Process.HasExited) { return $true }
-        $Process.Kill($true)
-        if ($Process.WaitForExit(5000)) { return $true }
-        $Result.detail += ' Termination wait expired.'
-    }
-    catch { $Result.detail += ' Termination failed: ' + $_.Exception.Message }
-    return $false
-}
-
-function Read-Fo4HdrTestProcessOutput {
-    param([Threading.Tasks.Task[]]$Tasks, [object]$Result)
-
-    if ($Tasks.Count -eq 0) { return $true }
-    try {
-        if (-not [Threading.Tasks.Task]::WaitAll($Tasks, 5000)) {
-            $Result.detail += ' Output pipes did not close in the cleanup wait.'
-            return $false
-        }
-        $Result.stdout = $Tasks[0].Result
-        $Result.stderr = $Tasks[1].Result
-        return $true
-    }
-    catch { $Result.detail += ' Output drain failed: ' + $_.Exception.Message }
-    return $false
-}
-
-function Set-Fo4HdrProcessStartInfo {
-    param([Diagnostics.Process]$Process, [string]$FilePath,
-        [string]$WorkingDirectory, [string[]]$Arguments)
-
-    $Process.StartInfo.FileName = $FilePath
-    $Process.StartInfo.WorkingDirectory = $WorkingDirectory
-    $Process.StartInfo.UseShellExecute = $false
-    $Process.StartInfo.CreateNoWindow = $true
-    $Process.StartInfo.RedirectStandardOutput = $true
-    $Process.StartInfo.RedirectStandardError = $true
-    foreach ($argument in $Arguments) {
-        if ($null -eq $argument) { throw 'Null process argument.' }
-        $Process.StartInfo.ArgumentList.Add($argument)
-    }
-}
-
-function Set-Fo4HdrTestExitResult {
-    param([Diagnostics.Process]$Process, [object]$Result, [bool]$AllowShaderSkip)
-
-    $Result.exitCode = $Process.ExitCode
-    $Result.category = if ($Result.exitCode -eq 0) { 'passed' }
-        elseif ($AllowShaderSkip -and $Result.exitCode -eq 77) { 'skipped' }
-        else { 'exitFailure' }
-}
-
-function Complete-Fo4HdrTestProcess {
-    param([Diagnostics.Process]$Process, [object[]]$Tasks, [object]$Result)
-
-    # Kill(tree) is best effort while the parent is live. Closed pipes
-    # do not prove all descendants exited; an outer job owns containment.
-    # Start/Kill scheduling is not bounded by these finite wait windows.
-    $stopped = Stop-Fo4HdrTestProcess $Process $Result
-    $drained = Read-Fo4HdrTestProcessOutput $Tasks $Result
-    $Result.cleanup = if ($stopped -and $drained) { 'waitsCompleted' } else { 'failed' }
-    if ($Result.cleanup -eq 'failed' -and $Result.category -in @('passed', 'skipped')) {
-        $Result.category = 'cleanupFailure'
-    }
-}
-
 function Invoke-Fo4HdrTestProcess {
     param(
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$FilePath,
+        [Parameter(Mandatory = $true)][string]$FilePath,
         [string[]]$Arguments = @(),
-        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$WorkingDirectory,
-        [ValidateRange(1, 2147483)][int]$TimeoutSeconds = 120,
-        [switch]$AllowShaderSkip
+        [Parameter(Mandatory = $true)][string]$WorkingDirectory,
+        [Parameter(Mandatory = $true)]
+        [ValidateRange(1, 2147483)][int]$TimeoutSeconds,
+        [switch]$AllowSkip
     )
 
-    $result = [pscustomobject]@{
-        category = 'startFailure'; exitCode = $null; stdout = ''; stderr = ''
-        detail = ''; cleanup = 'notStarted'
-    }
     $process = [Diagnostics.Process]::new()
-    $started = $false
-    $tasks = @()
-    try {
-        Set-Fo4HdrProcessStartInfo $process $FilePath $WorkingDirectory $Arguments
-        $started = $process.Start()
-        if (-not $started) { throw 'Process.Start returned false.' }
-        $tasks = @($process.StandardOutput.ReadToEndAsync(),
-            $process.StandardError.ReadToEndAsync())
-        if ($process.WaitForExit($TimeoutSeconds * 1000)) {
-            Set-Fo4HdrTestExitResult $process $result $AllowShaderSkip
-        }
-        else {
-            $result.category = 'timeout'
-            $result.detail = "Execution wait expired after $TimeoutSeconds seconds."
-        }
+    $process.StartInfo.FileName = $FilePath
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.WorkingDirectory = $WorkingDirectory
+    foreach ($argument in $Arguments) {
+        $process.StartInfo.ArgumentList.Add($argument)
     }
-    catch {
-        if ($started) { $result.category = 'executionFailure' }
-        $result.detail += $_.Exception.Message
+    $label = "$FilePath $($Arguments -join ' ')"
+    $started = $false
+    $outputTasks = @()
+    try {
+        $started = $process.Start()
+        if (-not $started) { throw "Unable to start test: $label" }
+        # Drain both pipes concurrently; publish through PowerShell so logs can redirect them.
+        $outputTasks = @(
+            $process.StandardOutput.ReadToEndAsync(),
+            $process.StandardError.ReadToEndAsync()
+        )
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            throw "Test timed out after $TimeoutSeconds seconds: $label"
+        }
+        Assert-Fo4HdrTestExit $process $AllowSkip $label
     }
     finally {
         try {
-            if ($started) {
-                Complete-Fo4HdrTestProcess $process $tasks $result
-            }
+            if ($started) { Stop-Fo4HdrTestProcess $process $label }
+            Write-Fo4HdrTestProcessOutput $outputTasks $label
         }
         finally { $process.Dispose() }
     }
-    return $result
+}
+
+function Stop-Fo4HdrTestProcess {
+    param([Diagnostics.Process]$Process, [string]$Label)
+
+    if (-not $process.HasExited) {
+        try { $process.Kill($true) }
+        catch [InvalidOperationException] {
+            if (-not $process.HasExited) { throw }
+        }
+        if (-not $process.WaitForExit(5000)) {
+            throw "Test process did not exit after termination: $label"
+        }
+    }
+}
+
+function Write-Fo4HdrTestProcessOutput {
+    param([object[]]$OutputTasks, [string]$Label)
+
+    if ($outputTasks.Count -and
+        -not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]$outputTasks, 5000)) {
+        throw "Test output did not close after termination: $label"
+    }
+    if ($outputTasks.Count) {
+        if ($outputTasks[0].Result.Length) { Write-Output $outputTasks[0].Result }
+        if ($outputTasks[1].Result.Length) { Write-Host -NoNewline $outputTasks[1].Result }
+    }
+}
+
+function Assert-Fo4HdrTestExit {
+    param([Diagnostics.Process]$Process, [bool]$AllowSkip, [string]$Label)
+    if ($AllowSkip -and $process.ExitCode -eq 77) {
+        Write-Host "SKIP: $label"
+    } elseif ($process.ExitCode -ne 0) {
+        throw "Test failed with exit code $($process.ExitCode): $label"
+    }
 }

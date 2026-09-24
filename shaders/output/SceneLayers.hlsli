@@ -6,7 +6,9 @@
 #define FO4HDR_SCENE_LAYERS
 
 #include "DisplayMath.hlsli"
-
+#ifdef FO4HDR_LAYER_ORACLES
+#include "../tonemap/Gt7.hlsli"
+#endif
 
 Texture2D<float4> FrameSource : register(t0);
 Texture2D<float4> CapturedMatte : register(t1);
@@ -69,7 +71,14 @@ float3 EvaluateFrameLayers(uint2 pixel)
     case 3u:
         light *= MenuWhite;
         break;
-
+#ifdef FO4HDR_LAYER_ORACLES
+    case 7u:
+        light = Fo4HdrGt7Bt2020AbsoluteNits(light, PeakWhite, ReferenceWhite);
+        break;
+    case 8u:
+        light = Fo4HdrGt7OfficialRec2020(light, PeakWhite);
+        break;
+#endif
     case 10u:
         light = (floor(pixel.x / max(1.0f, float(FrameSize.x) - 1.0f) * 31.0f + 1.0e-6f) *
             (PeakWhite * 1.125f / 31.0f)).xxx;

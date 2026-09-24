@@ -1,16 +1,43 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include <filesystem>
+#include "d3d11/GpuHarness.hpp"
+#include "reference/ShaderReference.hpp"
+
+int VerifyOperatorLutSampling(ID3D11Device& device, ID3D11DeviceContext& context);
 
 namespace fo4hdr::tests::gpu {
-void VerifyDisplayCalibration(const std::filesystem::path& fixtureDirectory);
-void VerifyHdrGradeTransfer(const std::filesystem::path& shaderPath);
-void BenchmarkOperatorLut(const std::filesystem::path& bytecodePath);
-void VerifyOperatorLut(const std::filesystem::path& fixtureDirectory);
-}
 
-namespace fo4hdr::tests {
-void RunSettingsPanelTests();
-}
+bool VerifyArmorEncodedComposition(Device& device);
 
+void VerifyCalibrationPatterns(Device& device);
+
+void VerifyContextQuerySafety();
+
+void VerifyDirectPresentation(Device& device);
+
+void VerifyGt7OperatorAndUi(Device& device);
+
+void VerifyGt7OfficialReference(Device& device);
+
+void VerifyLayerTransferReference(Device& device);
+
+void VerifyNativeReferenceState(Device& device);
+
+void VerifyNativeVanillaGradeRemoval(Device& device);
+
+void VerifyScopedPixelBindingRestoration(Device& device);
+
+void VerifyPresentationProxy(Device& device);
+
+void VerifyOutputDitherExperiment(Device& device);
+
+void VerifyPresentationState(Device& device);
+
+void VerifySeparatedUiProductionPath(Device& device, TestedToneMapper toneMapper);
+
+void VerifyShippingPixelShaders(Device& device);
+
+void VerifyLutGradeProfiles(Device& device);
+
+}  // namespace fo4hdr::tests::gpu

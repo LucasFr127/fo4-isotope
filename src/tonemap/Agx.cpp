@@ -2,6 +2,8 @@
 
 #include "Fallout4HDR/tonemap/Agx.hpp"
 
+#include "Fallout4HDR/output/Hdr10Color.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,18 +15,6 @@ namespace {
 using Matrix = std::array<std::array<double, 3>, 3>;
 
 constexpr double kMaximumSceneValue = 65504.0;
-
-using SigmoidSegment = AgxTransform::SigmoidSegment;
-using Sigmoid = AgxTransform::Sigmoid;
-
-struct AgxState
-{
-    double hdrSdrRatio;
-    double darkMaximumExponent;
-    Sigmoid formationSigmoid;
-    Sigmoid darkeningSigmoid;
-    double hdrPurity;
-};
 
 [[nodiscard]] LinearRgb Multiply(
     const Matrix& matrix,
@@ -42,8 +32,8 @@ struct AgxState
 
 [[nodiscard]] LinearRgb SanitizeScene(LinearRgb value) noexcept
 {
-    // Log encoding requires a nonnegative bounded scene domain. NaN and
-    // negative values use zero; positive infinity uses the FP16 maximum.
+    // CustomToneMappingURP bakes AgX over a nonnegative LUT domain. Contain
+    // invalid or out-of-domain scene samples before evaluating logarithms.
     std::array channels{value.red, value.green, value.blue};
     for (double& channel : channels)
     {
@@ -184,7 +174,15 @@ struct Log2Encoding
 // SPDX-SnippetBegin
 // SPDX-License-Identifier: MIT
 // SPDX-SnippetCopyrightText: Copyright (c) 2025 Akihiro Noguchi
-// SPDX-SnippetComment: adapted the selected neutral AgX core from aki-null/CustomToneMappingURP@ba6c68b5deafe4896115500d12cf976169d402ff/Runtime/Baker/AgX/AgXToneMapping.cs and Runtime/Baker/AgX/Sigmoid.cs. Modifications: dependency-free C++ double; fixed EV 0, contrast 2.7, HDR purity 0.5, shoulder power 2, P3Limit=false and SdrMaxNits=203; scene-linear BT.709 to absolute display-linear BT.2020 nits; finite/range handling. See THIRD_PARTY_NOTICES.md.
+// SPDX-SnippetComment: adapted the selected neutral AgX core from aki-null/CustomToneMappingURP@ba6c68b5deafe4896115500d12cf976169d402ff/Runtime/Baker/AgX/AgXToneMapping.cs and Runtime/Baker/AgX/Sigmoid.cs. Modifications: translated the Unity C# float3 baker to dependency-free C++ double; exposed bounded middle-gray, contrast, HDR-purity, and shoulder controls around the source defaults; fixed P3Limit=false and SdrMaxNits=203; adapted scene-linear BT.709 input to absolute display-linear BT.2020-nit output; and added fail-closed finite/range handling. This adaptation omits ApplyLuminanceCompensation and the P3 limiter. See THIRD_PARTY_NOTICES.md.
+[[nodiscard]] double LinearBreakpoint(
+    double numerator,
+    double slope,
+    double coordinate) noexcept
+{
+    return numerator / std::sqrt(slope * slope + 1.0) + coordinate;
+}
+
 struct CurvePoint
 {
     double x;
@@ -198,29 +196,24 @@ struct SigmoidShape
     double shoulderPower;
 };
 
-struct SegmentShape
-{
-    double power;
-    double slope;
-};
-
 [[nodiscard]] double SigmoidScale(
     CurvePoint limit,
     CurvePoint transition,
-    SegmentShape shape) noexcept
+    double power,
+    double slope) noexcept
 {
     const auto termA =
-        std::pow(shape.slope * (limit.x - transition.x), -shape.power);
+        std::pow(slope * (limit.x - transition.x), -power);
     const auto termB = std::pow(
-        shape.slope * (limit.x - transition.x) / (limit.y - transition.y),
-        shape.power) - 1.0;
-    return std::pow(termA * termB, -1.0 / shape.power);
+        slope * (limit.x - transition.x) / (limit.y - transition.y),
+        power) - 1.0;
+    return std::pow(termA * termB, -1.0 / power);
 }
 
 [[nodiscard]] double ExponentialCurve(
     double value,
-    const Sigmoid& sigmoid,
-    SigmoidSegment segment) noexcept
+    const AgxTransform::Sigmoid& sigmoid,
+    AgxTransform::SigmoidSegment segment) noexcept
 {
     const auto coordinate = sigmoid.slope * (value - sigmoid.transitionX) / segment.scale;
     const auto normalized = coordinate /
@@ -228,25 +221,27 @@ struct SegmentShape
     return segment.scale * normalized + sigmoid.transitionY;
 }
 
-[[nodiscard]] Sigmoid PrepareSigmoid(
+[[nodiscard]] AgxTransform::Sigmoid PrepareSigmoid(
     CurvePoint pivot,
     SigmoidShape shape) noexcept
 {
     // CustomToneMappingURP fixes both transition lengths to zero and the
     // limiting coordinates to (0,0) and (1,1).
-    const auto transitionToeX = pivot.x;
-    const auto transitionToeY = pivot.y;
+    const auto transitionToeX = LinearBreakpoint(0.0, shape.slope, pivot.x);
+    const auto transitionToeY = LinearBreakpoint(0.0, shape.slope, pivot.y);
     const auto transitionShoulderX = transitionToeX;
     const auto transitionShoulderY = transitionToeY;
 
     const auto scaleToe = -SigmoidScale(
         {1.0, 1.0},
         {1.0 - transitionToeX, 1.0 - transitionToeY},
-        {shape.toePower, shape.slope});
+        shape.toePower,
+        shape.slope);
     const auto scaleShoulder = SigmoidScale(
         {1.0, 1.0},
         {transitionShoulderX, transitionShoulderY},
-        {shape.shoulderPower, shape.slope});
+        shape.shoulderPower,
+        shape.slope);
     const auto intercept = transitionToeY - shape.slope * transitionToeX;
 
     return {
@@ -261,7 +256,7 @@ struct SegmentShape
 
 [[nodiscard]] double EvaluateSigmoid(
     double value,
-    const Sigmoid& sigmoid) noexcept
+    const AgxTransform::Sigmoid& sigmoid) noexcept
 {
     if (value < sigmoid.transitionX)
         return ExponentialCurve(
@@ -276,28 +271,24 @@ struct SegmentShape
         sigmoid.shoulder);
 }
 
-struct HueBlend
+[[nodiscard]] double LerpChromaticityAngle(
+    double first,
+    double second,
+    double amount) noexcept
 {
-    double first;
-    double second;
-    double amount;
-};
-
-[[nodiscard]] double LerpChromaticityAngle(HueBlend blend) noexcept
-{
-    const auto delta = blend.second - blend.first;
+    const auto delta = second - first;
     if (delta > 0.5)
-        blend.second -= 1.0;
+        second -= 1.0;
     else if (delta < -0.5)
-        blend.second += 1.0;
+        second += 1.0;
 
-    const auto result = blend.first + blend.amount * (blend.second - blend.first);
+    const auto result = first + amount * (second - first);
     return result - std::floor(result);
 }
 
 [[nodiscard]] LinearRgb ApplySigmoid(
     LinearRgb value,
-    const Sigmoid& sigmoid) noexcept
+    const AgxTransform::Sigmoid& sigmoid) noexcept
 {
     const auto apply = [=](double channel) noexcept {
         return EvaluateSigmoid(channel, sigmoid);
@@ -307,17 +298,17 @@ struct HueBlend
 
 [[nodiscard]] LinearRgb DarkenMiddleGrey(
     LinearRgb color,
-    const AgxState& transform) noexcept
+    const AgxTransform& transform) noexcept
 {
     const auto preHsv = RgbToHsv(color);
     constexpr double minimumExponent = -20.0;
-    const Log2Encoding encoding{minimumExponent, transform.darkMaximumExponent, kMidGrey};
+    const Log2Encoding encoding{minimumExponent, transform.DarkMaximumExponent(), kMidGrey};
 
     const auto darken = [&](double channel) noexcept {
         const auto encoded = Log2Encode(
             channel, encoding);
         const auto sigmoid = EvaluateSigmoid(
-            encoded, transform.darkeningSigmoid);
+            encoded, transform.DarkeningSigmoid());
         return Log2Decode(
             sigmoid, encoding);
     };
@@ -326,10 +317,10 @@ struct HueBlend
     const auto postHsv = RgbToHsv(darkenedLinear);
 
     return HsvToRgb({
-        LerpChromaticityAngle({
-            preHsv.hue, postHsv.hue, transform.hdrPurity}),
+        LerpChromaticityAngle(
+            preHsv.hue, postHsv.hue, transform.HdrPurity()),
         preHsv.saturation +
-            transform.hdrPurity *
+            transform.HdrPurity() *
                 (postHsv.saturation - preHsv.saturation),
         postHsv.value
     });
@@ -337,7 +328,7 @@ struct HueBlend
 
 [[nodiscard]] LinearRgb ApplyNeutralAgx(
     LinearRgb rec2020,
-    const AgxState& transform) noexcept
+    const AgxTransform& transform) noexcept
 {
     auto formation = Multiply(kInsetMatrix, rec2020);
     const auto preFormationHsv = RgbToHsv(formation);
@@ -350,7 +341,7 @@ struct HueBlend
     });
 
     auto displayLinear = ApplySigmoid(
-        formation, transform.formationSigmoid);
+        formation, transform.FormationSigmoid());
     displayLinear = {
         std::copysign(std::pow(std::abs(displayLinear.red), 2.4),
             displayLinear.red),
@@ -363,19 +354,19 @@ struct HueBlend
 
     const auto postFormationHsv = RgbToHsv(displayLinear);
     displayLinear = HsvToRgb({
-        LerpChromaticityAngle({
+        LerpChromaticityAngle(
             preFormationHsv.hue,
             postFormationHsv.hue,
-            kChromaMix}),
+            kChromaMix),
         postFormationHsv.saturation,
         postFormationHsv.value
     });
 
     const auto outset = Multiply(kOutsetMatrix, displayLinear);
     return {
-        outset.red * transform.hdrSdrRatio,
-        outset.green * transform.hdrSdrRatio,
-        outset.blue * transform.hdrSdrRatio
+        outset.red * transform.HdrSdrRatio(),
+        outset.green * transform.HdrSdrRatio(),
+        outset.blue * transform.HdrSdrRatio()
     };
 }
 
@@ -386,19 +377,13 @@ constexpr double kBt2020GreenLuminance = 0.6780;
 constexpr double kBt2020BlueLuminance = 0.0593;
 constexpr double kGamutScaleKnee = 0.05;
 
-struct ScaleBlend
-{
-    double first;
-    double second;
-    double knee;
-};
-
-[[nodiscard]] double SmoothMinimum(ScaleBlend scale) noexcept
+[[nodiscard]] double SmoothMinimum(
+    double first, double second, double knee) noexcept
 {
     const auto blend = std::clamp(
-        1.0 - std::abs(scale.first - scale.second) / scale.knee, 0.0, 1.0);
-    return std::min(scale.first, scale.second) -
-        0.25 * scale.knee * blend * blend;
+        1.0 - std::abs(first - second) / knee, 0.0, 1.0);
+    return std::min(first, second) -
+        0.25 * knee * blend * blend;
 }
 
 [[nodiscard]] bool IsValidDisplayPeak(double peak) noexcept
@@ -436,8 +421,8 @@ struct ScaleBlend
     // containment then scales RGB uniformly, avoiding the unstable division
     // by peak-minus-luminance for saturated highlights near display peak.
     const auto lowerScale = std::isfinite(maximumScale) ?
-        std::clamp(SmoothMinimum({1.0, std::max(maximumScale, 0.0),
-            kGamutScaleKnee}), 0.0, 1.0) : 1.0;
+        std::clamp(SmoothMinimum(1.0, std::max(maximumScale, 0.0),
+            kGamutScaleKnee), 0.0, 1.0) : 1.0;
     LinearRgb result{
         center + lowerScale * chroma.red,
         center + lowerScale * chroma.green,
@@ -458,7 +443,7 @@ struct ScaleBlend
     const auto upperLimit = displayPeakNits / maximum;
     const auto upperKnee = kGamutScaleKnee * chromaFraction;
     const auto upperScale = upperKnee > 0.0 ?
-        std::clamp(SmoothMinimum({1.0, upperLimit, upperKnee}), 0.0, 1.0) :
+        std::clamp(SmoothMinimum(1.0, upperLimit, upperKnee), 0.0, 1.0) :
         std::clamp(upperLimit, 0.0, 1.0);
     return ContainBt2020Nits({
         upperScale * result.red,
@@ -467,15 +452,15 @@ struct ScaleBlend
     }, displayPeakNits);
 }
 
-[[nodiscard]] LinearRgb ContainDisplayGamut(
+[[nodiscard]] LinearRgb ContainProductionGamut(
     LinearRgb value, double displayPeakNits) noexcept
 {
     if (!IsFinite(value) || !IsValidDisplayPeak(displayPeakNits)) return {};
     return ContainHighlightChroma(ContainNegativeChroma(value), displayPeakNits);
 }
 
-[[nodiscard]] LinearRgb EvaluateSceneNits(
-    const AgxState& transform,
+[[nodiscard]] LinearRgb EvaluateSourceLutNits(
+    const AgxTransform& transform,
     LinearRgb sceneLinear) noexcept
 {
     const LinearRgb containedBt709 = SanitizeScene(sceneLinear);
@@ -489,9 +474,47 @@ struct ScaleBlend
     };
 }
 
-[[nodiscard]] AgxState PrepareAgx(
-    double displayPeakNits, const ToneMapperParameters& parameters = {}) noexcept
+}  // namespace
+
+double AgxTransform::DisplayPeakNits() const noexcept
 {
+    return displayPeakNits_;
+}
+
+double AgxTransform::HdrSdrRatio() const noexcept
+{
+    return hdrSdrRatio_;
+}
+
+double AgxTransform::DarkMaximumExponent() const noexcept
+{
+    return darkMaximumExponent_;
+}
+
+double AgxTransform::HdrPurity() const noexcept
+{
+    return hdrPurity_;
+}
+
+const AgxTransform::Sigmoid& AgxTransform::FormationSigmoid() const noexcept
+{
+    return formationSigmoid_;
+}
+
+const AgxTransform::Sigmoid& AgxTransform::DarkeningSigmoid() const noexcept
+{
+    return darkeningSigmoid_;
+}
+
+std::optional<AgxTransform> CreateAgxTransform(
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
+{
+    if (!IsValidDisplayPeak(displayPeakNits) ||
+        !ValidateToneMapperParameters(
+            ProductionToneMapperAlgorithm::agX, parameters))
+        return std::nullopt;
+
     constexpr double fulcrumInput =
         -kLog2Minimum / (kLog2Maximum - kLog2Minimum);
     const auto fulcrumOutput = std::pow(kMidGrey, 1.0 / 2.4);
@@ -502,67 +525,78 @@ struct ScaleBlend
     constexpr double minimumExponent = -20.0;
     const auto maximumExponent = std::log2(1.0 / kMidGrey);
     const Log2Encoding encoding{minimumExponent, maximumExponent, kMidGrey};
-    const auto originalMiddleGrey = Log2Encode(kMidGrey, encoding);
+    const auto originalMiddleGrey = Log2Encode(
+        kMidGrey, encoding);
     const auto darkenedMiddleGrey = Log2Encode(
-        kMidGrey * std::exp2(parameters.agxMiddleGrayEv) / hdrSdrRatio, encoding);
+        kMidGrey * std::exp2(parameters.agxMiddleGrayEv) / hdrSdrRatio,
+        encoding);
 
-    return {
-        hdrSdrRatio,
-        maximumExponent,
-        PrepareSigmoid({fulcrumInput, fulcrumOutput},
-            {parameters.agxContrast, kExponentToe, shoulderExponent}),
-        PrepareSigmoid({originalMiddleGrey, darkenedMiddleGrey},
-            {1.000001, 3.0, 1.0}),
-        parameters.agxHdrPurity
-    };
-}
-
-}  // namespace
-
-LinearRgb ApplyAgxDisplayGamut(
-    LinearRgb displayLinearBt2020Nits, double displayPeakNits) noexcept
-{
-    return ContainDisplayGamut(displayLinearBt2020Nits, displayPeakNits);
-}
-
-std::optional<AgxTransform> CreateAgxTransform(
-    double displayPeakNits, const ToneMapperParameters& parameters) noexcept
-{
-    if (!IsValidDisplayPeak(displayPeakNits)) return std::nullopt;
-    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::agX, parameters)) return std::nullopt;
-    const auto prepared = PrepareAgx(displayPeakNits, parameters);
     AgxTransform transform;
     transform.displayPeakNits_ = displayPeakNits;
-    transform.hdrSdrRatio_ = prepared.hdrSdrRatio;
-    transform.darkMaximumExponent_ = prepared.darkMaximumExponent;
-    transform.hdrPurity_ = prepared.hdrPurity;
-    transform.formationSigmoid_ = prepared.formationSigmoid;
-    transform.darkeningSigmoid_ = prepared.darkeningSigmoid;
+    transform.hdrSdrRatio_ = hdrSdrRatio;
+    transform.darkMaximumExponent_ = maximumExponent;
+    transform.hdrPurity_ = parameters.agxHdrPurity;
+    transform.formationSigmoid_ = PrepareSigmoid(
+        {fulcrumInput, fulcrumOutput},
+        {parameters.agxContrast, kExponentToe, shoulderExponent});
+    transform.darkeningSigmoid_ = PrepareSigmoid(
+        {originalMiddleGrey, darkenedMiddleGrey}, {1.000001, 3.0, 1.0});
     return transform;
 }
 
 LinearRgb EvaluateAgxLutNits(
-    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
+    const AgxTransform& transform,
+    LinearRgb sceneLinear) noexcept
 {
-    const AgxState prepared{transform.hdrSdrRatio_, transform.darkMaximumExponent_,
-        transform.formationSigmoid_, transform.darkeningSigmoid_, transform.hdrPurity_};
-    return EvaluateSceneNits(prepared, sceneLinearBt709);
+    return EvaluateSourceLutNits(transform, sceneLinear);
+}
+
+LinearRgb EvaluateAgxLutNits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
+{
+    const auto transform = CreateAgxTransform(displayPeakNits, parameters);
+    return transform ? EvaluateAgxLutNits(*transform, sceneLinear) :
+        LinearRgb{};
 }
 
 LinearRgb MapAgxToBt2020Nits(
-    const AgxTransform& transform, LinearRgb sceneLinearBt709) noexcept
+    const AgxTransform& transform,
+    LinearRgb sceneLinear) noexcept
 {
     return ApplyAgxDisplayGamut(
-        EvaluateAgxLutNits(transform, sceneLinearBt709), transform.displayPeakNits_);
+        EvaluateAgxLutNits(transform, sceneLinear),
+        transform.DisplayPeakNits());
+}
+
+LinearRgb ApplyAgxDisplayGamut(
+    LinearRgb displayLinearBt2020Nits,
+    double displayPeakNits) noexcept
+{
+    return ContainProductionGamut(
+        displayLinearBt2020Nits, displayPeakNits);
 }
 
 LinearRgb MapAgxToBt2020Nits(
-    LinearRgb sceneLinearBt709, double displayPeakNits) noexcept
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
 {
-    if (!IsValidDisplayPeak(displayPeakNits)) return {};
-    const auto transform = PrepareAgx(displayPeakNits);
-    return ApplyAgxDisplayGamut(
-        EvaluateSceneNits(transform, sceneLinearBt709), displayPeakNits);
+    const auto transform = CreateAgxTransform(displayPeakNits, parameters);
+    return transform ? MapAgxToBt2020Nits(*transform, sceneLinear) :
+        LinearRgb{};
+}
+
+LinearRgb MapAgxSourceToBt2020Nits(
+    LinearRgb sceneLinear,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
+{
+    const auto transform = CreateAgxTransform(displayPeakNits, parameters);
+    return transform ? ContainBt2020Nits(
+        EvaluateAgxLutNits(*transform, sceneLinear), displayPeakNits) :
+        LinearRgb{};
 }
 
 }  // namespace fo4hdr
