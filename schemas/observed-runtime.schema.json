@@ -1,20 +1,117 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Caller-owned executable observation and local pin",
+  "title": "Fallout4HDR observed runtime candidate",
   "type": "object",
-  "required": ["schemaVersion", "observedAtUtc", "runtime", "status", "fileVersion", "executable"],
-  "properties": {
-    "schemaVersion": { "const": 1 },
-    "observedAtUtc": { "type": "string", "format": "date-time" },
-    "runtime": { "const": "1.10.163" },
-    "status": { "enum": ["observed", "runtime-pinned-unvalidated"] },
-    "fileVersion": { "const": "1.10.163.0" },
-    "executable": {
+  "required": [
+    "schemaVersion",
+    "observedAtUtc",
+    "runtime",
+    "fileVersion",
+    "platform",
+    "fo4Root",
+    "fallout4Exe",
+    "f4seLoader",
+    "f4seRuntime",
+    "addressLibrary"
+  ],
+  "definitions": {
+    "fileIdentity": {
       "type": "object",
-      "required": ["path", "sha256"],
+      "required": [
+        "path",
+        "sha256"
+      ],
       "properties": {
-        "path": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "observedAtUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "runtime": {
+      "enum": [
+        "1.10.163",
+        "1.10.984",
+        "1.11.221"
+      ]
+    },
+    "fileVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "platform": {
+      "enum": [
+        "steam",
+        "gog"
+      ]
+    },
+    "fo4Root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fallout4Exe": {
+      "$ref": "#/definitions/fileIdentity"
+    },
+    "f4seLoader": {
+      "$ref": "#/definitions/fileIdentity"
+    },
+    "f4seRuntime": {
+      "type": "object",
+      "required": [
+        "version",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^0\\.[0-9]+\\.[0-9]+$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "addressLibrary": {
+      "type": "object",
+      "required": [
+        "file",
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^version-[0-9-]+\\.bin$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        }
       },
       "additionalProperties": false
     }

@@ -217,7 +217,7 @@ $files = [string[]]@(
     "tests/source/ArchitectureLayout.Tests.ps1",
     "tests/source/PackageSource.Tests.ps1",
     "tests/source/PluginBoundarySource.Tests.ps1",
-    "tests/source/RuntimePinning.Tests.ps1",
+    "tests/runtime/RuntimePinning.Tests.ps1",
     "tests/source/SourceArchive.Tests.ps1",
     "tests/source/SourceText.Tests.ps1",
     "tests/source/SourceTree.Tests.ps1",
