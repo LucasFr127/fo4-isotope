@@ -5,9 +5,7 @@ version = 1
 # notices take precedence, including all upstream copyright and license terms.
 [[annotations]]
 path = [
-    ".clang-format", ".editorconfig", ".gitattributes", ".gitmodules",
-    ".gitignore", 
-    "third_party/selective-color/UPSTREAM.lock.json",
+    ".clang-format", ".editorconfig", ".gitattributes", ".gitmodules", ".gitignore",
     "config/**", "include/**", "runtime/**", "schemas/**", "scripts/**",
     "shaders/**", "src/**", "tests/**", "local.env.example.ps1",
     "versions.lock.json", "xmake.lua", "xmake-requires.lock",

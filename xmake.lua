@@ -25,7 +25,7 @@ includes("lib/commonlibf4")
 
 set_project("Fallout4HDR")
 set_version("0.0.0")
-set_license("GPL-3.0-or-later")
+set_license("LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions")
 set_languages("c++23")
 add_requires("imgui v1.92.6-docking", {
     configs = { shared = false, dx11 = true, win32 = true,

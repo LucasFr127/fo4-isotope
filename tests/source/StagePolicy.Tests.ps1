@@ -1,64 +1,146 @@
 # SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#requires -Version 7.4.6
-
-param([ValidateSet('debug', 'releasedbg')][string]$Mode = 'releasedbg',
-    [ValidateSet('1.10.163', '1.10.984', '1.11.221')][string]$Runtime = '1.10.163')
+[CmdletBinding()]
+param()
 
 $ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, '../..'))
-$stage = [IO.Path]::Combine($root, "dist/$Runtime/Data/F4SE/Plugins")
-$build = [IO.Path]::Combine($root, "build/windows/x64/$Mode")
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$fixture = Join-Path $tempBase ('Fallout4HDR-deploy-test-' + [Guid]::NewGuid().ToString('N'))
+$project = Join-Path $fixture 'project'
+$destination = Join-Path $fixture 'Fallout4HDR-mod'
+$game = Join-Path $fixture 'game'
+$stage = Join-Path $project 'dist/1.10.163/Data'
+$deploy = Join-Path $project 'scripts/deploy.ps1'
+$savedEnvironment = @{}
+foreach ($name in @('FO4_ROOT', 'FO4_MOD_ROOT', 'FO4HDR_STAGE_ROOT')) {
+    $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
 
-function Assert-StageDirectories {
-    $directory = [IO.DirectoryInfo]::new($stage)
-    while ($directory.FullName -ne $root) {
-        if (-not $directory.Exists -or ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "Missing or redirected staging directory: $($directory.FullName)"
+function Assert-DeployRejected {
+    param([string]$Reason)
+    try { & $deploy -Runtime '1.10.163' -Confirm:$false }
+    catch {
+        if ($_.Exception.Message.Contains($Reason, [StringComparison]::Ordinal)) { return }
+        throw
+    }
+    throw "Deployment unexpectedly accepted: $Reason"
+}
+
+function Test-DeploymentRejections {
+    & $deploy -Runtime '1.10.163' -WhatIf
+    $validationComplete = (Test-Path (Join-Path $project 'runtime-checked')) -and
+        (Test-Path (Join-Path $project 'metadata-checked'))
+    if ((Test-Path $destination) -or -not $validationComplete) {
+        throw 'WhatIf must validate the runtime and metadata without creating a deployment.'
+    }
+    $extraFile = Join-Path $stage 'unexpected.txt'
+    [IO.File]::WriteAllText($extraFile, 'extra')
+    Assert-DeployRejected 'Staged runtime file set is not exact.'
+    Remove-Item -LiteralPath $extraFile
+    $personalStage = Join-Path $stage 'F4SE/Plugins/Fallout4HDR/Personal.ini'
+    [IO.File]::WriteAllText($personalStage, 'must not ship')
+    Assert-DeployRejected 'Staged runtime file set is not exact.'
+    Remove-Item -LiteralPath $personalStage
+    $requiredFile = Join-Path $stage $relativeFiles[0]
+    Remove-Item -LiteralPath $requiredFile
+    Assert-DeployRejected 'Staged runtime file set is not exact.'
+    [IO.File]::WriteAllText($requiredFile, "fixture: $($relativeFiles[0])")
+    $rejection = Join-Path $project 'reject-metadata'
+    [IO.File]::WriteAllText($rejection, 'reject')
+    Assert-DeployRejected 'Fixture metadata rejection.'
+    Remove-Item -LiteralPath $rejection
+    if (Test-Path $destination) { throw 'Rejected staging created a deployment.' }
+
+    $env:FO4_MOD_ROOT = Join-Path $project 'Fallout4HDR-mod'
+    Assert-DeployRejected 'Deployment destination must not be inside the repository.'
+    $env:FO4_MOD_ROOT = Join-Path $game 'Fallout4HDR-mod'
+    Assert-DeployRejected 'Deployment destination must not be inside FO4_ROOT.'
+    $env:FO4_MOD_ROOT = $destination
+
+}
+
+function Test-DeploymentOwnedFiles {
+    New-Item -ItemType Directory -Path $destination | Out-Null
+    $unrelated = Join-Path $destination 'unrelated.txt'
+    $obsolete = Join-Path $destination 'obsolete.txt'
+    $personal = Join-Path $destination 'F4SE/Plugins/Fallout4HDR/Personal.ini'
+    New-Item -ItemType Directory -Path (Split-Path $personal) -Force | Out-Null
+    [IO.File]::WriteAllText($unrelated, 'keep')
+    [IO.File]::WriteAllText($obsolete, 'owned')
+    [IO.File]::WriteAllText($personal, 'personal')
+    $ownedManifest = Join-Path $destination '.fallout4hdr-owned-files.json'
+    [IO.File]::WriteAllText($ownedManifest,
+        '{"files":["obsolete.txt","F4SE/Plugins/Fallout4HDR/Personal.ini"]}')
+    & $deploy -Runtime '1.10.163' -Confirm:$false
+    $preserved = [IO.File]::ReadAllText($unrelated) -ceq 'keep' -and
+        [IO.File]::ReadAllText($personal) -ceq 'personal'
+    if ((Test-Path $obsolete) -or -not $preserved) {
+        throw 'Deployment must preserve unrelated files and Personal.ini.'
+    }
+    foreach ($relative in $relativeFiles) {
+        if ([IO.File]::ReadAllText((Join-Path $destination $relative)) -cne "fixture: $relative") {
+            throw "Deployment did not copy the expected bytes: $relative"
         }
-        $directory = $directory.Parent
     }
+    $recordedFiles = @((Get-Content -LiteralPath $ownedManifest -Raw | ConvertFrom-Json).files |
+        ForEach-Object { $_.Replace('\', '/') })
+    if (Compare-Object $relativeFiles $recordedFiles) { throw 'Owned-file manifest differs from deployment.' }
 }
 
-function Assert-StagedFile {
-    param([string]$Name, [string]$Source)
+function Remove-DeploymentFixture {
+    param([hashtable]$SavedEnvironment, [string]$Fixture, [string]$TempBase)
+    foreach ($entry in $savedEnvironment.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, 'Process')
+    }
+    $resolved = [IO.Path]::GetFullPath($fixture)
+    if (-not $resolved.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path $resolved -Leaf) -notlike 'Fallout4HDR-deploy-test-*') {
+        throw 'Refusing to remove an unexpected test fixture path.'
+    }
+    if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
+}
 
-    $file = [IO.FileInfo]::new([IO.Path]::Combine($stage, $Name))
-    if (-not $file.Exists -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Missing or redirected staged file: $Name"
+try {
+    New-Item -ItemType Directory -Path (Join-Path $project 'scripts/internal'), $game -Force | Out-Null
+    foreach ($script in @('deploy.ps1', 'internal/Project.Common.ps1', 'internal/Project.Process.ps1',
+        'internal/Project.Toolchain.ps1', 'internal/Project.Runtime.ps1', 'internal/Project.Runtime.Binary.ps1',
+        'internal/Project.Runtime.Profiles.ps1', 'internal/Project.Files.ps1',
+        'internal/Project.Source.ps1')) {
+        Copy-Item -LiteralPath (Join-Path $repoRoot "scripts/$script") -Destination (Join-Path $project "scripts/$script")
     }
-    $actual = [IO.File]::ReadAllBytes($file.FullName)
-    $expected = [IO.File]::ReadAllBytes($Source)
-    if ([Convert]::ToBase64String($actual) -cne [Convert]::ToBase64String($expected)) {
-        throw "Staged bytes differ from source: $Name"
+    # Only the installed-game and PE checks are stubbed; file validation and copying use the real deployment script.
+    [IO.File]::WriteAllText((Join-Path $project 'scripts/validate-runtime.ps1'), @"
+param([string]`$Runtime)
+if (`$Runtime -cne '1.10.163') { throw 'Unexpected runtime validation request.' }
+[IO.File]::WriteAllText((Join-Path `$PSScriptRoot '../runtime-checked'), 'checked')
+"@)
+    [IO.File]::WriteAllText((Join-Path $project 'scripts/verify-plugin-metadata.ps1'), @"
+param([string]`$Runtime, [switch]`$StageOnly)
+if (`$Runtime -cne '1.10.163') { throw 'Unexpected metadata runtime.' }
+if (-not `$StageOnly) { throw 'Expected stage-only metadata verification.' }
+if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture metadata rejection.' }
+[IO.File]::WriteAllText((Join-Path `$PSScriptRoot '../metadata-checked'), 'checked')
+"@)
+    $relativeFiles = @(
+        'F4SE/Plugins/Fallout4HDR.dll',
+        'F4SE/Plugins/Fallout4HDR.pdb',
+        'F4SE/Plugins/Fallout4HDR.ini',
+        'F4SE/Plugins/Fallout4HDR/Default.ini',
+        'F4SE/Plugins/Fallout4HDR/runtime-1.10.163.json'
+    )
+    foreach ($relative in $relativeFiles) {
+        $file = Join-Path $stage $relative
+        New-Item -ItemType Directory -Path (Split-Path $file) -Force | Out-Null
+        [IO.File]::WriteAllText($file, "fixture: $relative")
     }
-}
+    $env:FO4_ROOT = $game
+    $env:FO4_MOD_ROOT = $destination
+    $env:FO4HDR_STAGE_ROOT = Join-Path $fixture 'unused-stage'
 
-Assert-StageDirectories
-$required = @('Fallout4HDR.dll', 'Fallout4HDR.pdb', 'Fallout4HDR.ini', 'Fallout4HDR')
-$entries = @([IO.Directory]::EnumerateFileSystemEntries($stage))
-if ($entries.Count -ne $required.Count) { throw 'Unexpected staging entry count.' }
-foreach ($entry in $entries) {
-    if ([IO.Path]::GetFileName($entry) -cnotin $required) { throw "Unexpected staging entry: $entry" }
+    Test-DeploymentRejections
+    Test-DeploymentOwnedFiles
 }
-Assert-StagedFile 'Fallout4HDR.dll' ([IO.Path]::Combine($build, 'Fallout4HDR.dll'))
-Assert-StagedFile 'Fallout4HDR.pdb' ([IO.Path]::Combine($build, 'Fallout4HDR.pdb'))
-Assert-StagedFile 'Fallout4HDR.ini' ([IO.Path]::Combine($root, 'config/Fallout4HDR.ini'))
-$manifestName = "runtime-$Runtime.json"
-$manifestDirectory = [IO.DirectoryInfo]::new([IO.Path]::Combine($stage, 'Fallout4HDR'))
-if (-not $manifestDirectory.Exists -or
-    ($manifestDirectory.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-    throw 'Missing or redirected runtime manifest directory.'
+finally {
+    Remove-DeploymentFixture $savedEnvironment $fixture $tempBase
 }
-$manifestEntries = @($manifestDirectory.EnumerateFileSystemInfos())
-$childNames = @($manifestName, 'Default.ini')
-if ($manifestEntries.Count -ne $childNames.Count) {
-    throw 'Unexpected plugin data staging entry count.'
-}
-foreach ($entry in $manifestEntries) {
-    if ($entry.Name -cnotin $childNames) {
-        throw 'Unexpected plugin data staging entry.'
-    }
-}
-Assert-StagedFile "Fallout4HDR/$manifestName" ([IO.Path]::Combine($root, "runtime/$Runtime/manifest.json"))
-Assert-StagedFile 'Fallout4HDR/Default.ini' ([IO.Path]::Combine($root, 'config/Fallout4HDR/Default.ini'))
-Write-Host 'PASS staged plugin, symbols, canonical configuration, default profile pack, runtime manifest and exact file set'
+Write-Host 'Deployment staging, validation, WhatIf, and owned-file behavior tests passed.'
