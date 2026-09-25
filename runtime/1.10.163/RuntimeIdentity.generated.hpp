@@ -66,7 +66,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "beba5caaceeebedacbecc1cc97f7a1e1e22a0094356c1a25492efe6acf35d251";
+inline constexpr std::string_view kManifestSha256 = "511821530b3dec996dc454f696978efc5059151212f3058554ce817dd9a1bbdc";
 inline constexpr std::string_view kCommonLibCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
 inline constexpr std::array<std::uint32_t, 4> kLateGameUiCompositeDxbcHash{{
     0x525eaea9u, 0xaf037d1bu, 0x3ca0d381u, 0x8531a8b3u

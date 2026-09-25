@@ -82,33 +82,7 @@
     "target": {
       "addressLibraryId": 1388477,
       "rva": "0x028C8B30",
-      "expectedBytes": [
-        72,
-        137,
-        92,
-        36,
-        16,
-        72,
-        137,
-        108,
-        36,
-        24,
-        86,
-        87,
-        65,
-        84,
-        65,
-        86,
-        65,
-        87,
-        72,
-        129,
-        236,
-        160,
-        0,
-        0,
-        0
-      ]
+      "expectedBytes": [72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0]
     }
   },
   "imageSpaceObserver": {
@@ -394,7 +368,7 @@
   ],
   "resourceRules": [],
   "commonlibObservation": {
-    "status": "implementation-pending-runtime-validation",
+    "status": "runtime-validated",
     "relocationSource": {
       "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
       "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
@@ -452,348 +426,92 @@
       },
       "topLevelEffectCount": 72,
       "effects": [
-        {
-          "index": 0,
-          "symbol": "EFFECT_WORLD_CAMERA"
-        },
-        {
-          "index": 1,
-          "symbol": "EFFECT_TEMPORAL_AA_PRE_HDR"
-        },
-        {
-          "index": 2,
-          "symbol": "EFFECT_SUNBEAMS"
-        },
-        {
-          "index": 3,
-          "symbol": "EFFECT_HDR"
-        },
-        {
-          "index": 4,
-          "symbol": "EFFECT_HDR_CS"
-        },
-        {
-          "index": 5,
-          "symbol": "EFFECT_REFRACTION"
-        },
-        {
-          "index": 6,
-          "symbol": "EFFECT_DEPTH_OF_FIELD"
-        },
-        {
-          "index": 7,
-          "symbol": "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN"
-        },
-        {
-          "index": 8,
-          "symbol": "EFFECT_RADIAL_BLUR"
-        },
-        {
-          "index": 9,
-          "symbol": "EFFECT_FULLSCREEN_BLUR"
-        },
-        {
-          "index": 10,
-          "symbol": "EFFECT_MOTIONBLUR"
-        },
-        {
-          "index": 11,
-          "symbol": "EFFECT_GETHIT"
-        },
-        {
-          "index": 12,
-          "symbol": "EFFECT_VATS_TARGET"
-        },
-        {
-          "index": 13,
-          "symbol": "EFFECT_FULLSCREEN_COLOR"
-        },
-        {
-          "index": 14,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT"
-        },
-        {
-          "index": 15,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_LUT"
-        },
-        {
-          "index": 16,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_RESIZE"
-        },
-        {
-          "index": 17,
-          "symbol": "EFFECT_SHADER_FXAA"
-        },
-        {
-          "index": 18,
-          "symbol": "EFFECT_TEMPORAL_AA"
-        },
-        {
-          "index": 19,
-          "symbol": "EFFECT_TEMPORAL_OLD_AA"
-        },
-        {
-          "index": 20,
-          "symbol": "EFFECT_BOKEH_DEPTH_OF_FIELD"
-        },
-        {
-          "index": 21,
-          "symbol": "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION"
-        },
-        {
-          "index": 22,
-          "symbol": "EFFECT_MAP"
-        },
-        {
-          "index": 23,
-          "symbol": "EFFECT_BLUR3"
-        },
-        {
-          "index": 24,
-          "symbol": "EFFECT_BLUR5"
-        },
-        {
-          "index": 25,
-          "symbol": "EFFECT_BLUR7"
-        },
-        {
-          "index": 26,
-          "symbol": "EFFECT_BLUR9"
-        },
-        {
-          "index": 27,
-          "symbol": "EFFECT_BLUR11"
-        },
-        {
-          "index": 28,
-          "symbol": "EFFECT_BLUR13"
-        },
-        {
-          "index": 29,
-          "symbol": "EFFECT_BLUR15"
-        },
-        {
-          "index": 30,
-          "symbol": "EFFECT_NONHDR_BLUR3"
-        },
-        {
-          "index": 31,
-          "symbol": "EFFECT_NONHDR_BLUR5"
-        },
-        {
-          "index": 32,
-          "symbol": "EFFECT_NONHDR_BLUR7"
-        },
-        {
-          "index": 33,
-          "symbol": "EFFECT_NONHDR_BLUR9"
-        },
-        {
-          "index": 34,
-          "symbol": "EFFECT_NONHDR_BLUR11"
-        },
-        {
-          "index": 35,
-          "symbol": "EFFECT_NONHDR_BLUR13"
-        },
-        {
-          "index": 36,
-          "symbol": "EFFECT_NONHDR_BLUR15"
-        },
-        {
-          "index": 37,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR3"
-        },
-        {
-          "index": 38,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR5"
-        },
-        {
-          "index": 39,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR7"
-        },
-        {
-          "index": 40,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR9"
-        },
-        {
-          "index": 41,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR11"
-        },
-        {
-          "index": 42,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR13"
-        },
-        {
-          "index": 43,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR15"
-        },
-        {
-          "index": 44,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS"
-        },
-        {
-          "index": 45,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS"
-        },
-        {
-          "index": 46,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS"
-        },
-        {
-          "index": 47,
-          "symbol": "EFFECT_BLUR3_480x270CS"
-        },
-        {
-          "index": 48,
-          "symbol": "EFFECT_BLUR5_480x270CS"
-        },
-        {
-          "index": 49,
-          "symbol": "EFFECT_BLUR7_480x270CS"
-        },
-        {
-          "index": 50,
-          "symbol": "EFFECT_BLUR9_480x270CS"
-        },
-        {
-          "index": 51,
-          "symbol": "EFFECT_BLUR11_480x270CS"
-        },
-        {
-          "index": 52,
-          "symbol": "EFFECT_BLUR13_480x270CS"
-        },
-        {
-          "index": 53,
-          "symbol": "EFFECT_BLUR15_480x270CS"
-        },
-        {
-          "index": 54,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR3_480x270CS"
-        },
-        {
-          "index": 55,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR5_480x270CS"
-        },
-        {
-          "index": 56,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR7_480x270CS"
-        },
-        {
-          "index": 57,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR9_480x270CS"
-        },
-        {
-          "index": 58,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR11_480x270CS"
-        },
-        {
-          "index": 59,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR13_480x270CS"
-        },
-        {
-          "index": 60,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR15_480x270CS"
-        },
-        {
-          "index": 61,
-          "symbol": "EFFECT_WATER_DISPLACEMENT"
-        },
-        {
-          "index": 62,
-          "symbol": "EFFECT_NOISE"
-        },
-        {
-          "index": 63,
-          "symbol": "EFFECT_RAINSPLASH"
-        },
-        {
-          "index": 64,
-          "symbol": "EFFECT_VLS_LIGHT"
-        },
-        {
-          "index": 65,
-          "symbol": "EFFECT_VLS"
-        },
-        {
-          "index": 66,
-          "symbol": "EFFECT_PIPBOY_SCREEN"
-        },
-        {
-          "index": 67,
-          "symbol": "EFFECT_HUD_GLASS"
-        },
-        {
-          "index": 68,
-          "symbol": "EFFECT_MOD_MENU"
-        },
-        {
-          "index": 69,
-          "symbol": "EFFECT_AO"
-        },
-        {
-          "index": 70,
-          "symbol": "EFFECT_SAO"
-        },
-        {
-          "index": 71,
-          "symbol": "EFFECT_SAO_CS"
-        }
+        { "index": 0, "symbol": "EFFECT_WORLD_CAMERA" },
+        { "index": 1, "symbol": "EFFECT_TEMPORAL_AA_PRE_HDR" },
+        { "index": 2, "symbol": "EFFECT_SUNBEAMS" },
+        { "index": 3, "symbol": "EFFECT_HDR" },
+        { "index": 4, "symbol": "EFFECT_HDR_CS" },
+        { "index": 5, "symbol": "EFFECT_REFRACTION" },
+        { "index": 6, "symbol": "EFFECT_DEPTH_OF_FIELD" },
+        { "index": 7, "symbol": "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN" },
+        { "index": 8, "symbol": "EFFECT_RADIAL_BLUR" },
+        { "index": 9, "symbol": "EFFECT_FULLSCREEN_BLUR" },
+        { "index": 10, "symbol": "EFFECT_MOTIONBLUR" },
+        { "index": 11, "symbol": "EFFECT_GETHIT" },
+        { "index": 12, "symbol": "EFFECT_VATS_TARGET" },
+        { "index": 13, "symbol": "EFFECT_FULLSCREEN_COLOR" },
+        { "index": 14, "symbol": "EFFECT_SHADER_GAMMA_CORRECT" },
+        { "index": 15, "symbol": "EFFECT_SHADER_GAMMA_CORRECT_LUT" },
+        { "index": 16, "symbol": "EFFECT_SHADER_GAMMA_CORRECT_RESIZE" },
+        { "index": 17, "symbol": "EFFECT_SHADER_FXAA" },
+        { "index": 18, "symbol": "EFFECT_TEMPORAL_AA" },
+        { "index": 19, "symbol": "EFFECT_TEMPORAL_OLD_AA" },
+        { "index": 20, "symbol": "EFFECT_BOKEH_DEPTH_OF_FIELD" },
+        { "index": 21, "symbol": "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION" },
+        { "index": 22, "symbol": "EFFECT_MAP" },
+        { "index": 23, "symbol": "EFFECT_BLUR3" },
+        { "index": 24, "symbol": "EFFECT_BLUR5" },
+        { "index": 25, "symbol": "EFFECT_BLUR7" },
+        { "index": 26, "symbol": "EFFECT_BLUR9" },
+        { "index": 27, "symbol": "EFFECT_BLUR11" },
+        { "index": 28, "symbol": "EFFECT_BLUR13" },
+        { "index": 29, "symbol": "EFFECT_BLUR15" },
+        { "index": 30, "symbol": "EFFECT_NONHDR_BLUR3" },
+        { "index": 31, "symbol": "EFFECT_NONHDR_BLUR5" },
+        { "index": 32, "symbol": "EFFECT_NONHDR_BLUR7" },
+        { "index": 33, "symbol": "EFFECT_NONHDR_BLUR9" },
+        { "index": 34, "symbol": "EFFECT_NONHDR_BLUR11" },
+        { "index": 35, "symbol": "EFFECT_NONHDR_BLUR13" },
+        { "index": 36, "symbol": "EFFECT_NONHDR_BLUR15" },
+        { "index": 37, "symbol": "EFFECT_BRIGHTPASS_BLUR3" },
+        { "index": 38, "symbol": "EFFECT_BRIGHTPASS_BLUR5" },
+        { "index": 39, "symbol": "EFFECT_BRIGHTPASS_BLUR7" },
+        { "index": 40, "symbol": "EFFECT_BRIGHTPASS_BLUR9" },
+        { "index": 41, "symbol": "EFFECT_BRIGHTPASS_BLUR11" },
+        { "index": 42, "symbol": "EFFECT_BRIGHTPASS_BLUR13" },
+        { "index": 43, "symbol": "EFFECT_BRIGHTPASS_BLUR15" },
+        { "index": 44, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS" },
+        { "index": 45, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS" },
+        { "index": 46, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS" },
+        { "index": 47, "symbol": "EFFECT_BLUR3_480x270CS" },
+        { "index": 48, "symbol": "EFFECT_BLUR5_480x270CS" },
+        { "index": 49, "symbol": "EFFECT_BLUR7_480x270CS" },
+        { "index": 50, "symbol": "EFFECT_BLUR9_480x270CS" },
+        { "index": 51, "symbol": "EFFECT_BLUR11_480x270CS" },
+        { "index": 52, "symbol": "EFFECT_BLUR13_480x270CS" },
+        { "index": 53, "symbol": "EFFECT_BLUR15_480x270CS" },
+        { "index": 54, "symbol": "EFFECT_BRIGHTPASS_BLUR3_480x270CS" },
+        { "index": 55, "symbol": "EFFECT_BRIGHTPASS_BLUR5_480x270CS" },
+        { "index": 56, "symbol": "EFFECT_BRIGHTPASS_BLUR7_480x270CS" },
+        { "index": 57, "symbol": "EFFECT_BRIGHTPASS_BLUR9_480x270CS" },
+        { "index": 58, "symbol": "EFFECT_BRIGHTPASS_BLUR11_480x270CS" },
+        { "index": 59, "symbol": "EFFECT_BRIGHTPASS_BLUR13_480x270CS" },
+        { "index": 60, "symbol": "EFFECT_BRIGHTPASS_BLUR15_480x270CS" },
+        { "index": 61, "symbol": "EFFECT_WATER_DISPLACEMENT" },
+        { "index": 62, "symbol": "EFFECT_NOISE" },
+        { "index": 63, "symbol": "EFFECT_RAINSPLASH" },
+        { "index": 64, "symbol": "EFFECT_VLS_LIGHT" },
+        { "index": 65, "symbol": "EFFECT_VLS" },
+        { "index": 66, "symbol": "EFFECT_PIPBOY_SCREEN" },
+        { "index": 67, "symbol": "EFFECT_HUD_GLASS" },
+        { "index": 68, "symbol": "EFFECT_MOD_MENU" },
+        { "index": 69, "symbol": "EFFECT_AO" },
+        { "index": 70, "symbol": "EFFECT_SAO" },
+        { "index": 71, "symbol": "EFFECT_SAO_CS" }
       ],
       "activeData": [
-        {
-          "field": "eyeAdaptSpeed",
-          "offset": 128
-        },
-        {
-          "field": "bloomBlurRadius",
-          "offset": 132,
-          "xeditAlias": "Tonemap E"
-        },
-        {
-          "field": "bloomThreshold",
-          "offset": 136
-        },
-        {
-          "field": "bloomScale",
-          "offset": 140
-        },
-        {
-          "field": "receiveBloomThreshold",
-          "offset": 144,
-          "xeditAlias": "Auto Exposure Max"
-        },
-        {
-          "field": "white",
-          "offset": 148,
-          "xeditAlias": "Auto Exposure Min"
-        },
-        {
-          "field": "sunlightScale",
-          "offset": 152
-        },
-        {
-          "field": "skyScale",
-          "offset": 156
-        },
-        {
-          "field": "eyeAdaptStrength",
-          "offset": 160,
-          "xeditAlias": "Middle Gray"
-        },
-        {
-          "field": "cinematicSaturation",
-          "offset": 164
-        },
-        {
-          "field": "cinematicBrightness",
-          "offset": 168
-        },
-        {
-          "field": "cinematicContrast",
-          "offset": 172
-        }
+        { "field": "eyeAdaptSpeed", "offset": 128 },
+        { "field": "bloomBlurRadius", "offset": 132, "xeditAlias": "Tonemap E" },
+        { "field": "bloomThreshold", "offset": 136 },
+        { "field": "bloomScale", "offset": 140 },
+        { "field": "receiveBloomThreshold", "offset": 144, "xeditAlias": "Auto Exposure Max" },
+        { "field": "white", "offset": 148, "xeditAlias": "Auto Exposure Min" },
+        { "field": "sunlightScale", "offset": 152 },
+        { "field": "skyScale", "offset": 156 },
+        { "field": "eyeAdaptStrength", "offset": 160, "xeditAlias": "Middle Gray" },
+        { "field": "cinematicSaturation", "offset": 164 },
+        { "field": "cinematicBrightness", "offset": 168 },
+        { "field": "cinematicContrast", "offset": 172 }
       ]
     },
     "relocations": [
