@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 function Clear-Fo4HdrSourceRange {
     param([hashtable]$Scanner, [int]$End, [string[]]$Keep = @("`r", "`n"))
     $output = $Scanner.output

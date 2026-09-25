@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #requires -Version 7.4.6
 
 param([string]$Destination, [string]$SpdlogArchive = $env:FO4HDR_SPDLOG_ARCHIVE,
@@ -319,7 +319,12 @@ $files = [string[]]@(
     "tests/unit/ui/DisplayCalibrationTests.cpp",
     "tests/unit/config/HdrGradePackTests.cpp",
     "tests/runtime/ImageSpaceProfile.Tests.ps1",
-    "tests/unit/graphics/ScopedD3D11ComputeConstantBufferTests.cpp"
+    "tests/unit/graphics/ScopedD3D11ComputeConstantBufferTests.cpp",
+    "local.env.example.ps1",
+    "scripts/generate-combined-license.ps1",
+    "LICENSES/MIT.txt",
+    "REUSE.toml",
+    "LICENSES/LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt"
 )
 $sources = [Collections.Generic.SortedDictionary[string, byte[]]]::new([StringComparer]::Ordinal)
 foreach ($relative in $files) {

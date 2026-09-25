@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 #include "Fallout4HDR/config/SettingsPersistence.hpp"

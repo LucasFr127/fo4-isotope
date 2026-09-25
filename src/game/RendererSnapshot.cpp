@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include <RE/Fallout.h>
 #include "GameStateObserver.hpp"
 #include "GameObservationMemory.hpp"

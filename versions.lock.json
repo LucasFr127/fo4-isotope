@@ -3,7 +3,7 @@
   "project": {
     "name": "Fallout4HDR",
     "version": "0.0.0-dev",
-    "license": "GPL-3.0-or-later"
+    "license": "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
   },
   "toolchain": {
     "requirements": {
@@ -31,7 +31,8 @@
       },
       "xmake": "3.0.9",
       "powerShell": "7.6.5",
-      "git": "2.55.0.windows.3"
+      "git": "2.55.0.windows.3",
+      "reuse": "6.2.0"
     }
   },
   "commonlib": {

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #requires -Version 7.4.6
 
 $ErrorActionPreference = "Stop"
@@ -316,7 +316,12 @@ $expected = [string[]]@(
     "tests/unit/ui/DisplayCalibrationTests.cpp",
     "tests/unit/config/HdrGradePackTests.cpp",
     "tests/runtime/ImageSpaceProfile.Tests.ps1",
-    "tests/unit/graphics/ScopedD3D11ComputeConstantBufferTests.cpp"
+    "tests/unit/graphics/ScopedD3D11ComputeConstantBufferTests.cpp",
+    "local.env.example.ps1",
+    "scripts/generate-combined-license.ps1",
+    "LICENSES/MIT.txt",
+    "REUSE.toml",
+    "LICENSES/LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt"
 )
 $imguiFiles = @("imgui.cpp", "imgui_draw.cpp", "imgui_tables.cpp", "imgui_widgets.cpp",
     "imgui.h", "imgui_internal.h", "imconfig.h", "imstb_rectpack.h", "imstb_textedit.h",

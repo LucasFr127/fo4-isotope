@@ -1,3 +1,18 @@
+# Build output and local build state.
 /build/
-/.xmake/
 /dist/
+/.xmake/
+
+# Machine-local configuration and generated diagnostics.
+/local.env.ps1
+*.rdc
+*.dmp
+*.mdmp
+*.etl
+*.log
+*.wer
+*.exr
+*.obj
+*.pdb
+*.suo
+*.user

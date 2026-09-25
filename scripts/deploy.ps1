@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
 param(
     [ValidateSet("1.10.163", "1.10.984", "1.11.221")]

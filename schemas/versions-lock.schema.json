@@ -214,7 +214,7 @@
           "minLength": 1
         },
         "license": {
-          "const": "GPL-3.0-or-later"
+          "const": "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
         }
       },
       "additionalProperties": false
@@ -271,7 +271,8 @@
             "windowsSdk",
             "xmake",
             "powerShell",
-            "git"
+            "git",
+            "reuse"
           ],
           "properties": {
             "visualStudio": {
@@ -344,6 +345,10 @@
             "git": {
               "type": "string",
               "minLength": 1
+            },
+            "reuse": {
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
             }
           },
           "additionalProperties": false

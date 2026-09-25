@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #ifndef FALLOUT4HDR_OPERATOR_LUT_HLSLI
 #define FALLOUT4HDR_OPERATOR_LUT_HLSLI
 

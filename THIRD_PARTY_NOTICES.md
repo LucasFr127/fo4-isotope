@@ -1,8 +1,5 @@
 # Third-party notices
 
-The project grants the additional permissions in
-[COPYING.CommonLib-Exceptions](COPYING.CommonLib-Exceptions) for its own code.
-
 ## CommonLibF4
 
 GPL-3.0-or-later with the Modding and GPL-3.0 Linking (with Corresponding

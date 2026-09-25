@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [string]$Repository =
@@ -153,14 +153,14 @@ license identity. Review the upstream change and license policy deliberately.
     if ($upstreamExceptionHash -ne $localExceptionHash) {
         throw @"
 The project COPYING.CommonLib-Exceptions file does not match the selected commonlib-shared commit.
-Review the upstream change, update the license policy and retained license/exception
+Review the upstream change, update the license policy and combined LicenseRef
 text deliberately, then rerun this command.
 "@
     }
     if ($commonExceptionsHash -ne $localExceptionHash) {
         throw @"
 The project COPYING.CommonLib-Exceptions file does not match the selected CommonLibF4 commit.
-Review the upstream change, update the license policy and retained license/exception
+Review the upstream change, update the license policy and combined LicenseRef
 text deliberately, then rerun this command.
 "@
     }

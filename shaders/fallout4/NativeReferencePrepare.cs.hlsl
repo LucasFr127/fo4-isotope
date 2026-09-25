@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 Texture3D<float4> NativeLook0 : register(t0);
 Texture3D<float4> NativeLook1 : register(t1);
 Texture3D<float4> NativeLook2 : register(t2);

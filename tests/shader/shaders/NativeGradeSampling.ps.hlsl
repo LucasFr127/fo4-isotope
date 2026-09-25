@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Test-only observation of the actual guide and weighted texture samples.
 // Reuse the shipping sampling stage, but stop before decode/grade transfer;
 // the C++ oracle evaluates those stages independently from these readbacks.
