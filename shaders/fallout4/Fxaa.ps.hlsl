@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
-// Copyright (c) 2025 Carlos Lopez Jr.
-// Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/games/fallout4/fxaa_0x4FB4DA20.ps_5_0.hlsl
-// Adaptation: retain native filter and bindings for nonnegative linear HDR inputs.
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/fxaa_0x4FB4DA20.ps_5_0.hlsl
+// Whole-file adaptation for Fallout4HDR. Modification: retain the original
+// Fallout 4 FXAA body while preserving the sign of the FP16 HDR input around
+// the algorithm's luminance-domain absolute-value operations.
 // See THIRD_PARTY_NOTICES.md.
 
 Texture2D<float4> t0 : register(t0);
@@ -23,10 +24,9 @@ void main(
                                       out float4 o0 : SV_Target0
 ) {
   float4 r0, r1, r2, r3, r4, r5;
-  uint4 bitmask, uiDest;
-  float4 fDest;
 
   r0.xyzw = t0.SampleLevel(s0_s, v1.xy, 0).xyzw;
+  float3 signs = sign(r0.xyz);
   r1.xyz = t0.Gather(s0_s, v1.xy).xyz;
   r1.xyz = abs(r1.xyz);
   r2.xyz = t0.Gather(s0_s, v1.xy, int2(-1, -1)).xzw;
@@ -209,5 +209,6 @@ void main(
     r0.xyz = abs(r0.xyz);
   }
   o0.xyzw = r0.xyzw;
+  o0.xyz *= signs;
   return;
 }
