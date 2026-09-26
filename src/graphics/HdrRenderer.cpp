@@ -113,6 +113,10 @@ void ResetResources(bool retainColorControl) noexcept
 {
     g_nativeReferenceStatus = "Waiting for a color grading draw.";
     CloseArmorEncodedCompositionForLifecycle();
+    // A held comparison is transient UI state. Restore its unsaved Image
+    // draft before retiring the device generation so it cannot become the
+    // state applied after HDR/resource recovery.
+    RestoreHeldImageComparison();
     UnbindPresentationProxy();
     ResetSceneTracking();
     ResetDeveloperExposureResources();
@@ -243,7 +247,7 @@ struct DisplayGenerationObservation
 }
 void RetireLostDeviceGeneration() noexcept
 {
-    if (!ShutdownSettingsWindowBackend()) return;
+    ShutdownSettingsWindowBackend();
     ResetResources();
     ResetReplacementShaders();
     ResetShaderRegistry();
@@ -403,7 +407,7 @@ void ObserveQualifiedSettingsDrawThread() noexcept
 void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
 {
     g_activeSettings = static_cast<const HdrSettings&>(configuration);
-    InitializeSettingsWindow(g_activeSettings);
+    InitializeSettingsWindow(g_activeSettings, configuration.interfaceSettings);
     g_settingsGeneration = 1;
     g_desiredSettingsGeneration = 1;
     g_lutRequestGeneration = 0;

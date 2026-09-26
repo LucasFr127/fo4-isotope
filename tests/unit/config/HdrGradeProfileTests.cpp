@@ -191,7 +191,7 @@ void TestGradeProfileRoundTrip()
         "[LUT:stale.dds]\nColor=1\nStaleOwnedValue=removed\n"
         "[IMGS:stale.esm|000001]\nColor=2\n"
         "[Unrelated]\nKeep=1\n";
-    const auto saved = RewriteHdrSettingsIni(original, settings);
+    const auto saved = RewriteHdrSettingsIni(original, settings, {});
     FO4HDR_CHECK(saved.find("stale.dds") == std::string::npos);
     FO4HDR_CHECK(saved.find("stale.esm|000001") == std::string::npos);
     FO4HDR_CHECK(saved.find("StaleOwnedValue") == std::string::npos);
@@ -204,11 +204,18 @@ void TestGradeProfileRoundTrip()
     FO4HDR_CHECK(saved.find(
         "[IMGS:fallout4.esm|00abcd]\nColor=45\nLuminance=55\n") !=
         std::string::npos);
+    const auto positionOnly = RewriteHdrWindowPositionIni(saved, 20.0, 30.0);
+    FO4HDR_CHECK(positionOnly.find(
+        "[LUT:textures/effects/night.dds]\nColor=35\nLuminance=65\n") !=
+        std::string::npos);
+    FO4HDR_CHECK(positionOnly.find(
+        "[IMGS:fallout4.esm|00abcd]\nColor=45\nLuminance=55\n") !=
+        std::string::npos);
     const auto roundTrip = ParsePluginConfiguration(saved);
     FO4HDR_CHECK(roundTrip.valid);
     FO4HDR_CHECK(roundTrip.value.lutGradeProfiles ==
         settings.lutGradeProfiles);
-    const auto resaved = RewriteHdrSettingsIni(saved, settings);
+    const auto resaved = RewriteHdrSettingsIni(saved, settings, {});
     FO4HDR_CHECK(resaved == saved);}
 
 void TestLutGradeProfiles()

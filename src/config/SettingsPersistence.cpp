@@ -45,25 +45,35 @@ struct PersistedKey
     std::string_view section;
     std::string_view key;
     double HdrSettings::*number{};
+    double HdrInterfaceSettings::*interfaceNumber{};
     bool algorithm{};
+    bool hotkey{};
     bool colorGradingMethod{};
     double ToneMapperParameters::*toneMapperNumber{};
     bool lutProfilesEnabled{};
 };
 
-constexpr std::array<PersistedKey, 26> kPersistedKeys{{
+constexpr std::array<PersistedKey, 32> kPersistedKeys{{
     {"Output", "DisplayPeakNits", &HdrSettings::displayPeakNits},
     {"Output", "UiPaperWhiteNits", &HdrSettings::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", &HdrSettings::videoWhiteNits},
-    {"ToneMapper", "Algorithm", nullptr, true},
-    {"ACES2LMT", "LookStrength", nullptr, false, false, &ToneMapperParameters::acesLookStrength},
-    {"AgX", "MiddleGray", nullptr, false, false, &ToneMapperParameters::agxMiddleGrayEv},
-    {"AgX", "Contrast", nullptr, false, false, &ToneMapperParameters::agxContrast},
-    {"AgX", "HdrPurity", nullptr, false, false, &ToneMapperParameters::agxHdrPurity},
-    {"AgX", "ShoulderPower", nullptr, false, false, &ToneMapperParameters::agxHdrShoulderPower},
-    {"GT7", "ToeStrength", nullptr, false, false, &ToneMapperParameters::gt7ToeStrength},
-    {"GT7", "ShoulderStart", nullptr, false, false, &ToneMapperParameters::gt7ShoulderStart},
-    {"GT7", "ColorBlend", nullptr, false, false, &ToneMapperParameters::gt7ColorBlend},
+    {"ToneMapper", "Algorithm", nullptr, nullptr, true},
+    {"ACES2LMT", "LookStrength", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::acesLookStrength},
+    {"AgX", "MiddleGray", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::agxMiddleGrayEv},
+    {"AgX", "Contrast", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::agxContrast},
+    {"AgX", "HdrPurity", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::agxHdrPurity},
+    {"AgX", "ShoulderPower", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::agxHdrShoulderPower},
+    {"GT7", "ToeStrength", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::gt7ToeStrength},
+    {"GT7", "ShoulderStart", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::gt7ShoulderStart},
+    {"GT7", "ColorBlend", nullptr, nullptr, false, false, false,
+        &ToneMapperParameters::gt7ColorBlend},
     {"Image", "Exposure", &HdrSettings::exposureEv},
     {"Image", "Contrast", &HdrSettings::contrast},
     {"Image", "Blacks", &HdrSettings::blacks},
@@ -72,12 +82,24 @@ constexpr std::array<PersistedKey, 26> kPersistedKeys{{
     {"Image", "Saturation", &HdrSettings::saturationPercent},
     {"Image", "Temperature", &HdrSettings::temperature},
     {"Image", "Tint", &HdrSettings::tint},
-    {"Image", "ColorGradingMethod", nullptr, false, true},
-    {"Effects", "VanillaColorGradingStrength", &HdrSettings::vanillaColorGradingStrengthPercent},
-    {"Effects", "VanillaGradeLuminance", &HdrSettings::vanillaGradeLuminancePercent},
-    {"Effects", "VanillaGradeColor", &HdrSettings::vanillaGradeColorPercent},
-    {"Effects", "LutProfilesEnabled", nullptr, false, false, nullptr, true},
-    {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent}
+    {"Image", "ColorGradingMethod", nullptr, nullptr, false, false, true},
+    {"Effects", "VanillaColorGradingStrength",
+        &HdrSettings::vanillaColorGradingStrengthPercent},
+    {"Effects", "VanillaGradeLuminance",
+        &HdrSettings::vanillaGradeLuminancePercent},
+    {"Effects", "VanillaGradeColor",
+        &HdrSettings::vanillaGradeColorPercent},
+    {"Effects", "LutProfilesEnabled", nullptr, nullptr, false, false,
+        false, nullptr, true},
+    {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent},
+    {"Interface", "Scale", nullptr, &HdrInterfaceSettings::scale},
+    {"Interface", "WindowWidth", nullptr,
+        &HdrInterfaceSettings::windowWidth},
+    {"Interface", "WindowHeight", nullptr,
+        &HdrInterfaceSettings::windowHeight},
+    {"Interface", "WindowX", nullptr, &HdrInterfaceSettings::windowX},
+    {"Interface", "WindowY", nullptr, &HdrInterfaceSettings::windowY},
+    {"Interface", "ToggleKey", nullptr, nullptr, false, true}
 }};
 
 struct SelectivePersistedKey
@@ -117,8 +139,14 @@ std::filesystem::path g_personalIniPath;
 // distributed INIs remain read-only for the process lifetime.
 LutGradeProfiles g_distributedProfiles{};
 HdrSettings g_requestedSettings{};
+HdrInterfaceSettings g_requestedInterfaceSettings{};
+double g_requestedWindowX{-1.0};
+double g_requestedWindowY{-1.0};
 DisplayCalibrationProfile g_requestedDisplayCalibration{};
 DisplayCalibrationOperation g_requestedDisplayCalibrationOperation{};
+std::uint64_t g_requestedPositionGeneration{}; // under g_requestLock
+std::atomic<SettingsPersistenceState> g_positionState{
+    SettingsPersistenceState::unavailable};
 std::atomic_flag g_requestLock = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> g_requestedGeneration{};
 std::atomic<std::uint64_t> g_completedGeneration{};
@@ -206,14 +234,19 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
 
 [[nodiscard]] std::string KeyValue(
     const PersistedKey& key,
-    const HdrSettings& settings)
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings)
 {
     std::string result(key.key);
     result.push_back('=');
     if (key.algorithm)
         result.append(ToString(settings.productionAlgorithm));
+    else if (key.hotkey)
+        result.append(FormatHdrSettingsHotkey(interfaceSettings.toggleKey).data());
     else if (key.colorGradingMethod)
         result.append(ToString(settings.colorGradingMethod));
+    else if (key.interfaceNumber != nullptr)
+        result.append(FormatNumber(interfaceSettings.*key.interfaceNumber));
     else if (key.toneMapperNumber != nullptr)
         result.append(FormatNumber(
             settings.toneMapperParameters.*key.toneMapperNumber));
@@ -551,7 +584,17 @@ private:
 class SettingsIniWriter
 {
 public:
-    explicit SettingsIniWriter(const HdrSettings& settings) : settings_(settings) {}
+    SettingsIniWriter(const HdrSettings& settings,
+        const HdrInterfaceSettings& interfaceSettings, bool positionOnly) :
+        settings_(settings), interfaceSettings_(interfaceSettings), positionOnly_(positionOnly)
+    {
+        if (!positionOnly_) return;
+        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
+            seen_[index] = !IsPositionKey(kPersistedKeys[index]);
+        selectiveSeen_.fill(true);
+        selectiveEnabledSeen_ = true;
+        selectiveAmountSeen_ = true;
+    }
 
     [[nodiscard]] std::string Rewrite(std::string_view original)
     {
@@ -567,9 +610,15 @@ public:
     }
 
 private:
+    [[nodiscard]] static bool IsPositionKey(const PersistedKey& key) noexcept
+    {
+        return key.key == "WindowX" || key.key == "WindowY";
+    }
+
     [[nodiscard]] bool IsRetiredKey(std::string_view name) const noexcept
     {
         // A full save performs one-way migration of retired names.
+        if (positionOnly_) return false;
         if (section_ == "ToneMapper") return name == "ExposureEV";
         return section_ == "Image" && name == "GradeTransfer";
     }
@@ -579,8 +628,9 @@ private:
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
         {
             const auto& key = kPersistedKeys[index];
+            if (positionOnly_ && !IsPositionKey(key)) continue;
             if (section_ != key.section || name != key.key) continue;
-            result_.append(KeyValue(key, settings_));
+            result_.append(KeyValue(key, settings_, interfaceSettings_));
             seen_[index] = true;
             return true;
         }
@@ -620,7 +670,7 @@ private:
     {
         const auto retired = IsRetiredKey(name);
         const auto known = ReplaceKnownKey(name);
-        if (section_ == "SelectiveColor")
+        if (!positionOnly_ && section_ == "SelectiveColor")
             return ReplaceSelectiveKey(name) || known || retired;
         return known || retired;
     }
@@ -662,13 +712,13 @@ private:
         result_.append("[").append(group).append("]").append(newline_);
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
             if (kPersistedKeys[index].section == group && !seen_[index])
-                result_.append(KeyValue(kPersistedKeys[index], settings_)).append(newline_);
+                result_.append(KeyValue(kPersistedKeys[index], settings_, interfaceSettings_)).append(newline_);
     }
 
     void AppendMissingGroups()
     {
-        constexpr std::array<std::string_view, 8> groups{"Output", "ToneMapper",
-            "ACES2LMT", "AgX", "GT7", "Image", "SelectiveColor", "Effects"};
+        constexpr std::array<std::string_view, 9> groups{"Output", "ToneMapper",
+            "ACES2LMT", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface"};
         for (const auto group : groups)
         {
             if (group == "SelectiveColor") AppendMissingSelective();
@@ -677,6 +727,8 @@ private:
     }
 
     const HdrSettings& settings_;
+    const HdrInterfaceSettings& interfaceSettings_;
+    bool positionOnly_{};
     std::array<bool, kPersistedKeys.size()> seen_{};
     std::array<bool, kSelectivePersistedKeys.size()> selectiveSeen_{};
     bool selectiveEnabledSeen_{};
@@ -687,9 +739,10 @@ private:
 };
 
 [[nodiscard]] std::string RewriteIni(std::string_view original,
-    const HdrSettings& settings)
+    const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings,
+    bool positionOnly = false)
 {
-    return SettingsIniWriter(settings).Rewrite(original);
+    return SettingsIniWriter(settings, interfaceSettings, positionOnly).Rewrite(original);
 }
 
 [[nodiscard]] std::filesystem::path ResolveBackingPath(
@@ -797,19 +850,25 @@ private:
 }
 
 [[nodiscard]] bool SaveSettings(
-    const HdrSettings& settings) noexcept
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings,
+    bool positionOnly) noexcept
 {
     try
     {
-        if (!SavePersonalProfiles(settings)) return false;
+        if (!positionOnly && !SavePersonalProfiles(settings)) return false;
 
         std::string original;
         if (!ReadPersistenceFile(g_iniPath, original)) return false;
+        if (positionOnly)
+            return ReplacePersistenceFile(g_iniPath,
+                RewriteHdrWindowPositionIni(original,
+                    interfaceSettings.windowX, interfaceSettings.windowY));
         auto mainSettings = settings;
         mainSettings.lutGradeProfiles.count = 0;
         return ReplacePersistenceFile(g_iniPath,
             RewriteHdrSettingsIni(
-                original, mainSettings));
+                original, mainSettings, interfaceSettings));
     }
     catch (...)
     {
@@ -846,6 +905,7 @@ private:
 struct PersistenceGenerations
 {
     std::uint64_t settings{};
+    std::uint64_t position{};
     std::uint64_t calibration{};
     bool operator==(const PersistenceGenerations&) const = default;
 };
@@ -853,6 +913,7 @@ struct PersistenceGenerations
 struct PersistenceRequest
 {
     HdrSettings settings;
+    HdrInterfaceSettings interfaceSettings;
     DisplayCalibrationProfile calibration;
     DisplayCalibrationOperation calibrationOperation{};
     PersistenceGenerations generations;
@@ -861,8 +922,9 @@ struct PersistenceRequest
 struct PendingPersistence
 {
     bool settings{};
+    bool position{};
     bool calibration{};
-    [[nodiscard]] bool Any() const noexcept { return settings || calibration; }
+    [[nodiscard]] bool Any() const noexcept { return settings || position || calibration; }
 };
 
 struct PersistenceCompletion
@@ -878,10 +940,17 @@ struct PersistenceCompletion
     LockPersistenceWorker();
     PersistenceRequest request;
     request.settings = g_requestedSettings;
+    request.interfaceSettings = g_requestedInterfaceSettings;
     request.generations.settings = g_requestedGeneration.load(std::memory_order_relaxed);
+    request.generations.position = g_requestedPositionGeneration;
     request.calibration = g_requestedDisplayCalibration;
     request.calibrationOperation = g_requestedDisplayCalibrationOperation;
     request.generations.calibration = g_requestedDisplayCalibrationGeneration.load(std::memory_order_relaxed);
+    if (request.generations.position != 0)
+    {
+        request.interfaceSettings.windowX = g_requestedWindowX;
+        request.interfaceSettings.windowY = g_requestedWindowY;
+    }
     g_requestLock.clear(std::memory_order_release);
     return request;
 }
@@ -890,7 +959,8 @@ struct PersistenceCompletion
     const PersistenceRequest& request, PendingPersistence pending) noexcept
 {
     PersistenceCompletion completion;
-    completion.saved = pending.settings && SaveSettings(request.settings);
+    completion.saved = (pending.settings || pending.position) &&
+        SaveSettings(request.settings, request.interfaceSettings, !pending.settings);
     completion.calibration = request.calibration;
     if (!pending.calibration) return completion;
     if (request.calibrationOperation == DisplayCalibrationOperation::save)
@@ -927,6 +997,16 @@ struct PersistenceCompletion
     return latest;
 }
 
+[[nodiscard]] std::uint64_t PublishPositionCompletion(
+    const PersistenceRequest& request, bool pending, bool saved) noexcept
+{
+    const auto latest = g_requestedPositionGeneration;
+    if (pending && request.generations.position == latest)
+        g_positionState.store(saved ? SettingsPersistenceState::saved :
+            SettingsPersistenceState::failed, std::memory_order_release);
+    return latest;
+}
+
 [[nodiscard]] std::uint64_t PublishCalibrationCompletion(
     const PersistenceRequest& request, bool pending, const PersistenceCompletion& completion) noexcept
 {
@@ -950,6 +1030,7 @@ struct PersistenceCompletion
     LockPersistenceWorker();
     PersistenceGenerations latest;
     latest.settings = PublishSettingsCompletion(request, pending.settings, completion.saved);
+    latest.position = PublishPositionCompletion(request, pending.position, completion.saved);
     latest.calibration = PublishCalibrationCompletion(request, pending.calibration, completion);
     g_requestLock.clear(std::memory_order_release);
     return latest;
@@ -964,6 +1045,7 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
         const auto request = ReadPersistenceRequest();
         const PendingPersistence pending{
             request.generations.settings != processed.settings,
+            request.generations.position != processed.position,
             request.generations.calibration != processed.calibration};
         if (!pending.Any()) continue;
         processed = request.generations;
@@ -1013,20 +1095,34 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
     return std::ranges::find(terminal, state) != terminal.end();
 }
 
-[[nodiscard]] bool ValidSettingsForPersistence(const HdrSettings& settings) noexcept
+[[nodiscard]] bool ValidSettingsForPersistence(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept
 {
-    return ValidateHdrSettings(settings) == HdrSettingsValidationError::none;
+    return ValidateHdrSettings(settings) == HdrSettingsValidationError::none &&
+        ValidateHdrInterfaceSettings(interfaceSettings) == HdrInterfaceSettingsValidationError::none;
 }
 }  // namespace
 
+std::string RewriteHdrWindowPositionIni(
+    std::string_view original, double x, double y)
+{
+    HdrInterfaceSettings settings{};
+    settings.windowX = x;
+    settings.windowY = y;
+    if (ValidateHdrInterfaceSettings(settings) !=
+        HdrInterfaceSettingsValidationError::none) return std::string(original);
+    return RewriteIni(original, HdrSettings{}, settings, true);
+}
+
 std::string RewriteHdrSettingsIni(
     std::string_view original,
-    const HdrSettings& settings)
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings)
 {
-    if (!ValidSettingsForPersistence(settings))
+    if (!ValidSettingsForPersistence(settings, interfaceSettings))
         return std::string(original);
     return RewriteGradeProfileSections(
-        RewriteIni(original, settings),
+        RewriteIni(original, settings, interfaceSettings),
         settings.lutGradeProfiles, {});
 }
 
@@ -1063,6 +1159,7 @@ bool InitializeSettingsPersistence(
     }
     CloseHandle(thread);
     g_state.store(SettingsPersistenceState::idle, std::memory_order_release);
+    g_positionState.store(SettingsPersistenceState::idle, std::memory_order_release);
     g_displayCalibrationState.store(
         SettingsPersistenceState::idle, std::memory_order_release);
     g_started.store(true, std::memory_order_release);
@@ -1070,13 +1167,18 @@ bool InitializeSettingsPersistence(
 }
 
 std::uint64_t RequestHdrSettingsSave(
-    const HdrSettings& settings) noexcept
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept
 {
     if (!g_started.load(std::memory_order_acquire) ||
-        !ValidSettingsForPersistence(settings))
+        !ValidSettingsForPersistence(settings, interfaceSettings))
         return 0;
     if (!TryLockPersistenceRequest()) return 0;
     g_requestedSettings = settings;
+    g_requestedInterfaceSettings = interfaceSettings;
+    g_requestedWindowX = interfaceSettings.windowX;
+    g_requestedWindowY = interfaceSettings.windowY;
+    ++g_requestedPositionGeneration;
     const auto generation =
         g_requestedGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
     g_state.store(SettingsPersistenceState::saving, std::memory_order_release);
@@ -1096,6 +1198,7 @@ SettingsPersistenceSnapshot ReadSettingsPersistenceSnapshot() noexcept
         .state = g_state.load(std::memory_order_acquire),
         .generation =
             g_completedGeneration.load(std::memory_order_acquire),
+        .positionState = g_positionState.load(std::memory_order_acquire),
         .displayCalibrationState =
             g_displayCalibrationState.load(std::memory_order_acquire)
     };
@@ -1116,6 +1219,26 @@ SettingsPersistenceSnapshot ReadSettingsPersistenceSnapshot() noexcept
     }
     g_requestLock.clear(std::memory_order_release);
     return snapshot;
+}
+
+bool RequestHdrWindowPositionSave(double x, double y) noexcept
+{
+    HdrInterfaceSettings settings{};
+    settings.windowX = x;
+    settings.windowY = y;
+    if (!g_started.load(std::memory_order_acquire) ||
+        ValidateHdrInterfaceSettings(settings) !=
+            HdrInterfaceSettingsValidationError::none) return false;
+    // Render-thread publication is one try; a busy worker is retried next frame.
+    if (g_requestLock.test_and_set(std::memory_order_acquire)) return false;
+    g_requestedWindowX = x;
+    g_requestedWindowY = y;
+    ++g_requestedPositionGeneration;
+    g_positionState.store(SettingsPersistenceState::saving, std::memory_order_release);
+    g_requestLock.clear(std::memory_order_release);
+    if (SetEvent(g_saveEvent)) return true;
+    g_positionState.store(SettingsPersistenceState::failed, std::memory_order_release);
+    return false;
 }
 
 std::uint64_t RequestDisplayCalibrationSave(

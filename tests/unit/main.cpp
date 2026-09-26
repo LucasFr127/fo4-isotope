@@ -16,10 +16,15 @@ void RunHdrSettingsTests()
 {
     TestPipboyScreenObservation();
     TestDeveloperExposureLockFramePolicy();
+    TestHdrShortcutInput();
+    TestHdrShortcutWindowProcedure();
+    TestHotkeyFormatting();
     TestSettingsDefaultsAndMath();
     TestSettingsValidation();
     TestLutGradeProfiles();
     TestGradeProfilePacks();
+    TestToneMapperPanelSmoke();
+    TestVanillaGradePanelSmoke();
     TestOptionalConfigurationValues();
     TestOptionalConfigurationFailures();
     TestSettingsPersistenceRewrite();
@@ -53,6 +58,7 @@ constexpr Section kSections[]{
     {"gt7", fo4hdr::tests::RunGt7Tests},
     {"performance", fo4hdr::tests::RunPerformanceTests},
     {"hdr-settings", fo4hdr::tests::RunHdrSettingsTests},
+    {"lut-profiles-panel", fo4hdr::tests::RunLutProfilesPanelTests},
     {"native-lut-observation", fo4hdr::tests::RunNativeLutObservationTests},
     {"image-space-provenance", fo4hdr::tests::RunImageSpaceProvenanceTests},
     {"scoped-d3d11-compute-constant-buffer",

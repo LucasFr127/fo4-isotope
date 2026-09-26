@@ -1,105 +1,148 @@
 // SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 
+#include <algorithm>
+
+
+#include "Fallout4HDR/config/HdrSettings.hpp"
+
 #ifndef NOMINMAX
-#define NOMINMAX
+#  define NOMINMAX
 #endif
 #include <Windows.h>
 
-#include <array>
-#include <atomic>
-#include <cstddef>
 #include <cstdint>
-#include <span>
+#include <array>
 
 namespace fo4hdr {
 
-struct HdrSettingsInputMessage
+using HdrSettingsInteractionRequestHandler = bool (*)(bool open) noexcept;
+
+enum class HdrSettingsInteractionState : std::uint8_t
 {
-    UINT message{};
-    WPARAM key{};
-    LPARAM details{};
-    std::uint32_t modifiers{};
+    unavailable,
+    inactive,
+    opening,
+    active,
+    closing,
+    failed
 };
 
-struct HdrSettingsInputSnapshot
+// Plain-data bridge between the graphics-owned interface and the game adapter.
+// The Win32 input boundary invokes the handler only from the verified owner of
+// the Fallout HWND; callers on other threads are marshalled through that
+// window's message queue.
+void RegisterHdrSettingsInteractionRequestHandler(
+    HdrSettingsInteractionRequestHandler handler) noexcept;
+[[nodiscard]] bool RequestHdrSettingsInteraction(bool open) noexcept;
+[[nodiscard]] HdrSettingsInteractionState
+ReadHdrSettingsInteractionState() noexcept;
+
+
+// Window-thread-owned latch: exact modifiers are checked on the initial down,
+// then releasing the base key completes the chord even if modifiers went up
+// first. Focus loss/rebinding must reset the latch. Repeats never arm it.
+struct HdrSettingsShortcutLatch
 {
-    std::size_t messages{};
-    std::uint32_t toggles{};
-    bool focusLost{};
-    bool focused{};
+    std::uint32_t pendingKey{};
+
+    [[nodiscard]] constexpr bool KeyDown(
+        HdrSettingsHotkey configured, std::uint32_t key,
+        std::uint32_t modifiers, bool repeat) noexcept
+    {
+        const HdrSettingsHotkey pressed{key, modifiers};
+        if (repeat || pressed != configured) return false;
+        pendingKey = key;
+        return true;
+    }
+
+    [[nodiscard]] constexpr bool KeyUp(std::uint32_t key) noexcept
+    {
+        if (pendingKey == 0 || key != pendingKey) return false;
+        pendingKey = 0;
+        return true;
+    }
+
+    constexpr void Reset() noexcept { pendingKey = 0; }
 };
 
-// One HWND-affine producer and one fixed consumer; callbacks only publish plain
-// messages. The caller forwards unconsumed messages once and owns installation.
-class HdrSettingsInput
+struct HdrSettingsCaptureState
 {
-public:
-    // Both threads must be quiescent during cold Initialize/Stop. Initialize and
-    // Stop run on the HWND owner; consumerThread defaults to that same thread.
-    [[nodiscard]] bool Initialize(HWND window, DWORD consumerThread = 0) noexcept;
-    [[nodiscard]] bool Stop() noexcept;
-    [[nodiscard]] bool Observe(HWND window, UINT message, WPARAM key, LPARAM details) noexcept;
-    [[nodiscard]] HdrSettingsInputSnapshot Drain(
-        std::span<HdrSettingsInputMessage> messages = {}) noexcept;
-    void SetCapture(bool open, bool keyboard, bool mouse) noexcept;
-    [[nodiscard]] bool Matches(HWND window, DWORD consumerThread) const noexcept;
-    // Same producer/consumer thread only; held gestures and reset handshakes refuse.
-    [[nodiscard]] bool CanChangeConsumerReadiness() const noexcept;
+    bool capturedDown{};
+    bool active{};
+};
 
-    static constexpr std::size_t capacity = 256;
+// Keep shortcut capture out of ImGui navigation/text as well as the toggle
+// path. Translated characters can arrive after keyup; their scan marker is
+// therefore retained until the next initial down of that physical key.
+struct HdrSettingsCapturedGestureFilter
+{
+    std::array<bool, 256> keys{};
+    std::array<bool, 512> scans{};
+
+    [[nodiscard]] constexpr bool Suppress(UINT message, std::uint32_t key,
+        std::uintptr_t details, HdrSettingsCaptureState capture) noexcept
+    {
+        if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            return SuppressDown(key, details, capture);
+        if (message == WM_KEYUP || message == WM_SYSKEYUP)
+            return SuppressUp(key);
+        constexpr std::array characterMessages{WM_CHAR, WM_SYSCHAR, WM_UNICHAR};
+        if (std::ranges::find(characterMessages, message) != characterMessages.end())
+            return capture.active || CapturedScan(details);
+        return false;
+    }
+
+    constexpr void Reset() noexcept { keys.fill(false); scans.fill(false); }
 
 private:
-    [[nodiscard]] bool OnProducerThread() const noexcept;
-    [[nodiscard]] bool OnConsumerThread() const noexcept;
-    [[nodiscard]] bool HasCapturedKeyboardGesture() const noexcept;
-    [[nodiscard]] bool HasCapturedPointerGesture() const noexcept;
-    void ResetProducer() noexcept;
-    void RequestReset() noexcept;
-    void Push(HdrSettingsInputMessage message) noexcept;
-    [[nodiscard]] bool ObserveKeyboard(UINT message, WPARAM key, LPARAM details) noexcept;
-    [[nodiscard]] bool ObserveMouse(UINT message, WPARAM key, LPARAM details) noexcept;
-    [[nodiscard]] bool ObserveCharacter(UINT message, WPARAM key, LPARAM details) noexcept;
-    [[nodiscard]] bool KeyGesture(UINT key, bool down, bool repeat, LPARAM details) noexcept;
-    void ReleaseOwnedCapture() noexcept;
-    void ToggleKey(bool down, bool repeat) noexcept;
-    [[nodiscard]] bool ButtonGesture(unsigned button, bool down) noexcept;
-    void BeginMouseGesture(unsigned button) noexcept;
-    [[nodiscard]] bool ResetMessage(UINT message) const noexcept;
-    [[nodiscard]] bool ObserveMessage(UINT message, WPARAM key, LPARAM details) noexcept;
+    [[nodiscard]] constexpr bool SuppressDown(std::uint32_t key,
+        std::uintptr_t details, HdrSettingsCaptureState capture) noexcept
+    {
+        if (key >= keys.size()) return false;
+        if ((details & (1ULL << 30U)) == 0)
+        {
+            keys[key] = capture.capturedDown;
+            const auto scan = (details >> 16U) & 0x1FFU;
+            if (scan != 0) scans[scan] = capture.capturedDown;
+        }
+        return keys[key];
+    }
 
-    std::array<HdrSettingsInputMessage, capacity> messages_{};
-    std::array<bool, 256> capturedKeys_{};
-    std::array<bool, 512> capturedScans_{};
-    std::array<bool, 5> capturedButtons_{};
-    std::atomic<std::size_t> write_{};
-    std::atomic<std::size_t> read_{};
-    std::atomic<bool> resetRequested_{};
-    std::atomic<HWND> window_{};
-    std::atomic<DWORD> producerThread_{};
-    std::atomic<DWORD> consumerThread_{};
-    std::atomic<std::uint32_t> capture_{};
-    std::atomic<bool> focused_{};
-    std::uint32_t mouseButtons_{};
-    bool ownedCapture_{};
-    bool releasingCapture_{};
-    bool toggleArmed_{};
+    [[nodiscard]] constexpr bool SuppressUp(std::uint32_t key) noexcept
+    {
+        if (key >= keys.size()) return false;
+        const auto suppress = keys[key];
+        keys[key] = false;
+        return suppress;
+    }
+
+    [[nodiscard]] constexpr bool CapturedScan(std::uintptr_t details) const noexcept
+    {
+        const auto scan = (details >> 16U) & 0x1FFU;
+        return scan != 0 && scans[scan];
+    }
 };
 
-// One process-resident HWND/generation. Publish on the cold renderer owner;
-// activation verifies and runs on the HWND owner. Retirement is passive and
-// never resets a queue from another thread or restores a foreign subclass.
-// Activation requires cooperative exclusive subclass installation: no foreign
-// concurrent WNDPROC mutation. A mismatched exchange revokes admission; keeping
-// its captured forwarding chain resident remains the interfering owner's duty.
-[[nodiscard]] bool PublishSettingsInputHost(HWND window, std::uint64_t generation) noexcept;
-[[nodiscard]] bool TryActivateSettingsInputHostOnCurrentThread() noexcept;
-[[nodiscard]] HdrSettingsInput* SettingsInputForGeneration(std::uint64_t generation) noexcept;
-// A real consumer opts in only after readiness; every readiness transition and
-// revocation requires input/render callbacks and captured gestures quiescent.
-// Without opt-in every native message, including F10, continues through the
-// captured predecessor.
-[[nodiscard]] bool SetSettingsInputHostConsumerReady(std::uint64_t generation, bool ready) noexcept;
-void RevokeSettingsInputHost() noexcept;
+// The window procedure handles hotkeys and HWND-affine settings interaction,
+// filters captured input, and queues bounded, trivially-copyable messages
+// for ImGui to consume on the render thread.
+[[nodiscard]] bool InitializeHdrSettingsInput(
+    HWND window) noexcept;
+void SetHdrSettingsHotkey(HdrSettingsHotkey hotkey) noexcept;
+void BeginHdrSettingsHotkeyCapture() noexcept;
+void CancelHdrSettingsHotkeyCapture() noexcept;
+[[nodiscard]] bool HdrSettingsHotkeyCaptureActive() noexcept;
+[[nodiscard]] bool ConsumeHdrSettingsHotkeyCapture(
+    HdrSettingsHotkey& hotkey) noexcept;
+void ShutdownHdrSettingsInput() noexcept;
+void DrainHdrSettingsInput() noexcept;
+[[nodiscard]] bool ConsumeHdrSettingsToggle() noexcept;
+[[nodiscard]] bool ConsumeHdrSettingsFocusLoss() noexcept;
+[[nodiscard]] bool HdrSettingsFocusLossPending() noexcept;
+void SetHdrSettingsInputCapture(
+    bool windowOpen, bool keyboard, bool mouse) noexcept;
+[[nodiscard]] bool HdrSettingsInputInstalled() noexcept;
+[[nodiscard]] std::uint64_t HdrSettingsInputOverflowCount() noexcept;
 
 }  // namespace fo4hdr

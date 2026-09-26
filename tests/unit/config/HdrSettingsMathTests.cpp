@@ -55,6 +55,17 @@ void TestSettingsEquality()
     settingsCopy.selectiveColor = defaults.selectiveColor;
     FO4HDR_CHECK(settingsCopy == defaults);
 
+    const HdrInterfaceSettings interfaceDefaults{};
+    auto interfaceCopy = interfaceDefaults;
+    FO4HDR_CHECK(interfaceCopy == interfaceDefaults);
+    interfaceCopy.windowX = 100.0;
+    FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
+    interfaceCopy = interfaceDefaults;
+    interfaceCopy.toggleKey = HdrSettingsHotkey{VK_F10, 0U};
+    FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
+    interfaceCopy = interfaceDefaults;
+    FO4HDR_CHECK(interfaceCopy == interfaceDefaults);
+
     const PluginConfiguration configurationDefaults{};
     auto configurationCopy = configurationDefaults;
     FO4HDR_CHECK(configurationCopy == configurationDefaults);
@@ -62,6 +73,9 @@ void TestSettingsEquality()
     FO4HDR_CHECK(configurationCopy != configurationDefaults);
     configurationCopy = configurationDefaults;
     FO4HDR_CHECK(configurationCopy == configurationDefaults);
+    configurationCopy.interfaceSettings.windowY = 100.0;
+    FO4HDR_CHECK(configurationCopy != configurationDefaults);
+    configurationCopy = configurationDefaults;
     configurationCopy.developerMode = true;
     FO4HDR_CHECK(configurationCopy != configurationDefaults);
     configurationCopy = configurationDefaults;

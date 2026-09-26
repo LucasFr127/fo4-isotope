@@ -44,6 +44,13 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(shipped.value.vanillaGradeColorPercent == 100.0);
     FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.toggleKey ==
+        HdrSettingsHotkey{});
+    FO4HDR_CHECK(shipped.value.interfaceSettings.scale == 1.25);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.windowWidth == 700.0);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.windowHeight == 680.0);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.windowX == -1.0);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.windowY == -1.0);
     FO4HDR_CHECK(!shipped.value.developerMode);
     FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
     FO4HDR_CHECK(!shipped.value.measurePerformance);
@@ -57,7 +64,7 @@ void TestLegacyRoundTrip(const PluginConfigurationResult& parsed)
     auto sourceContrastSettings = static_cast<HdrSettings>(parsed.value);
     sourceContrastSettings.toneMapperParameters.agxContrast = 2.4;
     const auto sourceContrastSaved = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), sourceContrastSettings);
+        LegacyProductionConfiguration(), sourceContrastSettings, {});
     FO4HDR_CHECK(sourceContrastSaved.find("Contrast=2.4\n") !=
         std::string::npos);
     const auto sourceContrastReloaded =
@@ -72,14 +79,14 @@ void TestLegacyRoundTrip(const PluginConfigurationResult& parsed)
         auto settings = static_cast<HdrSettings>(parsed.value);
         settings.colorGradingMethod = method;
         const auto saved = RewriteHdrSettingsIni(
-            LegacyProductionConfiguration(), settings);
+            LegacyProductionConfiguration(), settings, {});
         const auto loaded = ParsePluginConfiguration(saved);
         FO4HDR_CHECK(loaded.valid);
         FO4HDR_CHECK(loaded.value.colorGradingMethod == method);
-        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings) == saved);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
         settings.colorGradingMethod = HdrSettings{}.colorGradingMethod;
         const auto reset = ParsePluginConfiguration(
-            RewriteHdrSettingsIni(saved, settings));
+            RewriteHdrSettingsIni(saved, settings, {}));
         FO4HDR_CHECK(reset.valid);
         FO4HDR_CHECK(reset.value.colorGradingMethod == ColorGradingMethod::radial);
     }
@@ -107,6 +114,13 @@ void TestLegacyConfiguration()
     FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 100.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey ==
+        kDefaultSettingsToggleVirtualKey);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers ==
+        kSettingsHotkeyAlt);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.25);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.windowWidth == 700.0);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);
 }
 
 void TestConfigurationEndpoints()
@@ -176,6 +190,11 @@ void TestExtendedConfiguration()
     FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 75.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 40.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 175.0);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey == 0x7BU);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers == 0U);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.5);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.windowWidth == 900.0);
+    FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 760.0);
 }
 
 void TestOptionalConfigurationValues()
@@ -263,7 +282,10 @@ void TestConfigurationRangeErrors()
              "VanillaColorGradingStrength=101",
              "VanillaGradeLuminance=-1",
              "VanillaGradeColor=nan",
-             "BloomStrength=-1"})
+             "BloomStrength=-1",
+             "Scale=1.1",
+             "WindowWidth=519",
+             "WindowHeight=1001"})
     {
         auto text = ExtendedProductionConfiguration();
         const std::string_view replacement{keyValue};
@@ -298,6 +320,29 @@ void TestConfigurationDuplicateEffects()
     FO4HDR_CHECK(parsed.error == PluginConfigurationError::duplicateKey);
 }
 
+void TestConfigurationToggleKeys()
+{
+    std::string text;
+    PluginConfigurationResult parsed;
+    for (const auto toggle : {"F1", "F10", "F24", "Alt+H", "Space",
+             "Ctrl+Shift+H", "Ctrl+Alt+Shift+Numpad0"})
+    {
+        text = LegacyProductionConfiguration() +
+            "\n[Interface]\nToggleKey=" + toggle + "\n";
+        FO4HDR_CHECK(ParsePluginConfiguration(text).valid);
+    }
+    for (const auto toggle : {"F0", "F25", "f10", "F10junk", "Alt",
+             "Alt+", "Ctrl+Ctrl+H", "Win+H", "Alt+F4", "Alt+Tab",
+             "Ctrl+Alt+Delete", "Escape", "Ctrl+Escape", "Alt+Enter"})
+    {
+        text = LegacyProductionConfiguration() +
+            "\n[Interface]\nToggleKey=" + toggle + "\n";
+        parsed = ParsePluginConfiguration(text);
+        FO4HDR_CHECK(!parsed.valid);
+        FO4HDR_CHECK(parsed.error ==
+            PluginConfigurationError::unsupportedToggleKey);
+    }
+}
 
 void TestOptionalConfigurationFailures()
 {
@@ -305,6 +350,7 @@ void TestOptionalConfigurationFailures()
     TestConfigurationOperatorErrors();
     TestConfigurationRangeErrors();
     TestConfigurationDuplicateEffects();
+    TestConfigurationToggleKeys();
 }
 
 }  // namespace fo4hdr::tests

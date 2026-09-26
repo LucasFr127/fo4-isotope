@@ -107,7 +107,8 @@ void TestSelectiveColorPersistence()
             value - 3.0, 110.0 + value, -30.0 + value};
     }
     const auto rewritten = RewriteHdrSettingsIni(
-        ExtendedProductionConfiguration(), persisted);
+        ExtendedProductionConfiguration(), persisted,
+        HdrInterfaceSettings{});
     const auto parsed = ParsePluginConfiguration(rewritten);
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(parsed.value.selectiveColor == persisted.selectiveColor);

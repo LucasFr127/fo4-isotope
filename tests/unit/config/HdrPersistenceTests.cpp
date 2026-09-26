@@ -61,12 +61,12 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
         std::string::npos);
 }
 
-void CheckRewrittenRoundTrip(const HdrSettings& settings)
+void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
     const auto roundTripRewrite = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), settings);
+        LegacyProductionConfiguration(), settings, interfaceSettings);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
-        roundTripRewrite, settings) == roundTripRewrite);
+        roundTripRewrite, settings, interfaceSettings) == roundTripRewrite);
     const auto reloadedRewrite =
         ParsePluginConfiguration(roundTripRewrite);
     FO4HDR_CHECK(reloadedRewrite.valid);
@@ -87,7 +87,7 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings)
     resetParameters.vanillaGradeColorPercent = 100.0;
     const auto resetParametersReloaded = ParsePluginConfiguration(
         RewriteHdrSettingsIni(
-            roundTripRewrite, resetParameters));
+            roundTripRewrite, resetParameters, interfaceSettings));
     FO4HDR_CHECK(resetParametersReloaded.valid);
     FO4HDR_CHECK(resetParametersReloaded.value.toneMapperParameters ==
         ToneMapperParameters{});
@@ -107,24 +107,58 @@ void CheckRewrittenEffects(const std::string& rewritten)
         "BloomStrength=175\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("BloomStrength=175\r\n") !=
         std::string::npos);
+    FO4HDR_CHECK(rewritten.find("[Interface]\r\nScale=1.75\r\n") !=
+        std::string::npos);
+    FO4HDR_CHECK(rewritten.find("WindowWidth=880\r\n") !=
+        std::string::npos);
+    FO4HDR_CHECK(rewritten.find("WindowHeight=740\r\n") !=
+        std::string::npos);
+    FO4HDR_CHECK(rewritten.find("WindowX=120\r\n") != std::string::npos);
+    FO4HDR_CHECK(rewritten.find("WindowY=90\r\n") != std::string::npos);
+    FO4HDR_CHECK(rewritten.find("ToggleKey=Ctrl+J\r\n") != std::string::npos);
 }
 
+void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings, const std::string& rewritten)
+{
+    constexpr std::string_view interfaceExtension =
+        "[Interface]\nThirdPartyInterface=kept\n";
+    const auto rewrittenInterfaceExtension = RewriteHdrSettingsIni(
+        interfaceExtension, settings, interfaceSettings);
+    FO4HDR_CHECK(rewrittenInterfaceExtension.find(
+        "ThirdPartyInterface=kept\n") != std::string::npos);
 
-void CheckRewrittenMigration(const HdrSettings& settings)
+    const auto positionOnly = RewriteHdrWindowPositionIni(rewritten, 321.0, 123.0);
+    FO4HDR_CHECK(positionOnly.find("WindowX=321\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("WindowY=123\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("ToggleKey=Ctrl+J\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("DisplayPeakNits=430\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("Exposure=0.25\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("ColorGradingMethod=NativeReference\r\n") !=
+        std::string::npos);
+    FO4HDR_CHECK(RewriteHdrWindowPositionIni("[Interface]\nToggleKey=F10\n", 1, 2)
+        .find("ToggleKey=F10\n") != std::string::npos);
+    for (const auto invalid : {-2.0, -0.5, 65536.0,
+             std::numeric_limits<double>::quiet_NaN()})
+        FO4HDR_CHECK(RewriteHdrWindowPositionIni(rewritten, invalid, 12) == rewritten);
+}
+
+void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
     constexpr std::string_view legacyExposure =
         "[ToneMapper]\nAlgorithm=ACES2LMT\nExposureEV=-0.5\n"
         "[Image]\nGradeTransfer=PreserveHDRColor\nContrast=0\n";
     const auto migrated = RewriteHdrSettingsIni(
-        legacyExposure, settings);
+        legacyExposure, settings, interfaceSettings);
     FO4HDR_CHECK(migrated.find("ExposureEV") == std::string::npos);
     FO4HDR_CHECK(migrated.find("GradeTransfer") == std::string::npos);
     FO4HDR_CHECK(migrated.find("Exposure=0.25") != std::string::npos);
+    FO4HDR_CHECK(RewriteHdrWindowPositionIni(legacyExposure, 1, 2)
+        .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
 
     auto precise = settings;
     precise.exposureEv = 0.123456;
     const auto preciseSaved = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), precise);
+        LegacyProductionConfiguration(), precise, interfaceSettings);
     const auto preciseLoaded = ParsePluginConfiguration(preciseSaved);
     FO4HDR_CHECK(preciseLoaded.valid);
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
@@ -133,7 +167,7 @@ void CheckRewrittenMigration(const HdrSettings& settings)
 void TestSettingsPersistenceRewrite()
 {
     HdrSettings settings{};
-
+    HdrInterfaceSettings interfaceSettings{};
     settings.productionAlgorithm = ProductionToneMapperAlgorithm::aces2Lmt;
     settings.toneMapperParameters = {
         .acesLookStrength = 0.35,
@@ -154,6 +188,12 @@ void TestSettingsPersistenceRewrite()
     settings.vanillaGradeLuminancePercent = 65.0;
     settings.vanillaGradeColorPercent = 35.0;
     settings.bloomStrengthPercent = 175.0;
+    interfaceSettings.scale = 1.75;
+    interfaceSettings.windowWidth = 880.0;
+    interfaceSettings.windowHeight = 740.0;
+    interfaceSettings.windowX = 120.0;
+    interfaceSettings.windowY = 90.0;
+    interfaceSettings.toggleKey = {0x4AU, kSettingsHotkeyControl};
     constexpr std::string_view original =
         "# keep this comment\r\n"
         "[General]\r\nEnabled=1\r\nUnknown=kept\r\n"
@@ -162,26 +202,43 @@ void TestSettingsPersistenceRewrite()
         "[Effects]\r\nThirdPartyNumber=2\r\n"
         "ThirdPartyEffect=kept\r\n";
     const auto rewritten = RewriteHdrSettingsIni(
-        original, settings);
+        original, settings, interfaceSettings);
     const auto bomRewritten = RewriteHdrSettingsIni(
         std::string("\xEF\xBB\xBF") + LegacyProductionConfiguration(),
-        settings);
+        settings, interfaceSettings);
     CheckRewrittenOutput(rewritten, bomRewritten);
-    CheckRewrittenRoundTrip(settings);
+    CheckRewrittenRoundTrip(settings, interfaceSettings);
     CheckRewrittenEffects(rewritten);
-    CheckRewrittenMigration(settings);
+    CheckRewrittenWindowPosition(settings, interfaceSettings, rewritten);
+    CheckRewrittenMigration(settings, interfaceSettings);
     settings.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
-        original, settings) == original);
+        original, settings, interfaceSettings) == original);
     settings.colorGradingMethod = ColorGradingMethod::nativeReference;
     settings.displayPeakNits = 399.0;
     FO4HDR_CHECK(RewriteHdrSettingsIni(
-        original, settings) == original);
+        original, settings, interfaceSettings) == original);
+    settings.displayPeakNits = 430.0;
+    interfaceSettings.scale = 1.1;
+    FO4HDR_CHECK(RewriteHdrSettingsIni(
+        original, settings, interfaceSettings) == original);
 }
 
 constexpr std::wstring_view kTestDisplayIdentity =
         L"\\\\?\\DISPLAY#Fallout4HDR_\x03A9#{A1B2C3D4}";
 
+SettingsPersistenceState WaitPositionSave()
+{
+
+    for (unsigned attempt = 0; attempt < 2000; ++attempt)
+    {
+        const auto result = ReadSettingsPersistenceSnapshot();
+        if (result.positionState != SettingsPersistenceState::saving)
+            return result.positionState;
+        Sleep(1);
+    }
+    return SettingsPersistenceState::saving;
+}
 
 template <class Request>
 std::uint64_t RetryProfileRequest(Request request)
@@ -227,7 +284,7 @@ struct PersistenceFixture
     std::filesystem::path profileDirectory;
     std::filesystem::path personalPath;
     HdrSettings settings;
-
+    HdrInterfaceSettings interfaceSettings;
 };
 PersistenceFixture CreatePersistenceFixture()
 {
@@ -276,15 +333,16 @@ PersistenceFixture CreatePersistenceFixture()
         .gt7ShoulderStart = 0.5,
         .gt7ColorBlend = 0.2};
     settings.colorGradingMethod = ColorGradingMethod::nativeReference;
-
-    return {root, path, profileDirectory, personalPath, settings};
+    HdrInterfaceSettings interfaceSettings{};
+    interfaceSettings.scale = 1.5;
+    return {root, path, profileDirectory, personalPath, settings, interfaceSettings};
 }
 
 void TestPersistedMainSettings(PersistenceFixture& fixture)
 {
-    auto& [root, path, profileDirectory, personalPath, settings] = fixture;
+    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
     const auto generation =
-        RequestHdrSettingsSave(settings);
+        RequestHdrSettingsSave(settings, interfaceSettings);
     FO4HDR_CHECK(generation != 0);
     SettingsPersistenceSnapshot snapshot{};
     for (unsigned attempt = 0; attempt < 2000; ++attempt)
@@ -329,6 +387,7 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
         std::string::npos);
     FO4HDR_CHECK(persisted.find("GradeTransfer") == std::string::npos);
     FO4HDR_CHECK(persisted.find("ExposureEV") == std::string::npos);
+    FO4HDR_CHECK(persisted.find("Scale=1.5") != std::string::npos);
     const auto reloaded = LoadPluginConfiguration(path);
     FO4HDR_CHECK(reloaded.valid);
     FO4HDR_CHECK(!reloaded.value.developerMode);
@@ -345,6 +404,43 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     input.close();
 }
 
+void TestPersistedWindowPosition(PersistenceFixture& fixture)
+{
+    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
+    FO4HDR_CHECK(RequestHdrWindowPositionSave(90, 120));
+    FO4HDR_CHECK(WaitPositionSave() == SettingsPersistenceState::saved);
+    auto positionReload = LoadPluginConfiguration(path);
+    FO4HDR_CHECK(positionReload.valid);
+    FO4HDR_CHECK(positionReload.value.interfaceSettings.windowX == 90);
+    FO4HDR_CHECK(positionReload.value.interfaceSettings.windowY == 120);
+    FO4HDR_CHECK(positionReload.value.exposureEv == settings.exposureEv);
+    FO4HDR_CHECK(positionReload.value.interfaceSettings.scale == interfaceSettings.scale);
+
+    // A full save newer than an autosave must not resurrect the old position.
+    FO4HDR_CHECK(RequestHdrWindowPositionSave(100, 130));
+    interfaceSettings.windowX = 200;
+    interfaceSettings.windowY = 230;
+    const auto newerGeneration = RequestHdrSettingsSave(settings, interfaceSettings);
+    FO4HDR_CHECK(newerGeneration != 0);
+    for (unsigned attempt = 0; attempt < 2000; ++attempt)
+    {
+        const auto result = ReadSettingsPersistenceSnapshot();
+        if (result.generation == newerGeneration &&
+            result.state != SettingsPersistenceState::saving) break;
+        Sleep(1);
+    }
+    FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().state == SettingsPersistenceState::saved);
+    std::ifstream newerInput(path, std::ios::binary);
+    const std::string newerPersisted(
+        std::istreambuf_iterator<char>(newerInput), {});
+    FO4HDR_CHECK(newerPersisted.find("DisplayPeakNits=430") !=
+        std::string::npos);
+    newerInput.close();
+    positionReload = LoadPluginConfiguration(path);
+    FO4HDR_CHECK(positionReload.valid);
+    FO4HDR_CHECK(positionReload.value.interfaceSettings.windowX == 200);
+    FO4HDR_CHECK(positionReload.value.interfaceSettings.windowY == 230);
+}
 
 void TestDisplayProfileLoad()
 {
@@ -420,7 +516,7 @@ void TestInvalidDisplayProfiles(const std::filesystem::path& path, const std::st
 
 void TestPersistedDisplayProfiles(PersistenceFixture& fixture)
 {
-    auto& [root, path, profileDirectory, personalPath, settings] = fixture;
+    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
     {
         std::ofstream append(path, std::ios::binary | std::ios::app);
         append << "\n[UnrelatedProfileTest]\nKeep=1\n";
@@ -478,6 +574,7 @@ void TestSettingsPersistenceSave()
 {
     auto fixture = CreatePersistenceFixture();
     TestPersistedMainSettings(fixture);
+    TestPersistedWindowPosition(fixture);
     TestPersistedDisplayProfiles(fixture);
     const auto& root = fixture.root;
     std::error_code error;

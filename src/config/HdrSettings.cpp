@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <span>
 
@@ -12,6 +13,21 @@ namespace fo4hdr {
 namespace {
 
 using Matrix3 = std::array<double, 9>;
+
+struct HotkeyName { std::string_view name; std::uint32_t key; };
+constexpr HotkeyName kHotkeyNames[]{
+    {"Backspace", 0x08U}, {"Tab", 0x09U}, {"Enter", 0x0DU},
+    {"Space", 0x20U}, {"PageUp", 0x21U}, {"PageDown", 0x22U},
+    {"End", 0x23U}, {"Home", 0x24U}, {"Left", 0x25U},
+    {"Up", 0x26U}, {"Right", 0x27U}, {"Down", 0x28U},
+    {"Insert", 0x2DU}, {"Delete", 0x2EU},
+    {"Multiply", 0x6AU}, {"Add", 0x6BU}, {"Separator", 0x6CU},
+    {"Subtract", 0x6DU}, {"Decimal", 0x6EU}, {"Divide", 0x6FU},
+    {"Semicolon", 0xBAU}, {"Plus", 0xBBU}, {"Comma", 0xBCU},
+    {"Minus", 0xBDU}, {"Period", 0xBEU}, {"Slash", 0xBFU},
+    {"Backtick", 0xC0U}, {"LeftBracket", 0xDBU},
+    {"Backslash", 0xDCU}, {"RightBracket", 0xDDU},
+    {"Quote", 0xDEU}, {"Oem8", 0xDFU}, {"Oem102", 0xE2U}};
 
 constexpr Matrix3 kBt709ToXyz{
     0.4123907992659595, 0.35758433938387796, 0.1804807884018343,
@@ -132,6 +148,114 @@ constexpr std::array<double, 3> kD65Xyz{
 
 }  // namespace
 
+namespace {
+
+constexpr HotkeyName kModifierNames[]{
+    {"Ctrl", kSettingsHotkeyControl}, {"Alt", kSettingsHotkeyAlt},
+    {"Shift", kSettingsHotkeyShift}};
+
+std::uint32_t NamedKey(std::string_view text) noexcept
+{
+    const auto found = std::ranges::find(kHotkeyNames, text, &HotkeyName::name);
+    return found == std::end(kHotkeyNames) ? 0U : found->key;
+}
+
+bool ParseModifiers(std::string_view& text, HdrSettingsHotkey& key) noexcept
+{
+    for (unsigned index = 0; index < 3; ++index)
+    {
+        const auto separator = text.find('+');
+        if (separator == std::string_view::npos) break;
+        const auto found = std::ranges::find(kModifierNames,
+            text.substr(0, separator), &HotkeyName::name);
+        if (found == std::end(kModifierNames)) return false;
+        if ((key.modifiers & found->key) != 0) return false;
+        key.modifiers |= found->key;
+        text.remove_prefix(separator + 1);
+    }
+    return true;
+}
+
+bool IsDigit(char value) noexcept { return value >= '0' && value <= '9'; }
+bool IsLetter(char value) noexcept { return value >= 'A' && value <= 'Z'; }
+
+std::uint32_t FunctionKey(std::string_view text) noexcept
+{
+    if (text.size() < 2 || text.size() > 3) return 0U;
+    if (text[0] != 'F' || text[1] == '0') return 0U;
+    unsigned number{};
+    const auto result = std::from_chars(text.data() + 1,
+        text.data() + text.size(), number);
+    if (result.ptr != text.data() + text.size())
+        return 0U;
+    if (number < 1 || number > 24) return 0U;
+    return 0x6FU + number;
+}
+
+std::uint32_t ParseVirtualKey(std::string_view text) noexcept
+{
+    if (text.size() == 1)
+        return IsLetter(text[0]) || IsDigit(text[0]) ?
+            static_cast<std::uint32_t>(text[0]) : 0U;
+    if (text.size() == 7 && text.starts_with("Numpad"))
+        return IsDigit(text[6]) ?
+            0x60U + static_cast<std::uint32_t>(text[6] - '0') : 0U;
+    const auto function = FunctionKey(text);
+    return function != 0 ? function : NamedKey(text);
+}
+
+void FormatVirtualKey(HdrSettingsHotkey hotkey, std::span<char> output) noexcept
+{
+    const auto key = hotkey.virtualKey;
+    auto* next = output.data();
+    if (key >= 0x30U && key <= 0x5AU)
+        *next = static_cast<char>(key);
+    else if (key >= 0x60U && key <= 0x69U)
+    {
+        constexpr std::string_view prefix{"Numpad"};
+        next = std::copy(prefix.begin(), prefix.end(), next);
+        *next = static_cast<char>('0' + key - 0x60U);
+    }
+    else if (key >= 0x70U && key <= 0x87U)
+    {
+        *next++ = 'F';
+        (void)std::to_chars(next, output.data() + output.size(), key - 0x6FU);
+    }
+    else
+    {
+        const auto found = std::ranges::find(kHotkeyNames, key, &HotkeyName::key);
+        if (found != std::end(kHotkeyNames))
+            std::copy(found->name.begin(), found->name.end(), next);
+    }
+}
+
+}  // namespace
+
+bool ParseHdrSettingsHotkey(
+    std::string_view text, HdrSettingsHotkey& key) noexcept
+{
+    HdrSettingsHotkey parsed{0U, 0U};
+    if (!ParseModifiers(text, parsed)) return false;
+    parsed.virtualKey = ParseVirtualKey(text);
+    if (!IsSupportedHdrSettingsHotkey(parsed)) return false;
+    key = parsed;
+    return true;
+}
+
+std::array<char, 64> FormatHdrSettingsHotkey(HdrSettingsHotkey key) noexcept
+{
+    std::array<char, 64> result{};
+    if (!IsSupportedHdrSettingsHotkey(key)) return result;
+    auto* next = result.data();
+    for (const auto& modifier : kModifierNames)
+    {
+        if ((key.modifiers & modifier.key) == 0) continue;
+        next = std::copy(modifier.name.begin(), modifier.name.end(), next);
+        *next++ = '+';
+    }
+    FormatVirtualKey(key, {next, result.data() + result.size() - 1});
+    return result;
+}
 namespace {
 
 bool ValidateAgxParameters(const ToneMapperParameters& parameters) noexcept
@@ -289,6 +413,42 @@ HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noex
     if (const auto error = ValidateHdrGrading(settings);
         error != HdrSettingsValidationError::none) return error;
     return HdrSettingsValidationError::none;
+}
+
+namespace {
+
+bool ValidWindowCoordinate(double coordinate) noexcept
+{
+    return InRange(coordinate, 0.0, 65535.0) || coordinate == -1.0;
+}
+
+bool ValidWindowPosition(const HdrInterfaceSettings& settings) noexcept
+{
+    return ValidWindowCoordinate(settings.windowX) &&
+        ValidWindowCoordinate(settings.windowY) &&
+        ((settings.windowX < 0.0) == (settings.windowY < 0.0));
+}
+
+}  // namespace
+HdrInterfaceSettingsValidationError ValidateHdrInterfaceSettings(
+    const HdrInterfaceSettings& settings) noexcept
+{
+    constexpr std::array<double, 5> supportedScales{
+        1.0, 1.25, 1.5, 1.75, 2.0};
+    if (std::ranges::find(supportedScales, settings.scale) ==
+        supportedScales.end())
+        return HdrInterfaceSettingsValidationError::scaleOutOfRange;
+    if (!InRange(settings.windowWidth,
+            kMinimumSettingsWindowWidth, kMaximumSettingsWindowWidth))
+        return HdrInterfaceSettingsValidationError::windowWidthOutOfRange;
+    if (!InRange(settings.windowHeight,
+            kMinimumSettingsWindowHeight, kMaximumSettingsWindowHeight))
+        return HdrInterfaceSettingsValidationError::windowHeightOutOfRange;
+    if (!ValidWindowPosition(settings))
+        return HdrInterfaceSettingsValidationError::windowPositionOutOfRange;
+    if (!IsSupportedHdrSettingsHotkey(settings.toggleKey))
+        return HdrInterfaceSettingsValidationError::unsupportedToggleKey;
+    return HdrInterfaceSettingsValidationError::none;
 }
 
 HdrSettingsMath DeriveHdrSettingsMath(

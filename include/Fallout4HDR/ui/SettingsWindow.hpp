@@ -90,9 +90,9 @@ struct SettingsInputActivation
     std::uint32_t currentThreadId{}, windowThreadId{};
 };
 
-void InitializeSettingsWindow(const HdrSettings& settings) noexcept;
+void InitializeSettingsWindow(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings) noexcept;
 void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept;
-[[nodiscard]] bool ShutdownSettingsWindowBackend() noexcept;
+void ShutdownSettingsWindowBackend() noexcept;
 [[nodiscard]] bool SettingsWindowBackendReady() noexcept;
 [[nodiscard]] SettingsInputActivation TryActivateSettingsWindowInput() noexcept;
 [[nodiscard]] bool DrawSettingsWindow(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept;
@@ -102,5 +102,6 @@ void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* devi
 [[nodiscard]] const HdrSettings& ReadSettingsDraft() noexcept;
 [[nodiscard]] bool SettingsCommitRequested() noexcept;
 [[nodiscard]] bool ConsumeSettingsCommitRequest() noexcept;
+void RestoreHeldImageComparison() noexcept;
 
 } // namespace fo4hdr

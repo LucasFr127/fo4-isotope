@@ -2,538 +2,840 @@
 
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 
+#include <imgui.h>
+
 #include <algorithm>
-#include <limits>
-#include <windowsx.h>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
 
 namespace fo4hdr {
 namespace {
 
-constexpr std::uint32_t keyboardCapture = 1;
-constexpr std::uint32_t mouseCapture = 2;
-constexpr UINT toggleMessage = WM_APP + 1;
+struct InputMessage
+{
+    UINT message{};
+    WPARAM wParam{};
+    LPARAM lParam{};
+};
 
-bool KeyDown(UINT message) noexcept
+constexpr std::size_t kInputCapacity = 256;
+constexpr std::size_t kMaximumDrainPerFrame = kInputCapacity;
+
+std::array<InputMessage, kInputCapacity> g_messages{};
+std::atomic<std::size_t> g_writeIndex{};
+std::atomic<std::size_t> g_readIndex{};
+std::atomic<std::uint64_t> g_overflowCount{};
+std::atomic<std::uint32_t> g_toggleCount{};
+std::atomic<bool> g_focusLoss{};
+std::atomic<std::uint32_t> g_toggleHotkey{
+    kDefaultSettingsToggleVirtualKey | (kSettingsHotkeyAlt << 8U)};
+std::atomic<bool> g_hotkeyCapture{};
+std::atomic<std::uint32_t> g_capturedHotkey{};
+std::atomic<std::uint32_t> g_shortcutReset{};
+// Only the owning window thread accesses these event-sequence fields.
+HdrSettingsShortcutLatch g_shortcutLatch{};
+HdrSettingsCapturedGestureFilter g_capturedGestureFilter{};
+HdrSettingsHotkey g_capturePending{};
+bool g_capturePendingValid{};
+std::uint32_t g_seenShortcutReset{};
+std::array<bool, 256> g_swallowedKeys{};
+std::atomic<bool> g_resetRequested{};
+std::atomic<bool> g_windowOpen{};
+std::atomic<bool> g_captureKeyboard{};
+std::atomic<bool> g_captureMouse{};
+std::atomic<bool> g_active{};
+std::atomic<bool> g_installed{};
+std::atomic<bool> g_retainedForeignChain{};
+std::atomic<HWND> g_window{};
+std::atomic<DWORD> g_windowThread{};
+std::atomic<WNDPROC> g_nextWindowProcedure{};
+std::atomic<UINT> g_interactionMessage{};
+std::atomic<HdrSettingsInteractionRequestHandler>
+    g_interactionRequestHandler{};
+std::atomic<std::uint64_t> g_interactionStatus{
+    static_cast<std::uint8_t>(HdrSettingsInteractionState::unavailable)};
+
+constexpr std::uint64_t kInteractionStateMask = 0xFFU;
+constexpr wchar_t kInteractionMessageName[] =
+    L"Fallout4HDR.SettingsInteraction.v1";
+
+void ResetQueue() noexcept;
+
+[[nodiscard]] constexpr std::uint32_t PackHotkey(HdrSettingsHotkey key) noexcept
+{
+    return key.virtualKey | (key.modifiers << 8U);
+}
+
+[[nodiscard]] constexpr HdrSettingsHotkey UnpackHotkey(std::uint32_t key) noexcept
+{
+    return {key & 0xFFU, key >> 8U};
+}
+
+[[nodiscard]] std::uint32_t CurrentModifiers() noexcept
+{
+    return ((GetKeyState(VK_CONTROL) & 0x8000) != 0 ? 1U : 0U) |
+        ((GetKeyState(VK_MENU) & 0x8000) != 0 ? 2U : 0U) |
+        ((GetKeyState(VK_SHIFT) & 0x8000) != 0 ? 4U : 0U) |
+        (((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) != 0 ? 8U : 0U);
+}
+
+[[nodiscard]] constexpr std::uint64_t PackInteractionStatus(
+    std::uint32_t generation,
+    HdrSettingsInteractionState state) noexcept
+{
+    return (static_cast<std::uint64_t>(generation) << 8U) |
+        static_cast<std::uint8_t>(state);
+}
+
+[[nodiscard]] constexpr std::uint32_t InteractionGeneration(
+    std::uint64_t status) noexcept
+{
+    return static_cast<std::uint32_t>(status >> 8U);
+}
+
+[[nodiscard]] constexpr HdrSettingsInteractionState InteractionState(
+    std::uint64_t status) noexcept
+{
+    return static_cast<HdrSettingsInteractionState>(
+        status & kInteractionStateMask);
+}
+
+[[nodiscard]] std::uint32_t BeginInteractionRequest(
+    HdrSettingsInteractionState state) noexcept
+{
+    auto current = g_interactionStatus.load(std::memory_order_acquire);
+    for (;;)
+    {
+        auto generation = InteractionGeneration(current) + 1U;
+        if (generation == 0) generation = 1;
+        const auto requested = PackInteractionStatus(generation, state);
+        if (g_interactionStatus.compare_exchange_weak(
+                current,
+                requested,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return generation;
+    }
+}
+
+void CompleteInteractionRequest(
+    std::uint32_t generation,
+    HdrSettingsInteractionState state) noexcept
+{
+    auto current = g_interactionStatus.load(std::memory_order_acquire);
+    while (InteractionGeneration(current) == generation)
+    {
+        const auto completed = PackInteractionStatus(generation, state);
+        if (g_interactionStatus.compare_exchange_weak(
+                current,
+                completed,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire))
+            return;
+    }
+}
+
+[[nodiscard]] bool ApplyInteractionRequest(
+    std::uint32_t generation, bool open) noexcept
+{
+    const auto current =
+        g_interactionStatus.load(std::memory_order_acquire);
+    const auto expectedState = open ?
+        HdrSettingsInteractionState::opening :
+        HdrSettingsInteractionState::closing;
+    if (InteractionGeneration(current) != generation ||
+        InteractionState(current) != expectedState)
+        return true;
+
+    const auto handler =
+        g_interactionRequestHandler.load(std::memory_order_acquire);
+    if (handler == nullptr)
+    {
+        CompleteInteractionRequest(
+            generation, HdrSettingsInteractionState::unavailable);
+        return false;
+    }
+
+    try
+    {
+        const auto accepted = handler(open);
+        CompleteInteractionRequest(
+            generation,
+            accepted ? (open ? HdrSettingsInteractionState::active :
+                               HdrSettingsInteractionState::inactive) :
+                       HdrSettingsInteractionState::failed);
+        return accepted;
+    }
+    catch (...)
+    {
+        CompleteInteractionRequest(
+            generation, HdrSettingsInteractionState::failed);
+        return false;
+    }
+}
+
+[[nodiscard]] constexpr bool IsKeyboardMessage(UINT message) noexcept
+{
+    constexpr std::array messages{WM_KEYDOWN, WM_KEYUP, WM_CHAR, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_UNICHAR};
+    return std::ranges::find(messages, message) != messages.end();
+}
+
+[[nodiscard]] ImGuiKey ToImGuiKey(WPARAM key) noexcept
+{
+    if (key >= '0' && key <= '9')
+        return static_cast<ImGuiKey>(ImGuiKey_0 + (key - '0'));
+    if (key >= 'A' && key <= 'Z')
+        return static_cast<ImGuiKey>(ImGuiKey_A + (key - 'A'));
+    if (key >= VK_F1 && key <= VK_F12)
+        return static_cast<ImGuiKey>(ImGuiKey_F1 + (key - VK_F1));
+    struct KeyMapping { WPARAM native; ImGuiKey imgui; };
+    constexpr KeyMapping mappings[]{
+        {VK_TAB, ImGuiKey_Tab},
+        {VK_LEFT, ImGuiKey_LeftArrow},
+        {VK_RIGHT, ImGuiKey_RightArrow},
+        {VK_UP, ImGuiKey_UpArrow},
+        {VK_DOWN, ImGuiKey_DownArrow},
+        {VK_PRIOR, ImGuiKey_PageUp},
+        {VK_NEXT, ImGuiKey_PageDown},
+        {VK_HOME, ImGuiKey_Home},
+        {VK_END, ImGuiKey_End},
+        {VK_INSERT, ImGuiKey_Insert},
+        {VK_DELETE, ImGuiKey_Delete},
+        {VK_BACK, ImGuiKey_Backspace},
+        {VK_SPACE, ImGuiKey_Space},
+        {VK_RETURN, ImGuiKey_Enter},
+        {VK_ESCAPE, ImGuiKey_Escape},
+        {VK_OEM_7, ImGuiKey_Apostrophe},
+        {VK_OEM_COMMA, ImGuiKey_Comma},
+        {VK_OEM_MINUS, ImGuiKey_Minus},
+        {VK_OEM_PERIOD, ImGuiKey_Period},
+        {VK_OEM_2, ImGuiKey_Slash},
+        {VK_OEM_1, ImGuiKey_Semicolon},
+        {VK_OEM_PLUS, ImGuiKey_Equal},
+        {VK_OEM_4, ImGuiKey_LeftBracket},
+        {VK_OEM_5, ImGuiKey_Backslash},
+        {VK_OEM_6, ImGuiKey_RightBracket},
+        {VK_OEM_3, ImGuiKey_GraveAccent},
+        {VK_CAPITAL, ImGuiKey_CapsLock},
+        {VK_SCROLL, ImGuiKey_ScrollLock},
+        {VK_NUMLOCK, ImGuiKey_NumLock},
+        {VK_SNAPSHOT, ImGuiKey_PrintScreen},
+        {VK_PAUSE, ImGuiKey_Pause},
+        {VK_NUMPAD0, ImGuiKey_Keypad0},
+        {VK_NUMPAD1, ImGuiKey_Keypad1},
+        {VK_NUMPAD2, ImGuiKey_Keypad2},
+        {VK_NUMPAD3, ImGuiKey_Keypad3},
+        {VK_NUMPAD4, ImGuiKey_Keypad4},
+        {VK_NUMPAD5, ImGuiKey_Keypad5},
+        {VK_NUMPAD6, ImGuiKey_Keypad6},
+        {VK_NUMPAD7, ImGuiKey_Keypad7},
+        {VK_NUMPAD8, ImGuiKey_Keypad8},
+        {VK_NUMPAD9, ImGuiKey_Keypad9},
+        {VK_DECIMAL, ImGuiKey_KeypadDecimal},
+        {VK_DIVIDE, ImGuiKey_KeypadDivide},
+        {VK_MULTIPLY, ImGuiKey_KeypadMultiply},
+        {VK_SUBTRACT, ImGuiKey_KeypadSubtract},
+        {VK_ADD, ImGuiKey_KeypadAdd},
+        {VK_LSHIFT, ImGuiKey_LeftShift},
+        {VK_LCONTROL, ImGuiKey_LeftCtrl},
+        {VK_LMENU, ImGuiKey_LeftAlt},
+        {VK_LWIN, ImGuiKey_LeftSuper},
+        {VK_RSHIFT, ImGuiKey_RightShift},
+        {VK_RCONTROL, ImGuiKey_RightCtrl},
+        {VK_RMENU, ImGuiKey_RightAlt},
+        {VK_RWIN, ImGuiKey_RightSuper},
+        {VK_APPS, ImGuiKey_Menu},
+    };
+    const auto found = std::ranges::find(mappings, key, &KeyMapping::native);
+    return found == std::end(mappings) ? ImGuiKey_None : found->imgui;
+}
+
+void AddModifierEvents(ImGuiIO& io) noexcept
+{
+    io.AddKeyEvent(ImGuiMod_Ctrl, (GetKeyState(VK_CONTROL) & 0x8000) != 0);
+    io.AddKeyEvent(ImGuiMod_Shift, (GetKeyState(VK_SHIFT) & 0x8000) != 0);
+    io.AddKeyEvent(ImGuiMod_Alt, (GetKeyState(VK_MENU) & 0x8000) != 0);
+    io.AddKeyEvent(ImGuiMod_Super,
+        (GetKeyState(VK_LWIN) & 0x8000) != 0 ||
+        (GetKeyState(VK_RWIN) & 0x8000) != 0);
+}
+
+bool IsKeyDown(UINT message) noexcept
 {
     return message == WM_KEYDOWN || message == WM_SYSKEYDOWN;
 }
 
-bool KeyUp(UINT message) noexcept
+bool IsKeyUp(UINT message) noexcept
 {
     return message == WM_KEYUP || message == WM_SYSKEYUP;
 }
 
-bool KeyboardMessage(UINT message) noexcept
+void AddKeyboardEvent(ImGuiIO& io, const InputMessage& record) noexcept
 {
-    return KeyDown(message) || KeyUp(message);
+    AddModifierEvents(io);
+    const auto key = ToImGuiKey(record.wParam);
+    if (key != ImGuiKey_None) io.AddKeyEvent(key, IsKeyDown(record.message));
 }
 
-bool CharacterMessage(UINT message) noexcept
+void AddCharacterEvent(ImGuiIO& io, const InputMessage& record) noexcept
 {
-    constexpr std::array messages{WM_CHAR, WM_SYSCHAR, WM_UNICHAR};
+    if (record.wParam > 0 && record.wParam <= 0xFFFFU)
+        io.AddInputCharacterUTF16(static_cast<ImWchar16>(record.wParam));
+}
+
+void AddMouseButtonEvent(ImGuiIO& io, const InputMessage& record) noexcept
+{
+    struct ButtonMessage { UINT message; int button; bool down; };
+    constexpr ButtonMessage messages[]{
+        {WM_LBUTTONDOWN, 0, true}, {WM_LBUTTONDBLCLK, 0, true}, {WM_LBUTTONUP, 0, false},
+        {WM_RBUTTONDOWN, 1, true}, {WM_RBUTTONDBLCLK, 1, true}, {WM_RBUTTONUP, 1, false},
+        {WM_MBUTTONDOWN, 2, true}, {WM_MBUTTONDBLCLK, 2, true}, {WM_MBUTTONUP, 2, false},
+        {WM_XBUTTONDOWN, 3, true}, {WM_XBUTTONDBLCLK, 3, true}, {WM_XBUTTONUP, 3, false}};
+    const auto found = std::ranges::find(messages, record.message, &ButtonMessage::message);
+    if (found == std::end(messages)) return;
+    auto button = found->button;
+    if (button == 3 && GET_XBUTTON_WPARAM(record.wParam) != XBUTTON1) button = 4;
+    io.AddMouseButtonEvent(button, found->down);
+}
+
+void AddPointerEvent(ImGuiIO& io, const InputMessage& record) noexcept
+{
+    if (record.message == WM_MOUSEMOVE)
+        io.AddMousePosEvent(
+            static_cast<float>(static_cast<short>(LOWORD(record.lParam))),
+            static_cast<float>(static_cast<short>(HIWORD(record.lParam))));
+    else if (record.message == WM_MOUSEWHEEL)
+        io.AddMouseWheelEvent(0.0F,
+            static_cast<float>(GET_WHEEL_DELTA_WPARAM(record.wParam)) / static_cast<float>(WHEEL_DELTA));
+    else if (record.message == WM_MOUSEHWHEEL)
+        io.AddMouseWheelEvent(
+            static_cast<float>(GET_WHEEL_DELTA_WPARAM(record.wParam)) / static_cast<float>(WHEEL_DELTA), 0.0F);
+    else AddMouseButtonEvent(io, record);
+}
+
+void AddImGuiEvent(const InputMessage& record) noexcept
+{
+    ImGuiIO& io = ImGui::GetIO();
+    if (IsKeyDown(record.message) || IsKeyUp(record.message)) AddKeyboardEvent(io, record);
+    else if (record.message == WM_CHAR || record.message == WM_UNICHAR) AddCharacterEvent(io, record);
+    else if (record.message == WM_SETFOCUS || record.message == WM_KILLFOCUS)
+        io.AddFocusEvent(record.message == WM_SETFOCUS);
+    else AddPointerEvent(io, record);
+}
+[[nodiscard]] constexpr bool IsMouseMessage(UINT message) noexcept
+{
+    constexpr std::array messages{WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_MOUSEHWHEEL, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_RBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP, WM_XBUTTONDBLCLK};
     return std::ranges::find(messages, message) != messages.end();
 }
-std::uint32_t ReadModifiers() noexcept
-{
-    std::uint32_t modifiers{};
-    if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= 1;
-    if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= 2;
-    if (GetKeyState(VK_MENU) & 0x8000) modifiers |= 4;
-    if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) modifiers |= 8;
-    return modifiers;
-}
 
-UINT PhysicalKey(WPARAM key, LPARAM details) noexcept
+[[nodiscard]] bool Enqueue(
+    UINT message, WPARAM wParam, LPARAM lParam) noexcept
 {
-    const auto extended = (static_cast<std::uintptr_t>(details) & (1U << 24)) != 0;
-    if (key == VK_CONTROL) return extended ? VK_RCONTROL : VK_LCONTROL;
-    if (key == VK_MENU) return extended ? VK_RMENU : VK_LMENU;
-    if (key == VK_SHIFT)
+    const auto write = g_writeIndex.load(std::memory_order_relaxed);
+    const auto next = (write + 1U) % kInputCapacity;
+    if (next == g_readIndex.load(std::memory_order_acquire))
     {
-        const auto scan = (static_cast<std::uintptr_t>(details) >> 16) & 0xFFU;
-        return MapVirtualKeyW(static_cast<UINT>(scan), MAPVK_VSC_TO_VK_EX);
-    }
-    return static_cast<UINT>(key);
-}
-
-struct ButtonEvent
-{
-    UINT message;
-    unsigned button;
-    bool down;
-};
-
-constexpr std::array buttonEvents{
-    ButtonEvent{WM_LBUTTONDOWN, 0, true}, ButtonEvent{WM_LBUTTONDBLCLK, 0, true},
-    ButtonEvent{WM_LBUTTONUP, 0, false}, ButtonEvent{WM_RBUTTONDOWN, 1, true},
-    ButtonEvent{WM_RBUTTONDBLCLK, 1, true}, ButtonEvent{WM_RBUTTONUP, 1, false},
-    ButtonEvent{WM_MBUTTONDOWN, 2, true}, ButtonEvent{WM_MBUTTONDBLCLK, 2, true},
-    ButtonEvent{WM_MBUTTONUP, 2, false}, ButtonEvent{WM_XBUTTONDOWN, 3, true},
-    ButtonEvent{WM_XBUTTONDBLCLK, 3, true}, ButtonEvent{WM_XBUTTONUP, 3, false}};
-
-void CopyMessage(const HdrSettingsInputMessage& record, std::span<HdrSettingsInputMessage> messages,
-    HdrSettingsInputSnapshot& snapshot) noexcept
-{
-    if (record.message == toggleMessage)
-    {
-        ++snapshot.toggles;
-        return;
-    }
-    if (snapshot.messages == messages.size())
-    {
-        snapshot.focusLost = true;
-        return;
-    }
-    messages[snapshot.messages++] = record;
-}
-}  // namespace
-
-bool HdrSettingsInput::Initialize(HWND window, DWORD consumerThread) noexcept
-{
-    if (!window || window_.load(std::memory_order_acquire)) return false;
-    DWORD process{};
-    const auto thread = GetWindowThreadProcessId(window, &process);
-    if (thread != GetCurrentThreadId() || process != GetCurrentProcessId()) return false;
-    read_.store(0, std::memory_order_relaxed);
-    write_.store(0, std::memory_order_relaxed);
-    resetRequested_.store(false, std::memory_order_relaxed);
-    capture_.store(0, std::memory_order_relaxed);
-    ResetProducer();
-    focused_.store(GetFocus() == window, std::memory_order_relaxed);
-    producerThread_.store(thread, std::memory_order_release);
-    consumerThread_.store(consumerThread ? consumerThread : thread, std::memory_order_release);
-    window_.store(window, std::memory_order_release);
-    return true;
-}
-
-bool HdrSettingsInput::OnProducerThread() const noexcept
-{
-    return producerThread_.load(std::memory_order_acquire) == GetCurrentThreadId();
-}
-
-bool HdrSettingsInput::OnConsumerThread() const noexcept
-{
-    return consumerThread_.load(std::memory_order_acquire) == GetCurrentThreadId();
-}
-
-bool HdrSettingsInput::Matches(HWND window, DWORD consumerThread) const noexcept
-{
-    if (!window) return false;
-    return window_.load(std::memory_order_acquire) == window &&
-        consumerThread_.load(std::memory_order_acquire) == consumerThread;
-}
-
-void HdrSettingsInput::ReleaseOwnedCapture() noexcept
-{
-    if (!ownedCapture_) return;
-    ownedCapture_ = false;
-    if (GetCapture() != window_.load(std::memory_order_acquire)) return;
-    releasingCapture_ = true;
-    (void)ReleaseCapture();
-    releasingCapture_ = false;
-}
-
-void HdrSettingsInput::ResetProducer() noexcept
-{
-    capturedKeys_.fill(false);
-    capturedScans_.fill(false);
-    capturedButtons_.fill(false);
-    mouseButtons_ = 0;
-    toggleArmed_ = false;
-    ReleaseOwnedCapture();
-}
-
-bool HdrSettingsInput::Stop() noexcept
-{
-    if (!OnProducerThread()) return false;
-    ResetProducer();
-    window_.store(nullptr, std::memory_order_release);
-    capture_.store(0, std::memory_order_release);
-    read_.store(write_.load(std::memory_order_acquire), std::memory_order_release);
-    resetRequested_.store(false, std::memory_order_release);
-    return true;
-}
-
-void HdrSettingsInput::RequestReset() noexcept
-{
-    // Preserve consumed down/up pairs even while dropping queued events.
-    toggleArmed_ = false;
-    ReleaseOwnedCapture();
-    capture_.store(0, std::memory_order_release);
-    resetRequested_.store(true, std::memory_order_release);
-}
-
-void HdrSettingsInput::Push(HdrSettingsInputMessage message) noexcept
-{
-    if (resetRequested_.load(std::memory_order_acquire)) return;
-    const auto write = write_.load(std::memory_order_relaxed);
-    const auto next = (write + 1) % capacity;
-    if (next == read_.load(std::memory_order_acquire))
-    {
-        RequestReset();
-        return;
-    }
-    messages_[write] = message;
-    write_.store(next, std::memory_order_release);
-}
-
-bool HdrSettingsInput::KeyGesture(UINT key, bool down, bool repeat, LPARAM details) noexcept
-{
-    if (key >= capturedKeys_.size()) return false;
-    if (down && !repeat)
-    {
-        capturedKeys_[key] = key == VK_F10 ||
-            (capture_.load(std::memory_order_acquire) & keyboardCapture) != 0;
-        const auto scan = (static_cast<std::uintptr_t>(details) >> 16) & 0x1FFU;
-        if (scan != 0) capturedScans_[scan] = key == VK_F10;
-    }
-    const auto consumed = capturedKeys_[key];
-    if (!down) capturedKeys_[key] = false;
-    return consumed;
-}
-
-bool HdrSettingsInput::ObserveKeyboard(UINT message, WPARAM key, LPARAM details) noexcept
-{
-    const auto physical = PhysicalKey(key, details);
-    const auto down = KeyDown(message);
-    const auto repeat = (static_cast<std::uintptr_t>(details) & (1U << 30)) != 0;
-    const auto consumed = KeyGesture(physical, down, repeat, details);
-    if (physical == VK_F10)
-    {
-        ToggleKey(down, repeat);
-        return consumed;
-    }
-    Push({message, physical, details, ReadModifiers()});
-    return consumed;
-}
-
-void HdrSettingsInput::ToggleKey(bool down, bool repeat) noexcept
-{
-    if (down)
-    {
-        if (!repeat && !resetRequested_.load(std::memory_order_acquire)) toggleArmed_ = true;
-        return;
-    }
-    if (toggleArmed_) Push({toggleMessage});
-    toggleArmed_ = false;
-}
-bool HdrSettingsInput::ObserveCharacter(UINT message, WPARAM key, LPARAM details) noexcept
-{
-    // UNICODE_NOCHAR is the native capability probe, not a Unicode scalar.
-    if (message == WM_UNICHAR && key == UNICODE_NOCHAR) return true;
-    const auto scan = (static_cast<std::uintptr_t>(details) >> 16) & 0x1FFU;
-    if (!capturedScans_[scan]) Push({message, key, details, ReadModifiers()});
-    return capturedScans_[scan] ||
-        (capture_.load(std::memory_order_acquire) & keyboardCapture) != 0;
-}
-
-bool HdrSettingsInput::ObserveMouse(UINT message, WPARAM key, LPARAM details) noexcept
-{
-    const auto found = std::ranges::find(buttonEvents, message, &ButtonEvent::message);
-    if (found == buttonEvents.end())
-    {
-        Push({message, key, details, ReadModifiers()});
-        return (capture_.load(std::memory_order_acquire) & mouseCapture) != 0;
-    }
-    const auto button = found->button +
-        (found->button == 3 && GET_XBUTTON_WPARAM(key) == XBUTTON2 ? 1U : 0U);
-    const auto consumed = ButtonGesture(button, found->down);
-    Push({message, key, details, ReadModifiers()});
-    return consumed;
-}
-
-void HdrSettingsInput::BeginMouseGesture(unsigned button) noexcept
-{
-    capturedButtons_[button] = (capture_.load(std::memory_order_acquire) & mouseCapture) != 0;
-    mouseButtons_ |= 1U << button;
-    if (!capturedButtons_[button]) return;
-    const auto window = window_.load(std::memory_order_acquire);
-    if (GetCapture() == window) return;
-    (void)SetCapture(window);
-    ownedCapture_ = GetCapture() == window;
-}
-
-bool HdrSettingsInput::ButtonGesture(unsigned button, bool down) noexcept
-{
-    if (down)
-    {
-        BeginMouseGesture(button);
-        return capturedButtons_[button];
-    }
-    const auto consumed = capturedButtons_[button];
-    mouseButtons_ &= ~(1U << button);
-    capturedButtons_[button] = false;
-    if (mouseButtons_ == 0) ReleaseOwnedCapture();
-    return consumed;
-}
-
-bool HdrSettingsInput::ResetMessage(UINT message) const noexcept
-{
-    if (message == WM_KILLFOCUS) return true;
-    return message == WM_CAPTURECHANGED && !releasingCapture_;
-}
-bool HdrSettingsInput::Observe(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
-{
-    if (!window || !OnProducerThread()) return false;
-    if (window != window_.load(std::memory_order_acquire)) return false;
-    if (message == WM_KILLFOCUS) focused_.store(false, std::memory_order_release);
-    if (ResetMessage(message))
-    {
-        RequestReset();
+        g_overflowCount.fetch_add(1, std::memory_order_relaxed);
+        g_resetRequested.store(true, std::memory_order_release);
         return false;
     }
-    return ObserveMessage(message, key, details);
-}
-
-bool HdrSettingsInput::ObserveMessage(UINT message, WPARAM key, LPARAM details) noexcept
-{
-    if (KeyboardMessage(message)) return ObserveKeyboard(message, key, details);
-    if (CharacterMessage(message))
-        return ObserveCharacter(message, key, details);
-    if (message == WM_SETFOCUS)
-    {
-        focused_.store(true, std::memory_order_release);
-        Push({message});
-    }
-    const bool pointer = message >= WM_MOUSEFIRST && message <= WM_MOUSELAST;
-    return pointer && ObserveMouse(message, key, details);
-}
-
-void HdrSettingsInput::SetCapture(bool open, bool keyboard, bool mouse) noexcept
-{
-    if (!OnConsumerThread()) return;
-    std::uint32_t value{};
-    if (open && keyboard) value |= keyboardCapture;
-    if (open && mouse) value |= mouseCapture;
-    capture_.store(value, std::memory_order_release);
-}
-
-bool HdrSettingsInput::HasCapturedKeyboardGesture() const noexcept
-{
-    const auto held = [](bool value) { return value; };
-    // Reserved scan markers suppress later characters and can outlive key-up.
-    // Only the armed toggle and captured keys describe an unfinished gesture.
-    return toggleArmed_ || std::any_of(capturedKeys_.begin(), capturedKeys_.end(), held);
-}
-
-bool HdrSettingsInput::HasCapturedPointerGesture() const noexcept
-{
-    return mouseButtons_ != 0 || ownedCapture_ || releasingCapture_ ||
-        std::any_of(capturedButtons_.begin(), capturedButtons_.end(), [](bool value) { return value; });
-}
-
-bool HdrSettingsInput::CanChangeConsumerReadiness() const noexcept
-{
-    if (!OnProducerThread() || !OnConsumerThread()) return false;
-    if (resetRequested_.load(std::memory_order_acquire)) return false;
-    if (HasCapturedKeyboardGesture()) return false;
-    return !HasCapturedPointerGesture();
-}
-
-HdrSettingsInputSnapshot HdrSettingsInput::Drain(std::span<HdrSettingsInputMessage> messages) noexcept
-{
-    HdrSettingsInputSnapshot snapshot;
-    if (!OnConsumerThread() || !window_.load(std::memory_order_acquire)) return snapshot;
-    snapshot.focused = focused_.load(std::memory_order_acquire);
-    auto read = read_.load(std::memory_order_relaxed);
-    const auto write = write_.load(std::memory_order_acquire);
-    if (resetRequested_.load(std::memory_order_acquire))
-    {
-        // The producer pauses writes until the consumer clears its cursor and
-        // acknowledges; neither thread resets the other thread's native state.
-        const auto pausedWrite = write_.load(std::memory_order_acquire);
-        snapshot.focused = focused_.load(std::memory_order_acquire);
-        read_.store(pausedWrite, std::memory_order_release);
-        resetRequested_.store(false, std::memory_order_release);
-        snapshot.focusLost = true;
-        return snapshot;
-    }
-    while (read != write)
-    {
-        const auto& record = messages_[read];
-        CopyMessage(record, messages, snapshot);
-        read = (read + 1) % capacity;
-    }
-    read_.store(read, std::memory_order_release);
-    if (snapshot.focusLost) snapshot.messages = snapshot.toggles = 0;
-    return snapshot;
-}
-
-namespace {
-
-enum class HostState { empty, preparing, requested, installing, installed, retired };
-
-struct SettingsInputHost
-{
-    std::atomic<HostState> state{HostState::empty};
-    std::atomic<WNDPROC> next{};
-    std::atomic<bool> consumerReady{};
-    HWND window{};
-    DWORD windowThread{};
-    DWORD consumerThread{};
-    std::uint64_t generation{};
-    unsigned callbackDepth{};
-    bool callbackOverflow{};
-    HdrSettingsInput input;
-};
-
-// No shutdown unhook or queue reset: reachable callback/record code is pinned.
-SettingsInputHost inputHost;
-
-LRESULT CALLBACK SettingsHostWindowProcedure(HWND window, UINT message,
-    WPARAM key, LPARAM details) noexcept;
-
-bool PinProcedure(WNDPROC procedure) noexcept
-{
-    HMODULE module{};
-    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
-        reinterpret_cast<LPCWSTR>(procedure), &module) != 0 && module != nullptr;
-}
-
-bool NativeWindow(HWND window, DWORD& thread) noexcept
-{
-    if (!window || !IsWindow(window)) return false;
-    DWORD process{};
-    thread = GetWindowThreadProcessId(window, &process);
-    return thread != 0 && process == GetCurrentProcessId();
-}
-
-bool HostMessage(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
-{
-    if (inputHost.state.load(std::memory_order_acquire) != HostState::installed) return false;
-    if (window != inputHost.window) return false;
-    const auto consumed = inputHost.input.Observe(window, message, key, details);
-    return consumed && inputHost.consumerReady.load(std::memory_order_acquire);
-}
-
-LRESULT ForwardHostMessage(HWND window, UINT message, WPARAM key, LPARAM details) noexcept
-{
-    const auto next = inputHost.next.load(std::memory_order_acquire);
-    if (!next || next == SettingsHostWindowProcedure)
-        return DefWindowProcW(window, message, key, details);
-    try { return CallWindowProcW(next, window, message, key, details); }
-    catch (...) { return 0; }
-}
-
-bool EnterHostCallback(HWND window) noexcept
-{
-    if (window != inputHost.window || GetCurrentThreadId() != inputHost.windowThread) return false;
-    if (inputHost.callbackDepth == std::numeric_limits<unsigned>::max())
-    {
-        inputHost.callbackOverflow = true;
-        return false;
-    }
-    ++inputHost.callbackDepth;
+    g_messages[write] = {message, wParam, lParam};
+    g_writeIndex.store(next, std::memory_order_release);
     return true;
 }
 
-LRESULT ConsumedHostMessageResult(UINT message) noexcept
+[[nodiscard]] LRESULT CALLBACK HdrSettingsWindowProcedure(
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam) noexcept;
+
+[[nodiscard]] bool HasPredecessor(WNDPROC next) noexcept
 {
-    const auto booleanResult = message == WM_UNICHAR || message == WM_XBUTTONDOWN ||
-        message == WM_XBUTTONUP || message == WM_XBUTTONDBLCLK;
-    return booleanResult ? TRUE : 0;
+    return next != nullptr && next != HdrSettingsWindowProcedure;
 }
 
-LRESULT CALLBACK SettingsHostWindowProcedure(HWND window, UINT message,
-    WPARAM key, LPARAM details) noexcept
+[[nodiscard]] LRESULT ForwardInput(
+    WNDPROC next, HWND window, const InputMessage& input)
 {
-    const auto entered = EnterHostCallback(window);
-    const auto consumed = HostMessage(window, message, key, details);
-    if (message == WM_NCDESTROY) RevokeSettingsInputHost();
-    LRESULT result{};
-    if (!consumed) result = ForwardHostMessage(window, message, key, details);
-    else result = ConsumedHostMessageResult(message);
-    if (entered) --inputHost.callbackDepth;
+    if (HasPredecessor(next))
+        return CallWindowProcW(next, window, input.message, input.wParam, input.lParam);
+    return DefWindowProcW(window, input.message, input.wParam, input.lParam);
+}
+
+void CloseInteractionIfPending() noexcept
+{
+    const auto interaction = InteractionState(
+        g_interactionStatus.load(std::memory_order_acquire));
+    constexpr std::array pending{HdrSettingsInteractionState::opening,
+        HdrSettingsInteractionState::active, HdrSettingsInteractionState::closing};
+    if (std::ranges::find(pending, interaction) != pending.end())
+        (void)RequestHdrSettingsInteraction(false);
+}
+
+void ClearWindowRecord() noexcept
+{
+    g_window.store(nullptr, std::memory_order_release);
+    g_windowThread.store(0, std::memory_order_release);
+    g_nextWindowProcedure.store(nullptr, std::memory_order_release);
+}
+
+void RetireDestroyedWindow(bool active) noexcept
+{
+    g_installed.store(false, std::memory_order_release);
+    if (active) g_active.store(false, std::memory_order_release);
+    g_retainedForeignChain.store(false, std::memory_order_release);
+    ClearWindowRecord();
+    ResetQueue();
+}
+
+void ApplyShortcutReset() noexcept
+{
+    const auto reset = g_shortcutReset.load(std::memory_order_acquire);
+    if (reset == g_seenShortcutReset) return;
+    g_seenShortcutReset = reset;
+    g_shortcutLatch.Reset();
+    g_capturePendingValid = false;
+}
+
+struct KeyGesture
+{
+    std::uint32_t key{};
+    bool down{};
+    bool up{};
+    bool repeat{};
+
+    [[nodiscard]] bool IsKeyboardEvent() const noexcept { return down || up; }
+};
+
+[[nodiscard]] bool CaptureKeyDown(std::uint32_t key) noexcept
+{
+    if (key == VK_ESCAPE)
+    {
+        CancelHdrSettingsHotkeyCapture();
+        g_capturePendingValid = false;
+        return true;
+    }
+    const HdrSettingsHotkey candidate{key, CurrentModifiers()};
+    if (!IsSupportedHdrSettingsHotkey(candidate)) return false;
+    g_capturePending = candidate;
+    g_capturePendingValid = true;
+    return true;
+}
+
+[[nodiscard]] bool CaptureKeyUp(std::uint32_t key) noexcept
+{
+    if (!g_capturePendingValid || key != g_capturePending.virtualKey) return false;
+    g_capturedHotkey.store(PackHotkey(g_capturePending), std::memory_order_release);
+    g_hotkeyCapture.store(false, std::memory_order_release);
+    g_capturePendingValid = false;
+    return true;
+}
+
+[[nodiscard]] bool CaptureShortcut(const KeyGesture& key) noexcept
+{
+    // Release completes capture so the selected shortcut cannot close the menu
+    // during the gesture that configured it.
+    g_shortcutLatch.Reset();
+    bool consumed{};
+    if (key.down && !key.repeat) consumed = CaptureKeyDown(key.key);
+    if (key.up) consumed = CaptureKeyUp(key.key) || consumed;
+    return consumed;
+}
+
+[[nodiscard]] bool ProcessShortcut(const KeyGesture& key, bool windowOpen) noexcept
+{
+    bool consumed{};
+    if (key.down)
+        consumed = g_shortcutLatch.KeyDown(
+            UnpackHotkey(g_toggleHotkey.load(std::memory_order_acquire)),
+            key.key, CurrentModifiers(), key.repeat);
+    const auto toggle = key.up && g_shortcutLatch.KeyUp(key.key);
+    if (toggle && RequestHdrSettingsInteraction(!windowOpen))
+        g_toggleCount.fetch_add(1, std::memory_order_release);
+    return consumed;
+}
+
+[[nodiscard]] bool IsUiInput(UINT message) noexcept
+{
+    return IsKeyboardMessage(message) || IsMouseMessage(message) ||
+        message == WM_SETFOCUS || message == WM_KILLFOCUS;
+}
+
+void LoseInputFocus(bool windowOpen) noexcept
+{
+    if (windowOpen) (void)RequestHdrSettingsInteraction(false);
+    g_resetRequested.store(true, std::memory_order_release);
+    g_windowOpen.store(false, std::memory_order_release);
+    g_focusLoss.store(true, std::memory_order_release);
+    g_shortcutLatch.Reset();
+    g_capturePendingValid = false;
+    g_swallowedKeys.fill(false);
+    g_capturedGestureFilter.Reset();
+    CancelHdrSettingsHotkeyCapture();
+}
+
+[[nodiscard]] bool CaptureKeyboardMessage(UINT message, bool windowOpen) noexcept
+{
+    // Generic keyboard capture leaves system chords in the game/OS chain.
+    if (message == WM_SYSKEYDOWN || message == WM_SYSKEYUP) return false;
+    return IsKeyboardMessage(message) && windowOpen &&
+        g_captureKeyboard.load(std::memory_order_acquire);
+}
+
+[[nodiscard]] bool SwallowKeyGesture(const KeyGesture& key, bool consumed) noexcept
+{
+    // A consumed down owns repeats and its matching up across menu/rebind changes.
+    // A forwarded down must retain its release in the game/OS chain.
+    if (key.down && !key.repeat) g_swallowedKeys[key.key] = consumed;
+    const auto swallowed = g_swallowedKeys[key.key];
+    if (key.up) g_swallowedKeys[key.key] = false;
+    return swallowed;
+}
+
+struct GestureConsumption
+{
+    bool shortcut{};
+    bool captured{};
+};
+
+[[nodiscard]] bool ConsumeGameInput(UINT message, bool windowOpen,
+    const KeyGesture& key, GestureConsumption consumed) noexcept
+{
+    const auto consumeKeyboard = CaptureKeyboardMessage(message, windowOpen);
+    const auto consumeMouse = IsMouseMessage(message) && windowOpen &&
+        g_captureMouse.load(std::memory_order_acquire);
+    const auto keyEvent = key.IsKeyboardEvent();
+    if (keyEvent && key.key < g_swallowedKeys.size())
+        return SwallowKeyGesture(key, consumed.shortcut || consumeKeyboard);
+    return consumed.captured || consumeKeyboard || consumeMouse;
+}
+
+[[nodiscard]] KeyGesture ReadKeyGesture(const InputMessage& input) noexcept
+{
+    return {static_cast<std::uint32_t>(input.wParam),
+        IsKeyDown(input.message), IsKeyUp(input.message),
+        (static_cast<std::uintptr_t>(input.lParam) & (1ULL << 30U)) != 0};
+}
+[[nodiscard]] bool ConsumeInputMessage(const InputMessage& input) noexcept
+{
+    const auto windowOpen = g_windowOpen.load(std::memory_order_acquire);
+    ApplyShortcutReset();
+    const auto key = ReadKeyGesture(input);
+    const auto capture = windowOpen && g_hotkeyCapture.load(std::memory_order_acquire);
+    const auto shortcutConsumed = capture ? CaptureShortcut(key) : ProcessShortcut(key, windowOpen);
+    const auto uiInput = windowOpen && IsUiInput(input.message);
+    const auto capturedGesture = g_capturedGestureFilter.Suppress(input.message,
+        key.key, static_cast<std::uintptr_t>(input.lParam), {key.down && shortcutConsumed, capture});
+    if (uiInput && !capturedGesture) (void)Enqueue(input.message, input.wParam, input.lParam);
+    if (input.message == WM_KILLFOCUS) LoseInputFocus(windowOpen);
+    return ConsumeGameInput(input.message, windowOpen, key, {shortcutConsumed, capturedGesture});
+}
+
+[[nodiscard]] LRESULT ProcessActiveWindowMessage(
+    WNDPROC next, HWND window, const InputMessage& input)
+{
+    if (ConsumeInputMessage(input)) return 0;
+    if (!HasPredecessor(next))
+        return DefWindowProcW(window, input.message, input.wParam, input.lParam);
+    const auto result = CallWindowProcW(next, window, input.message, input.wParam, input.lParam);
+    if (input.message == WM_NCDESTROY) RetireDestroyedWindow(true);
     return result;
 }
 
-bool PrepareHostProcedure(WNDPROC& expected) noexcept
+[[nodiscard]] LRESULT ProcessWindowMessage(HWND window, const InputMessage& input)
 {
-    expected = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(inputHost.window, GWLP_WNDPROC));
-    if (!expected || expected == SettingsHostWindowProcedure) return false;
-    if (!PinProcedure(expected) || !PinProcedure(SettingsHostWindowProcedure)) return false;
-    return inputHost.input.Initialize(inputHost.window, inputHost.consumerThread);
+    const auto next = g_nextWindowProcedure.load(std::memory_order_acquire);
+    const auto interactionMessage = g_interactionMessage.load(std::memory_order_acquire);
+    if (interactionMessage != 0 && input.message == interactionMessage)
+    {
+        (void)ApplyInteractionRequest(static_cast<std::uint32_t>(input.wParam), input.lParam != 0);
+        return 0;
+    }
+    if (input.message == WM_NCDESTROY) CloseInteractionIfPending();
+    if (!g_active.load(std::memory_order_acquire))
+    {
+        const auto result = ForwardInput(next, window, input);
+        if (input.message == WM_NCDESTROY) RetireDestroyedWindow(false);
+        return result;
+    }
+    return ProcessActiveWindowMessage(next, window, input);
 }
 
-bool InstallHostProcedure() noexcept
+[[nodiscard]] LRESULT CALLBACK HdrSettingsWindowProcedure(
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam) noexcept
 {
-    WNDPROC expected{};
-    if (!PrepareHostProcedure(expected)) return false;
-    // Passive forwarding exists before the HWND-owner subclass exchange.
-    inputHost.next.store(expected, std::memory_order_release);
+    const InputMessage input{message, wParam, lParam};
+    try { return ProcessWindowMessage(window, input); }
+    catch (...)
+    {
+        return ForwardInput(g_nextWindowProcedure.load(std::memory_order_acquire), window, input);
+    }
+}
+
+
+void ResetQueue() noexcept
+{
+    const auto write = g_writeIndex.load(std::memory_order_acquire);
+    g_readIndex.store(write, std::memory_order_release);
+}
+
+[[nodiscard]] bool CanInitializeInput(HWND window) noexcept
+{
+    if (window == nullptr || !IsWindow(window)) return false;
+    if (!IsSupportedHdrSettingsHotkey(UnpackHotkey(
+            g_toggleHotkey.load(std::memory_order_acquire)))) return false;
+    return !g_retainedForeignChain.load(std::memory_order_acquire);
+}
+
+[[nodiscard]] bool ReactivateInput(HWND window) noexcept
+{
+    if (g_window.load(std::memory_order_acquire) != window) return false;
+    if (g_retainedForeignChain.load(std::memory_order_acquire)) return false;
+    if (reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC)) !=
+            HdrSettingsWindowProcedure) return false;
+    g_active.store(true, std::memory_order_release);
+    return true;
+}
+
+[[nodiscard]] bool InstallInputPredecessor(HWND window) noexcept
+{
     SetLastError(ERROR_SUCCESS);
-    const auto old = SetWindowLongPtrW(inputHost.window, GWLP_WNDPROC,
-        reinterpret_cast<LONG_PTR>(SettingsHostWindowProcedure));
-    if (old == 0 && GetLastError() != ERROR_SUCCESS) return false;
-    const auto captured = reinterpret_cast<WNDPROC>(old);
-    if (!captured || captured == SettingsHostWindowProcedure) return false;
-    inputHost.next.store(captured, std::memory_order_release);
-    // Direct subclass exchange is not compare-and-swap. Interference revokes
-    // admission without overwriting the returned native forwarding chain.
-    return captured == expected;
+    const auto previous = SetWindowLongPtrW(window, GWLP_WNDPROC,
+        reinterpret_cast<LONG_PTR>(HdrSettingsWindowProcedure));
+    if (previous == 0 && GetLastError() != ERROR_SUCCESS)
+    {
+        ClearWindowRecord();
+        return false;
+    }
+    const auto next = reinterpret_cast<WNDPROC>(previous);
+    if (!HasPredecessor(next))
+    {
+        ClearWindowRecord();
+        return false;
+    }
+    // The returned predecessor is authoritative even if a same-thread owner
+    // changed it before installation.
+    g_nextWindowProcedure.store(next, std::memory_order_release);
+    return true;
+}
+
+void ActivateInput() noexcept
+{
+    CancelHdrSettingsHotkeyCapture();
+    ResetQueue();
+    g_toggleCount.store(0, std::memory_order_release);
+    g_resetRequested.store(false, std::memory_order_release);
+    g_focusLoss.store(false, std::memory_order_release);
+    g_installed.store(true, std::memory_order_release);
+    g_active.store(true, std::memory_order_release);
+}
+
+bool InitializeWindowInput(HWND window) noexcept
+{
+    DWORD process{};
+    const auto windowThread = GetWindowThreadProcessId(window, &process);
+    if (process != GetCurrentProcessId() || windowThread != GetCurrentThreadId())
+        return false;
+    const auto interactionMessage = RegisterWindowMessageW(kInteractionMessageName);
+    if (interactionMessage == 0) return false;
+    const auto expected = reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC));
+    if (!HasPredecessor(expected)) return false;
+    // Publish passive forwarding before making the hook live. The owning
+    // window thread cannot dispatch queued messages between these operations.
+    g_window.store(window, std::memory_order_release);
+    g_windowThread.store(windowThread, std::memory_order_release);
+    g_interactionMessage.store(interactionMessage, std::memory_order_release);
+    g_nextWindowProcedure.store(expected, std::memory_order_release);
+    if (!InstallInputPredecessor(window)) return false;
+    ActivateInput();
+    return true;
+}
+
+struct InteractionDestination
+{
+    HdrSettingsInteractionRequestHandler handler{};
+    HWND window{};
+    DWORD thread{};
+    UINT message{};
+
+    [[nodiscard]] bool Valid() const noexcept
+    {
+        return handler != nullptr && window != nullptr && thread != 0 && message != 0;
+    }
+};
+
+[[nodiscard]] bool PostInteractionRequest(const InteractionDestination& destination,
+    std::uint32_t generation, bool open) noexcept
+{
+    if (PostMessageW(destination.window, destination.message,
+            static_cast<WPARAM>(generation), open ? 1 : 0)) return true;
+    CompleteInteractionRequest(generation, HdrSettingsInteractionState::failed);
+    return false;
 }
 
 }  // namespace
 
-bool PublishSettingsInputHost(HWND window, std::uint64_t generation) noexcept
+bool InitializeHdrSettingsInput(HWND window) noexcept
 {
-    if (generation == 0) return false;
-    DWORD thread{};
-    if (!NativeWindow(window, thread)) return false;
-    auto expected = HostState::empty;
-    if (!inputHost.state.compare_exchange_strong(expected, HostState::preparing,
-            std::memory_order_acq_rel)) return false;
-    inputHost.window = window;
-    inputHost.windowThread = thread;
-    inputHost.consumerThread = GetCurrentThreadId();
-    inputHost.generation = generation;
-    expected = HostState::preparing;
-    return inputHost.state.compare_exchange_strong(expected, HostState::requested,
+    if (!CanInitializeInput(window)) return false;
+    if (g_installed.load(std::memory_order_acquire)) return ReactivateInput(window);
+    return InitializeWindowInput(window);
+}
+void ShutdownHdrSettingsInput() noexcept
+{
+    if (!g_installed.load(std::memory_order_acquire)) return;
+    CloseInteractionIfPending();
+    g_active.store(false, std::memory_order_release);
+    const auto window = g_window.load(std::memory_order_acquire);
+    const auto current = window != nullptr ?
+        reinterpret_cast<WNDPROC>(GetWindowLongPtrW(window, GWLP_WNDPROC)) :
+        nullptr;
+    g_windowOpen.store(false, std::memory_order_release);
+    g_captureKeyboard.store(false, std::memory_order_release);
+    g_captureMouse.store(false, std::memory_order_release);
+    CancelHdrSettingsHotkeyCapture();
+    g_shortcutReset.fetch_add(1, std::memory_order_release);
+    // Keep the process-lifetime subclass passive instead of performing a
+    // check-then-restore that could overwrite a concurrently installed owner.
+    // It can be reactivated when still current; a later owner keeps the exact
+    // passive predecessor chain valid through WM_NCDESTROY.
+    g_retainedForeignChain.store(
+        current != nullptr && current != HdrSettingsWindowProcedure,
         std::memory_order_release);
+    ResetQueue();
 }
 
-bool TryActivateSettingsInputHostOnCurrentThread() noexcept
+void DrainHdrSettingsInput() noexcept
 {
-    if (inputHost.state.load(std::memory_order_acquire) != HostState::requested) return false;
-    DWORD thread{};
-    if (!NativeWindow(inputHost.window, thread) || thread != GetCurrentThreadId()) return false;
-    if (thread != inputHost.windowThread) return false;
-    auto expected = HostState::requested;
-    if (!inputHost.state.compare_exchange_strong(expected, HostState::installing,
-            std::memory_order_acq_rel)) return false;
-    if (!InstallHostProcedure())
+    if (g_resetRequested.exchange(false, std::memory_order_acq_rel))
     {
-        RevokeSettingsInputHost();
+        ResetQueue();
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddFocusEvent(false);
+        return;
+    }
+
+    std::size_t drained{};
+    auto read = g_readIndex.load(std::memory_order_relaxed);
+    const auto write = g_writeIndex.load(std::memory_order_acquire);
+    while (read != write && drained < kMaximumDrainPerFrame)
+    {
+        const auto record = g_messages[read];
+        AddImGuiEvent(record);
+        read = (read + 1U) % kInputCapacity;
+        ++drained;
+    }
+    g_readIndex.store(read, std::memory_order_release);
+}
+
+bool ConsumeHdrSettingsToggle() noexcept
+{
+    auto count = g_toggleCount.load(std::memory_order_acquire);
+    while (count != 0)
+    {
+        if (g_toggleCount.compare_exchange_weak(count, count - 1U,
+                std::memory_order_acq_rel, std::memory_order_acquire))
+            return true;
+    }
+    return false;
+}
+
+bool ConsumeHdrSettingsFocusLoss() noexcept
+{
+    return g_focusLoss.exchange(false, std::memory_order_acq_rel);
+}
+
+bool HdrSettingsFocusLossPending() noexcept
+{
+    return g_focusLoss.load(std::memory_order_acquire);
+}
+
+void SetHdrSettingsHotkey(HdrSettingsHotkey hotkey) noexcept
+{
+    if (!IsSupportedHdrSettingsHotkey(hotkey)) return;
+    const auto packed = PackHotkey(hotkey);
+    if (g_toggleHotkey.exchange(packed, std::memory_order_acq_rel) != packed)
+        g_shortcutReset.fetch_add(1, std::memory_order_release);
+}
+
+void BeginHdrSettingsHotkeyCapture() noexcept
+{
+    g_capturedHotkey.store(0, std::memory_order_release);
+    g_shortcutReset.fetch_add(1, std::memory_order_release);
+    g_hotkeyCapture.store(true, std::memory_order_release);
+}
+
+void CancelHdrSettingsHotkeyCapture() noexcept
+{
+    g_hotkeyCapture.store(false, std::memory_order_release);
+    g_capturedHotkey.store(0, std::memory_order_release);
+    g_shortcutReset.fetch_add(1, std::memory_order_release);
+}
+
+bool HdrSettingsHotkeyCaptureActive() noexcept
+{
+    return g_hotkeyCapture.load(std::memory_order_acquire);
+}
+
+bool ConsumeHdrSettingsHotkeyCapture(HdrSettingsHotkey& hotkey) noexcept
+{
+    const auto packed = g_capturedHotkey.exchange(0, std::memory_order_acq_rel);
+    if (packed == 0) return false;
+    hotkey = UnpackHotkey(packed);
+    return IsSupportedHdrSettingsHotkey(hotkey);
+}
+
+void SetHdrSettingsInputCapture(
+    bool windowOpen, bool keyboard, bool mouse) noexcept
+{
+    g_windowOpen.store(windowOpen, std::memory_order_release);
+    g_captureKeyboard.store(windowOpen && keyboard, std::memory_order_release);
+    g_captureMouse.store(windowOpen && mouse, std::memory_order_release);
+    if (!windowOpen && g_hotkeyCapture.load(std::memory_order_acquire))
+        CancelHdrSettingsHotkeyCapture();
+}
+
+void RegisterHdrSettingsInteractionRequestHandler(
+    HdrSettingsInteractionRequestHandler handler) noexcept
+{
+    g_interactionRequestHandler.store(handler, std::memory_order_release);
+    (void)BeginInteractionRequest(
+        handler == nullptr ? HdrSettingsInteractionState::unavailable :
+                             HdrSettingsInteractionState::inactive);
+}
+
+bool RequestHdrSettingsInteraction(bool open) noexcept
+{
+    const InteractionDestination destination{
+        g_interactionRequestHandler.load(std::memory_order_acquire),
+        g_window.load(std::memory_order_acquire),
+        g_windowThread.load(std::memory_order_acquire),
+        g_interactionMessage.load(std::memory_order_acquire)};
+    if (!destination.Valid())
+    {
+        (void)BeginInteractionRequest(HdrSettingsInteractionState::unavailable);
         return false;
     }
-    expected = HostState::installing;
-    return inputHost.state.compare_exchange_strong(expected, HostState::installed,
-        std::memory_order_release);
+    const auto generation = BeginInteractionRequest(open ?
+        HdrSettingsInteractionState::opening : HdrSettingsInteractionState::closing);
+    if (GetCurrentThreadId() == destination.thread)
+        return ApplyInteractionRequest(generation, open);
+    return PostInteractionRequest(destination, generation, open);
+}
+HdrSettingsInteractionState ReadHdrSettingsInteractionState() noexcept
+{
+    return InteractionState(
+        g_interactionStatus.load(std::memory_order_acquire));
 }
 
-HdrSettingsInput* SettingsInputForGeneration(std::uint64_t generation) noexcept
+bool HdrSettingsInputInstalled() noexcept
 {
-    if (inputHost.state.load(std::memory_order_acquire) != HostState::installed) return nullptr;
-    if (inputHost.generation != generation || inputHost.consumerThread != GetCurrentThreadId()) return nullptr;
-    return &inputHost.input;
+    return g_active.load(std::memory_order_acquire);
 }
 
-bool SetSettingsInputHostConsumerReady(std::uint64_t generation, bool ready) noexcept
+std::uint64_t HdrSettingsInputOverflowCount() noexcept
 {
-    auto* input = SettingsInputForGeneration(generation);
-    if (!input || !input->CanChangeConsumerReadiness()) return false;
-    // Depth is read only after the same HWND-owner thread has been established.
-    if (inputHost.callbackDepth != 0 || inputHost.callbackOverflow) return false;
-    if (!ready) input->SetCapture(false, false, false);
-    inputHost.consumerReady.store(ready, std::memory_order_release);
-    return true;
-}
-
-void RevokeSettingsInputHost() noexcept
-{
-    if (inputHost.state.load(std::memory_order_acquire) == HostState::empty) return;
-    inputHost.consumerReady.store(false, std::memory_order_release);
-    inputHost.state.store(HostState::retired, std::memory_order_release);
+    return g_overflowCount.load(std::memory_order_acquire);
 }
 
 }  // namespace fo4hdr

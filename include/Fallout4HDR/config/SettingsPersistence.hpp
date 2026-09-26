@@ -38,6 +38,7 @@ struct SettingsPersistenceSnapshot
 {
     SettingsPersistenceState state{SettingsPersistenceState::unavailable};
     std::uint64_t generation{};
+    SettingsPersistenceState positionState{SettingsPersistenceState::unavailable};
     SettingsPersistenceState displayCalibrationState{
         SettingsPersistenceState::unavailable};
     std::uint64_t displayCalibrationGeneration{};
@@ -48,9 +49,12 @@ struct SettingsPersistenceSnapshot
     const std::filesystem::path& iniPath,
     const LutGradeProfiles& distributedProfiles = {}) noexcept;
 [[nodiscard]] std::uint64_t RequestHdrSettingsSave(
-    const HdrSettings& settings) noexcept;
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept;
 [[nodiscard]] SettingsPersistenceSnapshot
 ReadSettingsPersistenceSnapshot() noexcept;
+// Position-only autosave never persists unsaved image/interface controls.
+[[nodiscard]] bool RequestHdrWindowPositionSave(double x, double y) noexcept;
 [[nodiscard]] std::uint64_t RequestDisplayCalibrationSave(
     std::wstring_view monitorDevicePath,
     const HdrSettings& settings) noexcept;

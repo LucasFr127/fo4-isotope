@@ -24,6 +24,188 @@
 #include "GameObservationMemory.hpp"
 
 namespace {
+bool g_settingsInteractionApplied{};
+bool g_settingsInteractionCursorRegistered{};
+RE::BSTSmartPointer<RE::BSInputEnableLayer>
+    g_settingsInteractionInputLayer{};
+
+constexpr auto kSettingsSuppressedUserEvents =
+    static_cast<RE::UserEvents::USER_EVENT_FLAG>(
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kMovement) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kLooking) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kActivate) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kFighting) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kSneaking) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kMainFour) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kJumping) |
+        std::to_underlying(RE::UserEvents::USER_EVENT_FLAG::kVATS));
+constexpr auto kSettingsSuppressedOtherEvents =
+    static_cast<RE::OtherInputEvents::OTHER_EVENT_FLAG>(
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kJournalTabs) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kActivation) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kFastTravel) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kPOVChange) |
+        std::to_underlying(RE::OtherInputEvents::OTHER_EVENT_FLAG::kVATS) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kFavorites) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kPipboyLight) |
+        std::to_underlying(RE::OtherInputEvents::OTHER_EVENT_FLAG::kZKey) |
+        std::to_underlying(RE::OtherInputEvents::OTHER_EVENT_FLAG::kRunning) |
+        std::to_underlying(
+            RE::OtherInputEvents::OTHER_EVENT_FLAG::kSprinting));
+
+}
+namespace fo4hdr::game {
+bool AcquireInputLayer(RE::BSTSmartPointer<RE::BSInputEnableLayer>& inputLayer, std::uint32_t& layerID)
+{
+    auto* inputManager = observation::ValidateCommonLibObject(
+        RE::BSInputEnableManager::GetSingleton(),
+        sizeof(RE::BSInputEnableManager),
+        "RE::BSInputEnableManager::GetSingleton");
+    if (inputManager == nullptr)
+    {
+        REX::WARN(
+            "m14 settings_interaction active=true applied=false "
+            "reason=input-enable-manager-unavailable");
+        return false;
+    }
+
+    if (!inputManager->AllocateNewLayer(
+            inputLayer, "Fallout4HDR ImGui") ||
+        !inputLayer)
+    {
+        REX::WARN(
+            "m14 settings_interaction active=true applied=false "
+            "reason=input-layer-allocation-failed");
+        return false;
+    }
+    layerID = inputLayer->layerID;
+    // Own only gameplay actions. Menu and console user events and the
+    // cursor other-event remain enabled as independent recovery paths.
+    if (!inputManager->EnableUserEvent(
+            layerID,
+            kSettingsSuppressedUserEvents,
+            false,
+            RE::UserEvents::SENDER_ID::kMenu) ||
+        !inputManager->EnableOtherEvent(
+            layerID,
+            kSettingsSuppressedOtherEvents,
+            false,
+            RE::UserEvents::SENDER_ID::kMenu))
+    {
+        inputLayer.reset();
+        REX::WARN(
+            "m14 settings_interaction active=true applied=false "
+            "reason=input-layer-configuration-failed layer={}",
+            layerID);
+        return false;
+    }
+    return true;
+}
+
+bool SetInteraction(bool open, RE::MenuCursor& cursor, std::uint32_t& layerID)
+{
+    if (open)
+    {
+        RE::BSTSmartPointer<RE::BSInputEnableLayer> inputLayer;
+        if (!AcquireInputLayer(inputLayer, layerID)) return false;
+        cursor.RegisterCursor();
+        g_settingsInteractionCursorRegistered = true;
+        g_settingsInteractionInputLayer = std::move(inputLayer);
+        g_settingsInteractionApplied = true;
+        return true;
+    }
+    if (!g_settingsInteractionCursorRegistered ||
+        !g_settingsInteractionInputLayer)
+    {
+        REX::WARN(
+            "m14 settings_interaction active=false applied=false "
+            "reason=input-ownership-inconsistent");
+        return false;
+    }
+    layerID = g_settingsInteractionInputLayer->layerID;
+    cursor.UnregisterCursor();
+    g_settingsInteractionCursorRegistered = false;
+    // Releasing the engine-owned layer removes exactly our event
+    // suppression without reading or restoring another menu's state.
+    g_settingsInteractionInputLayer.reset();
+    g_settingsInteractionApplied = false;
+    return true;
+}
+
+bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, std::uint32_t collector) noexcept
+{
+    return expected != 0 && current == expected && (collector == 0 || current == collector);
+}
+[[nodiscard]] bool ApplyGameInputInteraction(
+    bool open, std::uint32_t expectedThread, std::uint32_t collectorThread) noexcept
+{
+    const auto currentThread = REX::W32::GetCurrentThreadId();
+    if (!VerifiedInteractionThread(currentThread, expectedThread, collectorThread))
+    {
+        REX::WARN(
+            "m14 settings_interaction applied=false "
+            "reason=unverified-window-game-thread current_thread={} "
+            "window_thread={} collector_thread={}",
+            currentThread,
+            expectedThread,
+            collectorThread);
+        return false;
+    }
+    if (open == g_settingsInteractionApplied)
+        return true;
+
+    try
+    {
+        auto* cursor = observation::ValidateCommonLibObject(
+            RE::MenuCursor::GetSingleton(),
+            sizeof(RE::MenuCursor),
+            "RE::MenuCursor::GetSingleton");
+        if (cursor == nullptr)
+        {
+            REX::WARN(
+                "m14 settings_interaction active={} applied=false "
+                "reason=menu-cursor-unavailable",
+                open);
+            return false;
+        }
+        const auto cursorOwnersBefore = cursor->registeredCursors;
+        std::uint32_t layerID{};
+
+        if (!SetInteraction(open, *cursor, layerID)) return false;
+        REX::INFO(
+            "m14 settings_interaction active={} applied=true thread={} "
+            "layer={} cursor_owners_before={} cursor_owners_after={}",
+            open,
+            REX::W32::GetCurrentThreadId(),
+            layerID,
+            cursorOwnersBefore,
+            cursor->registeredCursors);
+        return true;
+    }
+    catch (...)
+    {
+        const auto applied = open == g_settingsInteractionApplied;
+        ::OutputDebugStringA(
+            applied ?
+                "Fallout4HDR: M14 input logging failed after a completed "
+                "interaction transition.\n" :
+                "Fallout4HDR: M14 input interaction failed before a complete "
+                "transition.\n");
+        return applied;
+    }
+}
+
+}
+
+namespace {
 
 static_assert(std::is_base_of_v<
               RE::BSTEventSource<RE::MenuOpenCloseEvent>, RE::UI>);
@@ -62,6 +244,7 @@ std::atomic<std::uint64_t> g_observationRequestGeneration{};
 std::atomic<std::uint32_t> g_collectorThread{};
 std::atomic<bool> g_collectorFailed{};
 std::atomic<bool> g_uiCallbackFailed{};
+std::atomic<std::uint32_t> g_settingsInteractionWindowThread{};
 std::atomic<fo4hdr::game::LifecycleDiagnosticsCallback>
     g_lifecycleDiagnostics{};
 std::atomic_flag g_collectionActive = ATOMIC_FLAG_INIT;
@@ -685,6 +868,12 @@ private:
     ObservationRequest request_;
 };
 
+[[nodiscard]] bool ApplySettingsInteractionOnWindowThread(bool open) noexcept
+{
+    const auto expectedThread = g_settingsInteractionWindowThread.load(std::memory_order_acquire);
+    const auto collectorThread = g_collectorThread.load(std::memory_order_acquire);
+    return fo4hdr::game::ApplyGameInputInteraction(open, expectedThread, collectorThread);
+}
 bool TaskInterfaceAvailable(const LegacyTaskInterfaceView* task) noexcept
 {
     return task != nullptr && task->version == 2 && task->addTask != nullptr;
@@ -785,6 +974,11 @@ void ActivateSettingsInput(std::string_view name)
 {
     const auto activation =
         fo4hdr::TryActivateGraphicsSettingsInputOnCurrentThread();
+    if (activation.active && activation.windowThreadId != 0)
+    {
+        g_settingsInteractionWindowThread.store(
+            activation.windowThreadId, std::memory_order_release);
+    }
     REX::INFO(
         "m14 settings_input event={} ready={} active={} "
         "current_thread={} window_thread={}",
@@ -954,6 +1148,8 @@ namespace {
             "listener-registration-failed");
         return false;
     }
+    fo4hdr::RegisterHdrSettingsInteractionRequestHandler(
+        &ApplySettingsInteractionOnWindowThread);
     try
     {
         ReportMessagingAvailable(

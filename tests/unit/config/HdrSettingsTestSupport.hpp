@@ -45,6 +45,11 @@ VanillaColorGradingStrength=60
 VanillaGradeLuminance=75
 VanillaGradeColor=40
 BloomStrength=175
+[Interface]
+ToggleKey=F12
+Scale=1.5
+WindowWidth=900
+WindowHeight=760
 [ACES2LMT]
 LookStrength=0.25
 [AgX]

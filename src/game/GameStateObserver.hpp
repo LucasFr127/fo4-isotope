@@ -15,8 +15,8 @@ namespace fo4hdr::game {
 using LifecycleDiagnosticsCallback =
     void (*)(const GameHdrSnapshot& snapshot) noexcept;
 
-// Registers F4SE lifecycle/UI observation after exact-runtime validation.
-// Failure leaves the validated
+// Registers F4SE lifecycle/UI observation and window-thread settings input
+// interaction after exact-runtime validation. Failure leaves the validated
 // plugin loaded with HDR disabled.
 [[nodiscard]] bool InitializeGameStateObserver(
     const void* messagingInterface,

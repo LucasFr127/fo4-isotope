@@ -22,6 +22,7 @@ struct PluginConfiguration : HdrSettings
     bool enabled{};
     bool productionRequested{};
     double sceneExposureMultiplier{1.0};
+    HdrInterfaceSettings interfaceSettings{};
     bool developerMode{};
     bool traceRenderPipeline{};
     bool measurePerformance{};
@@ -44,6 +45,7 @@ enum class PluginConfigurationError
     valueOutOfRange,
     unsupportedAlgorithm,
     unsupportedColorGradingMethod,
+    unsupportedToggleKey,
     invalidCombination
 };
 

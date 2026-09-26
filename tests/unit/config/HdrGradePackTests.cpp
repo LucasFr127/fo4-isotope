@@ -350,7 +350,7 @@ void TestGradePackRewrite(const GradePackFixture& fixture, PluginConfigurationRe
     auto globalOnly = edited;
     globalOnly.lutGradeProfiles = {};
     const auto rewrittenMain = RewriteHdrSettingsIni(
-        mainText, globalOnly);
+        mainText, globalOnly, edited.interfaceSettings);
     FO4HDR_CHECK(rewrittenMain.find("[LUT:") == std::string::npos);
     WriteGradePack(personalPath, rewritten);
     WriteGradePack(mainPath, rewrittenMain);

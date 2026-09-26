@@ -372,6 +372,12 @@ enum class RequiredKey : std::size_t
     lutProfilesEnabled,
     colorGradingMethod,
     bloomStrength,
+    toggleKey,
+    interfaceScale,
+    settingsWindowWidth,
+    settingsWindowHeight,
+    settingsWindowX,
+    settingsWindowY,
     count
 };
 
@@ -434,6 +440,12 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Effects", "VanillaGradeColor", RequiredKey::vanillaGradeColor},
     {"Effects", "LutProfilesEnabled", RequiredKey::lutProfilesEnabled},
     {"Effects", "BloomStrength", RequiredKey::bloomStrength},
+    {"Interface", "ToggleKey", RequiredKey::toggleKey},
+    {"Interface", "Scale", RequiredKey::interfaceScale},
+    {"Interface", "WindowWidth", RequiredKey::settingsWindowWidth},
+    {"Interface", "WindowHeight", RequiredKey::settingsWindowHeight},
+    {"Interface", "WindowX", RequiredKey::settingsWindowX},
+    {"Interface", "WindowY", RequiredKey::settingsWindowY},
     {"Image", "Exposure", RequiredKey::exposureEv},
     {"ToneMapper", "ExposureEV", RequiredKey::exposureEv},
     {"SelectiveColor", "RedHue", RequiredKey::selectiveRedHue},
@@ -519,6 +531,11 @@ constexpr ConfigurationKey kConfigurationKeys[]{
         {RequiredKey::vanillaGradeLuminance, &configuration.vanillaGradeLuminancePercent},
         {RequiredKey::vanillaGradeColor, &configuration.vanillaGradeColorPercent},
         {RequiredKey::bloomStrength, &configuration.bloomStrengthPercent},
+        {RequiredKey::interfaceScale, &configuration.interfaceSettings.scale},
+        {RequiredKey::settingsWindowWidth, &configuration.interfaceSettings.windowWidth},
+        {RequiredKey::settingsWindowHeight, &configuration.interfaceSettings.windowHeight},
+        {RequiredKey::settingsWindowX, &configuration.interfaceSettings.windowX},
+        {RequiredKey::settingsWindowY, &configuration.interfaceSettings.windowY},
     };
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? nullptr : found->value;
@@ -564,6 +581,11 @@ constexpr ConfigurationRange kConfigurationRanges[]{
     {RequiredKey::vanillaGradeLuminance, {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent}},
     {RequiredKey::vanillaGradeColor, {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent}},
     {RequiredKey::bloomStrength, {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent}},
+    {RequiredKey::interfaceScale, {kMinimumInterfaceScale, kMaximumInterfaceScale}},
+    {RequiredKey::settingsWindowWidth, {kMinimumSettingsWindowWidth, kMaximumSettingsWindowWidth}},
+    {RequiredKey::settingsWindowHeight, {kMinimumSettingsWindowHeight, kMaximumSettingsWindowHeight}},
+    {RequiredKey::settingsWindowX, {-1.0, 65535.0}},
+    {RequiredKey::settingsWindowY, {-1.0, 65535.0}},
 };
 
 [[nodiscard]] constexpr std::array<double, 2> NumericRange(RequiredKey key) noexcept
@@ -625,6 +647,9 @@ PluginConfigurationError ParseNamedSetting(PluginConfiguration& parsed,
 {
     if (key == RequiredKey::algorithm) return ParseAlgorithm(value, parsed.productionAlgorithm);
     if (key == RequiredKey::colorGradingMethod) return ParseGradingMethod(value, parsed.colorGradingMethod);
+    if (key == RequiredKey::toggleKey)
+        return ParseHdrSettingsHotkey(value, parsed.interfaceSettings.toggleKey) ?
+            PluginConfigurationError::none : PluginConfigurationError::unsupportedToggleKey;
     return ParseBoolean(value, BooleanTarget(parsed, key)) ?
         PluginConfigurationError::none : PluginConfigurationError::invalidBoolean;
 }
@@ -661,6 +686,8 @@ PluginConfigurationError ValidateConfiguration(const PluginConfiguration& parsed
 {
     const auto error = ValidateDiagnosticConfiguration(parsed);
     if (error != PluginConfigurationError::none) return error;
+    if (ValidateHdrInterfaceSettings(parsed.interfaceSettings) != HdrInterfaceSettingsValidationError::none)
+        return PluginConfigurationError::valueOutOfRange;
     if (ValidateHdrSettings(parsed) != HdrSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
     return PluginConfigurationError::none;
@@ -1061,6 +1088,7 @@ std::string_view ToString(PluginConfigurationError error) noexcept
         {PluginConfigurationError::valueOutOfRange, "value-out-of-range"},
         {PluginConfigurationError::unsupportedAlgorithm, "unsupported-algorithm"},
         {PluginConfigurationError::unsupportedColorGradingMethod, "unsupported-color-grading-method"},
+        {PluginConfigurationError::unsupportedToggleKey, "unsupported-toggle-key"},
         {PluginConfigurationError::invalidCombination, "invalid-combination"},
     };
     const auto found = std::ranges::find(names, error, &ErrorName::error);

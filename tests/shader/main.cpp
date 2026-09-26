@@ -48,8 +48,6 @@ void RunDefaultCorpus()
     auto device = CreateDevice();
     RunPresentationCorpus(device);
     RunColorCorpus(device);
-    RunSettingsPanelTests();
-    RunLutProfilesPanelTests();
 }
 
 int ReportResult(bool benchmark)

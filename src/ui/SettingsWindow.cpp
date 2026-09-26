@@ -1,540 +1,1119 @@
 // SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "DisplayCalibrationPanel.hpp"
+#include "ToneMapperPanel.hpp"
+#include "SettingsPanelSlider.hpp"
+#include "Fallout4HDR/config/PluginConfiguration.hpp"
 #include "Fallout4HDR/ui/HdrSettingsInput.hpp"
 #include "Fallout4HDR/config/SettingsPersistence.hpp"
-#include "Fallout4HDR/graphics/HdrRenderer.hpp"
-#include "SettingsPanel.hpp"
-#include "DisplayCalibrationPanel.hpp"
-#include "LutProfilesPanel.hpp"
-#include "../graphics/LiveSettings.hpp"
-#include "../graphics/DisplayDiscovery.hpp"
-
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx11.h>
-#include <wrl/client.h>
-
 #include <algorithm>
-#include <array>
 #include <atomic>
+#include <cmath>
+#include <cstdio>
 #include <utility>
-
 namespace fo4hdr {
 namespace {
+using detail::DrawRestoreDefaultButton;
+using detail::DrawSettingsControlLabel;
+using detail::DrawSettingsSlider;
+using detail::SettingsSliderRange;
 
-using Microsoft::WRL::ComPtr;
-HdrSettings g_draft;
-GradeProfileSelection g_profileSelection;
-ComPtr<ID3D11Device> g_device;
-ComPtr<ID3D11DeviceContext> g_context;
-ImGuiContext* g_imgui{};
-HWND g_window{};
-std::atomic<HWND> g_inputWindow{};
-DWORD g_thread{};
-bool g_platform{}, g_renderer{}, g_ready{}, g_open{}, g_drawing{}, g_commit{};
-bool g_hideOverlay{};
-bool g_consumerReady{};
-bool g_saveRequested{};
-HdrSettings g_saveDraft;
-std::uint32_t g_calibrationMode{};
-std::atomic<std::uint64_t> g_inputGeneration{};
-std::uint64_t g_profileRequest{};
-bool g_profileLoad{};
-DisplayCalibrationProfile g_profileDraft;
-SettingsPersistenceState g_profileState{SettingsPersistenceState::unavailable};
-LARGE_INTEGER g_frequency{}, g_previous{};
+struct SettingsWindowState {
+    HdrSettings persistedSettings{};
+    HdrSettings uiDraft{};
+    HdrInterfaceSettings persistedInterfaceSettings{};
+    HdrInterfaceSettings uiInterfaceDraft{};
+    ImGuiStyle baseImGuiStyle{};
+    bool uiCommitRequested{};
+    bool settingsInteractionError{};
+    bool settingsWindowDesiredOpen{};
+    bool persistenceRequestError{};
+    bool interfaceStylePending{};
+    bool interfaceWindowSizePending{true};
+    bool interfaceWindowCenterPending{};
+    bool interfaceWindowPositionPending{true};
+    bool windowPositionSavePending{};
+    std::uint64_t windowPositionChangedAt{};
+    bool compareHeld{};
+    HdrSettings compareRestore{};
+    HdrSettings saveRequestedSettings{};
+    HdrInterfaceSettings saveRequestedInterfaceSettings{};
+    std::uint64_t saveRequestGeneration{};
+    std::uint64_t saveAcknowledgedGeneration{};
+    std::uint64_t calibrationRequestGeneration{};
+    std::uint64_t calibrationAcknowledgedGeneration{};
+    std::array<wchar_t, 128> calibrationRequestIdentity{};
+    HdrSettings calibrationRequestDraft{};
+    const char* calibrationStatus{};
+    std::uint32_t calibrationMode{};
 
-class ImGuiScope
-{
-public:
-    explicit ImGuiScope(ImGuiContext* context, bool retiring = false) noexcept : previous_(ImGui::GetCurrentContext())
-    {
-        if (retiring && previous_ == context) previous_ = nullptr;
-        ImGui::SetCurrentContext(context);
-    }
-    ~ImGuiScope() noexcept { ImGui::SetCurrentContext(previous_); }
-private:
-    ImGuiContext* previous_;
 };
 
-ImGuiKey NamedKey(WPARAM key) noexcept
+struct SettingsTabsFrame
 {
-    struct Range
+    float footerHeight;
+    const SettingsPersistenceSnapshot& persistence;
+    bool calibrationForThisDisplay;
+    HdrSettingsInteractionState interactionState;
+};
+
+void DrawExposureLockDiagnostic(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+{
+    bool lockExposure = view.exposureRequested;
+    if (ImGui::Checkbox("Lock Native Exposure (Session Only)", &lockExposure))
     {
-        WPARAM first;
-        WPARAM last;
-        ImGuiKey named;
-        bool Contains(WPARAM value) const noexcept { return value >= first && value <= last; }
+        actions.requestExposure(lockExposure);
+        actions.refreshView(view);
+    }
+    ImGui::SetItemTooltip("Captures the qualified GPU exposure and scene-filter reference.\n"
+        "Takes effect next frame; close settings to compare gameplay.\n"
+        "Focus loss, loading, or HDR retirement releases it.\nInvalid GPU samples "
+        "use live exposure; no numeric readback is performed.");
+    if (view.exposureFailed)
+        ImGui::TextWrapped("Exposure lock unavailable: resources or native source qualification failed.");
+    else if (view.exposureRequested && !view.exposureActive)
+        ImGui::TextUnformatted("Exposure lock: waiting for qualified scene capture");
+}
+
+void DrawRendererGenerations(const SettingsWindowView& view) noexcept
+{
+    ImGui::Text("Resource generation: %llu  Frame: %llu",
+        static_cast<unsigned long long>(
+            view.resourceGeneration),
+        static_cast<unsigned long long>(view.frame));
+    ImGui::Text("Settings: active=%llu desired=%llu request=%llu",
+        static_cast<unsigned long long>(view.settingsGeneration),
+        static_cast<unsigned long long>(
+            view.desiredSettingsGeneration),
+        static_cast<unsigned long long>(view.lutRequestGeneration));
+    ImGui::Text("Tone mapper: %s at %.0f nits%s",
+        SettingsOperatorDisplayName(
+            view.activeSettings.productionAlgorithm),
+        view.activeSettings.displayPeakNits,
+        view.lutPending ? " (replacement pending)" : "");
+}
+
+void DrawRendererDiagnosticStatus(const SettingsWindowView& view) noexcept
+{
+    DrawRendererGenerations(view);
+    ImGui::Text("Input: %s | dropped: %llu",
+        HdrSettingsInputInstalled() ? "owned" : "unavailable",
+        static_cast<unsigned long long>(
+            HdrSettingsInputOverflowCount()));
+    ImGui::Text("Live-settings render thread: %s",
+        view.threadCompatible ?
+            "compatible" : "disabled (draw/Present mismatch)");
+    ImGui::Text("HDR state: %s",
+        view.hdrActive ? "active" :
+            "inactive");
+    ImGui::Separator();
+}
+
+void CopyPipboyObservationReport(const SettingsWindowView& view, const SettingsPipboyObservation& pipboy) noexcept
+{
+    std::array<char, 4096> report{};
+    int written = std::snprintf(report.data(), report.size(),
+        "Pip-Boy lineage observation only; no content/write/complete-coverage proof.\n"
+        "status=%s active=%u resourceGeneration=%llu contextGeneration=%llu frame=%llu\n"
+        "producer=%llu consumer=%llu matched=%llu unmatched=%llu pending=%llu rejected=%llu\n"
+        "lastProducer=%llu lastConsumer=%llu lastMatch=%llu matchedProducerAge=%llu\n"
+        "producerResourceChanges=%llu\n"
+        "reject missingSRV=%llu SRVContract=%llu missingRTV=%llu RTVContract=%llu alias=%llu predicated=%llu\n"
+        "expected: texture=876x700 format=28 mips=1 array=1 samples=1 quality=0; "
+        "SRV dimension=4 format=28 mip=0 count=1(or UINT_MAX); RTV dimension=4 format=28 mip=0\n",
+        view.pipboy.status, unsigned(pipboy.requested),
+        static_cast<unsigned long long>(pipboy.generation),
+        static_cast<unsigned long long>(pipboy.contextGeneration),
+        static_cast<unsigned long long>(view.frame),
+        static_cast<unsigned long long>(pipboy.producerDraws),
+        static_cast<unsigned long long>(pipboy.consumerDraws),
+        static_cast<unsigned long long>(pipboy.matchedConsumers),
+        static_cast<unsigned long long>(pipboy.unmatchedConsumers),
+        static_cast<unsigned long long>(pipboy.pendingConsumers),
+        static_cast<unsigned long long>(pipboy.rejectedDraws),
+        static_cast<unsigned long long>(pipboy.lastProducerFrame),
+        static_cast<unsigned long long>(pipboy.lastConsumerFrame),
+        static_cast<unsigned long long>(pipboy.lastMatchedFrame),
+        static_cast<unsigned long long>(pipboy.lastProducerAge),
+        static_cast<unsigned long long>(view.pipboy.producerResourceChanges),
+        static_cast<unsigned long long>(view.pipboy.rejections[0]),
+        static_cast<unsigned long long>(view.pipboy.rejections[1]),
+        static_cast<unsigned long long>(view.pipboy.rejections[2]),
+        static_cast<unsigned long long>(view.pipboy.rejections[3]),
+        static_cast<unsigned long long>(view.pipboy.rejections[4]),
+        static_cast<unsigned long long>(view.pipboy.rejections[5]));
+    const std::array<const SettingsPipboyViewObservation*, 3> views{
+        &view.pipboy.producerInput, &view.pipboy.producerOutput,
+        &view.pipboy.consumerInput};
+    const std::array<const char*, 3> names{"producer t0", "producer RTV0", "consumer t4"};
+    for (std::size_t i = 0; i < views.size() && written > 0 &&
+        static_cast<std::size_t>(written) < report.size(); ++i)
+    {
+        const auto& v = *views[i];
+        written += std::snprintf(report.data() + written, report.size() - written,
+            "%s actual frame=%llu: texture=%ux%u format=%u mips=%u array=%u samples=%u quality=%u; "
+            "view dimension=%u format=%u mip=%u count=%u\n", names[i],
+            static_cast<unsigned long long>(v.frame),
+            v.texture.Width, v.texture.Height, unsigned(v.texture.Format),
+            v.texture.MipLevels, v.texture.ArraySize, v.texture.SampleDesc.Count,
+            v.texture.SampleDesc.Quality, v.dimension, unsigned(v.format), v.mip, v.mipCount);
+    }
+    ImGui::SetClipboardText(report.data());
+}
+
+void DrawPipboyObservationDiagnostic(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+{
+    bool observePipboy = view.pipboy.state.requested;
+    if (ImGui::Checkbox("Observe Pip-Boy Screen (Session Only)", &observePipboy))
+    {
+        actions.requestPipboyObservation(observePipboy);
+        actions.refreshView(view);
+    }
+    ImGui::SetItemTooltip("Lineage observer only; no color changes. Captured shader identities\n"
+        "and resource matches do not prove image contents or complete draw coverage.\n"
+        "Loading, focus loss, or resource retirement ends the session.");
+    const auto& pipboy = view.pipboy.state;
+    ImGui::TextWrapped("%s", view.pipboy.status);
+    ImGui::Text("Producer=%llu consumer=%llu matched=%llu unmatched=%llu pending=%llu rejected=%llu",
+        static_cast<unsigned long long>(pipboy.producerDraws),
+        static_cast<unsigned long long>(pipboy.consumerDraws),
+        static_cast<unsigned long long>(pipboy.matchedConsumers),
+        static_cast<unsigned long long>(pipboy.unmatchedConsumers),
+        static_cast<unsigned long long>(pipboy.pendingConsumers),
+        static_cast<unsigned long long>(pipboy.rejectedDraws));
+    ImGui::Text("Last producer=%llu consumer=%llu match=%llu matched age=%llu frames",
+        static_cast<unsigned long long>(pipboy.lastProducerFrame),
+        static_cast<unsigned long long>(pipboy.lastConsumerFrame),
+        static_cast<unsigned long long>(pipboy.lastMatchedFrame),
+        static_cast<unsigned long long>(pipboy.lastProducerAge));
+    if (ImGui::Button("Copy Pip-Boy Observation Report"))
+    {
+        CopyPipboyObservationReport(view, pipboy);
+    }
+    ImGui::SetItemTooltip("Copy the current Pip-Boy observations to the clipboard.");
+}
+
+struct SettingsTabs {
+    SettingsWindowState& state;
+    SettingsWindowView& view;
+    const SettingsWindowActions& actions;
+    float footerHeight;
+    const SettingsPersistenceSnapshot& persistence;
+    bool calibrationForThisDisplay;
+    HdrSettingsInteractionState interactionState;
+    bool& hideSettingsForCalibration;
+
+    void DrawInterfaceShortcut() noexcept
+    {
+        const HdrInterfaceSettings defaults{};
+        const auto shortcut = FormatHdrSettingsHotkey(state.uiInterfaceDraft.toggleKey);
+        ImGui::Text("Settings Shortcut: %s", shortcut.data());
+        const bool capturing = HdrSettingsHotkeyCaptureActive();
+        if (capturing)
+        {
+            if (ImGui::Button("Cancel Capture"))
+                CancelHdrSettingsHotkeyCapture();
+        }
+        else if (ImGui::Button("Change Shortcut"))
+            BeginHdrSettingsHotkeyCapture();
+        ImGui::SetItemTooltip("%s", capturing ?
+            "Cancel shortcut capture and keep the current shortcut." :
+            "Capture a key, optionally with Ctrl, Alt or Shift. Escape cancels.\n"
+            "Windows and system-reserved shortcuts are not accepted.");
+        if (DrawRestoreDefaultButton("toggle-key",
+                state.uiInterfaceDraft.toggleKey != defaults.toggleKey))
+        {
+            CancelHdrSettingsHotkeyCapture();
+            state.uiInterfaceDraft.toggleKey = defaults.toggleKey;
+            SetHdrSettingsHotkey(defaults.toggleKey);
+        }
+        if (HdrSettingsHotkeyCaptureActive())
+            ImGui::TextWrapped("Waiting for a shortcut... Press Escape to cancel.");
+    }
+
+    void DrawInterfaceScale() noexcept
+    {
+        const HdrInterfaceSettings defaults{};
+        constexpr const char* scaleLabels[]{
+            "100%", "125%", "150%", "175%", "200%"};
+        constexpr double scaleValues[]{
+            1.0, 1.25, 1.5, 1.75, 2.0};
+        int scaleIndex{};
+        for (int index = 0;
+             index < static_cast<int>(std::size(scaleValues));
+             ++index)
+        {
+            if (state.uiInterfaceDraft.scale == scaleValues[index])
+            {
+                scaleIndex = index;
+                break;
+            }
+        }
+        DrawSettingsControlLabel("Interface Scale");
+        if (ImGui::Combo("##interface-scale", &scaleIndex,
+                scaleLabels,
+                static_cast<int>(std::size(scaleLabels))))
+        {
+            state.uiInterfaceDraft.scale = scaleValues[scaleIndex];
+            state.interfaceStylePending = true;
+            state.interfaceWindowSizePending = true;
+        }
+        ImGui::SetItemTooltip("Scale settings text, controls and window dimensions together.");
+        if (DrawRestoreDefaultButton("interface-scale",
+                state.uiInterfaceDraft.scale != defaults.scale))
+        {
+            state.uiInterfaceDraft.scale = defaults.scale;
+            state.interfaceStylePending = true;
+            state.interfaceWindowSizePending = true;
+        }
+    }
+
+    struct InterfaceDimensionControl
+    {
+        const char* label;
+        const char* resetId;
+        double HdrInterfaceSettings::* member;
+        SettingsSliderRange range;
     };
-    constexpr std::array ranges{
-        Range{'0', '9', ImGuiKey_0}, Range{'A', 'Z', ImGuiKey_A},
-        Range{VK_F1, VK_F12, ImGuiKey_F1}, Range{VK_NUMPAD0, VK_NUMPAD9, ImGuiKey_Keypad0}};
-    for (const auto& range : ranges)
-        if (range.Contains(key)) return static_cast<ImGuiKey>(range.named + key - range.first);
-    struct Mapping { WPARAM native; ImGuiKey named; };
-    constexpr std::array mappings{
-        Mapping{VK_TAB, ImGuiKey_Tab}, Mapping{VK_LEFT, ImGuiKey_LeftArrow},
-        Mapping{VK_RIGHT, ImGuiKey_RightArrow}, Mapping{VK_UP, ImGuiKey_UpArrow},
-        Mapping{VK_DOWN, ImGuiKey_DownArrow}, Mapping{VK_PRIOR, ImGuiKey_PageUp},
-        Mapping{VK_NEXT, ImGuiKey_PageDown}, Mapping{VK_HOME, ImGuiKey_Home},
-        Mapping{VK_END, ImGuiKey_End}, Mapping{VK_INSERT, ImGuiKey_Insert},
-        Mapping{VK_DELETE, ImGuiKey_Delete}, Mapping{VK_BACK, ImGuiKey_Backspace},
-        Mapping{VK_SPACE, ImGuiKey_Space}, Mapping{VK_RETURN, ImGuiKey_Enter},
-        Mapping{VK_ESCAPE, ImGuiKey_Escape}, Mapping{VK_OEM_7, ImGuiKey_Apostrophe},
-        Mapping{VK_OEM_COMMA, ImGuiKey_Comma}, Mapping{VK_OEM_MINUS, ImGuiKey_Minus},
-        Mapping{VK_OEM_PERIOD, ImGuiKey_Period}, Mapping{VK_OEM_2, ImGuiKey_Slash},
-        Mapping{VK_OEM_1, ImGuiKey_Semicolon}, Mapping{VK_OEM_PLUS, ImGuiKey_Equal},
-        Mapping{VK_OEM_4, ImGuiKey_LeftBracket}, Mapping{VK_OEM_5, ImGuiKey_Backslash},
-        Mapping{VK_OEM_6, ImGuiKey_RightBracket}, Mapping{VK_OEM_3, ImGuiKey_GraveAccent},
-        Mapping{VK_CAPITAL, ImGuiKey_CapsLock}, Mapping{VK_SCROLL, ImGuiKey_ScrollLock},
-        Mapping{VK_NUMLOCK, ImGuiKey_NumLock}, Mapping{VK_SNAPSHOT, ImGuiKey_PrintScreen},
-        Mapping{VK_PAUSE, ImGuiKey_Pause}, Mapping{VK_DECIMAL, ImGuiKey_KeypadDecimal},
-        Mapping{VK_DIVIDE, ImGuiKey_KeypadDivide}, Mapping{VK_MULTIPLY, ImGuiKey_KeypadMultiply},
-        Mapping{VK_SUBTRACT, ImGuiKey_KeypadSubtract}, Mapping{VK_ADD, ImGuiKey_KeypadAdd},
-        Mapping{VK_LSHIFT, ImGuiKey_LeftShift}, Mapping{VK_RSHIFT, ImGuiKey_RightShift},
-        Mapping{VK_LCONTROL, ImGuiKey_LeftCtrl}, Mapping{VK_RCONTROL, ImGuiKey_RightCtrl},
-        Mapping{VK_LMENU, ImGuiKey_LeftAlt}, Mapping{VK_RMENU, ImGuiKey_RightAlt},
-        Mapping{VK_LWIN, ImGuiKey_LeftSuper}, Mapping{VK_RWIN, ImGuiKey_RightSuper},
-        Mapping{VK_APPS, ImGuiKey_Menu}};
-    const auto found = std::ranges::find(mappings, key, &Mapping::native);
-    return found == mappings.end() ? ImGuiKey_None : found->named;
-}
 
-void ModifierEvents(ImGuiIO& io, std::uint32_t modifiers) noexcept
-{
-    io.AddKeyEvent(ImGuiMod_Ctrl, (modifiers & 1) != 0);
-    io.AddKeyEvent(ImGuiMod_Shift, (modifiers & 2) != 0);
-    io.AddKeyEvent(ImGuiMod_Alt, (modifiers & 4) != 0);
-    io.AddKeyEvent(ImGuiMod_Super, (modifiers & 8) != 0);
-}
-
-void KeyboardEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
-{
-    auto key = NamedKey(message.key);
-    if (message.key == VK_RETURN && (static_cast<std::uintptr_t>(message.details) & (1U << 24)))
-        key = ImGuiKey_KeypadEnter;
-    if (key != ImGuiKey_None)
-        io.AddKeyEvent(key, message.message == WM_KEYDOWN || message.message == WM_SYSKEYDOWN);
-}
-
-bool MouseButtonEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
-{
-    struct Button { UINT down; UINT repeat; UINT up; int index; };
-    constexpr std::array buttons{
-        Button{WM_LBUTTONDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, 0},
-        Button{WM_RBUTTONDOWN, WM_RBUTTONDBLCLK, WM_RBUTTONUP, 1},
-        Button{WM_MBUTTONDOWN, WM_MBUTTONDBLCLK, WM_MBUTTONUP, 2},
-        Button{WM_XBUTTONDOWN, WM_XBUTTONDBLCLK, WM_XBUTTONUP, 3}};
-    for (const auto& button : buttons)
+    void DrawInterfaceDimension(const InterfaceDimensionControl& control) noexcept
     {
-        const std::array messages{button.down, button.repeat, button.up};
-        if (std::ranges::find(messages, message.message) == messages.end()) continue;
-        const auto index = button.index + (button.index == 3 && HIWORD(message.key) == XBUTTON2 ? 1 : 0);
-        io.AddMouseButtonEvent(index, message.message != button.up);
+        const auto& [label, resetId, member, range] = control;
+        auto& value = state.uiInterfaceDraft.*member;
+        const auto baseline = HdrInterfaceSettings{}.*member;
+        float editable = static_cast<float>(value);
+        if (DrawSettingsSlider(label, &editable, range))
+        {
+            value = std::round(editable);
+            state.interfaceWindowSizePending = true;
+        }
+        if (DrawRestoreDefaultButton(resetId, value != baseline))
+        {
+            value = baseline;
+            state.interfaceWindowSizePending = true;
+        }
+    }
+
+    void DrawInterfaceWindowSize() noexcept
+    {
+        DrawInterfaceDimension({"Window Width", "window-width", &HdrInterfaceSettings::windowWidth,
+            {static_cast<float>(kMinimumSettingsWindowWidth), static_cast<float>(kMaximumSettingsWindowWidth),
+                "%.0f px", "Sets the settings window width before Interface Scale is applied."}});
+        DrawInterfaceDimension({"Window Height", "window-height", &HdrInterfaceSettings::windowHeight,
+            {static_cast<float>(kMinimumSettingsWindowHeight), static_cast<float>(kMaximumSettingsWindowHeight),
+                "%.0f px", "Sets the settings window height before Interface Scale is applied."}});
+        if (ImGui::Button("Reset Size"))
+        {
+            state.uiInterfaceDraft.windowWidth =
+                kDefaultSettingsWindowWidth;
+            state.uiInterfaceDraft.windowHeight =
+                kDefaultSettingsWindowHeight;
+            state.interfaceWindowSizePending = true;
+        }
+        ImGui::SetItemTooltip("Restore the default window width and height.");
+        ImGui::SameLine();
+        if (ImGui::Button("Center Window"))
+            state.interfaceWindowCenterPending = true;
+        ImGui::SetItemTooltip("Center the settings window on the current display.");
+    }
+
+    DisplayCalibrationView MakeDisplayCalibrationView(const std::array<char, 256>& displayName) noexcept
+    {
+        const auto profileBusy =
+            persistence.displayCalibrationState == SettingsPersistenceState::loading ||
+            persistence.displayCalibrationState == SettingsPersistenceState::saving;
+        return DisplayCalibrationView{
+                .displayNameUtf8 = displayName.data(),
+                .reportedPeakNits = view.display.peakNits,
+                .reportedFullFrameNits = view.display.fullFrameNits,
+                .osSdrWhiteNits = view.display.sdrWhiteNits,
+                .identityAvailable = view.display.known &&
+                    view.display.monitorDevicePath[0] != L'\0' &&
+                    persistence.displayCalibrationState != SettingsPersistenceState::unavailable,
+                .profileBusy = profileBusy,
+                .saveReady = !view.lutPending && view.activeSettings == state.uiDraft,
+                .status = calibrationForThisDisplay ? state.calibrationStatus :
+                    nullptr};
+    }
+
+    void RequestCalibrationProfile(const DisplayCalibrationActions& actions) noexcept
+    {
+        if (actions.load || actions.save)
+        {
+            const std::wstring_view identity{view.display.monitorDevicePath.data()};
+            const auto requested = actions.load ? RequestDisplayCalibrationLoad(identity) :
+                RequestDisplayCalibrationSave(identity, view.activeSettings);
+            if (requested != 0)
+            {
+                state.calibrationRequestGeneration = requested;
+                state.calibrationRequestIdentity = view.display.monitorDevicePath;
+                state.calibrationRequestDraft = state.uiDraft;
+                state.calibrationStatus = actions.load ? "Loading display calibration..." :
+                    "Saving display calibration...";
+            }
+            else
+            {
+                state.calibrationRequestIdentity = view.display.monitorDevicePath;
+                state.calibrationStatus = "Calibration request could not be queued. Try again.";
+            }
+        }
+    }
+
+    void Draw() noexcept
+    {
+        if (!ImGui::BeginTabBar("Fallout4HDRTabs",
+                ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) return;
+        DrawColorSettingsTabs(state.uiDraft, state.uiCommitRequested, view, footerHeight);
+        DrawCalibrationSettingsTab();
+        DrawInterfaceSettingsTab();
+        DrawDiagnosticsSettingsTab();
+        ImGui::EndTabBar();
+    }
+
+    void DrawInterfaceSettingsTab() noexcept
+    {
+        if (ImGui::BeginTabItem("Interface"))
+        {
+            ImGui::BeginChild("Interface-content", ImVec2(0.0F, -footerHeight));
+            ImGui::TextWrapped(
+                "Adjust the settings window and its shortcut. Drag an edge to resize. "
+                "Save stores scale, size and shortcut. "
+                "Window position saves automatically.");
+            ImGui::SeparatorText("Shortcut");
+            DrawInterfaceShortcut();
+            ImGui::SeparatorText("Window");
+            DrawInterfaceScale();
+            DrawInterfaceWindowSize();
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+    }
+
+    void DrawCalibrationSettingsTab() noexcept
+    {
+        if (ImGui::BeginTabItem("Calibration"))
+        {
+            ImGui::BeginChild("Calibration-content", ImVec2(0.0F, -footerHeight));
+            std::array<char, 256> displayName{};
+            const auto* name = view.display.friendlyName[0] != L'\0' ?
+                view.display.friendlyName.data() :
+                view.display.deviceName.data();
+            (void)WideCharToMultiByte(CP_UTF8, 0, name, -1,
+                displayName.data(), static_cast<int>(displayName.size()), nullptr, nullptr);
+            const auto actions = DrawDisplayCalibrationPanel(state.uiDraft, state.calibrationMode,
+                MakeDisplayCalibrationView(displayName));
+            state.uiCommitRequested = state.uiCommitRequested || actions.changed;
+            hideSettingsForCalibration = actions.hideOverlay;
+            RequestCalibrationProfile(actions);
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+    }
+
+    void DrawDiagnosticsSettingsTab() noexcept
+    {
+        if (view.developerMode &&
+            ImGui::BeginTabItem("Diagnostics"))
+        {
+            ImGui::BeginChild("Diagnostics-content", ImVec2(0.0F, -footerHeight));
+            ImGui::TextWrapped("Inspect renderer health and run temporary diagnostics. "
+                "Exposure lock and Pip-Boy observation end on focus loss, loading or resource retirement.");
+            ImGui::SeparatorText("Renderer Status");
+            DrawRendererDiagnosticStatus(view);
+            ImGui::Text("Renderer failure: %s",
+                view.rendererFailure);
+            ImGui::Text("Live settings error: %s | input control: %u%s | persistence: %u%s",
+                view.liveSettingsError ? "yes" : "no",
+                static_cast<unsigned>(interactionState),
+                state.settingsInteractionError ? " (failed)" : "",
+                static_cast<unsigned>(persistence.state),
+                state.persistenceRequestError ? " (request rejected)" : "");
+            ImGui::Text("Armor HUD composition: %s", view.armorEncodedStatus);
+            ImGui::SeparatorText("Exposure");
+            DrawExposureLockDiagnostic(view, actions);
+            ImGui::SeparatorText("Pip-Boy");
+            DrawPipboyObservationDiagnostic(view, actions);
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+    }
+
+};
+bool DrawSettingsTabs(SettingsWindowState& state, SettingsWindowView& view,
+    const SettingsWindowActions& actions, const SettingsTabsFrame& frame) noexcept
+{
+    bool hideSettingsForCalibration{};
+    SettingsTabs{state, view, actions, frame.footerHeight, frame.persistence,
+        frame.calibrationForThisDisplay, frame.interactionState, hideSettingsForCalibration}.Draw();
+    return hideSettingsForCalibration;
+}
+
+SettingsWindowState g_state;
+bool g_open{};
+bool g_backendReady{};
+
+std::atomic<HWND> g_inputWindow{};
+std::atomic<bool> g_inputReady{};
+SettingsWindowView* g_view{};
+const SettingsWindowActions* g_actions{};
+
+[[nodiscard]] bool SameHdrInterfaceSettings(
+    const HdrInterfaceSettings& left,
+    const HdrInterfaceSettings& right) noexcept
+{
+    return left.scale == right.scale &&
+        left.windowWidth == right.windowWidth &&
+        left.windowHeight == right.windowHeight &&
+        left.toggleKey == right.toggleKey;
+}
+
+void RestoreImageComparison() noexcept
+{
+    if (!g_state.compareHeld) return;
+    g_state.uiDraft.colorGradingMethod = g_state.compareRestore.colorGradingMethod;
+    g_state.uiDraft.exposureEv = g_state.compareRestore.exposureEv;
+    g_state.uiDraft.contrast = g_state.compareRestore.contrast;
+    g_state.uiDraft.highlights = g_state.compareRestore.highlights;
+    g_state.uiDraft.shadows = g_state.compareRestore.shadows;
+    g_state.uiDraft.blacks = g_state.compareRestore.blacks;
+    g_state.uiDraft.saturationPercent = g_state.compareRestore.saturationPercent;
+    g_state.uiDraft.temperature = g_state.compareRestore.temperature;
+    g_state.uiDraft.tint = g_state.compareRestore.tint;
+    g_state.uiDraft.selectiveColor = g_state.compareRestore.selectiveColor;
+    g_state.uiDraft.vanillaGradeLuminancePercent =
+        g_state.compareRestore.vanillaGradeLuminancePercent;
+    g_state.uiDraft.vanillaGradeColorPercent =
+        g_state.compareRestore.vanillaGradeColorPercent;
+    g_state.uiDraft.lutGradeProfiles = g_state.compareRestore.lutGradeProfiles;
+    g_state.uiCommitRequested = true;
+    g_state.compareHeld = false;
+}
+
+void QueueWindowPositionSave(bool force) noexcept
+{
+    if (!g_state.windowPositionSavePending) return;
+    if (!force && GetTickCount64() - g_state.windowPositionChangedAt < 500U) return;
+    if (RequestHdrWindowPositionSave(
+            g_state.uiInterfaceDraft.windowX, g_state.uiInterfaceDraft.windowY))
+        g_state.windowPositionSavePending = false;
+}
+
+[[nodiscard]] bool ChangeSettingsWindowOpen(bool open) noexcept
+{
+    g_state.settingsWindowDesiredOpen = open;
+    auto interaction = ReadHdrSettingsInteractionState();
+    const auto [targetState, pendingState] = open ?
+        std::pair{HdrSettingsInteractionState::active, HdrSettingsInteractionState::opening} :
+        std::pair{HdrSettingsInteractionState::inactive, HdrSettingsInteractionState::closing};
+    auto applied = interaction == targetState;
+    const auto pending = interaction == pendingState;
+    if (!applied && !pending)
+    {
+        if (!RequestHdrSettingsInteraction(open))
+        {
+            g_state.settingsInteractionError = true;
+            g_state.settingsWindowDesiredOpen = g_open;
+            return false;
+        }
+        interaction = ReadHdrSettingsInteractionState();
+        applied = interaction == targetState;
+    }
+    g_state.settingsInteractionError = false;
+    if (!applied) return true;
+    if (g_open == open) return true;
+    g_open = open;
+    if (!open)
+    {
+        CancelHdrSettingsHotkeyCapture();
+        QueueWindowPositionSave(true);
+        RestoreImageComparison();
+        g_state.calibrationMode = 0;
+    }
+    return true;
+}
+
+bool CalibrationResultReady(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    return g_state.calibrationRequestGeneration != 0 &&
+        persistence.displayCalibrationGeneration == g_state.calibrationRequestGeneration &&
+        persistence.displayCalibrationGeneration != g_state.calibrationAcknowledgedGeneration &&
+        persistence.displayCalibrationState != SettingsPersistenceState::loading &&
+        persistence.displayCalibrationState != SettingsPersistenceState::saving;
+}
+
+bool CalibrationDraftChanged() noexcept
+{
+    return g_state.uiDraft.displayPeakNits != g_state.calibrationRequestDraft.displayPeakNits ||
+        g_state.uiDraft.uiPaperWhiteNits != g_state.calibrationRequestDraft.uiPaperWhiteNits ||
+        g_state.uiDraft.videoWhiteNits != g_state.calibrationRequestDraft.videoWhiteNits;
+}
+
+void ApplyCalibrationResult(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    if (CalibrationDraftChanged())
+    {
+        g_state.calibrationStatus = "Load finished; newer brightness edits were kept. Load again to apply.";
+        return;
+    }
+    g_state.uiDraft.displayPeakNits = persistence.displayCalibration.displayPeakNits;
+    g_state.uiDraft.uiPaperWhiteNits = persistence.displayCalibration.uiPaperWhiteNits;
+    g_state.uiDraft.videoWhiteNits = persistence.displayCalibration.videoWhiteNits;
+    g_state.uiCommitRequested = true;
+    g_state.calibrationStatus = "Display calibration loaded; image and interface settings are unchanged.";
+}
+
+void UpdateCalibrationStatus(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    switch (persistence.displayCalibrationState)
+    {
+    case SettingsPersistenceState::loaded:
+        ApplyCalibrationResult(persistence);
+        break;
+    case SettingsPersistenceState::saved:
+        g_state.calibrationStatus = "Calibration saved for this display.";
+        break;
+    case SettingsPersistenceState::missing:
+        g_state.calibrationStatus = "No calibration saved for this display yet.";
+        break;
+    case SettingsPersistenceState::failed:
+        g_state.calibrationStatus = "Calibration could not be read or saved. Live values are unchanged.";
+        break;
+    default: break;
+    }
+}
+
+void AcknowledgeCalibrationProfile(const SettingsPersistenceSnapshot& persistence,
+    bool calibrationForThisDisplay) noexcept
+{
+    if (!CalibrationResultReady(persistence)) return;
+    g_state.calibrationAcknowledgedGeneration = persistence.displayCalibrationGeneration;
+    if (calibrationForThisDisplay && persistence.displayCalibration.monitorDevicePath ==
+            g_state.calibrationRequestIdentity)
+        UpdateCalibrationStatus(persistence);
+    else
+        g_state.calibrationStatus = "Profile request finished after the display changed. Load again to apply.";
+}
+
+bool SettingsSaveResultReady(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    return persistence.state == SettingsPersistenceState::saved &&
+        persistence.generation == g_state.saveRequestGeneration &&
+        persistence.generation != g_state.saveAcknowledgedGeneration;
+}
+
+void AcknowledgeSavedSettings(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    if (SettingsSaveResultReady(persistence))
+    {
+        g_state.persistedSettings = g_state.saveRequestedSettings;
+        g_state.persistedInterfaceSettings =
+            g_state.saveRequestedInterfaceSettings;
+        g_state.saveAcknowledgedGeneration = persistence.generation;
+        g_state.persistenceRequestError = false;
+    }
+
+}
+
+HdrSettingsInteractionState UpdateSettingsWindowInteraction() noexcept
+{
+    auto interactionState = ReadHdrSettingsInteractionState();
+    if (g_state.settingsWindowDesiredOpen != g_open)
+    {
+        if (interactionState == HdrSettingsInteractionState::failed ||
+            interactionState == HdrSettingsInteractionState::unavailable)
+        {
+            g_state.settingsInteractionError = true;
+            g_state.settingsWindowDesiredOpen = g_open;
+        }
+        else
+            (void)ChangeSettingsWindowOpen(g_state.settingsWindowDesiredOpen);
+    }
+    if (ConsumeHdrSettingsFocusLoss())
+    {
+        g_actions->focusLost();
+        g_actions->refreshView(*g_view);
+
+        (void)ChangeSettingsWindowOpen(false);
+    }
+    if (ConsumeHdrSettingsToggle())
+    {
+        (void)ChangeSettingsWindowOpen(
+            !g_state.settingsWindowDesiredOpen);
+    }
+    interactionState = ReadHdrSettingsInteractionState();
+    return interactionState;
+}
+
+void BeginSettingsFrame(ImGuiIO& io) noexcept
+{
+    io.MouseDrawCursor = true;
+    DrainHdrSettingsInput();
+    if (g_state.interfaceStylePending)
+    {
+        ImGui::GetStyle() = g_state.baseImGuiStyle;
+        ImGui::GetStyle().ScaleAllSizes(
+            static_cast<float>(g_state.uiInterfaceDraft.scale));
+        ImGui::GetStyle().FontScaleMain =
+            static_cast<float>(g_state.uiInterfaceDraft.scale);
+        g_state.interfaceStylePending = false;
+    }
+    ImGui_ImplWin32_NewFrame();
+    ImGui_ImplDX11_NewFrame();
+    ImGui::NewFrame();
+    HdrSettingsHotkey capturedKey{};
+    if (ConsumeHdrSettingsHotkeyCapture(capturedKey))
+    {
+        g_state.uiInterfaceDraft.toggleKey = capturedKey;
+        SetHdrSettingsHotkey(capturedKey);
+    }
+
+}
+
+void PrepareSettingsWindowLayout(const ImGuiViewport* viewport, float interfaceScale) noexcept
+{
+    const auto maximumWindowSize = ImVec2(
+        std::max(320.0F, viewport->WorkSize.x - 32.0F),
+        std::max(280.0F, viewport->WorkSize.y - 32.0F));
+    const auto minimumWindowSize = ImVec2(
+        std::min(static_cast<float>(kMinimumSettingsWindowWidth) *
+                     interfaceScale,
+            maximumWindowSize.x),
+        std::min(static_cast<float>(kMinimumSettingsWindowHeight) *
+                     interfaceScale,
+            maximumWindowSize.y));
+    ImGui::SetNextWindowSizeConstraints(
+        minimumWindowSize, maximumWindowSize);
+    if (g_state.interfaceWindowSizePending)
+    {
+        ImGui::SetNextWindowSize(ImVec2(
+            std::min(static_cast<float>(g_state.uiInterfaceDraft.windowWidth) *
+                         interfaceScale,
+                maximumWindowSize.x),
+            std::min(static_cast<float>(g_state.uiInterfaceDraft.windowHeight) *
+                         interfaceScale,
+                maximumWindowSize.y)));
+        g_state.interfaceWindowSizePending = false;
+    }
+    const bool positionNeedsCentering = g_state.interfaceWindowPositionPending && g_state.uiInterfaceDraft.windowX < 0.0;
+    if (g_state.interfaceWindowCenterPending || positionNeedsCentering)
+    {
+        ImGui::SetNextWindowPos(ImVec2(
+            viewport->WorkPos.x + viewport->WorkSize.x * 0.5F,
+            viewport->WorkPos.y + viewport->WorkSize.y * 0.5F),
+            ImGuiCond_Always, ImVec2(0.5F, 0.5F));
+        g_state.interfaceWindowCenterPending = false;
+        g_state.interfaceWindowPositionPending = false;
+    }
+    else if (g_state.interfaceWindowPositionPending)
+    {
+        ImGui::SetNextWindowPos(ImVec2(
+            viewport->WorkPos.x + static_cast<float>(g_state.uiInterfaceDraft.windowX),
+            viewport->WorkPos.y + static_cast<float>(g_state.uiInterfaceDraft.windowY)));
+        g_state.interfaceWindowPositionPending = false;
+    }
+
+}
+
+bool ExposureLockVisible() noexcept
+{
+    return g_view->exposureRequested || g_view->exposureActive;
+}
+
+bool DrawClosedSettingsOverlay() noexcept
+{
+    QueueWindowPositionSave(true);
+    SetHdrSettingsInputCapture(false, false, false);
+    if (g_view->developerMode && ExposureLockVisible())
+    {
+        // Visible during gameplay without taking cursor or input ownership.
+        ImGuiIO& io = ImGui::GetIO();
+        io.MouseDrawCursor = false;
+        ImGui_ImplWin32_NewFrame();
+        ImGui_ImplDX11_NewFrame();
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
+        constexpr auto lockFlags = ImGuiWindowFlags_NoDecoration |
+            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
+        if (ImGui::Begin("HDR color diagnostics", nullptr, lockFlags))
+        {
+            if (ExposureLockVisible())
+                ImGui::TextUnformatted(g_view->exposureActive ?
+                    "Exposure snapshot held (GPU-valid samples only)" :
+                    "Exposure lock: waiting for qualified scene");
+        }
+        ImGui::End();
+        ImGui::Render();
         return true;
     }
     return false;
 }
 
-void MouseEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
+void UpdateSettingsWindowPosition(const ImGuiViewport* viewport) noexcept
 {
-    if (MouseButtonEvent(io, message)) return;
-    if (message.message == WM_MOUSEMOVE)
-        io.AddMousePosEvent(static_cast<float>(static_cast<short>(LOWORD(message.details))),
-            static_cast<float>(static_cast<short>(HIWORD(message.details))));
-    if (message.message == WM_MOUSEWHEEL || message.message == WM_MOUSEHWHEEL)
+    const auto windowSize = ImGui::GetWindowSize();
+    // Clamp in current client space on every size/display transition,
+    // keeping the complete window reachable without storing monitor IDs.
+    const auto position = ImGui::GetWindowPos();
+    const auto x = std::clamp(position.x - viewport->WorkPos.x, 0.0F,
+        std::max(0.0F, viewport->WorkSize.x - windowSize.x));
+    const auto y = std::clamp(position.y - viewport->WorkPos.y, 0.0F,
+        std::max(0.0F, viewport->WorkSize.y - windowSize.y));
+    if (position.x != viewport->WorkPos.x + x ||
+        position.y != viewport->WorkPos.y + y)
+        ImGui::SetWindowPos(ImVec2(viewport->WorkPos.x + x,
+            viewport->WorkPos.y + y));
+    if (g_state.uiInterfaceDraft.windowX != std::round(x) ||
+        g_state.uiInterfaceDraft.windowY != std::round(y))
     {
-        const auto delta = static_cast<float>(static_cast<short>(HIWORD(message.key))) / WHEEL_DELTA;
-        io.AddMouseWheelEvent(message.message == WM_MOUSEHWHEEL ? delta : 0.0F,
-            message.message == WM_MOUSEWHEEL ? delta : 0.0F);
+        g_state.uiInterfaceDraft.windowX = std::round(x);
+        g_state.uiInterfaceDraft.windowY = std::round(y);
+        g_state.windowPositionChangedAt = GetTickCount64();
+        g_state.windowPositionSavePending = true;
     }
 }
 
-void InputEvent(ImGuiIO& io, const HdrSettingsInputMessage& message) noexcept
+void UpdateSettingsWindowSize(float interfaceScale) noexcept
 {
-    ModifierEvents(io, message.modifiers);
-    constexpr std::array keyboard{WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
-    if (std::ranges::find(keyboard, message.message) != keyboard.end())
-        KeyboardEvent(io, message);
-    else if (message.message == WM_CHAR || message.message == WM_SYSCHAR)
-        io.AddInputCharacterUTF16(static_cast<ImWchar16>(message.key));
-    else if (message.message == WM_UNICHAR)
+    const auto windowSize = ImGui::GetWindowSize();
+    if (!g_state.interfaceWindowSizePending)
     {
-        if (message.key <= 0x10FFFFU) io.AddInputCharacter(static_cast<unsigned>(message.key));
+        g_state.uiInterfaceDraft.windowWidth = std::clamp(
+            static_cast<double>(
+                std::round(windowSize.x / interfaceScale)),
+            kMinimumSettingsWindowWidth,
+            kMaximumSettingsWindowWidth);
+        g_state.uiInterfaceDraft.windowHeight = std::clamp(
+            static_cast<double>(
+                std::round(windowSize.y / interfaceScale)),
+            kMinimumSettingsWindowHeight,
+            kMaximumSettingsWindowHeight);
     }
-    else if (message.message == WM_SETFOCUS) io.AddFocusEvent(true);
-    else MouseEvent(io, message);
+
 }
 
-
-HdrSettingsInput* CurrentInput() noexcept
+void BeginSavedImageComparison() noexcept
 {
-    return SettingsInputForGeneration(g_inputGeneration.load(std::memory_order_acquire));
+    g_state.compareRestore = g_state.uiDraft;
+    g_state.uiDraft.colorGradingMethod = g_state.persistedSettings.colorGradingMethod;
+    g_state.uiDraft.exposureEv = g_state.persistedSettings.exposureEv;
+    g_state.uiDraft.contrast = g_state.persistedSettings.contrast;
+    g_state.uiDraft.highlights = g_state.persistedSettings.highlights;
+    g_state.uiDraft.shadows = g_state.persistedSettings.shadows;
+    g_state.uiDraft.blacks = g_state.persistedSettings.blacks;
+    g_state.uiDraft.saturationPercent =
+        g_state.persistedSettings.saturationPercent;
+    g_state.uiDraft.temperature = g_state.persistedSettings.temperature;
+    g_state.uiDraft.tint = g_state.persistedSettings.tint;
+    g_state.uiDraft.selectiveColor =
+        g_state.persistedSettings.selectiveColor;
+    g_state.uiDraft.vanillaGradeLuminancePercent =
+        g_state.persistedSettings.vanillaGradeLuminancePercent;
+    g_state.uiDraft.vanillaGradeColorPercent =
+        g_state.persistedSettings.vanillaGradeColorPercent;
+    g_state.uiDraft.lutGradeProfiles = g_state.persistedSettings.lutGradeProfiles;
+    g_state.uiCommitRequested = true;
 }
 
-bool BackendTuple(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+void DrawSettingsComparison() noexcept
 {
-    return g_window == window && g_device.Get() == device && g_context.Get() == context;
-}
-
-void ClearBackend() noexcept
-{
-    ImGuiScope scoped(g_imgui, true);
-    if (g_renderer) ImGui_ImplDX11_Shutdown();
-    if (g_platform) ImGui_ImplWin32_Shutdown();
-    if (g_imgui) ImGui::DestroyContext(g_imgui);
-    g_imgui = nullptr;
-    g_renderer = g_platform = g_ready = g_open = false;
-    g_calibrationMode = 0;
-    g_consumerReady = false;
-    g_context.Reset();
-    g_device.Reset();
-    g_window = nullptr;
-    g_inputGeneration.store(0, std::memory_order_release);
-    g_inputWindow.store(nullptr, std::memory_order_release);
-}
-
-bool CreateBackendResources(HWND window, ID3D11Device* device, ID3D11DeviceContext* context)
-{
-    if (!QueryPerformanceFrequency(&g_frequency)) return false;
-    if (g_frequency.QuadPart <= 0) return false;
-    if (!QueryPerformanceCounter(&g_previous)) return false;
-    ImGuiScope scoped(nullptr);
-    g_imgui = ImGui::CreateContext();
-    if (!g_imgui) return false;
-    ImGui::GetIO().IniFilename = nullptr;
-    g_platform = ImGui_ImplWin32_Init(window);
-    if (!g_platform) return false;
-    g_renderer = ImGui_ImplDX11_Init(device, context);
-    if (!g_renderer) return false;
-    // Stock backend compilation and later buffer growth retain their existing limits.
-    return ImGui_ImplDX11_CreateDeviceObjects();
-}
-
-bool PrepareBackend(HWND window, ID3D11Device* device, ID3D11DeviceContext* context)
-{
-    const auto generation = ReadGraphicsObservation().resourceGeneration;
-    if (generation == 0) return false;
-    if (!IsWindow(window)) return false;
-    g_thread = GetCurrentThreadId();
-    g_window = window;
-    g_device = device;
-    g_context = context;
-    if (!CreateBackendResources(window, device, context)) return false;
-    if (!PublishSettingsInputHost(window, generation)) return false;
-    g_inputGeneration.store(generation, std::memory_order_release);
-    g_inputWindow.store(window, std::memory_order_release);
-    g_ready = true;
-    (void)TryActivateSettingsInputHostOnCurrentThread();
-    return true;
-}
-
-void DrainInput(HdrSettingsInput& input, const SettingsWindowActions& actions) noexcept
-{
-    std::array<HdrSettingsInputMessage, HdrSettingsInput::capacity> messages;
-    const auto copied = input.Drain(messages);
-    auto& io = ImGui::GetIO();
-    if (copied.focusLost)
+    ImGui::Separator();
+    ImGui::Button("Hold to Compare");
+    const auto held = ImGui::IsItemActive();
+    if (held && !g_state.compareHeld)
     {
-        io.ClearEventsQueue();
-        io.ClearInputKeys();
-        io.ClearInputMouse();
-        io.AddFocusEvent(copied.focused);
-        g_open = false;
-        actions.focusLost();
+        BeginSavedImageComparison();
     }
-    for (std::size_t index = 0; index < copied.messages; ++index) InputEvent(io, messages[index]);
-    if (copied.toggles % 2 != 0) g_open = !g_open;
-}
-
-bool BeginUiFrame() noexcept
-{
-    LARGE_INTEGER now{};
-    RECT client{};
-    if (!QueryPerformanceCounter(&now) || !GetClientRect(g_window, &client)) return false;
-    const auto elapsed = static_cast<double>(now.QuadPart - g_previous.QuadPart) /
-        static_cast<double>(g_frequency.QuadPart);
-    g_previous = now;
-    auto& io = ImGui::GetIO();
-    io.DisplaySize = {static_cast<float>(client.right), static_cast<float>(client.bottom)};
-    io.DeltaTime = static_cast<float>(std::clamp(elapsed, 0.001, 0.1));
-    io.MouseDrawCursor = g_open;
-    ImGui_ImplDX11_NewFrame();
-    ImGui::NewFrame();
-    return true;
-}
-
-bool SameCalibration(const HdrSettings& value, const DisplayCalibrationProfile& draft) noexcept
-{
-    return value.displayPeakNits == draft.displayPeakNits &&
-        value.uiPaperWhiteNits == draft.uiPaperWhiteNits && value.videoWhiteNits == draft.videoWhiteNits;
-}
-
-void RefreshDisplayView(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
-{
-    InvalidateDisplayCapabilities();
-    (void)RefreshDisplayCapabilities(g_window);
-    actions.refreshView(view);
-}
-
-void ConsumeCalibration(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
-{
-    const auto result = ReadSettingsPersistenceSnapshot();
-    g_profileState = result.displayCalibrationState;
-    if (!g_profileRequest || result.displayCalibrationGeneration != g_profileRequest) return;
-    g_profileRequest = 0;
-    if (!g_profileLoad || result.displayCalibrationState != SettingsPersistenceState::loaded) return;
-    RefreshDisplayView(view, actions);
-    if (!view.display.known || result.displayCalibration.monitorDevicePath != view.display.monitorDevicePath) return;
-    if (!SameCalibration(g_draft, g_profileDraft)) return;
-    g_draft.displayPeakNits = result.displayCalibration.displayPeakNits;
-    g_draft.uiPaperWhiteNits = result.displayCalibration.uiPaperWhiteNits;
-    g_draft.videoWhiteNits = result.displayCalibration.videoWhiteNits;
-    g_commit = true;
-}
-
-bool CalibrationRequested(const DisplayCalibrationActions& requested, const SettingsWindowView& view) noexcept
-{
-    if (g_profileRequest) return false;
-    if (!view.display.known) return false;
-    return requested.save || requested.load;
-}
-
-void SubmitCalibration(bool save, const SettingsWindowView& view) noexcept
-{
-    const auto& identity = view.display.monitorDevicePath;
-    g_profileLoad = !save;
-    if (save)
-        g_profileRequest = RequestDisplayCalibrationSave(identity.data(), view.activeSettings);
-    else
+    else if (!held && g_state.compareHeld)
     {
-        g_profileDraft = {identity, g_draft.displayPeakNits, g_draft.uiPaperWhiteNits, g_draft.videoWhiteNits};
-        g_profileRequest = RequestDisplayCalibrationLoad(identity.data());
+        RestoreImageComparison();
     }
+    g_state.compareHeld = held;
+    ImGui::SetItemTooltip(
+        "Hold to preview saved Image, Selective Color, grading method and grade response settings.\n"
+        "Release to restore current edits.");
+
 }
 
-void RequestCalibration(const DisplayCalibrationActions& requested, SettingsWindowView& view,
-    const SettingsWindowActions& actions) noexcept
+void RevertSettingsDraft() noexcept
 {
-    if (!CalibrationRequested(requested, view)) return;
-    const auto identity = view.display.monitorDevicePath;
-    RefreshDisplayView(view, actions);
-    if (!view.display.known) return;
-    if (identity != view.display.monitorDevicePath) return;
-    SubmitCalibration(requested.save, view);
+    g_state.uiDraft = g_state.persistedSettings;
+    const auto positionX = g_state.uiInterfaceDraft.windowX;
+    const auto positionY = g_state.uiInterfaceDraft.windowY;
+    g_state.uiInterfaceDraft = g_state.persistedInterfaceSettings;
+    g_state.uiInterfaceDraft.windowX = positionX;
+    g_state.uiInterfaceDraft.windowY = positionY;
+    CancelHdrSettingsHotkeyCapture();
+    SetHdrSettingsHotkey(g_state.uiInterfaceDraft.toggleKey);
+    g_state.interfaceStylePending = true;
+    g_state.interfaceWindowSizePending = true;
+    g_state.uiCommitRequested = true;
 }
 
-const char* ProfileStatusText(SettingsPersistenceState state) noexcept
+void DrawSettingsRestoreActions(bool narrowFooter) noexcept
 {
-    switch (state)
+    if (ImGui::Button("HDR Defaults"))
     {
-    case SettingsPersistenceState::loading: return "Reading display profile...";
-    case SettingsPersistenceState::saving: return "Saving display profile...";
-    case SettingsPersistenceState::saved: return "Display profile saved.";
-    case SettingsPersistenceState::loaded: return "Display profile read completed.";
-    case SettingsPersistenceState::missing: return "No profile for this display.";
-    case SettingsPersistenceState::failed: return "Display profile operation failed.";
-    default: return nullptr;
+        g_state.uiDraft = HdrSettings{};
+        g_state.uiCommitRequested = true;
     }
-}
-
-void DrawCalibration(SettingsWindowView& view, const SettingsWindowActions& callbacks, bool& changed)
-{
-    if (!ImGui::CollapsingHeader("Display calibration")) return;
-    ConsumeCalibration(view, callbacks);
-    std::array<char, 256> displayName{};
-    (void)WideCharToMultiByte(CP_UTF8, 0, view.display.friendlyName.data(), -1,
-        displayName.data(), static_cast<int>(displayName.size()), nullptr, nullptr);
-    const DisplayCalibrationView display{displayName.data(), view.display.peakNits,
-        view.display.fullFrameNits, view.display.sdrWhiteNits,
-        view.display.known && view.display.monitorDevicePath[0] != L'\0',
-        g_profileRequest != 0 || g_profileState == SettingsPersistenceState::unavailable,
-        !view.lutPending && !view.liveSettingsError, ProfileStatusText(g_profileState)};
-    if (ImGui::Button("Refresh display details")) RefreshDisplayView(view, callbacks);
-    const auto result = DrawDisplayCalibrationPanel(g_draft, g_calibrationMode, display);
-    RequestCalibration(result, view, callbacks);
-    changed |= result.changed;
-    g_hideOverlay = result.hideOverlay;
-}
-
-void DrawCurrentPanel(SettingsWindowView& view, const SettingsWindowActions& callbacks)
-{
-    const auto& io = ImGui::GetIO();
-    ImGui::SetNextWindowSize({std::min(440.0F, io.DisplaySize.x), std::min(900.0F, io.DisplaySize.y)}, ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos({io.DisplaySize.x * 0.5F, io.DisplaySize.y * 0.5F}, ImGuiCond_FirstUseEver, {0.5F, 0.5F});
-    SettingsPanelActions actions;
-    g_hideOverlay = false;
-    if (ImGui::Begin("Fallout4HDR", &g_open, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse))
+    ImGui::SetItemTooltip("Restore HDR defaults; interface settings stay unchanged.");
+    if (!narrowFooter) ImGui::SameLine();
+    if (ImGui::Button("Revert"))
     {
-        actions = DrawSettingsPanel(g_draft, view);
-        if (ImGui::CollapsingHeader("LUT and ImageSpace profiles"))
-            actions.request |= DrawLutProfilesPanel(g_draft, view.lutProfiles, g_profileSelection);
-        DrawCalibration(view, callbacks, actions.request);
+        RevertSettingsDraft();
     }
-    ImGui::End();
-    if (actions.request) g_commit = true;
-    if (actions.save) { g_saveDraft = g_draft; g_saveRequested = true; }
+    ImGui::SetItemTooltip("Restore saved HDR and interface settings.");
+    ImGui::SameLine();
+
 }
 
-void DrawCurrentDiagnostics(const SettingsWindowView& view)
+bool SettingsReadyToSave(const SettingsPersistenceSnapshot& persistence) noexcept
 {
-    if (!g_configuration.showDeveloperOverlay) return;
-    if (ImGui::Begin("Fallout4HDR diagnostics", nullptr, ImGuiWindowFlags_NoSavedSettings))
+    return !g_view->lutPending &&
+        g_view->activeSettings == g_state.uiDraft &&
+        ValidateHdrInterfaceSettings(g_state.uiInterfaceDraft) ==
+            HdrInterfaceSettingsValidationError::none &&
+        persistence.state != SettingsPersistenceState::saving &&
+        persistence.state != SettingsPersistenceState::unavailable;
+}
+
+struct SettingsWindowContents
+{
+    float interfaceScale;
+    const SettingsPersistenceSnapshot& persistence;
+    HdrSettingsInteractionState interactionState;
+    bool calibrationForThisDisplay;
+    bool dirty{};
+
+    const char* SettingsSummaryStatus() noexcept
     {
-        ImGui::TextUnformatted(g_configuration.developerHdr10Reference ? "Native HDR10 reference" : "Production HDR");
-        const auto evidence = ReadGraphicsObservation();
-        ImGui::Text("Present observations: %llu; HDR submissions: %llu",
-            static_cast<unsigned long long>(evidence.presentCount), static_cast<unsigned long long>(evidence.hdrFrameCount));
-        ImGui::TextUnformatted(g_configuration.traceRenderPipeline ? "Pipeline trace enabled" : "Pipeline trace disabled");
-        ImGui::TextUnformatted(view.rendererFailure);
+        return g_view->liveSettingsError ||
+                g_state.settingsInteractionError ||
+                g_state.persistenceRequestError ||
+                persistence.state == SettingsPersistenceState::failed ?
+            "Error" : g_view->lutPending ? "Preparing" : dirty ? "Unsaved" :
+            "Applied";
     }
-    ImGui::End();
-}
 
-void PrepareBackendOrClear(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    try { if (!PrepareBackend(window, device, context)) ClearBackend(); }
-    catch (...) { ClearBackend(); }
-}
+    void DrawSettingsSummary() noexcept
+    {
+        const auto* settingsStatus = SettingsSummaryStatus();
+        ImGui::TextWrapped("%s HDR10 | %.0f-nit peak | %s",
+            SettingsOperatorDisplayName(g_view->activeSettings.productionAlgorithm),
+            g_view->activeSettings.displayPeakNits,
+            settingsStatus);
+        if (g_view->developerMode && g_view->exposureActive)
+            ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F),
+                "Developer exposure snapshot held (not saved)");
+    
+    }
 
-bool OnClosedUiThread() noexcept
-{
-    if (g_drawing) return false;
-    return g_thread == GetCurrentThreadId();
-}
+    bool SettingsSaveConfirmed() noexcept
+    {
+        return persistence.state == SettingsPersistenceState::saved &&
+            persistence.generation == g_state.saveAcknowledgedGeneration && !dirty;
+    }
 
-bool NativeBackendArguments(HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
-{
-    if (!window) return false;
-    if (!device) return false;
-    return context != nullptr;
-}
+    void DrawSettingsSaveStatus() noexcept
+    {
+        if (persistence.state == SettingsPersistenceState::saving)
+            ImGui::TextDisabled("Saving settings...");
+        else if (persistence.state == SettingsPersistenceState::failed)
+            ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F),
+                "Save failed. Live values are unchanged.");
+        else if (SettingsSaveConfirmed())
+            ImGui::TextDisabled("Saved to Fallout4HDR.ini");
+        if (persistence.positionState == SettingsPersistenceState::failed)
+            ImGui::TextWrapped("Window position could not be saved. Move the window to retry.");
+    }
 
-bool EnableInputConsumer(bool interactive) noexcept
-{
-    if (!interactive) return true;
-    if (g_consumerReady) return true;
-    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
-    g_consumerReady = SetSettingsInputHostConsumerReady(generation, true);
-    return g_consumerReady;
-}
+    void DrawSettingsSave() noexcept
+    {
+        const bool saveReady = SettingsReadyToSave(persistence);
+        ImGui::BeginDisabled(!saveReady);
+        if (ImGui::Button("Save"))
+        {
+            g_state.saveRequestedSettings = g_view->activeSettings;
+            g_state.saveRequestedInterfaceSettings = g_state.uiInterfaceDraft;
+            g_state.saveRequestGeneration =
+                RequestHdrSettingsSave(g_state.saveRequestedSettings,
+                    g_state.saveRequestedInterfaceSettings);
+            g_state.persistenceRequestError = g_state.saveRequestGeneration == 0;
+        }
+        ImGui::EndDisabled();
+        ImGui::SetItemTooltip("Save current HDR and interface settings.");
+        DrawSettingsSaveStatus();
+    
+    }
 
-bool SaveRequestReady(const SettingsWindowView& view) noexcept
-{
-    if (!g_saveRequested) return false;
-    if (g_commit) return false;
-    if (view.liveSettingsError) return false;
-    return true;
-}
-
-void SaveRequestedDraft(const SettingsWindowView& view) noexcept
-{
-    if (SaveRequestReady(view)) g_saveRequested = RequestHdrSettingsSave(g_saveDraft) == 0;
-}
-
-void DrawFramePanels(SettingsWindowView& view, const SettingsWindowActions& actions, bool interactive)
-{
-    if (g_open && interactive) DrawCurrentPanel(view, actions);
-    else { g_hideOverlay = false; g_calibrationMode = 0; }
-    DrawCurrentDiagnostics(view);
-}
-
-class UiFrame
-{
-public:
-    explicit UiFrame(bool begun) noexcept : open_(begun) {}
-    ~UiFrame() noexcept { if (open_) ImGui::EndFrame(); }
-    void Render() { ImGui::Render(); open_ = false; }
-private:
-    bool open_;
+    bool Draw() noexcept
+    {
+        bool hideSettingsForCalibration{};
+        UpdateSettingsWindowSize(interfaceScale);
+        dirty =
+            g_view->activeSettings != g_state.persistedSettings ||
+            g_state.uiDraft != g_state.persistedSettings ||
+            !SameHdrInterfaceSettings(
+                g_state.uiInterfaceDraft, g_state.persistedInterfaceSettings);
+        DrawSettingsSummary();
+        const auto narrowFooter = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 27.0F;
+        const auto footerHeight = ImGui::GetFrameHeightWithSpacing() * (narrowFooter ? 5.0F : 4.0F);
+        hideSettingsForCalibration = DrawSettingsTabs(g_state, *g_view, *g_actions, {footerHeight, persistence, calibrationForThisDisplay, interactionState});
+        DrawSettingsComparison();
+        DrawSettingsRestoreActions(narrowFooter);
+        DrawSettingsSave();
+        return hideSettingsForCalibration;
+    }
 };
 
-bool DrawUiFrame(SettingsWindowView& view, const SettingsWindowActions& actions, HdrSettingsInput& input)
+[[nodiscard]] bool DrawWindow() noexcept
 {
-    DrainInput(input, actions);
-    const auto interactive = g_configuration.productionRequested;
-    if (!EnableInputConsumer(interactive)) return false;
-    const auto begun = BeginUiFrame();
-    UiFrame frame(begun);
-    if (!begun) return false;
-    DrawFramePanels(view, actions, interactive);
-    frame.Render();
-    SaveRequestedDraft(view);
-    const auto& io = ImGui::GetIO();
-    const auto open = g_open && interactive;
-    input.SetCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
-    return (open || g_configuration.showDeveloperOverlay) && !g_hideOverlay;
+    if (!g_backendReady) return false;
+    bool hideSettingsForCalibration{};
+    const auto persistence = ReadSettingsPersistenceSnapshot();
+    const bool calibrationForThisDisplay =
+        g_state.calibrationRequestIdentity == g_view->display.monitorDevicePath;
+    AcknowledgeCalibrationProfile(persistence, calibrationForThisDisplay);
+    AcknowledgeSavedSettings(persistence);
+    const auto interactionState = UpdateSettingsWindowInteraction();
+    if (!g_open) return DrawClosedSettingsOverlay();
+
+    ImGuiIO& io = ImGui::GetIO();
+    BeginSettingsFrame(io);
+    auto open = g_open;
+    const auto interfaceScale =
+        static_cast<float>(g_state.uiInterfaceDraft.scale);
+    const auto* viewport = ImGui::GetMainViewport();
+    PrepareSettingsWindowLayout(viewport, interfaceScale);
+    constexpr auto flags = ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse;
+    const auto showContents = ImGui::Begin("Fallout4HDR", &open, flags);
+    UpdateSettingsWindowPosition(viewport);
+    if (showContents)
+        hideSettingsForCalibration = SettingsWindowContents{interfaceScale, persistence,
+            interactionState, calibrationForThisDisplay}.Draw();
+    ImGui::End();
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) QueueWindowPositionSave(false);
+    if (!open) (void)ChangeSettingsWindowOpen(false);
+    open = g_open;
+    io.MouseDrawCursor = open;
+    ImGui::Render();
+    SetHdrSettingsInputCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
+
+    return !hideSettingsForCalibration;
 }
 
-}  // namespace
+} // namespace
 
-void InitializeSettingsWindow(const HdrSettings& settings) noexcept
+void InitializeSettingsWindow(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept
 {
-    g_draft = settings;
-    g_commit = false;
+    g_state.persistedSettings = settings;
+    g_state.uiDraft = settings;
+    g_state.persistedInterfaceSettings = interfaceSettings;
+    g_state.uiInterfaceDraft = interfaceSettings;
+    SetHdrSettingsHotkey(interfaceSettings.toggleKey);
+    g_state.persistenceRequestError = false;
+    g_state.interfaceStylePending = false;
+    g_state.interfaceWindowSizePending = true;
+    g_state.interfaceWindowCenterPending = false;
+    g_state.interfaceWindowPositionPending = true;
+    g_state.windowPositionSavePending = false;
+    g_state.compareHeld = false;
+    g_state.saveRequestGeneration = 0;
+    g_state.saveAcknowledgedGeneration = 0;
+    g_state.calibrationRequestGeneration = 0;
+    g_state.calibrationAcknowledgedGeneration = 0;
+    g_state.calibrationRequestIdentity = {};
+    g_state.calibrationRequestDraft = {};
+    g_state.calibrationStatus = nullptr;
 }
 
-void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+void EnsureSettingsWindowBackend(bool requested, HWND window,
+    ID3D11Device* device, ID3D11DeviceContext* context) noexcept
 {
-    if (!requested) { (void)ShutdownSettingsWindowBackend(); return; }
-    if (g_ready && BackendTuple(window, device, context)) return;
-    if (g_imgui)
-        if (!ShutdownSettingsWindowBackend()) return;
-    if (!NativeBackendArguments(window, device, context)) return;
-    PrepareBackendOrClear(window, device, context);
+    if (!requested || g_backendReady) return;
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    g_state.interfaceWindowPositionPending = true;
+    g_state.interfaceWindowSizePending = true;
+    ImGui::StyleColorsDark();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.IniFilename = nullptr;
+    io.LogFilename = nullptr;
+    io.FontDefault = io.Fonts->AddFontDefaultVector();
+    g_state.baseImGuiStyle = ImGui::GetStyle();
+    ImGui::GetStyle().ScaleAllSizes(static_cast<float>(g_state.uiInterfaceDraft.scale));
+    ImGui::GetStyle().FontScaleMain = static_cast<float>(g_state.uiInterfaceDraft.scale);
+    const auto platformReady = window != nullptr &&
+        io.FontDefault != nullptr && ImGui_ImplWin32_Init(window);
+    if (!platformReady) {
+        ImGui::DestroyContext();
+        return;
+    }
+    if (!ImGui_ImplDX11_Init(device, context)) {
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+        return;
+    }
+    g_backendReady = true;
+    g_inputWindow.store(window, std::memory_order_release);
+    g_inputReady.store(true, std::memory_order_release);
 }
 
-bool ShutdownSettingsWindowBackend() noexcept
+void ShutdownSettingsWindowBackend() noexcept
 {
-    if (!g_imgui) return true;
-    if (g_thread != GetCurrentThreadId() || g_drawing) return false;
-    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
-    // Refusal leaves the published consumer and its retained backend intact.
-    if (generation && !SetSettingsInputHostConsumerReady(generation, false)) return false;
-    RevokeSettingsInputHost();
-    ClearBackend();
-    return true;
+    g_inputReady.store(false, std::memory_order_release);
+    g_inputWindow.store(nullptr, std::memory_order_release);
+    ShutdownHdrSettingsInput();
+    if (!g_backendReady) return;
+    ImGui_ImplDX11_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+    g_backendReady = false;
+    g_open = false;
+    g_state.settingsWindowDesiredOpen = false;
+    g_state.calibrationMode = 0;
+    g_state.settingsInteractionError = false;
 }
 
-bool SettingsWindowBackendReady() noexcept { return g_ready; }
+bool SettingsWindowBackendReady() noexcept { return g_backendReady; }
 
 SettingsInputActivation TryActivateSettingsWindowInput() noexcept
 {
-    const auto generation = g_inputGeneration.load(std::memory_order_acquire);
-    const auto active = generation && TryActivateSettingsInputHostOnCurrentThread();
+    SettingsInputActivation result{.currentThreadId = GetCurrentThreadId()};
+    if (!g_inputReady.load(std::memory_order_acquire)) return result;
     const auto window = g_inputWindow.load(std::memory_order_acquire);
-    return {generation != 0, active, GetCurrentThreadId(), window ? GetWindowThreadProcessId(window, nullptr) : 0};
+    if (window == nullptr || !IsWindow(window)) return result;
+    result.ready = true;
+    DWORD process{};
+    result.windowThreadId = GetWindowThreadProcessId(window, &process);
+    if (process != GetCurrentProcessId()) return result;
+    result.active = InitializeHdrSettingsInput(window);
+    return result;
 }
 
-bool DrawSettingsWindow(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
+bool DrawSettingsWindow(SettingsWindowView& view,
+    const SettingsWindowActions& actions) noexcept
 {
-    if (!g_ready) return false;
-    if (!OnClosedUiThread()) return false;
-    auto* input = CurrentInput();
-    if (!input) return false;
-    if (!input->Matches(g_window, g_thread)) return false;
-    ImGuiScope scoped(g_imgui);
-    g_drawing = true;
-    bool visible{};
-    try { visible = DrawUiFrame(view, actions, *input); }
-    catch (...) { input->SetCapture(false, false, false); }
-    g_drawing = false;
-    return visible;
+    g_view = &view;
+    g_actions = &actions;
+    const auto ready = DrawWindow();
+    g_view = nullptr;
+    g_actions = nullptr;
+    return ready;
 }
 
-bool SetSettingsWindowOpen(bool open) noexcept
-{
-    if (!g_ready) return false;
-    if (!OnClosedUiThread()) return false;
-    g_open = open;
-    if (!open) g_calibrationMode = 0;
-    return true;
-}
-
+bool SetSettingsWindowOpen(bool open) noexcept { return ChangeSettingsWindowOpen(open); }
 bool SettingsWindowOpen() noexcept { return g_open; }
-std::uint32_t SettingsCalibrationMode() noexcept { return g_calibrationMode; }
-const HdrSettings& ReadSettingsDraft() noexcept { return g_draft; }
-bool SettingsCommitRequested() noexcept { return g_commit; }
-bool ConsumeSettingsCommitRequest() noexcept { return std::exchange(g_commit, false); }
+std::uint32_t SettingsCalibrationMode() noexcept { return g_state.calibrationMode; }
+const HdrSettings& ReadSettingsDraft() noexcept { return g_state.uiDraft; }
+bool SettingsCommitRequested() noexcept { return g_state.uiCommitRequested; }
+bool ConsumeSettingsCommitRequest() noexcept { return std::exchange(g_state.uiCommitRequested, false); }
+void RestoreHeldImageComparison() noexcept { RestoreImageComparison(); }
 
-}  // namespace fo4hdr
+} // namespace fo4hdr
