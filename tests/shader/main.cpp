@@ -3,7 +3,6 @@
 #include "ShaderTestOptions.hpp"
 #include "ShaderTestSuite.hpp"
 #include "TestHarness.hpp"
-#include "UnitTestSuite.hpp"
 
 #include <exception>
 #include <filesystem>
