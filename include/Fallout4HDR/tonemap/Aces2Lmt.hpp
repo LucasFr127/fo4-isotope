@@ -14,7 +14,7 @@ namespace fo4hdr {
 //
 // Finite signed input is retained. Matching the source DCTL, cone responses
 // use sign-preserving power functions; an achromatic response A <= 0 collapses
-// to AP0 black. Any non-finite input or final output fails closed to
+// to AP0 black. Any non-finite input, intermediate, or output fails closed to
 // black rather than allowing invalid data into LUT generation.
 [[nodiscard]] LinearRgb ApplyAces2ContrastLmt(
     LinearRgb sceneLinearAp0) noexcept;

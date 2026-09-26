@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2023 Carlos Lopez
 // Copyright (C) 2024 Carlos Lopez
-// Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/games/fallout4/addon.cpp
-// Upstream context: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/utils/resource.hpp
+// Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/addon.cpp
+// Upstream context: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/utils/resource.hpp
 // Whole-file simplified adaptation for Fallout4HDR. Modification: reduce the
 // generic RenoDX resource-upgrade description to the trusted Fallout 4
 // R11G11B10_FLOAT/backbuffer-aspect predicate and its exact 0.0001 tolerance.

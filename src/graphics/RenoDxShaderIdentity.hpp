@@ -4,7 +4,7 @@
  *
  * Fallout4HDR modification: reduced the pinned RenoDX hash helper to the
  * raw-bytecode CRC-32 operation used by the Fallout 4 shader matcher.
- * Upstream: clshortfuse/renodx@68d2ab15e6086ab04084278ee8cceb85b8a8023e/src/utils/hash.hpp
+ * Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/utils/hash.hpp
  * See THIRD_PARTY_NOTICES.md.
  */
 #pragma once

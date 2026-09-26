@@ -12,7 +12,7 @@ namespace {
 using Matrix = std::array<std::array<double, 3>, 3>;
 
 // Derived from the specified primaries and D65 by solving the XYZ white scale.
-// Binary32 rounding fixes the coefficient precision of the transform.
+// Binary32 coefficients keep CPU operator construction aligned with GPU math.
 // https://www.itu.int/rec/R-REC-BT.709-6-201506-I/en
 // https://www.itu.int/rec/R-REC-BT.2020-2-201510-I/en
 constexpr Matrix primaryTransform{{
@@ -55,17 +55,15 @@ LinearRgb ConvertBt2020ToBt709ForComparison(LinearRgb value) noexcept
 
 LinearRgb ContainBt2020Nits(LinearRgb value, double displayPeakNits) noexcept
 {
-    if (!(displayPeakNits > 0.0 && displayPeakNits <= 10000.0))
-    {
-        return {};
-    }
+    if (!(displayPeakNits > 0.0 && displayPeakNits <= 10000.0)) return {};
     return {BoundLight(value.red, displayPeakNits),
-        BoundLight(value.green, displayPeakNits), BoundLight(value.blue, displayPeakNits)};
+        BoundLight(value.green, displayPeakNits),
+        BoundLight(value.blue, displayPeakNits)};
 }
 
 double EncodeSt2084Pq(double nits) noexcept
 {
-    // Inverse display EOTF, BT.2100 Table 4, with absolute luminance units.
+    // Inverse display EOTF, BT.2100 Table 4; the scene operator runs earlier.
     // https://www.itu.int/rec/R-REC-BT.2100-3-202502-I/en
     const double light = BoundLight(nits, 10000.0) / 10000.0;
     const double power = std::pow(light, 2610.0 / 16384.0);
