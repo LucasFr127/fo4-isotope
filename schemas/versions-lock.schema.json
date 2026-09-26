@@ -92,38 +92,18 @@
       "allOf": [
         {
           "if": {
-            "properties": {
-              "status": {
-                "const": "planned"
-              }
-            }
+            "properties": { "status": { "const": "planned" } }
           },
           "then": {
             "properties": {
-              "platform": {
-                "const": "unvalidated"
-              },
-              "exeSha256": {
-                "const": "UNVALIDATED"
-              },
-              "f4seLoaderSha256": {
-                "const": "UNVALIDATED"
-              },
-              "f4seRuntimeDllSha256": {
-                "const": "UNVALIDATED"
-              },
-              "addressLibrarySha256": {
-                "const": "UNVALIDATED"
-              },
-              "runtimeManifestCanonicalSha256": {
-                "const": "UNVALIDATED"
-              },
-              "shaderManifestSha256": {
-                "const": "UNVALIDATED"
-              },
-              "observedAtUtc": {
-                "const": null
-              }
+              "platform": { "const": "unvalidated" },
+              "exeSha256": { "const": "UNVALIDATED" },
+              "f4seLoaderSha256": { "const": "UNVALIDATED" },
+              "f4seRuntimeDllSha256": { "const": "UNVALIDATED" },
+              "addressLibrarySha256": { "const": "UNVALIDATED" },
+              "runtimeManifestCanonicalSha256": { "const": "UNVALIDATED" },
+              "shaderManifestSha256": { "const": "UNVALIDATED" },
+              "observedAtUtc": { "const": null }
             }
           }
         },
@@ -140,35 +120,17 @@
             }
           },
           "then": {
-            "required": [
-              "runtimeManifestCanonicalSha256"
-            ],
+            "required": ["runtimeManifestCanonicalSha256"],
             "properties": {
-              "platform": {
-                "enum": [
-                  "steam",
-                  "gog"
-                ]
-              },
-              "exeSha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              },
-              "f4seLoaderSha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              },
-              "f4seRuntimeDllSha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              },
-              "addressLibrarySha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              },
+              "platform": { "enum": ["steam", "gog"] },
+              "exeSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
+              "f4seLoaderSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
+              "f4seRuntimeDllSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
+              "addressLibrarySha256": { "pattern": "^[0-9a-fA-F]{64}$" },
               "runtimeManifestCanonicalSha256": {
                 "pattern": "^[0-9a-fA-F]{64}$"
               },
-              "observedAtUtc": {
-                "type": "string",
-                "format": "date-time"
-              }
+              "observedAtUtc": { "type": "string", "format": "date-time" }
             }
           }
         },
@@ -176,10 +138,7 @@
           "if": {
             "properties": {
               "status": {
-                "enum": [
-                  "capture-complete",
-                  "release-approved"
-                ]
+                "enum": ["capture-complete", "release-approved"]
               }
             }
           },
@@ -223,7 +182,8 @@
       "type": "object",
       "required": [
         "requirements",
-        "observed"
+        "observed",
+        "hostedCi"
       ],
       "properties": {
         "requirements": {
@@ -260,6 +220,26 @@
               },
               "additionalProperties": false
             }
+          },
+          "additionalProperties": false
+        },
+        "hostedCi": {
+          "type": "object",
+          "required": ["servicingFamilies", "git", "xmakeArchiveSha256"],
+          "properties": {
+            "servicingFamilies": {
+              "type": "object",
+              "required": ["visualStudioInstallation", "msvcCompiler", "msvcTools", "powerShell"],
+              "properties": {
+                "visualStudioInstallation": { "type": "string", "pattern": "^[0-9]+$" },
+                "msvcCompiler": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+                "msvcTools": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+                "powerShell": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+              },
+              "additionalProperties": false
+            },
+            "git": { "const": "available" },
+            "xmakeArchiveSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
           },
           "additionalProperties": false
         },
@@ -479,36 +459,14 @@
                 "licenseSha256"
               ],
               "properties": {
-                "version": {
-                  "const": "v1.92.6-docking"
-                },
-                "tagObject": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{40}$"
-                },
-                "commit": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{40}$"
-                },
-                "sourceSha256": {
-                  "$ref": "#/definitions/sha256OrPlaceholder"
-                },
-                "recipeCommit": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{40}$"
-                },
-                "recipeTreeSha1": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{40}$"
-                },
-                "recipeSha256": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{64}$"
-                },
-                "licenseSha256": {
-                  "type": "string",
-                  "pattern": "^[0-9a-fA-F]{64}$"
-                }
+                "version": { "const": "v1.92.6-docking" },
+                "tagObject": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+                "commit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+                "sourceSha256": { "$ref": "#/definitions/sha256OrPlaceholder" },
+                "recipeCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+                "recipeTreeSha1": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+                "recipeSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+                "licenseSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
               },
               "additionalProperties": false
             }
@@ -541,94 +499,39 @@
     "aces2": {
       "type": "object",
       "required": [
-        "status",
-        "aggregateVersion",
-        "acesCoreRepository",
-        "acesCoreCommit",
-        "acesOutputRepository",
-        "acesOutputCommit",
-        "licenseSha256",
-        "contrastLmt"
+        "status", "aggregateVersion", "acesCoreRepository",
+        "acesCoreCommit", "acesOutputRepository", "acesOutputCommit",
+        "licenseSha256", "contrastLmt"
       ],
       "properties": {
-        "status": {
-          "const": "adapted"
-        },
-        "aggregateVersion": {
-          "const": "v2.0.0+2025.04.04"
-        },
-        "acesCoreRepository": {
-          "type": "string",
-          "format": "uri"
-        },
-        "acesCoreCommit": {
-          "type": "string",
-          "pattern": "^[0-9a-fA-F]{40}$"
-        },
-        "acesOutputRepository": {
-          "type": "string",
-          "format": "uri"
-        },
-        "acesOutputCommit": {
-          "type": "string",
-          "pattern": "^[0-9a-fA-F]{40}$"
-        },
-        "licenseSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
-        },
+        "status": { "const": "adapted" },
+        "aggregateVersion": { "const": "v2.0.0+2025.04.04" },
+        "acesCoreRepository": { "type": "string", "format": "uri" },
+        "acesCoreCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "acesOutputRepository": { "type": "string", "format": "uri" },
+        "acesOutputCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "licenseSha256": { "$ref": "#/definitions/sha256OrPlaceholder" },
         "contrastLmt": {
           "type": "object",
           "required": [
-            "status",
-            "sourceRepository",
-            "sourceBranch",
-            "sourceCommit",
-            "sourcePath",
-            "sourceSha256",
-            "license",
-            "licensePath",
-            "licenseSha256",
-            "selectedVariant",
-            "inputShaperCenter",
+            "status", "sourceRepository", "sourceBranch", "sourceCommit",
+            "sourcePath", "sourceSha256", "license", "licensePath",
+            "licenseSha256", "selectedVariant", "inputShaperCenter",
             "inputShaperWidth"
           ],
           "properties": {
-            "status": {
-              "const": "adapted"
-            },
-            "sourceRepository": {
-              "const": "https://github.com/scottdyer/aces-look.git"
-            },
-            "sourceBranch": {
-              "const": "dctl-contrast-lmt"
-            },
-            "sourceCommit": {
-              "const": "dc79dd74554e73a9e1518ec5f00ae0c1725f1686"
-            },
-            "sourcePath": {
-              "const": "contrast/LMT_Test_OCIO_options.dctl"
-            },
-            "sourceSha256": {
-              "const": "b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f"
-            },
-            "license": {
-              "const": "Apache-2.0"
-            },
-            "licensePath": {
-              "const": "LICENSE"
-            },
-            "licenseSha256": {
-              "const": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
-            },
-            "selectedVariant": {
-              "const": "J curve 2 + M curve 2"
-            },
-            "inputShaperCenter": {
-              "const": 2.4
-            },
-            "inputShaperWidth": {
-              "const": 3
-            }
+            "status": { "const": "adapted" },
+            "sourceRepository": { "const": "https://github.com/scottdyer/aces-look.git" },
+            "sourceBranch": { "const": "dctl-contrast-lmt" },
+            "sourceCommit": { "const": "dc79dd74554e73a9e1518ec5f00ae0c1725f1686" },
+            "sourcePath": { "const": "contrast/LMT_Test_OCIO_options.dctl" },
+            "sourceSha256": { "const": "b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f" },
+            "license": { "const": "Apache-2.0" },
+            "licensePath": { "const": "LICENSE" },
+            "licenseSha256": { "const": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1" },
+            "selectedVariant": { "const": "J curve 2 + M curve 2" },
+            "inputShaperCenter": { "const": 2.4 },
+            "inputShaperWidth": { "const": 3.0 }
           },
           "additionalProperties": false
         }
@@ -638,27 +541,14 @@
     "agx": {
       "type": "object",
       "required": [
-        "status",
-        "sourceRepository",
-        "sourceTag",
-        "sourceCommit",
+        "status", "sourceRepository", "sourceTag", "sourceCommit",
         "sourceFiles"
       ],
       "properties": {
-        "status": {
-          "const": "adapted"
-        },
-        "sourceRepository": {
-          "type": "string",
-          "format": "uri"
-        },
-        "sourceTag": {
-          "const": "1.2.4"
-        },
-        "sourceCommit": {
-          "type": "string",
-          "pattern": "^[0-9a-fA-F]{40}$"
-        },
+        "status": { "const": "adapted" },
+        "sourceRepository": { "type": "string", "format": "uri" },
+        "sourceTag": { "const": "1.2.4" },
+        "sourceCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
         "sourceFiles": {
           "type": "array",
           "minItems": 4,
@@ -666,19 +556,10 @@
           "uniqueItems": true,
           "items": {
             "type": "object",
-            "required": [
-              "path",
-              "gitBlobSha1"
-            ],
+            "required": ["path", "gitBlobSha1"],
             "properties": {
-              "path": {
-                "type": "string",
-                "minLength": 1
-              },
-              "gitBlobSha1": {
-                "type": "string",
-                "pattern": "^[0-9a-fA-F]{40}$"
-              }
+              "path": { "type": "string", "minLength": 1 },
+              "gitBlobSha1": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" }
             },
             "additionalProperties": false
           }
@@ -710,10 +591,7 @@
           "$ref": "#/definitions/sha256OrPlaceholder"
         },
         "importedSha256": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "pattern": "^[0-9a-fA-F]{64}$"
         }
       },
@@ -731,43 +609,22 @@
         "sourceFiles"
       ],
       "properties": {
-        "status": {
-          "const": "adapted"
-        },
-        "sourceRepository": {
-          "type": "string",
-          "format": "uri"
-        },
-        "sourceCommit": {
-          "type": "string",
-          "pattern": "^[0-9a-fA-F]{40}$"
-        },
-        "license": {
-          "const": "MIT"
-        },
-        "licensePath": {
-          "const": "LICENSE"
-        },
-        "licenseSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
-        },
+        "status": { "const": "adapted" },
+        "sourceRepository": { "type": "string", "format": "uri" },
+        "sourceCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+        "license": { "const": "MIT" },
+        "licensePath": { "const": "LICENSE" },
+        "licenseSha256": { "$ref": "#/definitions/sha256OrPlaceholder" },
         "sourceFiles": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
           "items": {
             "type": "object",
-            "required": [
-              "path",
-              "sha256"
-            ],
+            "required": ["path", "sha256"],
             "properties": {
-              "path": {
-                "const": "Effects/Smooth Tetra Skin.dctl"
-              },
-              "sha256": {
-                "$ref": "#/definitions/sha256OrPlaceholder"
-              }
+              "path": { "const": "Effects/Smooth Tetra Skin.dctl" },
+              "sha256": { "$ref": "#/definitions/sha256OrPlaceholder" }
             },
             "additionalProperties": false
           }

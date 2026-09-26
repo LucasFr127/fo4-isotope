@@ -33,6 +33,16 @@
       "powerShell": "7.6.5",
       "git": "2.55.0.windows.3",
       "reuse": "6.2.0"
+    },
+    "hostedCi": {
+      "servicingFamilies": {
+        "visualStudioInstallation": "18",
+        "msvcCompiler": "19.51",
+        "msvcTools": "14.51",
+        "powerShell": "7.6"
+      },
+      "git": "available",
+      "xmakeArchiveSha256": "0f2c57a29f358e4f9f059cd823f40c3213750dcb13d5b6e9f6e5b29910992d65"
     }
   },
   "commonlib": {
@@ -131,7 +141,7 @@
       "licenseSha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
       "selectedVariant": "J curve 2 + M curve 2",
       "inputShaperCenter": 2.4,
-      "inputShaperWidth": 3
+      "inputShaperWidth": 3.0
     }
   },
   "agx": {

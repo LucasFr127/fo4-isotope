@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 function Get-Fo4HdrToolchainPolicy {
     $policy = $env:FO4HDR_TOOLCHAIN_POLICY
     if ([string]::IsNullOrWhiteSpace($policy)) { return "pinned" }
-    if ($policy -cne "pinned") {
+    if ($policy -notin @("pinned", "hosted-ci")) {
         throw "Unknown toolchain policy: $policy"
     }
     return $policy
@@ -13,20 +13,52 @@ function Get-Fo4HdrToolchainPolicy {
 
 function Assert-Fo4HdrToolchainValue {
     param([string]$Key, [string]$Expected, [string]$Actual, [pscustomobject]$Lock)
-    [void](Get-Fo4HdrToolchainPolicy)
+    $policy = Get-Fo4HdrToolchainPolicy
     if ($Expected -match '^(FILL_|unknown$)' -or
         [string]::IsNullOrWhiteSpace($Expected)) {
         throw "$Key is not pinned. Run scripts/pin-toolchain.ps1."
+    }
+    $family = $null
+    if ($policy -eq "hosted-ci") {
+        $family = $Lock.toolchain.hostedCi.servicingFamilies.PSObject.Properties[$Key]
+    }
+    if ($null -ne $family) {
+        Assert-Fo4HdrServicingVersion -Key $Key -Expected $Expected -Actual $Actual -Family $family.Value
+        return
+    }
+    if ($policy -eq "hosted-ci" -and $Key -eq "git") {
+        Assert-Fo4HdrAvailableGit -Actual $Actual -Requirement $Lock.toolchain.hostedCi.git
+        return
     }
     if ($Expected -cne $Actual) {
         throw "$Key mismatch. Expected '$Expected'; observed '$Actual'."
     }
 }
 
+function Assert-Fo4HdrServicingVersion {
+    param([string]$Key, [string]$Expected, [string]$Actual, [string]$Family)
+    $version = [version]$Actual
+    $inFamily = $Actual.StartsWith($Family + '.', [StringComparison]::Ordinal)
+    if (-not $inFamily -or $version -lt [version]$Expected) {
+        throw "$Key must be in family $Family, at least $Expected; observed '$Actual'."
+    }
+}
+
+function Assert-Fo4HdrAvailableGit {
+    param([string]$Actual, [string]$Requirement)
+    if ($Requirement -cne "available") { throw "Unknown hosted-CI Git requirement: $Requirement" }
+    if ($Actual -notmatch '^\d+\.\d+\.\d+(?:\.windows\.\d+)?$') {
+        throw "Unable to validate hosted-CI Git version: '$Actual'."
+    }
+}
+
 function Get-Fo4HdrMsvcToolset {
     param([pscustomobject]$Lock)
-    [void](Get-Fo4HdrToolchainPolicy)
-    return [string]$Lock.toolchain.observed.msvc.toolsVersion
+    $expected = [string]$Lock.toolchain.observed.msvc.toolsVersion
+    if ((Get-Fo4HdrToolchainPolicy) -eq "pinned") { return $expected }
+    $actual = ([string]$env:VCToolsVersion).TrimEnd('\', '/')
+    Assert-Fo4HdrToolchainValue -Key "msvcTools" -Expected $expected -Actual $actual -Lock $Lock
+    return $actual
 }
 
 function Assert-Fo4HdrConfiguredMsvc {

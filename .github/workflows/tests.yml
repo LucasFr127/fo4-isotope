@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+name: Tests
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  tests:
+    name: Windows x64 (${{ matrix.mode }})
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [debug, releasedbg]
+    env:
+      FO4HDR_RUNTIME: "1.10.163"
+      FO4HDR_BUILD_MODE: ${{ matrix.mode }}
+      FO4HDR_TOOLCHAIN_POLICY: hosted-ci
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out source and submodules
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Configure optional source selection
+        env:
+          FO4HDR_SOURCE_INVENTORY: ${{ vars.FO4HDR_SOURCE_INVENTORY }}
+        run: git config --local fo4hdr.sourceInventory "$env:FO4HDR_SOURCE_INVENTORY"
+
+      - name: Install pinned XMake and REUSE
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content versions.lock.json -Raw | ConvertFrom-Json
+          $tools = Join-Path $env:RUNNER_TEMP 'fo4hdr-tools'
+          New-Item -ItemType Directory -Path $tools -Force | Out-Null
+          $archive = Join-Path $tools 'xmake.zip'
+          $version = $lock.toolchain.observed.xmake
+          $url = "https://github.com/xmake-io/xmake/releases/download/v$version/xmake-v$version.win64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ine $lock.toolchain.hostedCi.xmakeArchiveSha256) {
+            throw 'XMake archive differs from the locked checksum.'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $tools
+          (Join-Path $tools 'xmake') >> $env:GITHUB_PATH
+          $reuseRoot = Join-Path $tools 'reuse'
+          python -m venv $reuseRoot
+          if ($LASTEXITCODE -ne 0) { throw 'REUSE virtual environment creation failed.' }
+          & (Join-Path $reuseRoot 'Scripts/python.exe') -m pip install "reuse[charset-normalizer]==$($lock.toolchain.observed.reuse)"
+          if ($LASTEXITCODE -ne 0) { throw 'REUSE installation failed.' }
+          "FO4HDR_REUSE=$(Join-Path $reuseRoot 'Scripts/reuse.exe')" >> $env:GITHUB_ENV
+          "FO4HDR_PWSH=$((Get-Process -Id $PID).Path)" >> $env:GITHUB_ENV
+
+      - name: Initialize x64 MSVC and locked Windows SDK
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content versions.lock.json -Raw | ConvertFrom-Json
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $major = [int]$lock.toolchain.observed.visualStudio.productLine
+          $instances = & $vswhere -latest -products '*' -version "[$major.0,$($major + 1).0)" `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -format json | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $instances) { throw 'Approved Visual Studio installation was not found.' }
+          $instance = @($instances)[0]
+          $before = @{}
+          Get-ChildItem Env: | ForEach-Object { $before[$_.Name] = $_.Value }
+          Import-Module (Join-Path $instance.installationPath 'Common7/Tools/Microsoft.VisualStudio.DevShell.dll')
+          $family = $lock.toolchain.hostedCi.servicingFamilies.msvcTools
+          $sdk = $lock.toolchain.observed.windowsSdk.version
+          Enter-VsDevShell -VsInstanceId $instance.instanceId -SkipAutomaticLocation `
+            -DevCmdArguments "-arch=x64 -host_arch=x64 -vcvars_ver=$family -winsdk=$sdk"
+          # Developer-shell changes must survive the next workflow step.
+          foreach ($entry in Get-ChildItem Env:) {
+            if ($entry.Value -ne $before[$entry.Name]) {
+              "$($entry.Name)=$($entry.Value)" >> $env:GITHUB_ENV
+            }
+          }
+
+      - name: Verify compatible toolchain and pinned dependencies
+        run: .\scripts\bootstrap.ps1
+
+      - name: Audit public source licenses and REUSE metadata
+        if: matrix.mode == 'debug'
+        run: .\scripts\license-audit.ps1 -Scope fast
+
+      - name: Run repository checks
+        if: matrix.mode == 'debug'
+        run: .\scripts\test.ps1 -Runtime $env:FO4HDR_RUNTIME -Scope repository
+
+      - name: Build plugin and test executables
+        run: .\scripts\build.ps1 -Runtime $env:FO4HDR_RUNTIME -Mode $env:FO4HDR_BUILD_MODE
+
+      - name: Run CPU and WARP tests
+        run: >-
+          .\scripts\test.ps1 -Runtime $env:FO4HDR_RUNTIME -Mode $env:FO4HDR_BUILD_MODE
+          -SkipConfigure -Scope compiled
