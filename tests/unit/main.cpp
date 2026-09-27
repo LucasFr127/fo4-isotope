@@ -109,18 +109,87 @@ void RunSection(const Section& section)
               << '\n';
 }
 
+struct CommandOptions
+{
+    bool list{};
+    bool filtering{};
+    std::string_view filter;
+};
+
+bool ParseCommandOptions(int argumentCount, char** arguments, CommandOptions& options)
+{
+    for (int index = 1; index < argumentCount; ++index)
+    {
+        const std::string_view argument{arguments[index]};
+        if (argument == "--list")
+        {
+            options.list = true;
+        }
+        else if (argument == "--filter" && index + 1 < argumentCount)
+        {
+            options.filtering = true;
+            options.filter = arguments[++index];
+        }
+        else
+        {
+            std::cerr << "Usage: fo4hdr-tests [--list|--filter <section>]\n";
+            return false;
+        }
+    }
+    if (options.list && options.filtering)
+    {
+        std::cerr << "--list and --filter are mutually exclusive.\n";
+        return false;
+    }
+    return true;
+}
+
+int ListSections()
+{
+    for (const auto& section : kSections) std::cout << section.name << '\n';
+    return EXIT_SUCCESS;
+}
+
 }  // namespace
 
-int main()
+int main(int argumentCount, char** arguments)
 {
+    CommandOptions options;
+    if (!ParseCommandOptions(argumentCount, arguments, options)) return 2;
+    const auto [list, filtering, filter] = options;
+    if (list) return ListSections();
+
+    const auto selected = std::find_if(
+        std::begin(kSections), std::end(kSections),
+        [filter](const Section& section) { return section.name == filter; });
+    if (filtering && selected == std::end(kSections))
+    {
+        std::cerr << "Unknown test section: " << filter << '\n';
+        return 2;
+    }
+
     std::cout << "[ SUITE START ] native-cpu" << std::endl;
-    std::for_each(std::begin(kSections), std::end(kSections), RunSection);
+    if (!filtering)
+    {
+        std::for_each(std::begin(kSections), std::end(kSections), RunSection);
+    }
+    else
+    {
+        RunSection(*selected);
+    }
+
     if (fo4hdr::test::failures != 0)
     {
         std::cout << "[ SUITE END ] native-cpu failed\n";
-        std::cerr << fo4hdr::test::failures << " test failure(s)\n";
+        std::cerr << fo4hdr::test::failures
+                  << " test failure(s)\n";
         return EXIT_FAILURE;
     }
+
     std::cout << "[ SUITE END ] native-cpu passed\n";
+    if (filtering)
+        std::cout << "Selected Fallout4HDR test section passed.\n";
+    else
+        std::cout << "All Fallout4HDR tests passed.\n";
     return EXIT_SUCCESS;
 }

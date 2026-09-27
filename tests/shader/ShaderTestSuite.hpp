@@ -4,17 +4,19 @@
 #include "d3d11/GpuHarness.hpp"
 #include "reference/ShaderReference.hpp"
 
-int VerifyOperatorLutSampling(ID3D11Device& device, ID3D11DeviceContext& context);
+int VerifyOperatorLutSampling(ID3D11Device& device, ID3D11DeviceContext& context, bool benchmark);
 
 namespace fo4hdr::tests::gpu {
 
-bool VerifyArmorEncodedComposition(Device& device);
+bool VerifyArmorEncodedComposition(Device& device, bool benchmark=false);
 
 void VerifyCalibrationPatterns(Device& device);
 
 void VerifyContextQuerySafety();
 
 void VerifyDirectPresentation(Device& device);
+
+void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay = false);
 
 void VerifyGt7OperatorAndUi(Device& device);
 

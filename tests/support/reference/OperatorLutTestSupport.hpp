@@ -4,7 +4,6 @@
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include "Fallout4HDR/tonemap/OperatorLut.hpp"
 
-#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -24,7 +23,5 @@ namespace fo4hdr::test {
 
 // Shared CPU/GPU interpolation coverage uses identical binary32 inputs.
 [[nodiscard]] std::vector<LinearRgb> BuildOperatorLutCorpus(double peak);
-
-[[nodiscard]] std::array<LinearRgb, 16> OperatorLutReferenceSamples() noexcept;
 
 } // namespace fo4hdr::test

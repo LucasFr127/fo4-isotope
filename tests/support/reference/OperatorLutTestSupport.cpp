@@ -295,15 +295,4 @@ void AppendOperatorCorpusAnchors(const AddColor& add)
     return result;
 }
 
-std::array<LinearRgb, 16> OperatorLutReferenceSamples() noexcept
-{
-    return {{{0.0F, 0.0F, 0.0F}, {1.0e-6F, 1.0e-6F, 1.0e-6F},
-        {1.0e-4F, 1.0e-4F, 1.0e-4F}, {1.0e-3F, 1.0e-3F, 1.0e-3F},
-        {0.18F, 0.18F, 0.18F}, {1.0F, 1.0F, 1.0F}, {16.0F, 16.0F, 16.0F},
-        {8.0F, 0.0F, 0.0F}, {0.0F, 8.0F, 0.0F}, {0.0F, 0.0F, 8.0F},
-        {4.0F, 2.0F, 0.0F}, {2.03125F, 0.6875F, 0.53125F},
-        {64.0F, 22.4F, 0.0F}, {65504.0F, 65504.0F, 65504.0F},
-        {65504.0F, 0.0F, 0.0F}, {0.0F, 0.18F, 0.18F}}};
-}
-
 } // namespace fo4hdr::test

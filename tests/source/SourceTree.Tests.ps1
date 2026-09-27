@@ -1,217 +1,206 @@
 # SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#requires -Version 7.4.6
+[CmdletBinding()]
+param()
 
-$ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath([IO.Path]::Combine($PSScriptRoot, '../..'))
-$prefix = $root + [IO.Path]::DirectorySeparatorChar
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $repoRoot "scripts\internal\Project.Common.ps1")
 
-function Read-SelectedPaths {
-    param([string]$Relative, [string]$Variable)
+function Assert-Throws {
+    param(
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Action,
 
-    $tokens = $null
-    $errors = $null
-    $ast = [Management.Automation.Language.Parser]::ParseFile(
-        [IO.Path]::Combine($root, $Relative), [ref]$tokens, [ref]$errors)
-    if ($errors.Count) { throw "Cannot parse source selection: $Relative" }
-    $assignments = @($ast.FindAll({ param($node)
-        $node -is [Management.Automation.Language.AssignmentStatementAst] -and
-            $node.Left.VariablePath.UserPath -ceq $Variable
-    }, $true))
-    if ($assignments.Count -ne 1) { throw "Ambiguous source selection: $Relative" }
-    return @($assignments[0].Right.FindAll({ param($node)
-        $node -is [Management.Automation.Language.StringConstantExpressionAst]
-    }, $true) | ForEach-Object Value)
-}
+        [Parameter(Mandatory = $true)]
+        [string]$Message
+    )
 
-function Assert-SourceName {
-    param([string]$Relative)
-
-    $segments = $Relative.Split('/')
-    if ([IO.Path]::IsPathRooted($Relative)) { throw "Rooted source path: $Relative" }
-    if ($Relative.IndexOfAny([char[]]'\:') -ge 0) { throw "Invalid source separator: $Relative" }
-    if (@($segments | Where-Object { $_ -in @('', '.', '..', '.git') }).Count) {
-        throw "Unsafe source path: $Relative"
+    try {
+        & $Action
     }
-}
-
-function Assert-SelectedFile {
-    param([string]$Relative)
-
-    Assert-SourceName $Relative
-    $path = [IO.Path]::GetFullPath([IO.Path]::Combine($root, $Relative))
-    if (-not $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Source path leaves project: $Relative"
-    }
-    if (-not [IO.File]::Exists($path)) { throw "Missing selected source: $Relative" }
-    if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "Selected source is a reparse point: $Relative"
-    }
-}
-
-function Assert-BuildInputs {
-    param([string]$Recipe, [Collections.Generic.HashSet[string]]$Selected)
-
-    # Dependency-relative literals are checked against their configured roots.
-    $projectRecipe = [regex]::Replace($Recipe, 'path\.join\(dependency_profile\.[^)]*\)', '')
-    foreach ($input in [regex]::Matches($projectRecipe,
-        '"((?:src|tests|include|shaders)/[^"$]+\.(?:cpp|hpp|h|rc|hlsl|hlsli))"')) {
-        if (-not $Selected.Contains($input.Groups[1].Value)) {
-            throw "Build input is not selected: $($input.Groups[1].Value)"
-        }
-    }
-}
-
-function Assert-LocalIncludes {
-    param([string]$Relative, [string[]]$IncludeRoots,
-        [Collections.Generic.HashSet[string]]$Selected)
-
-    $path = [IO.Path]::Combine($root, $Relative)
-    $directory = [IO.Path]::GetDirectoryName($path)
-    foreach ($include in [regex]::Matches([IO.File]::ReadAllText($path),
-        '(?m)^\s*#\s*include\s*"([^"]+)"')) {
-        $name = $include.Groups[1].Value
-        if (-not (Find-SelectedInclude $name (@($directory) + $IncludeRoots) $Selected)) {
-            throw "Unselected local include: $Relative -> $name"
-        }
-    }
-}
-
-function Find-SelectedInclude {
-    param([string]$Name, [string[]]$SearchRoots,
-        [Collections.Generic.HashSet[string]]$Selected)
-
-    foreach ($search in $SearchRoots) {
-        $candidate = [IO.Path]::GetFullPath([IO.Path]::Combine($search, $Name))
-        if (-not $candidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = [IO.Path]::GetRelativePath($root, $candidate).Replace('\', '/')
-        if ($Selected.Contains($relative)) { return $true }
-    }
-    return $false
-}
-
-function Get-ComputeShaderSource {
-    param([string]$Name)
-
-    switch -CaseSensitive ($Name) {
-        'DeveloperExposureCapture' { return 'shaders/diagnostics/DeveloperExposureCapture.cs.hlsl' }
-        'NativeReferencePrepare' { return 'shaders/fallout4/NativeReferencePrepare.cs.hlsl' }
-        'ArmorEncodedComposition' { return 'shaders/armor/EncodedComposition.cs.hlsl' }
-        default { return $null }
-    }
-}
-
-function Assert-GeneratedIncludes {
-    param([string]$Relative, [string]$Recipe,
-        [Collections.Generic.HashSet[string]]$Selected)
-
-    $text = [IO.File]::ReadAllText([IO.Path]::Combine($root, $Relative))
-    foreach ($include in [regex]::Matches($text, '<fo4hdr-shaders/([A-Za-z0-9]+)\.hpp>')) {
-        $name = $include.Groups[1].Value
-        $source = "shaders/fallout4/$name.ps.hlsl"
-        $declared = $Recipe.Contains('"' + $name + '"')
-        if ($name -in @('PresentPixels', 'CopySdrCodes')) {
-            $source = 'shaders/output/PresentPixels.cs.hlsl'
-            $declared = $name -ceq 'PresentPixels' -or $declared
-        }
-        $computeSource = Get-ComputeShaderSource $name
-        if ($computeSource) {
-            $source = $computeSource
-            $declared = $Recipe.Contains('"k' + $name + 'Bytecode"')
-        }
-        if (-not $declared -or -not $Selected.Contains($source)) {
-            throw "Generated include lacks its selected shader recipe: $name"
-        }
-    }
-}
-
-function Get-DependencyRoots {
-    $commonlib = [IO.Path]::Combine($root, 'lib/commonlibf4')
-    return @{
-        commonlib = $commonlib
-        shared = [IO.Path]::Combine($commonlib, 'lib/commonlib-shared')
-        uiapi = [IO.Path]::Combine($commonlib, 'lib/dearmoddingui-api')
-        spdlog = if ($env:FO4HDR_SPDLOG_SOURCE) { $env:FO4HDR_SPDLOG_SOURCE }
-            else { [IO.Path]::Combine($root, 'lib/spdlog') }
-        imgui = if ($env:FO4HDR_IMGUI_SOURCE) { $env:FO4HDR_IMGUI_SOURCE }
-            else { [IO.Path]::Combine($root, 'lib/imgui') }
-    }
-}
-
-function Assert-DependencyPath {
-    param([string]$Path)
-
-    if (-not $Path.Contains('*')) {
-        if (-not (Test-Path -LiteralPath $Path)) { throw "Missing dependency build input: $Path" }
+    catch {
         return
     }
-    if (-not @(Get-ChildItem -Path $Path -File -Recurse).Count) {
-        throw "Missing dependency source pattern: $Path"
+    throw $Message
+}
+
+function Test-SelectedInventoryFiles {
+    param([string]$TestRoot, [string]$Inventory)
+    New-Item -ItemType Directory -Path (Join-Path $testRoot "src") |
+        Out-Null
+    [IO.File]::WriteAllText((Join-Path $testRoot "src\a.cpp"), "a")
+    [IO.File]::WriteAllText((Join-Path $testRoot "src\B.cpp"), "b")
+
+    [IO.File]::WriteAllLines($inventory, @(
+        "# Inventory",
+        "",
+        '- `src/a.cpp`',
+        '- `selection.md`',
+        '- `src/B.cpp`'
+    ))
+    $actual = @(Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory)
+    $expected = @("selection.md", "src/B.cpp", "src/a.cpp")
+    if ([string]::Join("|", $actual) -cne [string]::Join("|", $expected)) {
+        throw "Source-tree inventory did not return its ordinal-sorted paths."
+    }
+
+    foreach ($invalid in @(
+        '- `../outside.txt`',
+        '- `C:/outside.txt`',
+        '- `src\a.cpp`',
+        '- `.git/config`',
+        '- `src/missing.cpp`'
+    )) {
+        [IO.File]::WriteAllLines($inventory, @('- `selection.md`', $invalid))
+        Assert-Throws {
+            Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory | Out-Null
+        } "Source-tree inventory accepted: $invalid"
+    }
+
+    [IO.File]::WriteAllLines($inventory, @(
+        '- `selection.md`',
+        '- `src/a.cpp`',
+        '- `SRC/A.CPP`'
+    ))
+    Assert-Throws {
+        Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory | Out-Null
+    } "Source-tree inventory accepted a case-insensitive duplicate."
+
+}
+
+function Test-InventoryDependencyFiles {
+    param([string]$TestRoot, [string]$Inventory)
+    $dependency = Join-Path $testRoot 'lib\dependency'
+    New-Item -ItemType Directory -Path (Join-Path $dependency 'nested') | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dependency 'LICENSE'), "license`n")
+    [IO.File]::WriteAllText((Join-Path $dependency 'nested\source.cpp'), 'source')
+    [IO.File]::WriteAllText((Join-Path $testRoot '.gitmodules'),
+        "[submodule `"dependency`"]`n`tpath = lib/dependency`n`turl = https://example.invalid/dependency`n")
+    [IO.File]::WriteAllLines($inventory, @(
+        '- `selection.md`',
+        '- `lib/dependency` (submodule)'
+    ))
+    $expanded = @(Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory)
+    $missingDependencyFiles = 'lib/dependency/LICENSE' -cnotin $expanded -or
+        'lib/dependency/nested/source.cpp' -cnotin $expanded
+    if ($expanded.Count -ne 3 -or $missingDependencyFiles) {
+        throw 'Extracted source did not expand the dependency and its nested source.'
+    }
+    [IO.File]::WriteAllText((Join-Path $dependency 'nested\.git'), 'private Git pointer')
+    Assert-Throws {
+        Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory | Out-Null
+    } 'Private dependency Git metadata was accepted.'
+    Remove-Item -LiteralPath (Join-Path $dependency 'nested\.git')
+    [IO.File]::AppendAllText($inventory, "- ``lib/dependency/LICENSE```n")
+    Assert-Throws {
+        Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory | Out-Null
+    } 'An ordinary entry duplicated an expanded dependency file.'
+    [IO.File]::WriteAllLines($inventory, @(
+        '- `selection.md`',
+        '- `lib/dependency` (submodule)'
+    ))
+    [IO.File]::WriteAllText((Join-Path $testRoot '.git'), 'checkout marker')
+    Assert-Throws {
+        Get-Fo4HdrSourceTreeFiles -Root $testRoot -InventoryPath $inventory | Out-Null
+    } 'An uninitialized checkout dependency was treated as an extracted archive.'
+}
+
+function Test-PublicSourceSelection {
+    param([string]$PublicRoot)
+    New-Item -ItemType Directory -Path $publicRoot | Out-Null
+    [IO.File]::WriteAllText((Join-Path $publicRoot 'source.cpp'), 'source')
+    foreach ($directory in @('build', 'dist', '.xmake', 'third_party/xmake-package-sources')) {
+        $output = Join-Path $publicRoot $directory
+        New-Item -ItemType Directory -Path $output -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $output 'generated.txt'), 'output')
+    }
+    [IO.File]::WriteAllText((Join-Path $publicRoot 'local.env.ps1'), '# configuration')
+    $actual = @(Get-Fo4HdrSourceTreeFiles -Root $publicRoot)
+    if ($actual.Count -ne 1 -or $actual[0] -cne 'source.cpp') {
+        throw 'Extracted source selection includes generated output or requires an inventory.'
+    }
+    Test-PublicGitSelection $publicRoot
+}
+
+function Test-PublicGitSelection {
+    param([string]$PublicRoot)
+    git init --quiet $publicRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot initialize source selection fixture.' }
+    git -C $publicRoot add -- source.cpp
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot stage source selection fixture.' }
+    [IO.File]::WriteAllText((Join-Path $publicRoot 'untracked.cpp'), 'untracked')
+    $actual = @(Get-Fo4HdrSourceTreeFiles -Root $publicRoot)
+    if ($actual.Count -ne 1 -or $actual[0] -cne 'source.cpp') {
+        throw 'Public checkout selection differs from its tracked source files.'
+    }
+    Test-ConfiguredSourceSelection $publicRoot
+}
+
+function Test-ConfiguredSourceSelection {
+    param([string]$PublicRoot)
+    [IO.File]::WriteAllText((Join-Path $publicRoot 'selection.md'), '- `untracked.cpp`')
+    git -C $publicRoot config --local fo4hdr.sourceInventory selection.md
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot configure source selection fixture.' }
+    $actual = @(Get-Fo4HdrSourceTreeFiles -Root $publicRoot)
+    if ($actual.Count -ne 1 -or $actual[0] -cne 'untracked.cpp') {
+        throw 'Checkout-local source selection did not override tracked files.'
+    }
+    git -C $publicRoot config --local fo4hdr.sourceInventory missing.md
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot configure source selection fixture.' }
+    Assert-Throws {
+        Get-Fo4HdrSourceTreeFiles -Root $publicRoot | Out-Null
+    } 'A missing configured inventory silently fell back to other files.'
+}
+
+$testRoot = Join-Path `
+    ([IO.Path]::GetTempPath()) `
+    ("Fallout4HDR-source-tree-" + [Guid]::NewGuid().ToString("N"))
+$inventory = Join-Path $testRoot "selection.md"
+
+try {
+    Test-SelectedInventoryFiles $testRoot $inventory
+    Test-InventoryDependencyFiles $testRoot $inventory
+}
+finally {
+    if (Test-Path -LiteralPath $testRoot) {
+        Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
 
-function Assert-DependencyTerms {
-    param([hashtable]$Roots)
+$publicRoot = Join-Path ([IO.Path]::GetTempPath()) (
+    'Fallout4HDR-public-source-' + [Guid]::NewGuid().ToString('N'))
+try {
+    Test-PublicSourceSelection $publicRoot
+}
+finally {
+    if (Test-Path -LiteralPath $publicRoot) {
+        Remove-Item -LiteralPath $publicRoot -Recurse -Force
+    }
+}
 
-    foreach ($entry in @(@('commonlib', 'LICENSE'), @('shared', 'LICENSE'),
-        @('shared', 'EXCEPTIONS'), @('commonlib', 'EXCEPTIONS'),
-        @('commonlib', 'res/license/MIT'), @('uiapi', 'LICENSE'), @('spdlog', 'LICENSE'), @('imgui', 'LICENSE.txt'))) {
-        if (-not [IO.File]::Exists([IO.Path]::Combine($roots[$entry[0]], $entry[1]))) {
-            throw "Missing dependency terms: $($entry[0])/$($entry[1])"
+$sourceFiles = [Collections.Generic.HashSet[string]]::new(
+    [string[]]@(Get-Fo4HdrSourceTreeFiles -Root $repoRoot),
+    [StringComparer]::Ordinal
+)
+foreach ($relative in $sourceFiles) {
+    if ($relative.StartsWith('lib/', [StringComparison]::Ordinal) -or
+        [IO.Path]::GetExtension($relative) -ne '.md') {
+        continue
+    }
+    $path = Join-Path $repoRoot $relative
+    $text = Get-Content -LiteralPath $path -Raw
+    foreach ($link in [regex]::Matches($text, '\[[^\]\r\n]*\]\(([^)\r\n]+)\)')) {
+        $target = $link.Groups[1].Value.Trim('<', '>')
+        if ($target -match '^(?:[a-z][a-z0-9+.-]*:|#)') {
+            continue
+        }
+        $target = [Uri]::UnescapeDataString(($target -split '[?#]', 2)[0])
+        $resolved = [IO.Path]::GetFullPath((Join-Path (Split-Path $path) $target))
+        $linkedFile = [IO.Path]::GetRelativePath($repoRoot, $resolved).Replace('\', '/')
+        if (-not $sourceFiles.Contains($linkedFile)) {
+            throw "Public documentation links outside the source selection: $relative -> $target"
         }
     }
 }
 
-function Assert-DependencyInputs {
-    param([string]$Recipe)
-
-    $roots = Get-DependencyRoots
-    foreach ($input in [regex]::Matches($Recipe,
-        'path\.join\(dependency_profile\.(commonlib|shared|spdlog|imgui)_source, "([^"]+)"\)')) {
-        Assert-DependencyPath ([IO.Path]::Combine(
-            $roots[$input.Groups[1].Value], $input.Groups[2].Value))
-    }
-    foreach ($input in @(@('commonlib', 'xmake.lua'), @('shared', 'xmake.lua'),
-        @('uiapi', 'xmake.lua'), @('commonlib', 'res/commonlibf4.natvis'),
-        @('shared', 'res/commonlib-plugin.rc.in'))) {
-        Assert-DependencyPath ([IO.Path]::Combine($roots[$input[0]], $input[1]))
-    }
-    Assert-DependencyTerms $roots
-}
-
-function Read-SourceSelection {
-    $paths = @(Read-SelectedPaths 'scripts/package-source.ps1' 'files')
-    $expected = @(Read-SelectedPaths 'tests/source/PackageSource.Tests.ps1' 'expected')
-    $selected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in $paths) {
-        Assert-SelectedFile $path
-        if (-not $selected.Add($path)) { throw "Duplicate selected source: $path" }
-    }
-    if (Compare-Object $paths $expected -CaseSensitive) { throw 'Source selections differ.' }
-    return ,$selected
-}
-
-function Test-SourceClosure {
-    $selected = Read-SourceSelection
-    $paths = @($selected)
-    $xmake = [IO.File]::ReadAllText([IO.Path]::Combine($root, 'xmake.lua'))
-    $shaders = [IO.File]::ReadAllText([IO.Path]::Combine($root, 'scripts/compile-shaders.ps1'))
-    Assert-BuildInputs $xmake $selected
-    Assert-BuildInputs $shaders $selected
-    $includeRoots = @([regex]::Matches($xmake, '(?m)^\s*add_includedirs\(([^\r\n]+)') |
-        ForEach-Object { [regex]::Matches($_.Groups[1].Value, '"([^"$]+)"') } |
-        ForEach-Object { [IO.Path]::Combine($root, $_.Groups[1].Value) })
-    foreach ($path in $paths | Where-Object { $_ -match '\.(cpp|hpp|h|hlsl|hlsli)$' }) {
-        Assert-LocalIncludes $path $includeRoots $selected
-        Assert-GeneratedIncludes $path $shaders $selected
-    }
-    Assert-DependencyInputs $xmake
-    $lock = Get-Content -LiteralPath ([IO.Path]::Combine($root, 'third_party/gt7/UPSTREAM.lock.json')) -Raw |
-        ConvertFrom-Json
-    $oracle = [IO.Path]::Combine($root, 'third_party/gt7/upstream/gt7_tone_mapping.cpp')
-    if ((Get-FileHash -LiteralPath $oracle -Algorithm SHA256).Hash -ine $lock.sha256) {
-        throw 'GT7 source differs from its retained identity.'
-    }
-    Write-Host "PASS selected source/build/include closure ($($paths.Count) project files); compilation and archive identity are separate checks."
-}
-
-Test-SourceClosure
+Write-Host "Source-tree inventory and public documentation link regression tests passed."

@@ -1,48 +1,97 @@
 # SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#requires -Version 7.4.6
+[CmdletBinding()]
+param()
 
-$ErrorActionPreference = 'Stop'
-. ([IO.Path]::Combine($PSScriptRoot, '../../scripts/internal/Project.Source.ps1'))
+$ErrorActionPreference = "Stop"
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $repoRoot "scripts/internal/Project.Common.ps1")
+$archivePath = Join-Path ([IO.Path]::GetTempPath()) ("Fallout4HDR-archive-" + [Guid]::NewGuid() + ".zip")
+Add-Type -AssemblyName System.IO.Compression
 
-function Test-ArchiveNames {
-    param([string]$Path, [string[]]$Names, [bool]$Expected)
+function New-TestArchive {
+    param([string[]]$ExtraEntries = @())
 
-    $archive = [IO.Compression.ZipFile]::Open($Path, [IO.Compression.ZipArchiveMode]::Create)
+    $writer = [IO.Compression.ZipFile]::Open($archivePath, "Create")
     try {
-        foreach ($name in $Names) { [void]$archive.CreateEntry($name) }
+        foreach ($name in @("Fallout4HDR/", "Fallout4HDR/src/example.cpp") + $ExtraEntries) {
+            [void]$writer.CreateEntry($name)
+        }
     }
-    finally { $archive.Dispose() }
-    $accepted = $false
-    try {
-        $validated = Open-Fo4HdrValidatedZipArchive $Path
-        try { $accepted = $true }
-        finally { $validated.Dispose() }
-    }
-    catch { $accepted = $false }
-    if ($accepted -ne $Expected) { throw "Unexpected archive name admission: $($Names -join ', ')" }
+    finally { $writer.Dispose() }
 }
 
-$temp = [IO.Path]::Combine([IO.Path]::GetTempPath(), "Fallout4HDR-archive-$([Guid]::NewGuid())")
-[void][IO.Directory]::CreateDirectory($temp)
+function Assert-ArchiveRejection {
+    param([scriptblock]$Action, [string]$ExpectedMessage)
+
+    try { & $Action }
+    catch {
+        if ($_.Exception.Message -notlike $ExpectedMessage) { throw }
+        return
+    }
+    throw "Archive check did not reject the fixture: $ExpectedMessage"
+}
+
 try {
-    $cases = @(
-        @{ Names = @('src/main.cpp', 'COPYING.GPL-3.0-or-later'); Accepted = $true },
-        @{ Names = @('../escape'); Accepted = $false },
-        @{ Names = @('/absolute'); Accepted = $false },
-        @{ Names = @('C:/absolute'); Accepted = $false },
-        @{ Names = @('src\alias'); Accepted = $false },
-        @{ Names = @('src//empty'); Accepted = $false },
-        @{ Names = @('src/./alias'); Accepted = $false },
-        @{ Names = @('src/name.'); Accepted = $false },
-        @{ Names = @('src/NUL.txt'); Accepted = $false },
-        @{ Names = @('src/main.cpp', 'SRC/MAIN.cpp'); Accepted = $false },
-        @{ Names = @('src', 'src/'); Accepted = $false }
-    )
-    $index = 0
-    foreach ($case in $cases) {
-        Test-ArchiveNames ([IO.Path]::Combine($temp, "$index.zip")) $case.Names $case.Accepted
-        ++$index
+    foreach ($extra in @("", "unexpected.txt", "Fallout4HDR-other/file.txt", "other/")) {
+        if ($extra) { New-TestArchive -ExtraEntries @($extra) }
+        else { New-TestArchive }
+
+        # Dependency archives still use the generic safe-path validator.
+        $generic = Open-Fo4HdrValidatedZipArchive $archivePath
+        $generic.Dispose()
+        if (-not $extra) {
+            $source = Open-Fo4HdrValidatedZipArchive $archivePath -RequiredRoot "Fallout4HDR"
+            $source.Dispose()
+        } else {
+            Assert-ArchiveRejection {
+                & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
+            } "Archive entry is outside the required Fallout4HDR/ root:*"
+        }
+        Remove-Item -LiteralPath $archivePath -Force
     }
-    Write-Host 'PASS archive path and Windows name admission'
+
+    foreach ($case in @(
+        @{ Entry = "/absolute.txt"; Error = "unsafe" },
+        @{ Entry = "C:/absolute.txt"; Error = "unsafe" },
+        @{ Entry = '\\server\share\absolute.txt'; Error = "unsafe" },
+        @{ Entry = "Fallout4HDR/../outside.txt"; Error = "traversal" },
+        @{ Entry = 'Fallout4HDR\..\outside.txt'; Error = "traversal" },
+        @{ Entry = "Fallout4HDR/./src/other.cpp"; Error = "traversal" },
+        @{ Entry = "Fallout4HDR/src/example.cpp"; Error = "duplicate" },
+        @{ Entry = "Fallout4HDR/SRC/EXAMPLE.CPP"; Error = "duplicate" },
+        @{ Entry = 'Fallout4HDR/src\example.cpp'; Error = "duplicate" }
+    )) {
+        New-TestArchive -ExtraEntries @($case.Entry)
+        $expected = "Archive contains a " + $case.Error + " path:*"
+        if ($case.Error -eq "unsafe") { $expected = "Archive contains an unsafe path:*" }
+        Assert-ArchiveRejection {
+            $archive = Open-Fo4HdrValidatedZipArchive $archivePath
+            $archive.Dispose()
+        } $expected
+        if ($case.Entry -ceq "Fallout4HDR/../outside.txt") {
+            Assert-ArchiveRejection {
+                & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
+            } $expected
+        }
+        Remove-Item -LiteralPath $archivePath -Force
+    }
+
+    New-TestArchive -ExtraEntries @("unexpected.txt")
+    $sidecarPath = $archivePath + ".sha256"
+    $validHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+    Set-Content -LiteralPath $sidecarPath -Value "$validHash  source.zip" -Encoding ascii
+    Assert-ArchiveRejection {
+        & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
+    } "Archive entry is outside the required Fallout4HDR/ root:*"
+    Set-Content -LiteralPath $sidecarPath -Value (('0' * 64) + "  source.zip") -Encoding ascii
+    Assert-ArchiveRejection {
+        & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
+    } "Corresponding-source archive differs from its SHA-256 sidecar."
 }
-finally { [IO.Directory]::Delete($temp, $true) }
+finally {
+    if (Test-Path -LiteralPath $archivePath) { Remove-Item -LiteralPath $archivePath -Force }
+    if (Test-Path -LiteralPath ($archivePath + ".sha256")) {
+        Remove-Item -LiteralPath ($archivePath + ".sha256") -Force
+    }
+}
+Write-Host "Source archive root, path safety, duplicate and checksum validation passed."

@@ -4,9 +4,6 @@
 #endif
 
 #include "ShaderTestSuite.hpp"
-#include "TestHarness.hpp"
-#include <cstring>
-#include <filesystem>
 #include "Fallout4HDR/config/HdrSettings.hpp"
 #include "Fallout4HDR/output/Hdr10Color.hpp"
 #include <d3d11.h>
@@ -38,6 +35,7 @@ namespace
 
 using Microsoft::WRL::ComPtr;
 using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
+using Clock = std::chrono::steady_clock;
 using Pixel = std::array<float, 4>;
 constexpr UINT kWidth = 256;
 
@@ -48,6 +46,11 @@ void Require(HRESULT result, const char *operation,
         throw std::runtime_error(std::string(location.file_name()) + ':' + std::to_string(location.line()) + ": " +
                                  operation + " failed: " + std::to_string(result));
     }
+}
+
+double Milliseconds(Clock::time_point start, Clock::time_point end)
+{
+    return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
 const char *Name(Algorithm algorithm)
@@ -122,6 +125,55 @@ ComPtr<ID3D11Texture2D> CreateBatchTexture(ID3D11Device &device, const BatchText
     return texture;
 }
 
+template <class T> T ReadQuery(ID3D11DeviceContext &context, ID3D11Query &query)
+{
+    T value{};
+    const auto deadline = Clock::now() + std::chrono::seconds(5);
+    for (;;) {
+        const auto result = context.GetData(&query, &value, static_cast<UINT>(sizeof(value)), 0);
+        if (result == S_OK)
+            return value;
+        Require(result, "Read operator GPU timer");
+        if (Clock::now() >= deadline) {
+            throw std::runtime_error("Operator GPU timer exceeded five seconds");
+        }
+        std::this_thread::yield();
+    }
+}
+
+// Measures the isolated compute wrapper and input/output traffic; excludes
+// the creative-grade pixel shader and gameplay rendering.
+double MeasureDispatchMilliseconds(ID3D11Device &device, ID3D11DeviceContext &context, UINT height)
+{
+    ComPtr<ID3D11Query> disjoint;
+    ComPtr<ID3D11Query> start;
+    ComPtr<ID3D11Query> end;
+    D3D11_QUERY_DESC query{D3D11_QUERY_TIMESTAMP_DISJOINT, 0};
+    Require(device.CreateQuery(&query, &disjoint), "Create disjoint query");
+    query.Query = D3D11_QUERY_TIMESTAMP;
+    Require(device.CreateQuery(&query, &start), "Create start timestamp");
+    Require(device.CreateQuery(&query, &end), "Create end timestamp");
+    for (UINT warmup = 0; warmup < 4; ++warmup) {
+        context.Dispatch(kWidth / 64, height, 1);
+    }
+    constexpr UINT repetitions = 128;
+    context.Begin(disjoint.Get());
+    context.End(start.Get());
+    for (UINT iteration = 0; iteration < repetitions; ++iteration) {
+        context.Dispatch(kWidth / 64, height, 1);
+    }
+    context.End(end.Get());
+    context.End(disjoint.Get());
+    context.Flush();
+    const auto frequency = ReadQuery<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT>(context, *disjoint.Get());
+    if (frequency.Disjoint || frequency.Frequency == 0) {
+        throw std::runtime_error("Operator GPU timing was disjoint; rerun required");
+    }
+    const auto first = ReadQuery<UINT64>(context, *start.Get());
+    const auto last = ReadQuery<UINT64>(context, *end.Get());
+    return static_cast<double>(last - first) * 1000.0 / static_cast<double>(frequency.Frequency) / repetitions;
+}
+
 struct OperatorCorpus
 {
     std::vector<fo4hdr::LinearRgb> corpus;
@@ -185,6 +237,13 @@ struct OperatorCorpus
         AppendHostile();
         PreparePixels();
     }
+};
+
+struct OperatorTimings
+{
+    Clock::time_point bakeStart, bakeEnd, uploadStart, uploadEnd;
+    double gpuMilliseconds;
+    bool benchmark;
 };
 
 struct OperatorSample
@@ -419,10 +478,11 @@ struct OperatorMeasurements
                   << " holdout_mean_nits=" << holdoutMeanError << '/' << meanBound << '\n';
     }
 
-    int Report() const
+    int Report(const OperatorTimings &timing) const
     {
         const auto &[corpus, broadEnd, holdoutBegin, holdoutEnd, darkBegin, darkEnd, neutralBegin, neutralEnd, height,
                      pixels] = dataset;
+        const auto &[bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark] = timing;
         const auto verdict = Evaluate();
         const auto &[maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound, passed] = verdict;
         const char *label = "Direct operator LUT ";
@@ -452,7 +512,11 @@ struct OperatorMeasurements
                   << worstNeutralDrawdownMaximumReference.green << ',' << worstNeutralDrawdownMaximumReference.blue
                   << ")->(" << worstNeutralDrawdownCurrentReference.red << ','
                   << worstNeutralDrawdownCurrentReference.green << ',' << worstNeutralDrawdownCurrentReference.blue
-                  << ')';
+                  << ')' << " bake_cpu_ms=" << Milliseconds(bakeStart, bakeEnd)
+                  << " upload_api_cpu_ms=" << Milliseconds(uploadStart, uploadEnd);
+        if (benchmark) {
+            std::cout << " isolated_gpu_batch_ms=" << gpuMilliseconds << " (not gameplay cost)";
+        }
         std::cout << '\n';
         if (!passed)
             ReportFailure(verdict);
@@ -472,6 +536,7 @@ struct OperatorCase
 {
     Algorithm algorithm;
     double peak;
+    bool benchmark;
     fo4hdr::ToneMapperParameters parameters{};
 };
 
@@ -522,18 +587,22 @@ struct OperatorBatch
 int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
 {
     const auto &[device, context, shader, sampler] = execution;
-    const auto &[algorithm, peak, parameters] = test;
+    const auto &[algorithm, peak, benchmark, parameters] = test;
     const OperatorCorpus dataset(peak);
     const auto &[corpus, broadEnd, holdoutBegin, holdoutEnd, darkBegin, darkEnd, neutralBegin, neutralEnd, height,
                  pixels] = dataset;
     const OperatorBatch batch(device, dataset);
     const auto &[input, output, staging, inputView, outputView] = batch;
 
+    const auto bakeStart = Clock::now();
     const auto lut = fo4hdr::BuildOperatorLut(algorithm, peak, parameters);
+    const auto bakeEnd = Clock::now();
     if (!lut.IsValid())
         throw std::runtime_error("Operator LUT generation failed");
+    const auto uploadStart = Clock::now();
     const UploadedOperatorLut uploaded(device, lut);
     const auto &[lutTexture, lutView] = uploaded;
+    const auto uploadEnd = Clock::now();
 
     const auto mode = ProductionMode(algorithm);
     const auto shaper = fo4hdr::OperatorLutShaperParameters(algorithm, peak);
@@ -564,6 +633,7 @@ int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
     context.CSSetConstantBuffers(0, 1, &bufferPointer);
     context.CSSetUnorderedAccessViews(0, 1, &outputPointer, nullptr);
     context.Dispatch(kWidth / 64, height, 1);
+    const auto gpuMilliseconds = benchmark ? MeasureDispatchMilliseconds(device, context, height) : 0.0;
     // This runner exclusively owns the device/context, not a borrowed game
     // context. Unbind before copying and before the other tests run.
     context.ClearState();
@@ -579,7 +649,7 @@ int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
     OperatorMeasurements measurements{dataset, algorithm, peak, parameters, aces, lut};
     measurements.Measure(mapped);
     context.Unmap(staging.Get(), 0);
-    return measurements.Report();
+    return measurements.Report({bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark});
 }
 
 fo4hdr::ToneMapperParameters AgxCornerParameters(unsigned corner)
@@ -604,7 +674,7 @@ fo4hdr::ToneMapperParameters Gt7CornerParameters(unsigned corner)
 
 } // namespace
 
-int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context)
+int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context, bool benchmark)
 {
     ComPtr<ID3D11ComputeShader> shader;
     const auto &bytecode = fo4hdr::generated::test::kOperatorLutCs;
@@ -622,7 +692,7 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
     int failures{};
     for (const auto algorithm : {Algorithm::aces2Lmt, Algorithm::agX, Algorithm::gt7}) {
         for (const auto peak : {400.0, 430.0, 1000.0, 2000.0}) {
-            failures += VerifyCase(execution, {algorithm, peak});
+            failures += VerifyCase(execution, {algorithm, peak, benchmark});
         }
     }
     // Keep the established approximation and sampling budgets for configured
@@ -631,289 +701,16 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
         for (const double strength : {0.0, 0.25, 0.5, 0.75}) {
             fo4hdr::ToneMapperParameters parameters{};
             parameters.acesLookStrength = strength;
-            failures += VerifyCase(execution, {Algorithm::aces2Lmt, peak, parameters});
+            failures += VerifyCase(execution, {Algorithm::aces2Lmt, peak, false, parameters});
         }
         for (unsigned corner = 0; corner < 16; ++corner) {
             const auto parameters = AgxCornerParameters(corner);
-            failures += VerifyCase(execution, {Algorithm::agX, peak, parameters});
+            failures += VerifyCase(execution, {Algorithm::agX, peak, false, parameters});
         }
         for (unsigned corner = 0; corner < 8; ++corner) {
             const auto parameters = Gt7CornerParameters(corner);
-            failures += VerifyCase(execution, {Algorithm::gt7, peak, parameters});
+            failures += VerifyCase(execution, {Algorithm::gt7, peak, false, parameters});
         }
     }
     return failures;
 }
-
-namespace fo4hdr::tests::gpu {
-namespace {
-constexpr float peakNits = 1000;
-constexpr UINT batchWidth = 4;
-constexpr UINT batchHeight = 4;
-using BatchPixels = std::array<Float4, batchWidth * batchHeight>;
-
-ComPtr<ID3D11Buffer> ImmutableConstants(ID3D11Device& device, const void* data, UINT size)
-{
-    D3D11_BUFFER_DESC description{};
-    description.ByteWidth = size;
-    description.Usage = D3D11_USAGE_IMMUTABLE;
-    description.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    const D3D11_SUBRESOURCE_DATA initial{data, 0, 0};
-    ComPtr<ID3D11Buffer> result;
-    CheckHresult(device.CreateBuffer(&description, &initial, &result), "Operator batch constants");
-    return result;
-}
-
-BatchPixels SamplingInputs()
-{
-    const auto samples = test::OperatorLutReferenceSamples();
-    static_assert(std::tuple_size_v<decltype(samples)> == batchWidth * batchHeight);
-    BatchPixels result{};
-    for (std::size_t index = 0; index < samples.size(); ++index)
-        result[index] = {static_cast<float>(samples[index].red), static_cast<float>(samples[index].green),
-            static_cast<float>(samples[index].blue), 1};
-    return result;
-}
-
-struct SamplingResources
-{
-    ComPtr<ID3D11Texture2D> input;
-    ComPtr<ID3D11ShaderResourceView> inputView;
-    ComPtr<ID3D11Texture2D> output;
-    ComPtr<ID3D11UnorderedAccessView> outputView;
-    ComPtr<ID3D11Texture2D> staging;
-    ComPtr<ID3D11ComputeShader> shader;
-    ComPtr<ID3D11SamplerState> sampler;
-
-    SamplingResources(ID3D11Device& device, const std::filesystem::path& shaderPath, const BatchPixels& pixels)
-    {
-        D3D11_TEXTURE2D_DESC description{};
-        description.Width = batchWidth;
-        description.Height = batchHeight;
-        description.MipLevels = 1;
-        description.ArraySize = 1;
-        description.SampleDesc.Count = 1;
-        description.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        description.Usage = D3D11_USAGE_IMMUTABLE;
-        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        const D3D11_SUBRESOURCE_DATA data{pixels.data(), batchWidth * sizeof(Float4), 0};
-        CheckHresult(device.CreateTexture2D(&description, &data, &input), "Operator batch input");
-        CheckHresult(device.CreateShaderResourceView(input.Get(), nullptr, &inputView), "Operator batch input SRV");
-        description.Usage = D3D11_USAGE_DEFAULT;
-        description.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-        CheckHresult(device.CreateTexture2D(&description, nullptr, &output), "Operator batch output");
-        CheckHresult(device.CreateUnorderedAccessView(output.Get(), nullptr, &outputView), "Operator batch output UAV");
-        description.Usage = D3D11_USAGE_STAGING;
-        description.BindFlags = 0;
-        description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        CheckHresult(device.CreateTexture2D(&description, nullptr, &staging), "Operator batch staging");
-        const auto bytecode = ReadShader(shaderPath);
-        CheckHresult(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
-            "Operator batch shader");
-        D3D11_SAMPLER_DESC filter{};
-        filter.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-        filter.AddressU = filter.AddressV = filter.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-        filter.MaxAnisotropy = 1;
-        filter.ComparisonFunc = D3D11_COMPARISON_NEVER;
-        CheckHresult(device.CreateSamplerState(&filter, &sampler), "Operator batch sampler");
-    }
-};
-
-struct SamplingTable
-{
-    ComPtr<ID3D11Texture3D> texture;
-    ComPtr<ID3D11ShaderResourceView> view;
-    ComPtr<ID3D11Buffer> constants;
-
-    SamplingTable(ID3D11Device& device, const OperatorLutData& table)
-    {
-        D3D11_TEXTURE3D_DESC description{};
-        description.Width = description.Height = description.Depth = table.textureEdge;
-        description.MipLevels = 1;
-        description.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        description.Usage = D3D11_USAGE_IMMUTABLE;
-        description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        const auto rowPitch = table.textureEdge * 8u;
-        const D3D11_SUBRESOURCE_DATA data{table.rgba16.data(), rowPitch, rowPitch * table.textureEdge};
-        CheckHresult(device.CreateTexture3D(&description, &data, &texture), "Operator coefficient texture");
-        CheckHresult(device.CreateShaderResourceView(texture.Get(), nullptr, &view), "Operator coefficient SRV");
-        const auto shaper = OperatorLutShaperParameters(table.algorithm, table.displayPeakNits);
-        const BatchConstants values{batchWidth, batchWidth * batchHeight,
-            ::ProductionMode(table.algorithm), shaper[0], shaper[1],
-            static_cast<float>(table.displayPeakNits), {shaper[2], shaper[3]}};
-        constants = ImmutableConstants(device, &values, sizeof(values));
-    }
-};
-
-void BindSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
-{
-    auto* constants = table.constants.Get();
-    auto* input = resources.inputView.Get();
-    auto* coefficients = table.view.Get();
-    auto* sampler = resources.sampler.Get();
-    auto* output = resources.outputView.Get();
-    context.CSSetShader(resources.shader.Get(), nullptr, 0);
-    context.CSSetConstantBuffers(0, 1, &constants);
-    context.CSSetShaderResources(0, 1, &input);
-    context.CSSetShaderResources(7, 1, &coefficients);
-    context.CSSetSamplers(7, 1, &sampler);
-    context.CSSetUnorderedAccessViews(0, 1, &output, nullptr);
-}
-
-void DispatchSampling(ID3D11DeviceContext& context, const SamplingResources& resources, const SamplingTable& table)
-{
-    BindSampling(context, resources, table);
-    context.Dispatch(1, batchHeight, 1);
-    // This context is owned by the batch; clear aliases before staging readback.
-    context.ClearState();
-}
-
-BatchPixels ReadSampling(ID3D11DeviceContext& context, const SamplingResources& resources)
-{
-    context.CopyResource(resources.staging.Get(), resources.output.Get());
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    CheckHresult(context.Map(resources.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Operator batch map");
-    constexpr auto rowBytes = batchWidth * sizeof(Float4);
-    if (!mapped.pData || mapped.RowPitch < rowBytes)
-    {
-        context.Unmap(resources.staging.Get(), 0);
-        throw std::runtime_error("Invalid operator batch pitch");
-    }
-    BatchPixels result{};
-    const auto* data = static_cast<const std::byte*>(mapped.pData);
-    for (UINT row = 0; row < batchHeight; ++row)
-        std::memcpy(result.data() + row * batchWidth, data + row * mapped.RowPitch, rowBytes);
-    context.Unmap(resources.staging.Get(), 0);
-    return result;
-}
-
-void CheckSamplingChannel(float actual, double expected)
-{
-    // CPU and GPU read the same packed coefficients. This provisional allowance
-    // covers differing sampling arithmetic; it is not a proved hardware bound.
-    const auto tolerance = 0.5 + std::abs(expected) / 1024.0;
-    FO4HDR_CHECK(std::isfinite(actual));
-    FO4HDR_CHECK(actual >= 0);
-    FO4HDR_CHECK(actual <= peakNits);
-    FO4HDR_CHECK(std::abs(static_cast<double>(actual) - expected) <= tolerance);
-}
-
-void CheckSampling(const OperatorLutData& table, const BatchPixels& input, const BatchPixels& output)
-{
-    for (std::size_t index = 0; index < input.size(); ++index)
-    {
-        const auto& source = input[index];
-        const auto expected = test::SampleOperatorLut(table, {source.red, source.green, source.blue});
-        const auto actual = output[index];
-        CheckSamplingChannel(actual.red, expected.red);
-        CheckSamplingChannel(actual.green, expected.green);
-        CheckSamplingChannel(actual.blue, expected.blue);
-        FO4HDR_CHECK(actual.alpha == 1);
-        if (std::max({source.red, source.green, source.blue}) == 0)
-        {
-            FO4HDR_CHECK(actual.red == 0);
-            FO4HDR_CHECK(actual.green == 0);
-            FO4HDR_CHECK(actual.blue == 0);
-        }
-    }
-}
-
-using SamplingClock = std::chrono::steady_clock;
-constexpr UINT samplingRepetitions = 128;
-
-ComPtr<ID3D11Query> SamplingQuery(ID3D11Device& device, D3D11_QUERY kind)
-{
-    const D3D11_QUERY_DESC description{kind, 0};
-    ComPtr<ID3D11Query> query;
-    CheckHresult(device.CreateQuery(&description, &query), "Operator timing query");
-    if (!query) throw std::runtime_error("Missing operator timing query");
-    return query;
-}
-
-template <class T>
-T ReadSamplingQuery(ID3D11DeviceContext& context, ID3D11Query& query, SamplingClock::time_point deadline)
-{
-    T value{};
-    for (;;)
-    {
-        const auto result = context.GetData(&query, &value, static_cast<UINT>(sizeof(value)),
-            D3D11_ASYNC_GETDATA_DONOTFLUSH);
-        if (result == S_OK) return value;
-        if (result != S_FALSE) throw std::runtime_error("Operator timing query failed");
-        if (SamplingClock::now() >= deadline)
-            throw std::runtime_error("Operator timing query exceeded five seconds");
-        std::this_thread::yield();
-    }
-}
-
-double ReadSamplingMilliseconds(ID3D11DeviceContext& context, ID3D11Query& disjoint,
-    ID3D11Query& start, ID3D11Query& end)
-{
-    const auto deadline = SamplingClock::now() + std::chrono::seconds(5);
-    const auto frequency = ReadSamplingQuery<D3D11_QUERY_DATA_TIMESTAMP_DISJOINT>(context, disjoint, deadline);
-    if (frequency.Disjoint || frequency.Frequency == 0)
-        throw std::runtime_error("Invalid operator timing frequency");
-    const auto first = ReadSamplingQuery<UINT64>(context, start, deadline);
-    const auto last = ReadSamplingQuery<UINT64>(context, end, deadline);
-    if (last < first) throw std::runtime_error("Reversed operator timestamps");
-    const double milliseconds = static_cast<double>(last - first) * 1000.0 /
-        static_cast<double>(frequency.Frequency) / samplingRepetitions;
-    if (!std::isfinite(milliseconds)) throw std::runtime_error("Nonfinite operator timing");
-    return milliseconds;
-}
-
-double MeasureSamplingDispatches(ID3D11Device& device, ID3D11DeviceContext& context)
-{
-    const auto disjoint = SamplingQuery(device, D3D11_QUERY_TIMESTAMP_DISJOINT);
-    const auto start = SamplingQuery(device, D3D11_QUERY_TIMESTAMP);
-    const auto end = SamplingQuery(device, D3D11_QUERY_TIMESTAMP);
-    for (UINT warmup = 0; warmup < 4; ++warmup) context.Dispatch(1, batchHeight, 1);
-    context.Begin(disjoint.Get());
-    context.End(start.Get());
-    for (UINT iteration = 0; iteration < samplingRepetitions; ++iteration) context.Dispatch(1, batchHeight, 1);
-    context.End(end.Get());
-    context.End(disjoint.Get());
-    context.Flush();
-    return ReadSamplingMilliseconds(context, *disjoint.Get(), *start.Get(), *end.Get());
-}
-
-double SamplingMilliseconds(SamplingClock::time_point first, SamplingClock::time_point last)
-{
-    return std::chrono::duration<double, std::milli>(last - first).count();
-}
-
-void BenchmarkSamplingCase(const Device& device, const SamplingResources& resources,
-    const BatchPixels& inputs, ProductionToneMapperAlgorithm algorithm)
-{
-    const auto bakeStart = SamplingClock::now();
-    const auto table = BuildOperatorLut(algorithm, peakNits);
-    const auto bakeEnd = SamplingClock::now();
-    FO4HDR_CHECK(table.IsValid());
-    if (!table.IsValid()) return;
-    const auto uploadStart = SamplingClock::now();
-    const SamplingTable uploaded(*device.device.Get(), table);
-    const auto uploadEnd = SamplingClock::now();
-    BindSampling(*device.context.Get(), resources, uploaded);
-    const auto gpuMilliseconds = MeasureSamplingDispatches(*device.device.Get(), *device.context.Get());
-    device.context->ClearState();
-    CheckSampling(table, inputs, ReadSampling(*device.context.Get(), resources));
-    // This measures the isolated wrapper and input/output traffic, not gameplay.
-    std::cout << "Isolated WARP operator=" << ToString(algorithm) << " peak=" << peakNits
-              << " colors=16 batch=4x4 warmup=4 repetitions=128 bake_cpu_ms="
-              << SamplingMilliseconds(bakeStart, bakeEnd) << " upload_api_cpu_ms="
-              << SamplingMilliseconds(uploadStart, uploadEnd) << " isolated_warp_batch_ms_per_dispatch="
-              << gpuMilliseconds << '\n';
-}
-
-}  // namespace
-
-void BenchmarkOperatorLut(const std::filesystem::path& bytecodePath)
-{
-    const auto device = CreateDevice();
-    const auto inputs = SamplingInputs();
-    const SamplingResources resources(*device.device.Get(), bytecodePath, inputs);
-    for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2Lmt, ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7})
-        BenchmarkSamplingCase(device, resources, inputs, algorithm);
-}
-
-}  // namespace fo4hdr::tests::gpu

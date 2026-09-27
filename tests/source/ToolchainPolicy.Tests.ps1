@@ -37,7 +37,7 @@ function Assert-ConfiguredMsvcResult {
 try {
     $env:FO4HDR_TOOLCHAIN_POLICY = ''
     if ((Get-Fo4HdrToolchainPolicy) -cne 'pinned') { throw 'The default policy must be pinned.' }
-    foreach ($policy in @('pinned')) {
+    foreach ($policy in @('pinned', 'hosted-ci')) {
         $env:FO4HDR_TOOLCHAIN_POLICY = $policy
         foreach ($case in @(
             @{ Key = 'visualStudioInstallation'; Expected = $pinned.visualStudio.installationVersion },
@@ -50,7 +50,7 @@ try {
             if ($version.Revision -ge 0) { $newer += '.' + $version.Revision }
             $older = '{0}.{1}.{2}' -f $version.Major, $version.Minor, ($version.Build - 1)
             Assert-ToolchainResult $case.Key $case.Expected $case.Expected $true
-            Assert-ToolchainResult $case.Key $case.Expected $newer $false
+            Assert-ToolchainResult $case.Key $case.Expected $newer ($policy -eq 'hosted-ci')
             Assert-ToolchainResult $case.Key $case.Expected $older $false
             Assert-ToolchainResult $case.Key $case.Expected '99.0.0' $false
             Assert-ToolchainResult $case.Key $case.Expected '0.0.0' $false
@@ -60,7 +60,7 @@ try {
         Assert-ToolchainResult 'powerShell' $pinned.powerShell '7.7.0' $false
         Assert-ToolchainResult 'msvcCompiler' $pinned.msvc.compilerVersion '19.52.0' $false
         Assert-ToolchainResult 'msvcTools' $pinned.msvc.toolsVersion '14.52.0' $false
-        Assert-ToolchainResult 'git' $pinned.git '2.55.0.windows.99' $false
+        Assert-ToolchainResult 'git' $pinned.git '2.55.0.windows.99' ($policy -eq 'hosted-ci')
         Assert-ToolchainResult 'git' $pinned.git 'unknown' $false
         foreach ($case in @(
             @{ Key = 'windowsSdk'; Expected = $pinned.windowsSdk.version },
@@ -73,12 +73,12 @@ try {
         Assert-ToolchainResult 'powerShell' 'FILL_LOCAL' $pinned.powerShell $false
         $toolsVersion = [version]$pinned.msvc.toolsVersion
         $env:VCToolsVersion = '{0}.{1}.{2}' -f $toolsVersion.Major, $toolsVersion.Minor, ($toolsVersion.Build + 1)
-        $expectedToolset = $pinned.msvc.toolsVersion
+        $expectedToolset = if ($policy -eq 'pinned') { $pinned.msvc.toolsVersion } else { $env:VCToolsVersion }
         if ((Get-Fo4HdrMsvcToolset -Lock $lock) -cne $expectedToolset) {
             throw "XMake toolset selection did not honor $policy."
         }
         Assert-ConfiguredMsvcResult $pinned.msvc.toolsVersion $pinned.windowsSdk.version $true
-        Assert-ConfiguredMsvcResult $env:VCToolsVersion $pinned.windowsSdk.version $false
+        Assert-ConfiguredMsvcResult $env:VCToolsVersion $pinned.windowsSdk.version ($policy -eq 'hosted-ci')
         Assert-ConfiguredMsvcResult '14.52.0' $pinned.windowsSdk.version $false
         Assert-ConfiguredMsvcResult $pinned.msvc.toolsVersion '10.0.99999.0' $false
         Assert-ConfiguredMsvcResult $pinned.msvc.toolsVersion $pinned.windowsSdk.version $false 23
@@ -102,4 +102,4 @@ finally {
     $env:FO4HDR_TOOLCHAIN_POLICY = $savedPolicy
     $env:VCToolsVersion = $savedToolset
 }
-Write-Host 'Pinned toolchain acceptance, version rejection, and x64 checks passed.'
+Write-Host 'Pinned and hosted-CI toolchain acceptance, family rejection, and x64 checks passed.'

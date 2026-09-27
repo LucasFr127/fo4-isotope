@@ -309,6 +309,151 @@ void VerifyDirectPresentation(Device& device)
     device.context->ClearState();
 }
 
+struct PresentationBenchmarkSubmission
+{
+    Device& device;
+    Texture& output;
+    Texture& scratch;
+    Texture& overlay;
+    ID3D11ComputeShader* shader;
+    ID3D11Buffer* constants;
+    ID3D11Buffer* hiddenConstants;
+    std::array<ID3D11ShaderResourceView*,4> inputs;
+    bool compareHiddenOverlay;
+
+    void SubmitOverlay(UINT arm) const
+    {
+        auto& context = *device.context.Get();
+        constexpr float transparent[4]{};
+        if (arm == 1)
+            context.ClearRenderTargetView(overlay.rtv.Get(), transparent);
+        DispatchPresentation(device, {shader,
+            arm == 0 ? hiddenConstants : constants, inputs, output.uav.Get(), 2560, 1440});
+    }
+
+    void Submit(UINT arm) const
+    {
+        if (compareHiddenOverlay) { SubmitOverlay(arm); return; }
+        DispatchPresentation(device, {shader, constants, inputs,
+            arm == 0 ? output.uav.Get() : scratch.uav.Get(), 2560, 1440});
+        if (arm != 0)
+            device.context->CopyResource(output.texture.Get(), scratch.texture.Get());
+    }
+};
+
+struct PresentationBenchmarkTiming
+{
+    static constexpr UINT samples = 64;
+    ID3D11DeviceContext& context;
+    ComPtr<ID3D11Query> disjoint;
+    std::array<ComPtr<ID3D11Query>, samples * 4> queries;
+    std::array<std::array<double,samples>,2> cpu{}, gpu{};
+
+    explicit PresentationBenchmarkTiming(Device& device) : context(*device.context.Get())
+    {
+        const D3D11_QUERY_DESC disjointDescription{D3D11_QUERY_TIMESTAMP_DISJOINT,0};
+        const D3D11_QUERY_DESC timestampDescription{D3D11_QUERY_TIMESTAMP,0};
+        CheckHresult(device.device->CreateQuery(&disjointDescription,&disjoint), "Create presentation disjoint query");
+        for (auto& query : queries)
+            CheckHresult(device.device->CreateQuery(&timestampDescription,&query), "Create presentation timestamp");
+    }
+
+    void Read(ID3D11Query* query, void* dataPointer, UINT bytes,
+        std::chrono::steady_clock::time_point deadline) const
+    {
+        HRESULT status{};
+        while ((status = context.GetData(query,dataPointer,bytes,D3D11_ASYNC_GETDATA_DONOTFLUSH)) == S_FALSE) {
+            if (std::chrono::steady_clock::now() >= deadline) throw std::runtime_error("Presentation query timeout");
+            Sleep(1);
+        }
+        CheckHresult(status,"Read presentation query");
+    }
+
+    void Collect()
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT timing{};
+        Read(disjoint.Get(),&timing,sizeof(timing),deadline);
+        if (timing.Disjoint || timing.Frequency == 0) throw std::runtime_error("Presentation timestamps disjoint");
+        for (UINT sample = 0; sample < samples; ++sample)
+            for (UINT arm = 0; arm < 2; ++arm) {
+                UINT64 start{}, end{};
+                Read(queries[sample*4+arm*2].Get(),&start,sizeof(start),deadline);
+                Read(queries[sample*4+arm*2+1].Get(),&end,sizeof(end),deadline);
+                gpu[arm][sample] = double(end-start)*1000.0/double(timing.Frequency);
+            }
+    }
+
+    void Measure(const PresentationBenchmarkSubmission& submission)
+    {
+        context.Begin(disjoint.Get());
+        for (UINT sample = 0; sample < samples; ++sample) {
+            for (UINT order = 0; order < 2; ++order) {
+                const UINT arm = (sample + order) % 2;
+                context.End(queries[sample*4+arm*2].Get());
+                const auto start = std::chrono::steady_clock::now();
+                submission.Submit(arm);
+                cpu[arm][sample] = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+                context.End(queries[sample*4+arm*2+1].Get());
+            }
+        }
+        context.End(disjoint.Get());
+        context.Flush();
+        Collect();
+    }
+
+    const char* Label(bool compareHiddenOverlay, UINT arm) const
+    {
+        if (compareHiddenOverlay)
+            return arm == 0 ? "hidden overlay skipped" : "transparent overlay cleared+sampled";
+        return arm == 0 ? "direct" : "scratch+copy";
+    }
+
+    void Report(bool compareHiddenOverlay)
+    {
+        for (UINT arm = 0; arm < 2; ++arm) {
+            std::sort(gpu[arm].begin(),gpu[arm].end());
+            std::sort(cpu[arm].begin(),cpu[arm].end());
+            std::cout << "Presentation mechanism 2560x1440 " << Label(compareHiddenOverlay, arm)
+                << ": GPU p50/p95 ms=" << (gpu[arm][31]+gpu[arm][32])*0.5 << '/' << gpu[arm][60]
+                << ", CPU submission p50/p95 ms=" << (cpu[arm][31]+cpu[arm][32])*0.5 << '/' << cpu[arm][60] << '\n';
+        }
+        std::cout << "Identical fused shader; real R10 flip-chain destination; 16 warmups/64 alternating samples. Excludes Present, native frame work and display latency; no game FPS claim.\n";
+    }
+};
+
+void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay)
+{
+    constexpr UINT width = 2560, height = 1440;
+    PresentationWindow window;
+    auto chain = CreatePresentationChain(device, window.handle, width, height);
+    auto output = GetPresentationBuffer(device, *chain.Get());
+    auto scratch = CreateSizedTexture(*device.device.Get(), { width, height,
+        DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_UNORDERED_ACCESS});
+    std::vector<std::array<std::uint16_t, 4>> pixels(width * height,
+        {FloatToBinary16(0.4F), FloatToBinary16(0.2F), FloatToBinary16(0.1F), FloatToBinary16(0.5F)});
+    const D3D11_SUBRESOURCE_DATA data{pixels.data(), width * 8, 0};
+    auto scene = CreateSizedTexture(*device.device.Get(), { width, height,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE, &data});
+    const auto shader = CreateShader(*device.device.Get(), fo4hdr::generated::kPresentPixelsCs);
+    const auto constants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1});
+    const auto hiddenConstants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1,0});
+    auto overlay = CreateSizedTexture(*device.device.Get(), { width, height,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET});
+    const std::array<ID3D11ShaderResourceView*,4> inputs{scene.srv.Get(),scene.srv.Get(),scene.srv.Get(),
+        compareHiddenOverlay ? overlay.srv.Get() : scene.srv.Get()};
+    auto& context = *device.context.Get();
+    constexpr float transparent[4]{};
+    context.ClearRenderTargetView(overlay.rtv.Get(), transparent);
+    const PresentationBenchmarkSubmission submission{device, output, scratch, overlay,
+        shader.Get(), constants.Get(), hiddenConstants.Get(), inputs, compareHiddenOverlay};
+    PresentationBenchmarkTiming timing(device);
+    for (UINT i = 0; i < 16; ++i) { submission.Submit(0); submission.Submit(1); }
+    timing.Measure(submission);
+    timing.Report(compareHiddenOverlay);
+    context.ClearState();
+}
+
 }  // namespace fo4hdr::tests::gpu
 
 namespace fo4hdr::tests::gpu {

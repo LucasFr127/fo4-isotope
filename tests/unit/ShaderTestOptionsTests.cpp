@@ -1,66 +1,177 @@
 // SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
+#include "UnitTestSuite.hpp"
 #include "../shader/ShaderTestOptions.hpp"
 #include "TestHarness.hpp"
-#include "UnitTestSuite.hpp"
 
 #include <array>
-#include <span>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace fo4hdr::tests {
 namespace {
 
-void CheckAcceptedForms()
+class DiagnosticCapture
 {
-    const wchar_t* defaults[]{L"fo4hdr-shader-tests"};
-    const auto corpus = gpu::ParseShaderTestOptions(1, defaults);
-    FO4HDR_CHECK(corpus.mode == gpu::ShaderTestMode::defaultCorpus);
-    FO4HDR_CHECK(corpus.bytecodePath.empty());
+public:
+    DiagnosticCapture() : previous_(std::cerr.rdbuf(text_.rdbuf())) {}
+    ~DiagnosticCapture() { std::cerr.rdbuf(previous_); }
+    std::string Text() const { return text_.str(); }
 
-    const wchar_t* benchmark[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", L"C:\\shader fixtures\\OperatorLut.dxbc"};
-    const auto selected = gpu::ParseShaderTestOptions(3, benchmark);
-    FO4HDR_CHECK(selected.mode == gpu::ShaderTestMode::operatorLutBenchmark);
-    FO4HDR_CHECK(selected.bytecodePath == benchmark[2]);
-    FO4HDR_CHECK(selected.bytecodePath.data() == benchmark[2]);
+private:
+    std::ostringstream text_;
+    std::streambuf* previous_;
+};
+
+bool LegacyDisplayConflict(const gpu::ShaderTestOptions& options)
+{
+    const bool display = options.presentationBenchmark || options.overlayBenchmark;
+    const bool other = options.operatorLutBenchmark || options.armorEncodedMode;
+    return display && other;
 }
 
-void CheckRejected(std::span<const wchar_t* const> arguments)
+bool LegacyModeConflict(const gpu::ShaderTestOptions& options)
 {
-    const auto result = gpu::ParseShaderTestOptions(
-        static_cast<int>(arguments.size()), arguments.data());
-    FO4HDR_CHECK(result.mode == gpu::ShaderTestMode::invalid);
-    FO4HDR_CHECK(result.bytecodePath.empty());
+    if (options.armorEncodedOnly && options.armorEncodedBenchmark) return true;
+    if (options.operatorLutBenchmark && options.armorEncodedMode) return true;
+    if (options.presentationBenchmark && options.overlayBenchmark) return true;
+    return LegacyDisplayConflict(options);
 }
 
-void CheckRejectedForms()
+bool LegacySelectionConflict(const gpu::ShaderTestOptions& options, bool benchmark)
 {
-    const wchar_t* transfer[]{L"fo4hdr-shader-tests", L"TransferEvaluation.dxbc"};
-    const wchar_t* reference[]{L"fo4hdr-shader-tests", L"--gt7-reference", L"Gt7Evaluation.dxbc"};
-    const wchar_t* excess[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", L"OperatorLut.dxbc", L"extra"};
-    const wchar_t* missingPath[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark"};
-    const wchar_t* unknown[]{L"fo4hdr-shader-tests", L"--unsupported-option", L"OperatorLut.dxbc"};
-    const wchar_t* duplicate[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", L"--operator-lut-benchmark"};
-    const wchar_t* emptyPath[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", L""};
-    const wchar_t* emptyFlag[]{L"fo4hdr-shader-tests", L"", L"OperatorLut.dxbc"};
-    const wchar_t* emptyProgram[]{L""};
-    const wchar_t* nullPath[]{L"fo4hdr-shader-tests", L"--operator-lut-benchmark", nullptr};
-    const wchar_t* nullFlag[]{L"fo4hdr-shader-tests", nullptr, L"OperatorLut.dxbc"};
-    const wchar_t* nullProgram[]{nullptr};
-    for (const auto arguments : std::array<std::span<const wchar_t* const>, 12>{
-             transfer, reference, excess, missingPath, unknown, duplicate,
-             emptyPath, emptyFlag, emptyProgram, nullPath, nullFlag, nullProgram})
-        CheckRejected(arguments);
-    FO4HDR_CHECK(gpu::ParseShaderTestOptions(1, nullptr).mode == gpu::ShaderTestMode::invalid);
-    FO4HDR_CHECK(gpu::ParseShaderTestOptions(0, nullptr).mode == gpu::ShaderTestMode::invalid);
-    FO4HDR_CHECK(gpu::ParseShaderTestOptions(-1, nullptr).mode == gpu::ShaderTestMode::invalid);
+    return (options.list || options.filtering) && (benchmark || options.armorEncodedMode);
+}
+
+std::string_view LegacySelectionError(const gpu::ShaderTestOptions& options, bool benchmark)
+{
+    if (options.list && options.filtering)
+        return "--list and --filter are mutually exclusive.\n";
+    if (LegacySelectionConflict(options, benchmark))
+        return "Selection and benchmark/armor-only modes are mutually exclusive.\n";
+    return {};
+}
+
+bool LegacyBenchmark(const gpu::ShaderTestOptions& options)
+{
+    return options.presentationBenchmark || options.overlayBenchmark ||
+        options.operatorLutBenchmark || options.armorEncodedBenchmark;
+}
+
+std::string_view LegacyValidationError(const gpu::ShaderTestOptions& options)
+{
+    const bool benchmark = LegacyBenchmark(options);
+    if (LegacyModeConflict(options))
+        return "Benchmark and armor-only modes are mutually exclusive.\n";
+    if (benchmark && !options.hardware)
+        return "Benchmarks require --hardware.\n";
+    if (options.debugLayer && benchmark)
+        return "Benchmarks require the debug layer disabled.\n";
+    return LegacySelectionError(options, benchmark);
+}
+
+bool Parse(gpu::ShaderTestOptions& options, std::vector<std::string>& arguments)
+{
+    std::vector<char*> pointers;
+    for (auto& argument : arguments) pointers.push_back(argument.data());
+    return options.Parse(static_cast<int>(pointers.size()), pointers.data());
+}
+
+void CheckFlags(unsigned bits)
+{
+    gpu::ShaderTestOptions options;
+    const std::array destinations{
+        &options.hardware, &options.debugLayer, &options.list, &options.filtering,
+        &options.armorEncodedOnly, &options.armorEncodedBenchmark,
+        &options.operatorLutBenchmark, &options.presentationBenchmark,
+        &options.overlayBenchmark};
+    for (unsigned index = 0; index < destinations.size(); ++index)
+        *destinations[index] = (bits & (1U << index)) != 0;
+    options.armorEncodedMode = options.armorEncodedOnly || options.armorEncodedBenchmark;
+    const auto expected = LegacyValidationError(options);
+    std::string diagnostic;
+    bool accepted{};
+    {
+        DiagnosticCapture capture;
+        accepted = options.ValidateModes();
+        diagnostic = capture.Text();
+    }
+    FO4HDR_CHECK(accepted == expected.empty());
+    FO4HDR_CHECK(diagnostic == expected);
+}
+
+void CheckRecognizedFlags()
+{
+    const std::array flags{
+        "--hardware", "--debug-layer", "--list", "--armor-encoded-only",
+        "--armor-encoded-benchmark", "--operator-lut-benchmark",
+        "--presentation-benchmark", "--overlay-benchmark"};
+    for (unsigned flagIndex = 0; flagIndex < flags.size(); ++flagIndex)
+    {
+        gpu::ShaderTestOptions options;
+        std::vector<std::string> arguments{"shader-tests", flags[flagIndex]};
+        FO4HDR_CHECK(Parse(options, arguments));
+        const std::array selected{options.hardware, options.debugLayer, options.list,
+            options.armorEncodedOnly, options.armorEncodedBenchmark,
+            options.operatorLutBenchmark, options.presentationBenchmark,
+            options.overlayBenchmark};
+        for (unsigned index = 0; index < selected.size(); ++index)
+            FO4HDR_CHECK(selected[index] == (index == flagIndex));
+        FO4HDR_CHECK(!options.filtering);
+        FO4HDR_CHECK(options.filter.empty());
+        FO4HDR_CHECK(options.armorEncodedMode ==
+            (options.armorEncodedOnly || options.armorEncodedBenchmark));
+    }
+    gpu::ShaderTestOptions options;
+    std::vector<std::string> arguments{"shader-tests", "--hardware", "--debug-layer"};
+    FO4HDR_CHECK(Parse(options, arguments));
+    FO4HDR_CHECK(options.hardware && options.debugLayer);
+}
+
+void CheckFilterParsing()
+{
+    gpu::ShaderTestOptions options;
+    std::array arguments{"shader-tests", "--filter", "operator-lut", "--filter", ""};
+    std::array<char*, arguments.size()> pointers{};
+    for (std::size_t index = 0; index < pointers.size(); ++index)
+        pointers[index] = const_cast<char*>(arguments[index]);
+    FO4HDR_CHECK(options.Parse(static_cast<int>(pointers.size()), pointers.data()));
+    FO4HDR_CHECK(options.filtering);
+    FO4HDR_CHECK(options.filter.empty());
+    FO4HDR_CHECK(options.ValidateModes());
+}
+
+void CheckRejectedArguments()
+{
+    const std::array invalid{
+        std::vector<std::string>{"shader-tests", "--filter"},
+        std::vector<std::string>{"shader-tests", "--unknown"}};
+    for (auto arguments : invalid)
+    {
+        gpu::ShaderTestOptions options;
+        std::string diagnostic;
+        bool accepted{};
+        {
+            DiagnosticCapture capture;
+            accepted = Parse(options, arguments);
+            diagnostic = capture.Text();
+        }
+        FO4HDR_CHECK(!accepted);
+        FO4HDR_CHECK(diagnostic.starts_with("Usage: fo4hdr-shader-tests "));
+    }
 }
 
 }  // namespace
 
 void RunShaderTestOptionsTests()
 {
-    CheckAcceptedForms();
-    CheckRejectedForms();
+    for (unsigned bits = 0; bits < 512; ++bits) CheckFlags(bits);
+    CheckRecognizedFlags();
+    CheckFilterParsing();
+    CheckRejectedArguments();
 }
 
 }  // namespace fo4hdr::tests

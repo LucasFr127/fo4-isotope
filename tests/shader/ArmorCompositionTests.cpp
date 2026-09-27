@@ -269,6 +269,82 @@ struct ArmorEncodedFixture
         FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
             {shader.Get(),target.uav.Get(),constants,width,height}));
     }
+    void ReadTimingQuery(ID3D11Query* query, void* value, UINT size,
+        std::chrono::steady_clock::time_point deadline)
+    {
+        HRESULT result{};
+        while ((result=context.GetData(query,value,size,D3D11_ASYNC_GETDATA_DONOTFLUSH))==S_FALSE) {
+            if (std::chrono::steady_clock::now()>=deadline) throw std::runtime_error("Armor timing timeout");
+            Sleep(1);
+        }
+        CheckHresult(result,"Read armor timing query");
+    }
+
+    void ReportTimings(ID3D11Query* disjoint,
+        const std::array<ComPtr<ID3D11Query>,128>& stamps, std::array<double,32> cpu)
+    {
+        constexpr UINT samples=32;
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT frequency{};
+        ReadTimingQuery(disjoint,&frequency,sizeof(frequency),deadline);
+        if (frequency.Disjoint || frequency.Frequency==0) throw std::runtime_error("Armor timing disjoint");
+        std::array<double,samples> baseline{},gpuPair{};
+        for (UINT i=0;i<samples;++i) {
+            std::array<UINT64,4> ticks{};
+            for (UINT j=0;j<4;++j) ReadTimingQuery(stamps[i*4+j].Get(),&ticks[j],sizeof(ticks[j]),deadline);
+            baseline[i]=double(ticks[1]-ticks[0])*1000.0/double(frequency.Frequency);
+            gpuPair[i]=double(ticks[3]-ticks[2])*1000.0/double(frequency.Frequency);
+        }
+        std::sort(baseline.begin(),baseline.end());
+        std::sort(gpuPair.begin(),gpuPair.end());
+        std::sort(cpu.begin(),cpu.end());
+        const auto median=[](const auto& values) { return (values[15]+values[16])*.5; };
+        std::cout << "Synthetic armor 2560x1440 encode/decode pair (peak/UI white=430/203), 8 warmups/32 alternating samples: "
+            << "GPU baseline p50/p95 ms=" << median(baseline) << '/' << baseline[30]
+            << ", GPU pair p50/p95 ms=" << median(gpuPair) << '/' << gpuPair[30]
+            << ", CPU helper submission p50/p95 ms=" << median(cpu) << '/' << cpu[30]
+            << ". Two full-frame dispatches per scope; excludes native draw and hook routing; no native FPS claim.\n";
+    }
+
+    void Benchmark()
+    {
+        constexpr UINT fullWidth=2560, fullHeight=1440, samples=32;
+        auto full=CreateSizedTexture(gpu, {fullWidth,fullHeight,DXGI_FORMAT_R16G16B16A16_FLOAT,
+            D3D11_BIND_UNORDERED_ACCESS|D3D11_BIND_RENDER_TARGET});
+        const float initial[4]{4,1,.25F,1};
+        context.ClearRenderTargetView(full.rtv.Get(),initial);
+        auto* fullRtv=full.rtv.Get();
+        context.OMSetRenderTargets(1,&fullRtv,nullptr);
+        const auto pair=[&] {
+            FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),{shader.Get(),full.uav.Get(),encodeBuffer.Get(),fullWidth,fullHeight}));
+            FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),{shader.Get(),full.uav.Get(),productionDecodeBuffer.Get(),fullWidth,fullHeight}));
+        };
+        for (UINT i=0;i<8;++i) pair();
+        ComPtr<ID3D11Query> disjoint;
+        const D3D11_QUERY_DESC disjointDesc{D3D11_QUERY_TIMESTAMP_DISJOINT,0};
+        CheckHresult(gpu.CreateQuery(&disjointDesc,&disjoint),"Create armor timing disjoint");
+        std::array<ComPtr<ID3D11Query>,samples*4> stamps;
+        const D3D11_QUERY_DESC stampDesc{D3D11_QUERY_TIMESTAMP,0};
+        for (auto& stamp:stamps) CheckHresult(gpu.CreateQuery(&stampDesc,&stamp),"Create armor timestamp");
+        std::array<double,samples> cpu{};
+        context.Begin(disjoint.Get());
+        for (UINT i=0;i<samples;++i) {
+            const auto baseline=[&] { context.End(stamps[i*4].Get()); context.End(stamps[i*4+1].Get()); };
+            const auto timed=[&] {
+                context.End(stamps[i*4+2].Get());
+                const auto start=std::chrono::steady_clock::now();
+                pair();
+                cpu[i]=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+                context.End(stamps[i*4+3].Get());
+            };
+            if ((i&1)==0) { baseline(); timed(); } else { timed(); baseline(); }
+        }
+        context.End(disjoint.Get());
+        context.Flush();
+        ReportTimings(disjoint.Get(), stamps, cpu);
+        context.ClearState();
+    }
+
     void VerifyExtremes()
     {
         // Emergency finite-storage bound is separate from ordinary HDR behavior.
@@ -558,7 +634,7 @@ struct ArmorEncodedFixture
         context.OMSetRenderTargets(0,nullptr,nullptr);
     }
 
-    void Run()
+    void Run(bool benchmark)
     {
         VerifyRoundtrip();
         PrepareDraw();
@@ -573,7 +649,7 @@ struct ArmorEncodedFixture
     }
 };
 
-bool VerifyArmorEncodedComposition(Device& device)
+bool VerifyArmorEncodedComposition(Device& device, bool benchmark)
 {
     auto& gpu = *device.device.Get();
     D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{DXGI_FORMAT_R16G16B16A16_FLOAT, 0};
@@ -584,7 +660,7 @@ bool VerifyArmorEncodedComposition(Device& device)
         return false;
     }
     ArmorEncodedFixture fixture(device);
-    fixture.Run();
+    fixture.Run(benchmark);
     return true;
 }
 

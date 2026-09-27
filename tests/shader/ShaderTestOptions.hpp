@@ -1,26 +1,34 @@
 // SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 
-#include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace fo4hdr::tests::gpu {
 
-enum class ShaderTestMode : std::uint8_t
-{
-    invalid,
-    defaultCorpus,
-    operatorLutBenchmark
-};
-
 struct ShaderTestOptions
 {
-    ShaderTestMode mode{ShaderTestMode::invalid};
-    // Borrows the original wmain argument storage until the selected run returns.
-    std::wstring_view bytecodePath;
-};
+    bool hardware{};
+    bool debugLayer{};
+    bool list{};
+    bool filtering{};
+    bool armorEncodedOnly{};
+    bool armorEncodedBenchmark{};
+    bool operatorLutBenchmark{};
+    bool presentationBenchmark{};
+    bool overlayBenchmark{};
+    std::string_view filter;
+    bool armorEncodedMode{};
 
-[[nodiscard]] ShaderTestOptions ParseShaderTestOptions(
-    int argumentCount, const wchar_t* const* arguments) noexcept;
+    bool Parse(int argumentCount, char** arguments);
+    bool ValidateModes() const;
+
+private:
+    bool SetFlag(std::string_view argument);
+    bool ParseFilter(std::string_view argument, std::span<char*> arguments, int& index);
+    bool Benchmark() const;
+    bool ConflictingModes() const;
+    bool SelectionConflicts() const;
+};
 
 }  // namespace fo4hdr::tests::gpu

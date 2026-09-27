@@ -8,7 +8,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -59,40 +58,60 @@ void CheckDebugMessages(Device& device)
     queue->ClearStoredMessages();
 }
 
-Device CreateDevice()
+[[nodiscard]] Device CreateDevice(bool hardware, bool debug)
 {
     Device result;
-    constexpr D3D_FEATURE_LEVEL requested = D3D_FEATURE_LEVEL_11_0;
     D3D_FEATURE_LEVEL selected{};
-    CheckHresult(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
-        &requested, 1, D3D11_SDK_VERSION, result.device.GetAddressOf(), &selected,
-        result.context.GetAddressOf()), "D3D11CreateDevice(WARP)");
-    if (selected != requested)
-    {
-        throw std::runtime_error("WARP did not provide feature level 11_0");
+    constexpr std::array requested{
+        D3D_FEATURE_LEVEL_11_1,
+        D3D_FEATURE_LEVEL_11_0,
+    };
+    const auto driver = hardware ? D3D_DRIVER_TYPE_HARDWARE : D3D_DRIVER_TYPE_WARP;
+    const UINT flags = debug ? D3D11_CREATE_DEVICE_DEBUG : 0;
+    auto status = D3D11CreateDevice(
+        nullptr,
+        driver,
+        nullptr,
+        flags,
+        requested.data(),
+        static_cast<UINT>(requested.size()),
+        D3D11_SDK_VERSION,
+        &result.device,
+        &selected,
+        &result.context);
+    if (status == E_INVALIDARG) {
+        constexpr D3D_FEATURE_LEVEL fallback = D3D_FEATURE_LEVEL_11_0;
+        status = D3D11CreateDevice(
+            nullptr,
+            driver,
+            nullptr,
+            flags,
+            &fallback,
+            1,
+            D3D11_SDK_VERSION,
+            &result.device,
+            &selected,
+            &result.context);
+    }
+    CheckHresult(status, hardware ? "D3D11CreateDevice(HARDWARE)" :
+        "D3D11CreateDevice(WARP)");
+    if (selected < D3D_FEATURE_LEVEL_11_0) {
+        throw std::runtime_error(
+            "Selected D3D11 adapter did not provide feature level 11_0");
+    }
+    if (hardware) {
+        ComPtr<IDXGIDevice> dxgi;
+        ComPtr<IDXGIAdapter> adapter;
+        DXGI_ADAPTER_DESC description{};
+        CheckHresult(result.device.As(&dxgi), "QueryInterface(IDXGIDevice)");
+        CheckHresult(dxgi->GetAdapter(&adapter), "IDXGIDevice::GetAdapter");
+        CheckHresult(adapter->GetDesc(&description), "IDXGIAdapter::GetDesc");
+        std::wcout << L"hardware adapter: " << description.Description
+                   << L" (vendor=0x" << std::hex << description.VendorId
+                   << L", device=0x" << description.DeviceId << std::dec
+                   << L")\n";
     }
     return result;
-}
-
-std::vector<char> ReadShader(const std::filesystem::path& path)
-{
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        throw std::runtime_error("Cannot open test shader bytecode");
-    }
-    const auto size = file.tellg();
-    if (size <= 0 || size > 1024 * 1024)
-    {
-        throw std::runtime_error("Cannot read bounded test shader bytecode");
-    }
-    std::vector<char> bytes(static_cast<std::size_t>(size));
-    file.seekg(0);
-    if (!file.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
-    {
-        throw std::runtime_error("Incomplete test shader bytecode");
-    }
-    return bytes;
 }
 
 [[nodiscard]] Texture CreateSizedTexture(ID3D11Device& device, const TextureSpec& spec)

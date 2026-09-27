@@ -13,8 +13,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <vector>
 #include <string_view>
 
 namespace fo4hdr::tests::gpu {
@@ -130,8 +128,7 @@ template <std::size_t Size>
 
 void CheckDebugMessages(Device& device);
 
-[[nodiscard]] Device CreateDevice();
-[[nodiscard]] std::vector<char> ReadShader(const std::filesystem::path& path);
+[[nodiscard]] Device CreateDevice(bool hardware, bool debug = false);
 
 [[nodiscard]] Texture CreateSizedTexture(ID3D11Device& device, const TextureSpec& spec);
 
