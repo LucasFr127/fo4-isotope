@@ -105,4 +105,4 @@ jobs:
       - name: Run CPU and WARP tests
         run: >-
           .\scripts\test.ps1 -Runtime $env:FO4HDR_RUNTIME -Mode $env:FO4HDR_BUILD_MODE
-          -SkipConfigure -Scope compiled
+          -SkipConfigure -Scope compiled -TestTimeoutSeconds 1800
