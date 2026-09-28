@@ -241,7 +241,7 @@ SettingsPersistenceState WaitPositionSave()
 }
 
 template <class Request>
-std::uint64_t RetryProfileRequest(Request request)
+std::uint64_t RetryPersistenceRequest(Request request)
 {
     for (unsigned attempt = 0; attempt < 2000; ++attempt)
     {
@@ -254,12 +254,12 @@ std::uint64_t RetryProfileRequest(Request request)
 
 std::uint64_t RequestProfileSave(const HdrSettings& settings)
 {
-    return RetryProfileRequest([&] { return RequestDisplayCalibrationSave(kTestDisplayIdentity, settings); });
+    return RetryPersistenceRequest([&] { return RequestDisplayCalibrationSave(kTestDisplayIdentity, settings); });
 }
 
 std::uint64_t RequestProfileLoad(std::wstring_view identity)
 {
-    return RetryProfileRequest([&] { return RequestDisplayCalibrationLoad(identity); });
+    return RetryPersistenceRequest([&] { return RequestDisplayCalibrationLoad(identity); });
 }
 SettingsPersistenceSnapshot WaitProfile(std::uint64_t requested)
 {
@@ -420,7 +420,8 @@ void TestPersistedWindowPosition(PersistenceFixture& fixture)
     FO4HDR_CHECK(RequestHdrWindowPositionSave(100, 130));
     interfaceSettings.windowX = 200;
     interfaceSettings.windowY = 230;
-    const auto newerGeneration = RequestHdrSettingsSave(settings, interfaceSettings);
+    const auto newerGeneration = RetryPersistenceRequest(
+        [&] { return RequestHdrSettingsSave(settings, interfaceSettings); });
     FO4HDR_CHECK(newerGeneration != 0);
     for (unsigned attempt = 0; attempt < 2000; ++attempt)
     {
