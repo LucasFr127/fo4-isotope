@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Project-authored GPU handoff of qualified tone-map exposure. Zero signals
 // an invalid snapshot, never an assumed adaptation exposure. The developer
 // lock also retains the measured scalar used by Fallout 4's scene filter.

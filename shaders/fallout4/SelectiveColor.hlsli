@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Thatcher Freeman
-// Copyright Fallout4HDR contributors
+// Copyright FO4Isotope contributors
 // Upstream: thatcherfreeman/utility-dctls@a495531de3e4704a0a6e0113daa69be303172ed0/Effects/Smooth Tetra Skin.dctl
-// Linear-only bounded adaptation for Fallout4HDR. The cylindrical conversion
+// Linear-only bounded adaptation for FO4Isotope. The cylindrical conversion
 // is attributed by the upstream source to Juan Pablo Zambrano.
 #ifndef FO4HDR_SELECTIVE_COLOR_HLSLI
 #define FO4HDR_SELECTIVE_COLOR_HLSLI

@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 #include "HdrSettingsTestSupport.hpp"
 
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <Windows.h>
@@ -220,8 +220,8 @@ Color=nan
 
 GradePackFixture CreateGradePackFixture(const std::filesystem::path& root)
 {
-    const auto directory = root / "Fallout4HDR";
-    GradePackFixture fixture{root / "Fallout4HDR.ini", directory, directory / "Personal.ini",
+    const auto directory = root / "FO4Isotope";
+    GradePackFixture fixture{root / "FO4Isotope.ini", directory, directory / "Personal.ini",
         directory / "z-HIGH.INI", directory / "A-low.iNi", directory / "m-invalid.ini"};
     FO4HDR_CHECK(std::filesystem::create_directory(directory));
     WriteDistributedGradePacks(fixture);
@@ -378,7 +378,7 @@ void TestGradeProfilePacks()
     TestGradePackParsing();
 
     const auto root = std::filesystem::temp_directory_path() /
-        ("Fallout4HDR-profile-packs-" +
+        ("FO4Isotope-profile-packs-" +
          std::to_string(GetCurrentProcessId()) + "-" +
          std::to_string(GetTickCount64()));
     std::error_code error;

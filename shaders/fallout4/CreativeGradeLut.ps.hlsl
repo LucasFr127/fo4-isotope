@@ -3,7 +3,7 @@
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/12_luts_0x80802E60.ps_5_0.hlsl
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
-// Adapted for Fallout4HDR from that shader and
+// Adapted for FO4Isotope from that shader and
 // src/shaders/tonemap.hlsl. Modification: retain Fallout 4's four weighted LUT
 // look through a project-owned radial HDR extension, and insert the selected
 // production operator exactly once before TAA. Apply a project-authored

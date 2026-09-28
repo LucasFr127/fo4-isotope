@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
-#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/ui/HdrSettingsInput.hpp"
 #include "TestHarness.hpp"
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "../config/HdrSettingsTestSupport.hpp"
 #include <string_view>
 
@@ -216,7 +216,7 @@ void TestFunctionKeyShortcut(HWND window)
 void RunHdrShortcutWindowProcedureTest()
 {
     const auto instance = GetModuleHandleW(nullptr);
-    ShortcutTestScope scope{instance, L"Fallout4HDR.ShortcutTest"};
+    ShortcutTestScope scope{instance, L"FO4Isotope.ShortcutTest"};
     WNDCLASSW windowClass{};
     windowClass.lpfnWndProc = ShortcutTestWindow;
     windowClass.hInstance = instance;

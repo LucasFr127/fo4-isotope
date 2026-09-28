@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -11,7 +11,7 @@ $utf8 = [Text.UTF8Encoding]::new($false, $true)
 
 $tempRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    ("Fallout4HDR-license-tests-" + [Guid]::NewGuid().ToString("N"))
+    ("FO4Isotope-license-tests-" + [Guid]::NewGuid().ToString("N"))
 
 try {
     New-Item -ItemType Directory -Path $tempRoot |

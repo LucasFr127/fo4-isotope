@@ -13,7 +13,7 @@
 // aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad
 //   d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
 //
-// Modified by Fallout4HDR: parameterize the same Rec.2100 limiting gamut for
+// Modified by FO4Isotope: parameterize the same Rec.2100 limiting gamut for
 // 400-2000 nits and adapt dimensionless scene-linear BT.709/D65 to AP0/D60
 // without changing neutral scene values, and stop at absolute display-linear
 // Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
@@ -26,13 +26,13 @@
 // interpolation and a full bounded interval search correct the pinned CTL's
 // hue interpolation/search issues. See THIRD_PARTY_NOTICES.md.
 
-#include "Fallout4HDR/tonemap/Aces2.hpp"
+#include "FO4Isotope/tonemap/Aces2.hpp"
 
 #include "aces2/Aces2Model.hpp"
 
-#include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
+#include "FO4Isotope/tonemap/Aces2Lmt.hpp"
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 
 #include <algorithm>
 #include <array>

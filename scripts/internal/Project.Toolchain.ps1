@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 Set-StrictMode -Version Latest
 
@@ -144,7 +144,7 @@ function Assert-X64Toolchain {
         throw (
             "The active MSVC target is '" +
             $Toolchain.TargetArchitecture +
-            "'. Fallout4HDR requires x64. Open an x64 Visual " +
+            "'. FO4Isotope requires x64. Open an x64 Visual " +
             "Studio developer environment."
         )
     }

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Thatcher Freeman
-// Copyright Fallout4HDR contributors
+// Copyright FO4Isotope contributors
 // Upstream: thatcherfreeman/utility-dctls@a495531de3e4704a0a6e0113daa69be303172ed0/Effects/Smooth Tetra Skin.dctl
-// Adapted for Fallout4HDR: linear input only, fixed bounded hue centers,
+// Adapted for FO4Isotope: linear input only, fixed bounded hue centers,
 // shared stabilized weights, CPU-prepared neutral planes, and HDR-domain
 // finite/negative-channel containment. Cylindrical conversion in the upstream
 // source is attributed there to Juan Pablo Zambrano.
 
-#include "Fallout4HDR/output/SelectiveColor.hpp"
+#include "FO4Isotope/output/SelectiveColor.hpp"
 
 #include <algorithm>
 #include <array>

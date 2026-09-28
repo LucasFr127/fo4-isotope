@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ImageSpaceObserver.hpp"
 #include "DirectCallPatch.hpp"
-#include "Fallout4HDR/config/HdrSettings.hpp"
+#include "FO4Isotope/config/HdrSettings.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -235,7 +235,7 @@ void BuildImageSpaceCatalog() noexcept
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: ImageSpace catalog construction raised an exception; "
+            "FO4Isotope: ImageSpace catalog construction raised an exception; "
             "ImageSpace profiles remain unavailable.\n");
     }
 }

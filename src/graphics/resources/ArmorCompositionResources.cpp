@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ArmorCompositionResources.hpp"
-#include <Fallout4HDR/ShippingShaders.generated.hpp>
+#include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <utility>
 
 namespace fo4hdr {

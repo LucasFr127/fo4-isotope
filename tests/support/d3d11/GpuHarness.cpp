@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "GpuHarness.hpp"
-#include "Fallout4HDR/config/HdrSettings.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
+#include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include <d3d11sdklayers.h>
 #include <dxgi1_2.h>
 #include <array>
@@ -412,7 +412,7 @@ void DispatchPresentation(Device& device, const PresentationDispatch& request)
 }
 
 PresentationWindow::PresentationWindow()
-    : handle(CreateWindowExW(0, L"STATIC", L"Fallout4HDR presentation test",
+    : handle(CreateWindowExW(0, L"STATIC", L"FO4Isotope presentation test",
         WS_OVERLAPPEDWINDOW, 0, 0, 128, 128, nullptr, nullptr,
         GetModuleHandleW(nullptr), nullptr))
 {}

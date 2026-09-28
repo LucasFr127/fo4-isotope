@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
@@ -146,7 +146,7 @@ $testSpecifications = @(
 )
 $allSpecifications = @($specifications) + @($testSpecifications)
 
-$generatedIncludeRoot = Join-Path $OutputDirectory "Fallout4HDR"
+$generatedIncludeRoot = Join-Path $OutputDirectory "FO4Isotope"
 $generatedBinaryRoot = Join-Path $generatedIncludeRoot "shaders"
 $generatedTestBinaryRoot = Join-Path $generatedIncludeRoot "test-shaders"
 $fxcVersion = (Get-Item -LiteralPath $fxc).VersionInfo.FileVersion
@@ -190,7 +190,7 @@ $outputDirectoryHash = [Convert]::ToHexString(
     [Security.Cryptography.SHA256]::HashData(
         $utf8.GetBytes($normalizedOutputDirectory)))
 $generationMutex = [Threading.Mutex]::new(
-    $false, "Local\Fallout4HDR.ShaderGeneration.$outputDirectoryHash")
+    $false, "Local\FO4Isotope.ShaderGeneration.$outputDirectoryHash")
 $generationMutexOwned = $false
 
 function Publish-CompiledShader {

@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+-- SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 set_xmakever("3.0.0")
 set_policy("package.requires_lock", true)
@@ -23,9 +23,9 @@ if not os.isdir("lib/commonlibf4") then
         "Missing lib/commonlibf4. Run git submodule update --init --recursive.")
 end
 
--- CommonLib is included before defining Fallout4HDR targets so its shared
+-- CommonLib is included before defining FO4Isotope targets so its shared
 -- targets and rules are available. The custom plugin rule below deliberately
--- uses the lower-level commonlib.plugin rule because Fallout4HDR supplies a
+-- uses the lower-level commonlib.plugin rule because FO4Isotope supplies a
 -- runtime-specific PluginVersion.cpp.
 includes("lib/commonlibf4")
 
@@ -39,9 +39,9 @@ add_requires("imgui v1.92.6-docking", {
     }
 })
 
-set_project("Fallout4HDR")
+set_project("FO4Isotope")
 set_version("0.0.0")
-set_license("LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions")
+set_license("LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions")
 set_languages("c++23")
 set_warnings("allextra")
 set_encodings("utf-8")
@@ -107,12 +107,12 @@ rule("fo4hdr.plugin")
             { prefixdir = "F4SE/Plugins" })
         target:add(
             "installfiles",
-            "config/Fallout4HDR.ini",
+            "config/FO4Isotope.ini",
             { prefixdir = "F4SE/Plugins" })
         target:add(
             "installfiles",
-            "config/Fallout4HDR/Default.ini",
-            { prefixdir = "F4SE/Plugins/Fallout4HDR" })
+            "config/FO4Isotope/Default.ini",
+            { prefixdir = "F4SE/Plugins/FO4Isotope" })
         target:add(
             "installfiles",
             path.join(
@@ -120,7 +120,7 @@ rule("fo4hdr.plugin")
                 get_config("fo4hdr_runtime"),
                 "manifest.json"),
             {
-                prefixdir = "F4SE/Plugins/Fallout4HDR",
+                prefixdir = "F4SE/Plugins/FO4Isotope",
                 filename =
                     "runtime-" ..
                     get_config("fo4hdr_runtime") ..
@@ -222,7 +222,7 @@ target("fo4hdr-core")
         "src/output/HdrActivationPolicy.cpp",
         "src/output/SelectiveColor.cpp",
         "src/output/PerformanceStatistics.cpp")
-    add_headerfiles("include/Fallout4HDR/**.hpp")
+    add_headerfiles("include/FO4Isotope/**.hpp")
     add_includedirs("include", { public = true })
 target_end()
 
@@ -232,7 +232,7 @@ target("fo4hdr-renderer")
     add_deps("fo4hdr-core", "fo4hdr-shaders")
     add_files("src/graphics/**.cpp")
     add_files("src/ui/**.cpp")
-    add_headerfiles("include/Fallout4HDR/**.hpp")
+    add_headerfiles("include/FO4Isotope/**.hpp")
     add_includedirs("include", { public = true })
     add_includedirs(path.join(os.projectdir(), "build", "generated"))
     add_packages("imgui")
@@ -244,10 +244,10 @@ target("fo4hdr-renderer")
 
 target_end()
 
-target("Fallout4HDR")
+target("FO4Isotope")
     add_rules("fo4hdr.plugin", {
-        name = "Fallout4HDR",
-        author = "Fallout4HDR contributors",
+        name = "FO4Isotope",
+        author = "FO4Isotope contributors",
         description =
             "CommonLibF4 HDR output plugin for Fallout 4"
     })

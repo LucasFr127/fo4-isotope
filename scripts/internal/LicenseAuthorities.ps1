@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 function Test-Fo4HdrAcesIdentityMismatch {
     return (-not (Test-Fo4HdrIdentityFields $aces2Lmt $expectedIdentity) -or
         [double]$aces2Lmt.inputShaperCenter -ne 2.4 -or
@@ -84,7 +84,7 @@ function Assert-Fo4HdrAcesAuthority {
     }
     Assert-Fo4HdrAcesNotices
     foreach ($relative in @(
-            "include/Fallout4HDR/tonemap/Aces2Lmt.hpp",
+            "include/FO4Isotope/tonemap/Aces2Lmt.hpp",
             "src/tonemap/Aces2Lmt.cpp",
             "tests/support/reference/Aces2LmtSourceOracle.hpp",
             "tests/support/reference/Aces2LmtSourceOracle.cpp"

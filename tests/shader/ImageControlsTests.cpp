@@ -1,15 +1,15 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ShippingPixelShaderTests.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include "reference/ShaderReference.hpp"
-#include "Fallout4HDR/ShippingShaders.generated.hpp"
-#include "Fallout4HDR/TestShaders.generated.hpp"
+#include "FO4Isotope/ShippingShaders.generated.hpp"
+#include "FO4Isotope/TestShaders.generated.hpp"
 #include "reference/NativeGradeReference.hpp"
 #include "reference/ImageControlReference.hpp"
-#include "Fallout4HDR/tonemap/Aces2.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/tonemap/Aces2.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>

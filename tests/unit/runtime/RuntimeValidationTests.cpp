@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 
 #include "TestHarness.hpp"
 
-#include "Fallout4HDR/runtime/RuntimeValidation.hpp"
+#include "FO4Isotope/runtime/RuntimeValidation.hpp"
 
 #include <string_view>
 

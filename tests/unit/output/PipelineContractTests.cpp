@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "RenoDxShaderIdentity.hpp"
-#include "Fallout4HDR/output/RenderPipelineContract.hpp"
+#include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "TestHarness.hpp"
 
 #include <array>

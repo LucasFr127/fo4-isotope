@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -154,7 +154,7 @@ function Test-ConfiguredSourceSelection {
 
 $testRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    ("Fallout4HDR-source-tree-" + [Guid]::NewGuid().ToString("N"))
+    ("FO4Isotope-source-tree-" + [Guid]::NewGuid().ToString("N"))
 $inventory = Join-Path $testRoot "selection.md"
 
 try {
@@ -168,7 +168,7 @@ finally {
 }
 
 $publicRoot = Join-Path ([IO.Path]::GetTempPath()) (
-    'Fallout4HDR-public-source-' + [Guid]::NewGuid().ToString('N'))
+    'FO4Isotope-public-source-' + [Guid]::NewGuid().ToString('N'))
 try {
     Test-PublicSourceSelection $publicRoot
 }

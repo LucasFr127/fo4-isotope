@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 //
@@ -11,7 +11,7 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "PresentationPass.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 #include "../resources/PresentationResources.hpp"
 #include "../resources/SceneResources.hpp"
 #include "../RendererLifetime.hpp"
@@ -23,11 +23,11 @@
 #include "../resources/ArmorCompositionResources.hpp"
 #include "../resources/DeveloperExposureResources.hpp"
 #include "../resources/ReplacementShaders.hpp"
-#include <Fallout4HDR/output/ArmorUiComposition.hpp>
+#include <FO4Isotope/output/ArmorUiComposition.hpp>
 #include <backends/imgui_impl_dx11.h>
 #include <imgui.h>
 #include "../d3d11/BorrowedComputeState.hpp"
-#include "Fallout4HDR/ui/SettingsWindow.hpp"
+#include "FO4Isotope/ui/SettingsWindow.hpp"
 #include <algorithm>
 #include <cstring>
 

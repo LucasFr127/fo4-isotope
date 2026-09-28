@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2024 Carlos Lopez
  *
- * Fallout4HDR modification: reduced the pinned RenoDX hash helper to the
+ * FO4Isotope modification: reduced the pinned RenoDX hash helper to the
  * raw-bytecode CRC-32 operation used by the Fallout 4 shader matcher.
  * Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/utils/hash.hpp
  * See THIRD_PARTY_NOTICES.md.

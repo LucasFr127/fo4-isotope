@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -43,7 +43,7 @@ function Assert-Rejected {
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $temporaryRoot = Join-Path `
     $temporaryBase `
-    ("Fallout4HDR-commonlib-integrity-" + [Guid]::NewGuid())
+    ("FO4Isotope-commonlib-integrity-" + [Guid]::NewGuid())
 $temporaryRoot = [IO.Path]::GetFullPath($temporaryRoot)
 if (-not $temporaryRoot.StartsWith(
     $temporaryBase,
@@ -68,7 +68,7 @@ try {
     )) {
         New-Item -ItemType Directory -Force -Path $root | Out-Null
         $null = Invoke-GitChecked $root @("init", "--quiet")
-        $null = Invoke-GitChecked $root @("config", "user.name", "Fallout4HDR Tests")
+        $null = Invoke-GitChecked $root @("config", "user.name", "FO4Isotope Tests")
         $null = Invoke-GitChecked $root @(
             "config",
             "user.email",

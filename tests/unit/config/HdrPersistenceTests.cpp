@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 #include "HdrSettingsTestSupport.hpp"
 
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/SettingsPersistence.hpp"
 #include "SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <Windows.h>
@@ -225,7 +225,7 @@ void TestSettingsPersistenceRewrite()
 }
 
 constexpr std::wstring_view kTestDisplayIdentity =
-        L"\\\\?\\DISPLAY#Fallout4HDR_\x03A9#{A1B2C3D4}";
+        L"\\\\?\\DISPLAY#FO4Isotope_\x03A9#{A1B2C3D4}";
 
 SettingsPersistenceState WaitPositionSave()
 {
@@ -290,12 +290,12 @@ PersistenceFixture CreatePersistenceFixture()
 {
 
     const auto root = std::filesystem::temp_directory_path() /
-        ("Fallout4HDR-settings-save-" +
+        ("FO4Isotope-settings-save-" +
          std::to_string(GetCurrentProcessId()) + "-" +
          std::to_string(GetTickCount64()));
     FO4HDR_CHECK(std::filesystem::create_directory(root));
-    const auto path = root / "Fallout4HDR.ini";
-    const auto profileDirectory = root / "Fallout4HDR";
+    const auto path = root / "FO4Isotope.ini";
+    const auto profileDirectory = root / "FO4Isotope";
     FO4HDR_CHECK(std::filesystem::create_directory(profileDirectory));
     const auto personalPath = profileDirectory / "Personal.ini";
     {
@@ -457,7 +457,7 @@ void TestDisplayProfileLoad()
     FO4HDR_CHECK(profileSnapshot.displayCalibration.videoWhiteNits == 220.0);
 
     constexpr std::wstring_view otherDisplayIdentity =
-        L"\\\\?\\DISPLAY#Fallout4HDR_Other#{A1B2C3D4}";
+        L"\\\\?\\DISPLAY#FO4Isotope_Other#{A1B2C3D4}";
     profileGeneration = RequestProfileLoad(otherDisplayIdentity);
     FO4HDR_CHECK(profileGeneration != 0);
     profileSnapshot = WaitProfile(profileGeneration);

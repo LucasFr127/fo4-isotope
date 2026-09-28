@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/shared.h
-// Adapted for Fallout4HDR from the pinned Fallout 4 tone-map family.
+// Adapted for FO4Isotope from the pinned Fallout 4 tone-map family.
 // Modification: retain Fallout 4 exposure, separate bloom, mask, and
 // scene-filter stages while removing only normalized Uncharted 2/Hable range
 // compression; apply a project-authored multiplier on that separate bloom

@@ -2,7 +2,7 @@
 // Copyright (c) 2024 Carlos Lopez Jr.
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/09_videos_0x0F2CC0D1.ps_5_0.hlsl
-// Whole-file simplified adaptation for Fallout4HDR. Modification: retain the
+// Whole-file simplified adaptation for FO4Isotope. Modification: retain the
 // Fallout 4 BGR sample order, decode the SDR sRGB signal to linear, and map
 // SDR video white to the independently configured video white, convert linear
 // BT.709 to BT.2020, and publish the UI-relative wide-gamut HDR intermediate.

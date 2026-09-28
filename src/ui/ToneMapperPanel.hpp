@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
-#include "Fallout4HDR/config/HdrSettings.hpp"
+#include "FO4Isotope/config/HdrSettings.hpp"
 namespace fo4hdr {
 struct SettingsWindowView;
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;

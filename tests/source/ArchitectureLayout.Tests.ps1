@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param([switch]$SelfTest)
 
@@ -47,9 +47,9 @@ function Assert-LayoutHeaderBoundary {
 
 function Assert-LayoutCoreDependency {
     param([string]$File, [string]$Resolved)
-    $core = $File -match '^(src|include/Fallout4HDR)/(config|tonemap|output|runtime|hooks)/'
-    $renderer = $Resolved -match '^(src|include/Fallout4HDR)/(graphics|ui)/'
-    $inputContract = $Resolved -ceq 'include/Fallout4HDR/ui/HdrSettingsInput.hpp'
+    $core = $File -match '^(src|include/FO4Isotope)/(config|tonemap|output|runtime|hooks)/'
+    $renderer = $Resolved -match '^(src|include/FO4Isotope)/(graphics|ui)/'
+    $inputContract = $Resolved -ceq 'include/FO4Isotope/ui/HdrSettingsInput.hpp'
     if (!$core -or !$renderer) { return }
     if (!$inputContract) {
         throw "Core component depends on renderer/UI in ${File}: $Resolved"
@@ -81,7 +81,7 @@ function Assert-LayoutPortablePath {
 function Assert-LayoutDirectory {
     param([string]$Path)
     Assert-LayoutPortablePath $Path
-    if ($Path -ceq 'include/Fallout4HDR' -or $Path -cmatch '^runtime/\d+\.\d+\.\d+$') { return }
+    if ($Path -ceq 'include/FO4Isotope' -or $Path -cmatch '^runtime/\d+\.\d+\.\d+$') { return }
     if ((Split-Path $Path -Leaf) -cnotmatch '^[a-z][a-z0-9_]*$') {
         throw "Subsystem directory must use lowercase words: $Path"
     }
@@ -134,7 +134,7 @@ function Assert-LayoutInclude {
     Assert-LayoutHeaderBoundary $File $Include $resolved
     Assert-LayoutDependency $File $resolved
     Assert-LayoutInlineInclude $File $Include $resolved
-    $missingSharedInclude = !$resolved -and $Include -match '^Fallout4HDR/' -and
+    $missingSharedInclude = !$resolved -and $Include -match '^FO4Isotope/' -and
         $Include -notmatch '\.generated\.hpp$'
     if ($missingSharedInclude) {
         throw "Missing shared include in ${File}: $Include"
@@ -159,31 +159,31 @@ function Assert-LayoutRejects {
 
 function Test-LayoutDependencies {
     $paths = @{}
-    foreach ($path in @('include/Fallout4HDR/graphics/HdrRenderer.hpp',
-        'include/Fallout4HDR/ui/SettingsWindow.hpp', 'include/Fallout4HDR/ui/HdrSettingsInput.hpp',
+    foreach ($path in @('include/FO4Isotope/graphics/HdrRenderer.hpp',
+        'include/FO4Isotope/ui/SettingsWindow.hpp', 'include/FO4Isotope/ui/HdrSettingsInput.hpp',
         'src/graphics/PresentFrame.hpp', 'src/ui/LutProfilesPanel.hpp',
         'src/game/GameStateObserver.hpp', 'src/runtime/RuntimeIdentityFiles.hpp',
         'src/config/SettingsPersistence.hpp')) {
         Add-LayoutPath $paths $path
     }
     foreach ($subsystem in @('config', 'tonemap', 'output', 'runtime', 'hooks')) {
-        foreach ($root in @('src', 'include/Fallout4HDR')) {
+        foreach ($root in @('src', 'include/FO4Isotope')) {
             $file = "$root/$subsystem/Component.hpp"
-            foreach ($dependency in @('Fallout4HDR/graphics/HdrRenderer.hpp',
-                'Fallout4HDR/ui/SettingsWindow.hpp', 'graphics/PresentFrame.hpp', 'ui/LutProfilesPanel.hpp')) {
+            foreach ($dependency in @('FO4Isotope/graphics/HdrRenderer.hpp',
+                'FO4Isotope/ui/SettingsWindow.hpp', 'graphics/PresentFrame.hpp', 'ui/LutProfilesPanel.hpp')) {
                 Assert-LayoutRejects { Assert-LayoutInclude $file $dependency $paths }
             }
         }
     }
-    Assert-LayoutInclude 'src/config/Settings.cpp' 'Fallout4HDR/ui/HdrSettingsInput.hpp' $paths
-    Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' 'Fallout4HDR/ui/SettingsWindow.hpp' $paths
+    Assert-LayoutInclude 'src/config/Settings.cpp' 'FO4Isotope/ui/HdrSettingsInput.hpp' $paths
+    Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' 'FO4Isotope/ui/SettingsWindow.hpp' $paths
     Assert-LayoutInclude 'src/plugin/PluginMain.cpp' '../game/GameStateObserver.hpp' $paths
     Assert-LayoutInclude 'src/plugin/PluginMain.cpp' '../runtime/RuntimeIdentityFiles.hpp' $paths
-    Assert-LayoutInclude 'src/game/GameStateObserver.cpp' 'Fallout4HDR/graphics/HdrRenderer.hpp' $paths
+    Assert-LayoutInclude 'src/game/GameStateObserver.cpp' 'FO4Isotope/graphics/HdrRenderer.hpp' $paths
     Assert-LayoutInclude 'tests/unit/runtime/RuntimeIdentityFilesTests.cpp' 'RuntimeIdentityFiles.hpp' $paths
     Assert-LayoutInclude 'tests/unit/config/SettingsTests.cpp' 'LutProfilesPanel.hpp' $paths
     Assert-LayoutInclude 'tests/unit/config/SettingsTests.cpp' 'SettingsPersistence.hpp' $paths
-    Assert-LayoutRejects { Assert-LayoutInclude 'include/Fallout4HDR/config/Settings.hpp' 'SettingsPersistence.hpp' $paths }
+    Assert-LayoutRejects { Assert-LayoutInclude 'include/FO4Isotope/config/Settings.hpp' 'SettingsPersistence.hpp' $paths }
     Assert-LayoutInclude 'tests/shader/PresentationTests.cpp' 'PresentFrame.hpp' $paths
     Assert-LayoutRejects { Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' '../ui/LutProfilesPanel.hpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'src/ui/SettingsWindow.cpp' '../graphics/PresentFrame.hpp' $paths }
@@ -203,7 +203,7 @@ function Test-LayoutNames {
         'shaders/output/PresentPixels.hlsl', 'shaders/output/PresentPixels.CS.hlsl')) {
         Assert-LayoutRejects { Assert-LayoutNativeName $file $paths }
     }
-    foreach ($directory in @('include/Fallout4HDR', 'src/graphics/d3d11', 'runtime/1.10.163')) {
+    foreach ($directory in @('include/FO4Isotope', 'src/graphics/d3d11', 'runtime/1.10.163')) {
         Assert-LayoutDirectory $directory
     }
     foreach ($directory in @('src/Graphics', 'src/render-passes', 'src/con', 'src/graphics.')) {
@@ -213,11 +213,11 @@ function Test-LayoutNames {
 
 function Test-LayoutChecks {
     $paths = @{}
-    Add-LayoutPath $paths 'include/Fallout4HDR/config/Settings.hpp'
+    Add-LayoutPath $paths 'include/FO4Isotope/config/Settings.hpp'
     Add-LayoutPath $paths 'src/config/Private.hpp'
     Add-LayoutPath $paths 'src/config/Template.hpp'
     Add-LayoutPath $paths 'src/config/Template.inl'
-    Assert-LayoutInclude 'src/config/Settings.cpp' 'Fallout4HDR/config/Settings.hpp' $paths
+    Assert-LayoutInclude 'src/config/Settings.cpp' 'FO4Isotope/config/Settings.hpp' $paths
     Assert-LayoutInclude 'src/config/Template.hpp' 'Template.inl' $paths
     Assert-LayoutInclude 'tests/unit/tonemap/Gt7Tests.cpp' '../../../third_party/gt7/upstream/gt7_tone_mapping.cpp' $paths
     Assert-LayoutRejects { Assert-LayoutInclude 'tests/unit/tonemap/Gt7Tests.cpp' '../../../third_party/gt7/upstream/other.cpp' $paths }
@@ -226,7 +226,7 @@ function Test-LayoutChecks {
     Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'fallout4hdr/config/Settings.hpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'Settings.cpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'Template.inl' $paths }
-    Assert-LayoutRejects { Assert-LayoutInclude 'include/Fallout4HDR/config/Settings.hpp' '../../../src/config/Private.hpp' $paths }
+    Assert-LayoutRejects { Assert-LayoutInclude 'include/FO4Isotope/config/Settings.hpp' '../../../src/config/Private.hpp' $paths }
     Test-LayoutDependencies
     Test-LayoutNames
     Test-LayoutPowerShellNames

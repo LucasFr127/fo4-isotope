@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "PluginPch.hpp"
-#include "Fallout4HDR/runtime/RuntimeValidation.hpp"
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/graphics/HdrRenderer.hpp"
-#include "Fallout4HDR/output/RenderPipelineContract.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "FO4Isotope/runtime/RuntimeValidation.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/output/RenderPipelineContract.hpp"
+#include "FO4Isotope/config/SettingsPersistence.hpp"
 #include "../game/GameStateObserver.hpp"
 #include "../game/ArmorUiObserver.hpp"
 #include "../game/NativeLutObserver.hpp"
@@ -49,7 +49,7 @@ namespace {
 #elif defined(FO4HDR_RUNTIME_1_11_221)
     return "1.11.221";
 #else
-#  error "No Fallout4HDR runtime selected"
+#  error "No FO4Isotope runtime selected"
 #endif
 }
 
@@ -120,7 +120,7 @@ void InitializeProjectLogging()
     }
 
     auto path = std::filesystem::path(knownPath.get()) /
-        L"My Games" / L"Fallout4" / L"F4SE" / L"Fallout4HDR.log";
+        L"My Games" / L"Fallout4" / L"F4SE" / L"FO4Isotope.log";
     std::vector<spdlog::sink_ptr> sinks{
         std::make_shared<spdlog::sinks::msvc_sink_mt>(),
         std::make_shared<spdlog::sinks::basic_file_sink_mt>(
@@ -137,7 +137,7 @@ void InitializeProjectLogging()
     logger->flush_on(level);
     spdlog::set_default_logger(std::move(logger));
     spdlog::set_pattern("[%T.%e] [%=5t] [%L] %v");
-    REX::INFO("Fallout4HDR v0");
+    REX::INFO("FO4Isotope v0");
 }
 
 [[nodiscard]] LegacyF4seServices QueryLegacyF4seServices(
@@ -280,7 +280,7 @@ struct ObservedRuntimeIdentity
                           .value_or("");
         observed.manifestHash = fo4hdr::Sha256CanonicalTextFile(
             root / L"Data" / L"F4SE" / L"Plugins" /
-            L"Fallout4HDR" / L"runtime-1.10.163.json")
+            L"FO4Isotope" / L"runtime-1.10.163.json")
                            .value_or("");
 #endif
     }
@@ -311,7 +311,7 @@ void ReportStartupException(const std::exception* error) noexcept
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: startup exception; CommonLib logging unavailable.\n");
+            "FO4Isotope: startup exception; CommonLib logging unavailable.\n");
     }
 }
 
@@ -339,7 +339,7 @@ F4SE_EXPORT bool F4SEPlugin_Query(
         }
 
         a_info->infoVersion = F4SE::PluginInfo::kVersion;
-        a_info->name = "Fallout4HDR";
+        a_info->name = "FO4Isotope";
         a_info->version = 0;
         return IsExpectedLegacyRuntime(a_f4se);
     }
@@ -419,7 +419,7 @@ namespace
     if (executable.has_value())
     {
         settingsPath = executable->parent_path() / L"Data" / L"F4SE" /
-            L"Plugins" / L"Fallout4HDR.ini";
+            L"Plugins" / L"FO4Isotope.ini";
         diagnosticsConfiguration =
             fo4hdr::LoadPluginConfiguration(
                 *settingsPath);
@@ -471,7 +471,7 @@ void ReportGameObserverStatus(bool observerActive) noexcept
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: M2 observer status logging failed.\n");
+            "FO4Isotope: M2 observer status logging failed.\n");
     }
 }
 
@@ -532,7 +532,7 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: HDR inactive status logging failed.\n");
+            "FO4Isotope: HDR inactive status logging failed.\n");
     }
 }
 

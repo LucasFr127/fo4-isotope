@@ -1,13 +1,13 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $tempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-$fixture = Join-Path $tempBase ('Fallout4HDR-deploy-test-' + [Guid]::NewGuid().ToString('N'))
+$fixture = Join-Path $tempBase ('FO4Isotope-deploy-test-' + [Guid]::NewGuid().ToString('N'))
 $project = Join-Path $fixture 'project'
-$destination = Join-Path $fixture 'Fallout4HDR-mod'
+$destination = Join-Path $fixture 'FO4Isotope-mod'
 $game = Join-Path $fixture 'game'
 $stage = Join-Path $project 'dist/1.10.163/Data'
 $deploy = Join-Path $project 'scripts/deploy.ps1'
@@ -37,7 +37,7 @@ function Test-DeploymentRejections {
     [IO.File]::WriteAllText($extraFile, 'extra')
     Assert-DeployRejected 'Staged runtime file set is not exact.'
     Remove-Item -LiteralPath $extraFile
-    $personalStage = Join-Path $stage 'F4SE/Plugins/Fallout4HDR/Personal.ini'
+    $personalStage = Join-Path $stage 'F4SE/Plugins/FO4Isotope/Personal.ini'
     [IO.File]::WriteAllText($personalStage, 'must not ship')
     Assert-DeployRejected 'Staged runtime file set is not exact.'
     Remove-Item -LiteralPath $personalStage
@@ -51,9 +51,9 @@ function Test-DeploymentRejections {
     Remove-Item -LiteralPath $rejection
     if (Test-Path $destination) { throw 'Rejected staging created a deployment.' }
 
-    $env:FO4_MOD_ROOT = Join-Path $project 'Fallout4HDR-mod'
+    $env:FO4_MOD_ROOT = Join-Path $project 'FO4Isotope-mod'
     Assert-DeployRejected 'Deployment destination must not be inside the repository.'
-    $env:FO4_MOD_ROOT = Join-Path $game 'Fallout4HDR-mod'
+    $env:FO4_MOD_ROOT = Join-Path $game 'FO4Isotope-mod'
     Assert-DeployRejected 'Deployment destination must not be inside FO4_ROOT.'
     $env:FO4_MOD_ROOT = $destination
 
@@ -63,14 +63,14 @@ function Test-DeploymentOwnedFiles {
     New-Item -ItemType Directory -Path $destination | Out-Null
     $unrelated = Join-Path $destination 'unrelated.txt'
     $obsolete = Join-Path $destination 'obsolete.txt'
-    $personal = Join-Path $destination 'F4SE/Plugins/Fallout4HDR/Personal.ini'
+    $personal = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Personal.ini'
     New-Item -ItemType Directory -Path (Split-Path $personal) -Force | Out-Null
     [IO.File]::WriteAllText($unrelated, 'keep')
     [IO.File]::WriteAllText($obsolete, 'owned')
     [IO.File]::WriteAllText($personal, 'personal')
     $ownedManifest = Join-Path $destination '.fallout4hdr-owned-files.json'
     [IO.File]::WriteAllText($ownedManifest,
-        '{"files":["obsolete.txt","F4SE/Plugins/Fallout4HDR/Personal.ini"]}')
+        '{"files":["obsolete.txt","F4SE/Plugins/FO4Isotope/Personal.ini"]}')
     & $deploy -Runtime '1.10.163' -Confirm:$false
     $preserved = [IO.File]::ReadAllText($unrelated) -ceq 'keep' -and
         [IO.File]::ReadAllText($personal) -ceq 'personal'
@@ -94,7 +94,7 @@ function Remove-DeploymentFixture {
     }
     $resolved = [IO.Path]::GetFullPath($fixture)
     if (-not $resolved.StartsWith($tempBase, [StringComparison]::OrdinalIgnoreCase) -or
-        (Split-Path $resolved -Leaf) -notlike 'Fallout4HDR-deploy-test-*') {
+        (Split-Path $resolved -Leaf) -notlike 'FO4Isotope-deploy-test-*') {
         throw 'Refusing to remove an unexpected test fixture path.'
     }
     if (Test-Path -LiteralPath $resolved) { Remove-Item -LiteralPath $resolved -Recurse -Force }
@@ -122,11 +122,11 @@ if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture 
 [IO.File]::WriteAllText((Join-Path `$PSScriptRoot '../metadata-checked'), 'checked')
 "@)
     $relativeFiles = @(
-        'F4SE/Plugins/Fallout4HDR.dll',
-        'F4SE/Plugins/Fallout4HDR.pdb',
-        'F4SE/Plugins/Fallout4HDR.ini',
-        'F4SE/Plugins/Fallout4HDR/Default.ini',
-        'F4SE/Plugins/Fallout4HDR/runtime-1.10.163.json'
+        'F4SE/Plugins/FO4Isotope.dll',
+        'F4SE/Plugins/FO4Isotope.pdb',
+        'F4SE/Plugins/FO4Isotope.ini',
+        'F4SE/Plugins/FO4Isotope/Default.ini',
+        'F4SE/Plugins/FO4Isotope/runtime-1.10.163.json'
     )
     foreach ($relative in $relativeFiles) {
         $file = Join-Path $stage $relative

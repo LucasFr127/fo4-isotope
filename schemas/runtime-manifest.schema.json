@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallout4HDR runtime manifest",
+  "title": "FO4Isotope runtime manifest",
   "type": "object",
   "required": [
     "schemaVersion",

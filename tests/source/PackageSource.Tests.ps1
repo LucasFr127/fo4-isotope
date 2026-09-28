@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -106,7 +106,7 @@ function Assert-SourceArchiveTimestamps {
 function Assert-PackagedSourceBytes {
     param([IO.Compression.ZipArchive]$Archive, [string]$ReferenceRoot, [string[]]$InventoryFiles, [string]$ExpectedTree)
     foreach ($relative in $inventoryFiles) {
-        $entryName = "Fallout4HDR/$relative"
+        $entryName = "FO4Isotope/$relative"
         $archiveHash = Get-Fo4HdrZipEntrySha256 $archive $entryName
         $referenceHash = (Get-FileHash `
             -LiteralPath (Join-Path $referenceRoot $relative) `
@@ -121,7 +121,7 @@ function Assert-PackagedSourceBytes {
 function Assert-PackagedDependencyBytes {
     param([IO.Compression.ZipArchive]$Archive, [object[]]$LinkedArtifacts)
     foreach ($artifact in $linkedArtifacts) {
-        $entryName = "Fallout4HDR/$($artifact.Path)"
+        $entryName = "FO4Isotope/$($artifact.Path)"
         if ((Get-Fo4HdrZipEntrySha256 $archive $entryName) -ne
             $artifact.Hash) {
             throw "Packaged linked source hash differs from its manifest: $entryName"
@@ -183,7 +183,7 @@ function Export-GitReferenceTree {
 
     $archivePath = Join-Path `
         ([IO.Path]::GetTempPath()) `
-        ("Fallout4HDR-reference-" + [Guid]::NewGuid() + ".tar")
+        ("FO4Isotope-reference-" + [Guid]::NewGuid() + ".tar")
     try {
         git -C $GitRoot archive `
             --format=tar `
@@ -249,14 +249,14 @@ $linkedArtifacts = @(Get-LinkedSourceArtifacts $sourceManifest)
 
 $expectedNames = [Collections.Generic.List[string]]::new()
 foreach ($relative in $inventoryFiles) {
-    $expectedNames.Add("Fallout4HDR/$relative")
+    $expectedNames.Add("FO4Isotope/$relative")
 }
 foreach ($artifact in $linkedArtifacts) {
-    $expectedNames.Add("Fallout4HDR/$($artifact.Path)")
+    $expectedNames.Add("FO4Isotope/$($artifact.Path)")
 }
 $expectedNames.Sort([StringComparer]::Ordinal)
 
-$archive = Open-Fo4HdrValidatedZipArchive $first -RequiredRoot "Fallout4HDR"
+$archive = Open-Fo4HdrValidatedZipArchive $first -RequiredRoot "FO4Isotope"
 $referenceRoot = $repoRoot
 $referenceTemp = $null
 try {
@@ -266,8 +266,8 @@ try {
     if ($ExpectedTree -eq "Git") {
         $referenceTemp = Join-Path `
             ([IO.Path]::GetTempPath()) `
-            ("Fallout4HDR-reference-" + [Guid]::NewGuid())
-        $referenceRoot = Join-Path $referenceTemp "Fallout4HDR"
+            ("FO4Isotope-reference-" + [Guid]::NewGuid())
+        $referenceRoot = Join-Path $referenceTemp "FO4Isotope"
         New-Item -ItemType Directory -Force $referenceRoot |
             Out-Null
         Export-GitReferenceTree `

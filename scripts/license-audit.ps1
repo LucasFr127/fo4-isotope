@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [string]$PackageRoot,
@@ -151,7 +151,7 @@ function Invoke-Fo4HdrReuseLint {
         throw "REUSE version mismatch; expected $($lock.toolchain.observed.reuse)."
     }
 
-    $selectionRoot = Join-Path ([IO.Path]::GetTempPath()) ('Fallout4HDR-reuse-' + [guid]::NewGuid().ToString('N'))
+    $selectionRoot = Join-Path ([IO.Path]::GetTempPath()) ('FO4Isotope-reuse-' + [guid]::NewGuid().ToString('N'))
     try {
         Copy-Fo4HdrReuseSelection -SelectionRoot $selectionRoot
         & $reuse.Source --root $selectionRoot lint
@@ -371,7 +371,7 @@ function Assert-Fo4HdrForbiddenArtifactRules {
         "tools/third-party.dll",
         "sample/session.dmp",
         "sample/session.log",
-        "sample/Fallout4HDR.pdb"
+        "sample/FO4Isotope.pdb"
     )
     foreach ($relative in $unsafe) {
         if (-not (Get-Fo4HdrForbiddenArtifactReason $relative)) {
@@ -478,7 +478,7 @@ $projectSourceExtensions = @(
 )
 
 $projectSpdxId =
-"LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
+"LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
 
 Assert-Fo4HdrProductionSourceLicenseSelfTests
 
@@ -493,7 +493,7 @@ $required = @(
     "LICENSES\BSD-3-Clause.txt",
     "LICENSES\MIT.txt",
     "COPYING.GPL-3.0-or-later",
-    "LICENSES\LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt",
+    "LICENSES\LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt",
     "COPYING.CommonLib-Exceptions",
     "REUSE.toml",
     "THIRD_PARTY_NOTICES.md",
@@ -511,7 +511,7 @@ Assert-Fo4HdrAcesAuthority
 
 Assert-Fo4HdrAgxAuthority
 
-if ($lock.project.license -ne "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions") {
+if ($lock.project.license -ne "LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions") {
     throw "versions.lock.json contains the wrong project license ID."
 }
 if ($lock.gt7.status -eq "imported" -and

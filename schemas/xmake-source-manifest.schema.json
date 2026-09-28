@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallout4HDR XMake source manifest",
+  "title": "FO4Isotope XMake source manifest",
   "type": "object",
   "required": [
     "schemaVersion",

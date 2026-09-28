@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 
 #ifndef NOMINMAX
@@ -9,7 +9,7 @@
 #include <wrl/client.h>
 
 #include "reference/ShaderPixels.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>

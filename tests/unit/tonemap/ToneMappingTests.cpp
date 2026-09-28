@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 #include "reference/Aces2LmtSourceOracle.hpp"
 
-#include "Fallout4HDR/tonemap/Aces2.hpp"
-#include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/tonemap/Aces2.hpp"
+#include "FO4Isotope/tonemap/Aces2Lmt.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>

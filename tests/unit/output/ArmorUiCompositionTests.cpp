@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "../UnitTestSuite.hpp"
 
-#include "Fallout4HDR/output/ArmorUiComposition.hpp"
+#include "FO4Isotope/output/ArmorUiComposition.hpp"
 #include "TestHarness.hpp"
 
 #include <array>

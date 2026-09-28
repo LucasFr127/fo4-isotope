@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#include "Fallout4HDR/ui/SettingsWindow.hpp"
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+#include "FO4Isotope/ui/SettingsWindow.hpp"
 #include "DisplayCalibrationPanel.hpp"
 #include "ToneMapperPanel.hpp"
 #include "SettingsPanelSlider.hpp"
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
-#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
+#include "FO4Isotope/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/config/SettingsPersistence.hpp"
 #include <imgui.h>
 #include <backends/imgui_impl_win32.h>
 #include <backends/imgui_impl_dx11.h>
@@ -364,7 +364,7 @@ struct SettingsTabs {
 
     void Draw() noexcept
     {
-        if (!ImGui::BeginTabBar("Fallout4HDRTabs",
+        if (!ImGui::BeginTabBar("FO4IsotopeTabs",
                 ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) return;
         DrawColorSettingsTabs(state.uiDraft, state.uiCommitRequested, view, footerHeight);
         DrawCalibrationSettingsTab();
@@ -926,7 +926,7 @@ struct SettingsWindowContents
             ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F),
                 "Save failed. Live values are unchanged.");
         else if (SettingsSaveConfirmed())
-            ImGui::TextDisabled("Saved to Fallout4HDR.ini");
+            ImGui::TextDisabled("Saved to FO4Isotope.ini");
         if (persistence.positionState == SettingsPersistenceState::failed)
             ImGui::TextWrapped("Window position could not be saved. Move the window to retry.");
     }
@@ -990,7 +990,7 @@ struct SettingsWindowContents
     const auto* viewport = ImGui::GetMainViewport();
     PrepareSettingsWindowLayout(viewport, interfaceScale);
     constexpr auto flags = ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoCollapse;
-    const auto showContents = ImGui::Begin("Fallout4HDR", &open, flags);
+    const auto showContents = ImGui::Begin("FO4Isotope", &open, flags);
     UpdateSettingsWindowPosition(viewport);
     if (showContents)
         hideSettingsForCalibration = SettingsWindowContents{interfaceScale, persistence,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/fxaa_0x4FB4DA20.ps_5_0.hlsl
-// Whole-file adaptation for Fallout4HDR. Modification: retain the original
+// Whole-file adaptation for FO4Isotope. Modification: retain the original
 // Fallout 4 FXAA body while preserving the sign of the FP16 HDR input around
 // the algorithm's luminance-domain absolute-value operations.
 // See THIRD_PARTY_NOTICES.md.

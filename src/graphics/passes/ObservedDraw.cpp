@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 //
@@ -28,7 +28,7 @@
 #include "../hooks/ContextHooks.hpp"
 #include "../d3d11/ScopedD3D11PixelBindings.hpp"
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
-#include <Fallout4HDR/hooks/HookOwnership.hpp>
+#include <FO4Isotope/hooks/HookOwnership.hpp>
 #include <algorithm>
 #include <cassert>
 #include <cstring>

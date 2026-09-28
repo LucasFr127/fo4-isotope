@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [ValidateSet('success', 'failure', 'skip', 'hang')][string]$Fixture,
@@ -33,7 +33,7 @@ if ($Fixture -eq 'hang') {
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot 'scripts/internal/Project.Common.ps1')
-$pidPath = Join-Path ([IO.Path]::GetTempPath()) ("Fallout4HDR test process $([Guid]::NewGuid().ToString('N')).txt")
+$pidPath = Join-Path ([IO.Path]::GetTempPath()) ("FO4Isotope test process $([Guid]::NewGuid().ToString('N')).txt")
 $logPath = $pidPath + '.log'
 $arguments = @('-NoProfile', '-NonInteractive', '-File', $PSCommandPath, '-Fixture')
 try {

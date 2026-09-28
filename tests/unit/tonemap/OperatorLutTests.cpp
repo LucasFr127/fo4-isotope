@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
-#include "Fallout4HDR/tonemap/Aces2.hpp"
-#include "Fallout4HDR/tonemap/Agx.hpp"
-#include "Fallout4HDR/tonemap/Gt7.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
-#include "Fallout4HDR/tonemap/OperatorLut.hpp"
+#include "FO4Isotope/tonemap/Aces2.hpp"
+#include "FO4Isotope/tonemap/Agx.hpp"
+#include "FO4Isotope/tonemap/Gt7.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>

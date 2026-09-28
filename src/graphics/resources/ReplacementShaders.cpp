@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 //
@@ -11,12 +11,12 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "ReplacementShaders.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 #include "PresentationResources.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../RendererLifetime.hpp"
 #include "../LiveSettings.hpp"
-#include <Fallout4HDR/ShippingShaders.generated.hpp>
+#include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <algorithm>
 #include <span>
 #include <cstddef>

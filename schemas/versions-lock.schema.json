@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallout4HDR versions lock",
+  "title": "FO4Isotope versions lock",
   "type": "object",
   "required": [
     "schemaVersion",
@@ -166,14 +166,14 @@
       ],
       "properties": {
         "name": {
-          "const": "Fallout4HDR"
+          "const": "FO4Isotope"
         },
         "version": {
           "type": "string",
           "minLength": 1
         },
         "license": {
-          "const": "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
+          "const": "LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
         }
       },
       "additionalProperties": false

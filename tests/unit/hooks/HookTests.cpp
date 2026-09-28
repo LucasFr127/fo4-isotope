@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "../UnitTestSuite.hpp"
 
-#include "Fallout4HDR/hooks/HookOwnership.hpp"
-#include "Fallout4HDR/hooks/PeIat.hpp"
+#include "FO4Isotope/hooks/HookOwnership.hpp"
+#include "FO4Isotope/hooks/PeIat.hpp"
 #include "TestHarness.hpp"
 
 #include <array>

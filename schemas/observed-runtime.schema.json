@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Fallout4HDR observed runtime candidate",
+  "title": "FO4Isotope observed runtime candidate",
   "type": "object",
   "required": [
     "schemaVersion",

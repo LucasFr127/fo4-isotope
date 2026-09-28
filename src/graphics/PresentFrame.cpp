@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "PresentFrame.hpp"
 #include "RendererLifetime.hpp"
@@ -14,10 +14,10 @@
 #include "resources/DeveloperExposureResources.hpp"
 #include "resources/ArmorCompositionResources.hpp"
 #include "resources/HdrResourcePolicy.hpp"
-#include "Fallout4HDR/ui/SettingsWindow.hpp"
-#include <Fallout4HDR/output/HdrActivationPolicy.hpp>
-#include <Fallout4HDR/ui/HdrSettingsInput.hpp>
-#include "Fallout4HDR/output/PerformanceStatistics.hpp"
+#include "FO4Isotope/ui/SettingsWindow.hpp"
+#include <FO4Isotope/output/HdrActivationPolicy.hpp>
+#include <FO4Isotope/ui/HdrSettingsInput.hpp>
+#include "FO4Isotope/output/PerformanceStatistics.hpp"
 #include <wrl/client.h>
 #include <algorithm>
 #include <array>

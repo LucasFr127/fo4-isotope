@@ -2,7 +2,7 @@
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/{taa_0x8CAC3BD9,taa2_0x61CC29E6}.ps_5_0.hlsl
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
-// Adapted for Fallout4HDR from RenoDX's normalized gamma-domain wrapper around
+// Adapted for FO4Isotope from RenoDX's normalized gamma-domain wrapper around
 // Fallout 4's original temporal filter. Modification: use a reversible,
 // peak-independent positive-HDR compression and invert/reapply UI-relative
 // linear BT.2020 transport while retaining fixed 203-nit temporal history.

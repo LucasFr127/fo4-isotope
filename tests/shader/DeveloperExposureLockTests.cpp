@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ShippingPixelShaderTests.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include <d3d11_1.h>
 #include "reference/ShaderReference.hpp"
-#include "Fallout4HDR/ShippingShaders.generated.hpp"
+#include "FO4Isotope/ShippingShaders.generated.hpp"
 #include "d3d11/ScopedD3D11PixelBindings.hpp"
 #include <algorithm>
 #include <array>

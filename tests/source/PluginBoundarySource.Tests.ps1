@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -9,7 +9,7 @@ $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 function Assert-PluginPchBoundary {
     param([string]$Text)
     $header = '\bset_pcxxheader\s*\(\s*(["''])src/plugin/PluginPch\.hpp\1\s*\)'
-    $pluginTarget = [regex]::Match($Text, '(?s)\btarget\s*\(\s*(["''])Fallout4HDR\1\s*\).*?\btarget_end\s*\(\s*\)')
+    $pluginTarget = [regex]::Match($Text, '(?s)\btarget\s*\(\s*(["''])FO4Isotope\1\s*\).*?\btarget_end\s*\(\s*\)')
     if (-not $pluginTarget.Success -or $pluginTarget.Value -notmatch $header) {
         throw 'The plugin target must own its CommonLib PCH.'
     }
@@ -20,7 +20,7 @@ function Assert-PluginPchBoundary {
 }
 
 foreach ($quote in @('"', "'")) {
-    $valid = "target ( ${quote}Fallout4HDR${quote} )`nset_pcxxheader ( ${quote}src/plugin/PluginPch.hpp${quote} )`ntarget_end ( )"
+    $valid = "target ( ${quote}FO4Isotope${quote} )`nset_pcxxheader ( ${quote}src/plugin/PluginPch.hpp${quote} )`ntarget_end ( )"
     Assert-PluginPchBoundary $valid
     foreach ($invalid in @(
         $valid.Replace('set_pcxxheader', 'disabled_set_pcxxheader'),

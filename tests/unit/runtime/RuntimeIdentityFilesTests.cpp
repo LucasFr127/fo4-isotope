@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 
@@ -18,7 +18,7 @@ namespace fo4hdr::tests {
 void RunRuntimeIdentityFilesTests()
 {
     const auto root = std::filesystem::temp_directory_path() /
-        ("Fallout4HDR-runtime-identity-files-" +
+        ("FO4Isotope-runtime-identity-files-" +
          std::to_string(GetCurrentProcessId()) + "-" +
          std::to_string(GetTickCount64()));
     std::error_code error;

@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #pragma once
 
 #include "d3d11/ContextQuerySafety.hpp"
 #include "RenoDxShaderIdentity.hpp"
-#include "Fallout4HDR/output/RenderPipelineContract.hpp"
+#include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include <d3d11.h>
 #include <cstdint>
 

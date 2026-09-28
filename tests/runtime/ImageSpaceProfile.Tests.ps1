@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -170,10 +170,10 @@ Assert-Rejected {
 
 $first = [IO.Path]::Combine(
     [IO.Path]::GetTempPath(),
-    "Fallout4HDR.RuntimeIdentity.first.$([Guid]::NewGuid()).hpp")
+    "FO4Isotope.RuntimeIdentity.first.$([Guid]::NewGuid()).hpp")
 $second = [IO.Path]::Combine(
     [IO.Path]::GetTempPath(),
-    "Fallout4HDR.RuntimeIdentity.second.$([Guid]::NewGuid()).hpp")
+    "FO4Isotope.RuntimeIdentity.second.$([Guid]::NewGuid()).hpp")
 try {
     & (Join-Path $repoRoot "scripts\generate-runtime-identity.ps1") `
         -Runtime "1.10.163" `

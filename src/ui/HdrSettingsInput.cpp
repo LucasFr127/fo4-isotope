@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
-#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/ui/HdrSettingsInput.hpp"
 
 #include <imgui.h>
 
@@ -59,7 +59,7 @@ std::atomic<std::uint64_t> g_interactionStatus{
 
 constexpr std::uint64_t kInteractionStateMask = 0xFFU;
 constexpr wchar_t kInteractionMessageName[] =
-    L"Fallout4HDR.SettingsInteraction.v1";
+    L"FO4Isotope.SettingsInteraction.v1";
 
 void ResetQueue() noexcept;
 

@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 
 #include "TestHarness.hpp"
 
-#include "Fallout4HDR/game/GameHdrSnapshot.hpp"
+#include "FO4Isotope/game/GameHdrSnapshot.hpp"
 #include "GameSnapshotStore.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "MenuEventQueue.hpp"

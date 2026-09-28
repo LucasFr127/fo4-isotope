@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 version = 1
 
 # Fallback metadata for maintained project files. Existing file and snippet
@@ -14,8 +14,8 @@ path = [
     "third_party/gt7/UPSTREAM.lock.json"
 ]
 precedence = "closest"
-SPDX-FileCopyrightText = "Fallout4HDR contributors"
-SPDX-License-Identifier = "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
+SPDX-FileCopyrightText = "FO4Isotope contributors"
+SPDX-License-Identifier = "LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
 
 # The official oracle is retained byte-for-byte, with its original notice.
 [[annotations]]

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 #include "GameSnapshotStore.hpp"
 #include <REX/LOG.h>
@@ -144,7 +144,7 @@ inline void ReportFeatureFailure(
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: snapshot failure-state publication failed.\n");
+            "FO4Isotope: snapshot failure-state publication failed.\n");
     }
     try
     {
@@ -156,7 +156,7 @@ inline void ReportFeatureFailure(
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: feature failure logging failed.\n");
+            "FO4Isotope: feature failure logging failed.\n");
     }
 }
 

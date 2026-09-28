@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
@@ -31,13 +31,13 @@ if (Test-Path -LiteralPath $sidecar -PathType Leaf) {
     }
 }
 
-$validatedArchive = Open-Fo4HdrValidatedZipArchive $archive -RequiredRoot "Fallout4HDR"
+$validatedArchive = Open-Fo4HdrValidatedZipArchive $archive -RequiredRoot "FO4Isotope"
 $validatedArchive.Dispose()
 
 $extractRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ("F4H Src " + [Guid]::NewGuid().ToString("N").Substring(0, 8))
-$projectRoot = Join-Path $extractRoot "Fallout4HDR"
+$projectRoot = Join-Path $extractRoot "FO4Isotope"
 $environmentNames = @(
     "FO4_ROOT",
     "FO4_MOD_ROOT",
@@ -59,7 +59,7 @@ try {
     )
 
     if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
-        throw "Archive does not contain the stable Fallout4HDR top-level directory."
+        throw "Archive does not contain the stable FO4Isotope top-level directory."
     }
 
     & (Join-Path $projectRoot "scripts\license-audit.ps1") `

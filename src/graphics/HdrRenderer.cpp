@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 //
@@ -10,14 +10,14 @@
 // Native hooks, generation ownership, settings, grading integration and direct
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
-#include "Fallout4HDR/graphics/HdrRenderer.hpp"
-#include "Fallout4HDR/hooks/HookOwnership.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/hooks/HookOwnership.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include "passes/ArmorCompositionPass.hpp"
-#include "Fallout4HDR/ui/SettingsWindow.hpp"
-#include <Fallout4HDR/output/ArmorUiComposition.hpp>
+#include "FO4Isotope/ui/SettingsWindow.hpp"
+#include <FO4Isotope/output/ArmorUiComposition.hpp>
 #include <new>
 #include <algorithm>
 #include <array>
@@ -32,12 +32,12 @@
 #include "resources/ArmorCompositionResources.hpp"
 #include "LutProfileBindings.hpp"
 #include "DrawObservation.hpp"
-#include <Fallout4HDR/output/NativeLutObservation.hpp>
+#include <FO4Isotope/output/NativeLutObservation.hpp>
 #include "PresentFrame.hpp"
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
-#include <Fallout4HDR/tonemap/OperatorLut.hpp>
-#include <Fallout4HDR/output/SelectiveColor.hpp>
+#include "FO4Isotope/output/Hdr10Color.hpp"
+#include <FO4Isotope/tonemap/OperatorLut.hpp>
+#include <FO4Isotope/output/SelectiveColor.hpp>
 
 namespace fo4hdr {
 RendererDevice g_rendererDevice;

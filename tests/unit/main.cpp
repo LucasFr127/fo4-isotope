@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "TestHarness.hpp"
 #include "UnitTestSuite.hpp"
@@ -188,8 +188,8 @@ int main(int argumentCount, char** arguments)
 
     std::cout << "[ SUITE END ] native-cpu passed\n";
     if (filtering)
-        std::cout << "Selected Fallout4HDR test section passed.\n";
+        std::cout << "Selected FO4Isotope test section passed.\n";
     else
-        std::cout << "All Fallout4HDR tests passed.\n";
+        std::cout << "All FO4Isotope tests passed.\n";
     return EXIT_SUCCESS;
 }

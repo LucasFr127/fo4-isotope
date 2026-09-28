@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 Polyphony Digital Inc.
 // Upstream: https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp sha256=94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822
-// Fallout4HDR modification: retain the official default ICtCp/HDR algorithm;
+// FO4Isotope modification: retain the official default ICtCp/HDR algorithm;
 // expose bounded toe, shoulder-start, and color-blend controls only in the
 // production adapter; add finite-input validation and the BT.709/203-nit to
 // Rec.2020/100-nit adapter. The native BT.2020 result is the production output;
@@ -9,9 +9,9 @@
 // LUT baking may defer the final peak clamp until after interpolation.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.
 
-#include "Fallout4HDR/tonemap/Gt7.hpp"
+#include "FO4Isotope/tonemap/Gt7.hpp"
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 
 #include <algorithm>
 #include <array>

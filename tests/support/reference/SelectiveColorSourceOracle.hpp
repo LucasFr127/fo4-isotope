@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "Fallout4HDR/output/SelectiveColor.hpp"
+#include "FO4Isotope/output/SelectiveColor.hpp"
 
 namespace fo4hdr::tests::smooth_tetra_oracle {
 

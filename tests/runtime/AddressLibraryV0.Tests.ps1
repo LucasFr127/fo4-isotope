@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -156,7 +156,7 @@ function New-RequiredRelocation {
 
 $tempRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    ("Fallout4HDR-address-v0-tests-" + [Guid]::NewGuid().ToString("N"))
+    ("FO4Isotope-address-v0-tests-" + [Guid]::NewGuid().ToString("N"))
 
 try {
     New-Item -ItemType Directory -Path $tempRoot | Out-Null

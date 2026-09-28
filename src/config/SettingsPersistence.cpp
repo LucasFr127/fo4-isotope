@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "SettingsPersistence.hpp"
-#include "Fallout4HDR/config/SettingsPersistence.hpp"
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/SettingsPersistence.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
 
 #include <Windows.h>
 

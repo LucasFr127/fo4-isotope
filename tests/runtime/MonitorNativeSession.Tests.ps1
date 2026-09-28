@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
@@ -242,7 +242,7 @@ function Test-UnavailableExitStatus {
 
 $temporaryRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
-    ("Fallout4HDR-monitor-tests-" + [Guid]::NewGuid().ToString("N"))
+    ("FO4Isotope-monitor-tests-" + [Guid]::NewGuid().ToString("N"))
 $resolvedTemporaryRoot = [IO.Path]::GetFullPath($temporaryRoot)
 $expectedPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $null = New-Item -ItemType Directory -Path $resolvedTemporaryRoot

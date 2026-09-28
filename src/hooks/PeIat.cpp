@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#include "Fallout4HDR/hooks/PeIat.hpp"
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+#include "FO4Isotope/hooks/PeIat.hpp"
 
 #include <algorithm>
 #include <array>

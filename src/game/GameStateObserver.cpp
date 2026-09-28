@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include <RE/Fallout.h>
 #include <F4SE/F4SE.h>
@@ -6,10 +6,10 @@
 #include "GameStateObserver.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "GameSnapshotStore.hpp"
-#include "Fallout4HDR/output/HdrActivationPolicy.hpp"
-#include "Fallout4HDR/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/output/HdrActivationPolicy.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "MenuEventQueue.hpp"
-#include "Fallout4HDR/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/ui/HdrSettingsInput.hpp"
 #include <Windows.h>
 #include <algorithm>
 #include <array>
@@ -78,7 +78,7 @@ bool AcquireInputLayer(RE::BSTSmartPointer<RE::BSInputEnableLayer>& inputLayer, 
     }
 
     if (!inputManager->AllocateNewLayer(
-            inputLayer, "Fallout4HDR ImGui") ||
+            inputLayer, "FO4Isotope ImGui") ||
         !inputLayer)
     {
         REX::WARN(
@@ -195,9 +195,9 @@ bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, st
         const auto applied = open == g_settingsInteractionApplied;
         ::OutputDebugStringA(
             applied ?
-                "Fallout4HDR: M14 input logging failed after a completed "
+                "FO4Isotope: M14 input logging failed after a completed "
                 "interaction transition.\n" :
-                "Fallout4HDR: M14 input interaction failed before a complete "
+                "FO4Isotope: M14 input interaction failed before a complete "
                 "transition.\n");
         return applied;
     }
@@ -321,7 +321,7 @@ void ReportMessagingAvailable(
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: messaging snapshot publication failed.\n");
+            "FO4Isotope: messaging snapshot publication failed.\n");
     }
     try
     {
@@ -335,7 +335,7 @@ void ReportMessagingAvailable(
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: messaging availability logging failed.\n");
+            "FO4Isotope: messaging availability logging failed.\n");
     }
 }
 
@@ -1159,7 +1159,7 @@ namespace {
     catch (...)
     {
         ::OutputDebugStringA(
-            "Fallout4HDR: post-registration M2 status logging failed.\n");
+            "FO4Isotope: post-registration M2 status logging failed.\n");
     }
     return true;
 }

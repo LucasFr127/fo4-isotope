@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [ValidateSet("1.10.163")]
@@ -20,19 +20,19 @@ $lock = Get-Content (
 $entry = $lock.runtimes.$Runtime
 $stageRoot = Join-Path $repoRoot "dist"
 $builtDll =
-    Join-Path $repoRoot "build\windows\x64\$Mode\Fallout4HDR.dll"
+    Join-Path $repoRoot "build\windows\x64\$Mode\FO4Isotope.dll"
 $pluginRoot =
     Join-Path $stageRoot "$Runtime\Data\F4SE\Plugins"
-$stagedDll = Join-Path $pluginRoot "Fallout4HDR.dll"
+$stagedDll = Join-Path $pluginRoot "FO4Isotope.dll"
 $stagedManifest = Join-Path `
     $pluginRoot `
-    "Fallout4HDR\runtime-$Runtime.json"
+    "FO4Isotope\runtime-$Runtime.json"
 
 foreach ($path in @(
     $stagedDll,
-    (Join-Path $pluginRoot "Fallout4HDR.pdb"),
-    (Join-Path $pluginRoot "Fallout4HDR.ini"),
-    (Join-Path $pluginRoot "Fallout4HDR\Default.ini"),
+    (Join-Path $pluginRoot "FO4Isotope.pdb"),
+    (Join-Path $pluginRoot "FO4Isotope.ini"),
+    (Join-Path $pluginRoot "FO4Isotope\Default.ini"),
     $stagedManifest
 )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
@@ -118,7 +118,7 @@ try {
     $structureIndependence =
         [Runtime.InteropServices.Marshal]::ReadInt32($version, 0x20C)
 
-    if ($dataVersion -ne 1 -or $pluginName -ne "Fallout4HDR") {
+    if ($dataVersion -ne 1 -or $pluginName -ne "FO4Isotope") {
         throw "The exported F4SE plugin identity is invalid."
     }
     if ($addressIndependence -ne 4 -or

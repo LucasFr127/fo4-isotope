@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 
 #include <algorithm>
 #include <array>

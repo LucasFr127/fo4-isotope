@@ -1,6 +1,6 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
-#include "Fallout4HDR/tonemap/Aces2Lmt.hpp"
+#include "FO4Isotope/tonemap/Aces2Lmt.hpp"
 
 #include <algorithm>
 #include <array>
@@ -21,7 +21,7 @@ using Vec3 = std::array<double, 3>;
 // SPDX-SnippetBegin
 // SPDX-License-Identifier: Apache-2.0
 // SPDX-SnippetCopyrightText: Copyright Contributors to the ACES Project
-// SPDX-SnippetComment: Adapted from scottdyer/aces-look@dc79dd74554e73a9e1518ec5f00ae0c1725f1686/contrast/LMT_Test_OCIO_options.dctl, selecting only J2M2_CURVE ("J curve 2 + M curve 2"). Modified by Fallout4HDR: translated the dependency-free DCTL float transform to C++ double while retaining the source float constants and spline extrapolation; corrected hue on the vertical opponent axis; replaced DCTL vector/intrinsic syntax with project value types and standard math; added explicit finite-input/intermediate/output rejection; and omitted UI selection plus every unselected LMT curve. See THIRD_PARTY_NOTICES.md.
+// SPDX-SnippetComment: Adapted from scottdyer/aces-look@dc79dd74554e73a9e1518ec5f00ae0c1725f1686/contrast/LMT_Test_OCIO_options.dctl, selecting only J2M2_CURVE ("J curve 2 + M curve 2"). Modified by FO4Isotope: translated the dependency-free DCTL float transform to C++ double while retaining the source float constants and spline extrapolation; corrected hue on the vertical opponent axis; replaced DCTL vector/intrinsic syntax with project value types and standard math; added explicit finite-input/intermediate/output rejection; and omitted UI selection plus every unselected LMT curve. See THIRD_PARTY_NOTICES.md.
 // Upstream file SHA-256: b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f.
 
 // Each literal is first rounded as the source DCTL's float literal and then

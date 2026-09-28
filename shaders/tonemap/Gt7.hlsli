@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 Polyphony Digital Inc.
 // Upstream: https://blog.selfshadow.com/publications/s2025-shading-course/pdi/supplemental/gt7_tone_mapping.cpp sha256=94df7e7e310b9423ebb5aaaa29416f376ebbae66e0948fb259f8688314b29822
-// Fallout4HDR modification: translate the official default ICtCp/HDR color
+// FO4Isotope modification: translate the official default ICtCp/HDR color
 // volume mapper to SM5 and adapt BT.709 scene units to its Rec.2020 framebuffer
 // convention. The native BT.2020 path is the analytical GPU oracle.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.

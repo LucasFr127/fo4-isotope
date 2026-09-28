@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "DeveloperExposureResources.hpp"
 #include "ReplacementShaders.hpp"
 #include "../RendererLifetime.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
-#include <Fallout4HDR/ShippingShaders.generated.hpp>
+#include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -92,7 +92,7 @@ void SetD3dDebugName(
     diagnostic.captureShader = std::move(shader);
     diagnostic.constants = std::move(constants);
     (void)g_rendererDevice.activeContext->QueryInterface(IID_PPV_ARGS(&diagnostic.context1));
-    SetD3dDebugName(diagnostic.texture.Get(), "Fallout4HDR developer exposure snapshot");
+    SetD3dDebugName(diagnostic.texture.Get(), "FO4Isotope developer exposure snapshot");
     return true;
 }
 

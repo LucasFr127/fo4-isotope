@@ -1,9 +1,9 @@
 {
   "schemaVersion": 2,
   "project": {
-    "name": "Fallout4HDR",
+    "name": "FO4Isotope",
     "version": "0.0.0-dev",
-    "license": "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
+    "license": "LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions"
   },
   "toolchain": {
     "requirements": {

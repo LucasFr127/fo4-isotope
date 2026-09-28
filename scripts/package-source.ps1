@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [string]$OutputPath,
@@ -74,7 +74,7 @@ if (-not $OutputPath) {
     $OutputPath =
         Join-Path `
             $repoRoot `
-            "dist\source\Fallout4HDR-corresponding-source.zip"
+            "dist\source\FO4Isotope-corresponding-source.zip"
 }
 
 function Copy-PackageSourceArtifact {
@@ -136,7 +136,7 @@ function Export-GitSourceBatch {
     param([string]$GitRoot, [string]$DestinationRoot, [string[]]$Files)
     $archivePath = Join-Path `
         ([IO.Path]::GetTempPath()) `
-        ("Fallout4HDR-git-archive-" + [Guid]::NewGuid() + ".tar")
+        ("FO4Isotope-git-archive-" + [Guid]::NewGuid() + ".tar")
     try {
         $arguments = @(
             "-C",
@@ -432,8 +432,8 @@ function New-DeterministicZip {
 $tempRoot =
     Join-Path `
         ([IO.Path]::GetTempPath()) `
-        ("Fallout4HDR-source-" + [Guid]::NewGuid())
-$stageRoot = Join-Path $tempRoot "Fallout4HDR"
+        ("FO4Isotope-source-" + [Guid]::NewGuid())
+$stageRoot = Join-Path $tempRoot "FO4Isotope"
 
 try {
     New-Item -ItemType Directory -Force $stageRoot |

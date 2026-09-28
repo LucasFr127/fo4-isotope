@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 function Test-Fo4HdrOfficialGt7Origin {
     param([string]$RelativePath, [string]$Text, [string]$LicenseExpression)
@@ -121,7 +121,7 @@ function Assert-Fo4HdrProductionSourceLicenseSelfTests {
         "// ${spdx}License-Identifier: GPL-3.0-or-later",
         '// Copyright (c) Upstream',
         "// Upstream: org/repo@$commit/source.cpp",
-        '// Modified by Fallout4HDR'
+        '// Modified by FO4Isotope'
     ) -join "`n"
     $snippet = @(
         $project,
@@ -167,7 +167,7 @@ function Assert-Fo4HdrProductionSourceLicenseSelfTests {
         @{ name = 'missing imported copyright'; path = 'src/imported.cpp';
             text = $imported.Replace('// Copyright (c) Upstream', '') },
         @{ name = 'missing modification notice'; path = 'src/imported.cpp';
-            text = $imported.Replace('// Modified by Fallout4HDR', '') },
+            text = $imported.Replace('// Modified by FO4Isotope', '') },
         @{ name = 'missing snippet origin'; path = 'src/snippet.cpp';
             text = $snippet.Replace("@$commit/", '@main/') },
         @{ name = 'missing nested snippet origin'; path = 'src/nested.cpp';

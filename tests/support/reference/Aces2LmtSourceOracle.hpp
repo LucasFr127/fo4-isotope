@@ -4,12 +4,12 @@
 // Upstream: scottdyer/aces-look@dc79dd74554e73a9e1518ec5f00ae0c1725f1686/contrast/LMT_Test_OCIO_options.dctl
 // Source SHA-256:
 // b5b1022c46758c02edd4c3967375d6daa0cd022e78c85962004a2f628318711f.
-// Modified by Fallout4HDR: this test-only C++ port selects only
+// Modified by FO4Isotope: this test-only C++ port selects only
 // J2M2_CURVE ("J curve 2 + M curve 2"), preserves the source float constants
 // and evaluation order, and replaces DCTL vector/intrinsic syntax with C++.
 #pragma once
 
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 
 namespace fo4hdr::tests {
 

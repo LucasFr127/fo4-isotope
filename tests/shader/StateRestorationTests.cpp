@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ShaderTestSuite.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include <d3d11_1.h>
 #include "reference/ShaderReference.hpp"
-#include "Fallout4HDR/TestShaders.generated.hpp"
+#include "FO4Isotope/TestShaders.generated.hpp"
 #include "d3d11/BorrowedComputeState.hpp"
 #include <array>
 #include <cstdint>

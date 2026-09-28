@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 Set-StrictMode -Version Latest
 
@@ -57,7 +57,7 @@ function Assert-Fo4HdrRuntimeActionAllowed {
         "release-approved"
     )
     if ($Status -notin $knownStatuses) {
-        throw "Unknown Fallout4HDR runtime status '$Status'."
+        throw "Unknown FO4Isotope runtime status '$Status'."
     }
 
     $allowed = Test-Fo4HdrRuntimeActionAuthorization $Status $Action $AllowUnvalidatedRuntime.IsPresent

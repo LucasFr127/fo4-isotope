@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
     [string]$OutputPath,
@@ -13,7 +13,7 @@ $repoRoot = Get-Fo4HdrRepoRoot
 if (-not $OutputPath) {
     $OutputPath = Join-Path `
         $repoRoot `
-        "LICENSES\LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt"
+        "LICENSES\LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt"
 }
 
 $gpl = Read-Fo4HdrCanonicalUtf8Text (
@@ -24,13 +24,13 @@ $exceptions = Read-Fo4HdrCanonicalUtf8Text (
 )
 
 $introLines = @(
-    "Fallout4HDR combined licensing terms",
+    "FO4Isotope combined licensing terms",
     "====================================",
     "",
     "SPDX custom license identifier:",
-    "LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions",
+    "LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions",
     "",
-    "Project-owned Fallout4HDR source is licensed under GNU GPL version 3 or any",
+    "Project-owned FO4Isotope source is licensed under GNU GPL version 3 or any",
     "later version, with the additional permissions reproduced after the GPL text.",
     "The additional-permission text is kept verbatim from the pinned",
     'Dear-Modding-FO4 `commonlib-shared/EXCEPTIONS` file used by the project.',

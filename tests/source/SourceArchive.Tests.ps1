@@ -1,11 +1,11 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param()
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 . (Join-Path $repoRoot "scripts/internal/Project.Common.ps1")
-$archivePath = Join-Path ([IO.Path]::GetTempPath()) ("Fallout4HDR-archive-" + [Guid]::NewGuid() + ".zip")
+$archivePath = Join-Path ([IO.Path]::GetTempPath()) ("FO4Isotope-archive-" + [Guid]::NewGuid() + ".zip")
 Add-Type -AssemblyName System.IO.Compression
 
 function New-TestArchive {
@@ -13,7 +13,7 @@ function New-TestArchive {
 
     $writer = [IO.Compression.ZipFile]::Open($archivePath, "Create")
     try {
-        foreach ($name in @("Fallout4HDR/", "Fallout4HDR/src/example.cpp") + $ExtraEntries) {
+        foreach ($name in @("FO4Isotope/", "FO4Isotope/src/example.cpp") + $ExtraEntries) {
             [void]$writer.CreateEntry($name)
         }
     }
@@ -32,7 +32,7 @@ function Assert-ArchiveRejection {
 }
 
 try {
-    foreach ($extra in @("", "unexpected.txt", "Fallout4HDR-other/file.txt", "other/")) {
+    foreach ($extra in @("", "unexpected.txt", "FO4Isotope-other/file.txt", "other/")) {
         if ($extra) { New-TestArchive -ExtraEntries @($extra) }
         else { New-TestArchive }
 
@@ -40,12 +40,12 @@ try {
         $generic = Open-Fo4HdrValidatedZipArchive $archivePath
         $generic.Dispose()
         if (-not $extra) {
-            $source = Open-Fo4HdrValidatedZipArchive $archivePath -RequiredRoot "Fallout4HDR"
+            $source = Open-Fo4HdrValidatedZipArchive $archivePath -RequiredRoot "FO4Isotope"
             $source.Dispose()
         } else {
             Assert-ArchiveRejection {
                 & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
-            } "Archive entry is outside the required Fallout4HDR/ root:*"
+            } "Archive entry is outside the required FO4Isotope/ root:*"
         }
         Remove-Item -LiteralPath $archivePath -Force
     }
@@ -54,12 +54,12 @@ try {
         @{ Entry = "/absolute.txt"; Error = "unsafe" },
         @{ Entry = "C:/absolute.txt"; Error = "unsafe" },
         @{ Entry = '\\server\share\absolute.txt'; Error = "unsafe" },
-        @{ Entry = "Fallout4HDR/../outside.txt"; Error = "traversal" },
-        @{ Entry = 'Fallout4HDR\..\outside.txt'; Error = "traversal" },
-        @{ Entry = "Fallout4HDR/./src/other.cpp"; Error = "traversal" },
-        @{ Entry = "Fallout4HDR/src/example.cpp"; Error = "duplicate" },
-        @{ Entry = "Fallout4HDR/SRC/EXAMPLE.CPP"; Error = "duplicate" },
-        @{ Entry = 'Fallout4HDR/src\example.cpp'; Error = "duplicate" }
+        @{ Entry = "FO4Isotope/../outside.txt"; Error = "traversal" },
+        @{ Entry = 'FO4Isotope\..\outside.txt'; Error = "traversal" },
+        @{ Entry = "FO4Isotope/./src/other.cpp"; Error = "traversal" },
+        @{ Entry = "FO4Isotope/src/example.cpp"; Error = "duplicate" },
+        @{ Entry = "FO4Isotope/SRC/EXAMPLE.CPP"; Error = "duplicate" },
+        @{ Entry = 'FO4Isotope/src\example.cpp'; Error = "duplicate" }
     )) {
         New-TestArchive -ExtraEntries @($case.Entry)
         $expected = "Archive contains a " + $case.Error + " path:*"
@@ -68,7 +68,7 @@ try {
             $archive = Open-Fo4HdrValidatedZipArchive $archivePath
             $archive.Dispose()
         } $expected
-        if ($case.Entry -ceq "Fallout4HDR/../outside.txt") {
+        if ($case.Entry -ceq "FO4Isotope/../outside.txt") {
             Assert-ArchiveRejection {
                 & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
             } $expected
@@ -82,7 +82,7 @@ try {
     Set-Content -LiteralPath $sidecarPath -Value "$validHash  source.zip" -Encoding ascii
     Assert-ArchiveRejection {
         & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath
-    } "Archive entry is outside the required Fallout4HDR/ root:*"
+    } "Archive entry is outside the required FO4Isotope/ root:*"
     Set-Content -LiteralPath $sidecarPath -Value (('0' * 64) + "  source.zip") -Encoding ascii
     Assert-ArchiveRejection {
         & (Join-Path $repoRoot "scripts/verify-source-package.ps1") -ArchivePath $archivePath

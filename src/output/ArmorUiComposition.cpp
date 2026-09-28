@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#include "Fallout4HDR/output/ArmorUiComposition.hpp"
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+#include "FO4Isotope/output/ArmorUiComposition.hpp"
 
 #include <atomic>
 #include <limits>

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+# SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
 param(
     [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
@@ -32,11 +32,11 @@ if (-not (Test-Path $source)) {
     -StageOnly
 
 $expectedRelativeFiles = @(
-    "F4SE\Plugins\Fallout4HDR.dll",
-    "F4SE\Plugins\Fallout4HDR.pdb",
-    "F4SE\Plugins\Fallout4HDR.ini",
-    "F4SE\Plugins\Fallout4HDR\Default.ini",
-    "F4SE\Plugins\Fallout4HDR\runtime-$Runtime.json"
+    "F4SE\Plugins\FO4Isotope.dll",
+    "F4SE\Plugins\FO4Isotope.pdb",
+    "F4SE\Plugins\FO4Isotope.ini",
+    "F4SE\Plugins\FO4Isotope\Default.ini",
+    "F4SE\Plugins\FO4Isotope\runtime-$Runtime.json"
 )
 $actualRelativeFiles = @(
     Get-ChildItem $source -Recurse -File |
@@ -70,9 +70,9 @@ if ($env:FO4_ROOT -and
 
 $destinationLeaf = Split-Path $destination -Leaf
 if (-not $AllowUnconventionalDestination -and
-    $destinationLeaf -notmatch 'Fallout4HDR') {
+    $destinationLeaf -notmatch 'FO4Isotope') {
     throw (
-        "FO4_MOD_ROOT does not look like a dedicated Fallout4HDR mod. " +
+        "FO4_MOD_ROOT does not look like a dedicated FO4Isotope mod. " +
         "Use a dedicated mod directory or pass " +
         "-AllowUnconventionalDestination deliberately."
     )
@@ -104,13 +104,13 @@ $obsolete = @(
     Where-Object {
         $_ -notin $newRelativeFiles -and
         ([string]$_).Replace('/', '\') -ine
-            "F4SE\Plugins\Fallout4HDR\Personal.ini"
+            "F4SE\Plugins\FO4Isotope\Personal.ini"
     }
 )
 
 if ($PSCmdlet.ShouldProcess(
     $destination,
-    "Deploy Fallout4HDR $Runtime"
+    "Deploy FO4Isotope $Runtime"
 )) {
     New-Item -ItemType Directory -Force $destination |
         Out-Null

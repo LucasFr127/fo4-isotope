@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 //
@@ -242,7 +242,7 @@ bool HasExpectedShaderBinding(ID3D11DeviceContext* context, const DrawObservatio
     context->PSGetShader(&actual, nullptr, nullptr);
     if (actual.Get() == record.expectedBoundShader) return true;
 
-    // A downstream owner changed a shader after Fallout4HDR selected its
+    // A downstream owner changed a shader after FO4Isotope selected its
     // replacement. Required-pass collisions disable this generation; an
     // optional collision disables only scene continuation for this draw.
     if (DecideUnknownShaderOutcome(record.currentRequirement) ==

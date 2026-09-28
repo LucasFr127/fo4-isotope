@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/taa_0x8CAC3BD9.ps_5_0.hlsl
-// Adapted for Fallout4HDR from the pinned TAA 0x8CAC3BD9 shader. Modification:
+// Adapted for FO4Isotope from the pinned TAA 0x8CAC3BD9 shader. Modification:
 // preserve the original Fallout 4 temporal body and bindings while wrapping
 // color in the project HDR intermediate defined by TemporalIntermediate.hlsli.
 // See THIRD_PARTY_NOTICES.md.

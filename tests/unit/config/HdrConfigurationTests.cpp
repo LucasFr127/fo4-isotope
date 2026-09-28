@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 #include "HdrSettingsTestSupport.hpp"
 
-#include "Fallout4HDR/config/PluginConfiguration.hpp"
+#include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <filesystem>
@@ -15,7 +15,7 @@ namespace fo4hdr::tests {
 void TestShippedConfiguration()
 {
     const auto shipped = LoadPluginConfiguration(
-        std::filesystem::path{"config/Fallout4HDR.ini"});
+        std::filesystem::path{"config/FO4Isotope.ini"});
     FO4HDR_CHECK(shipped.valid);
     FO4HDR_CHECK(shipped.profileIssues.empty());
     FO4HDR_CHECK(shipped.distributedProfiles.count > 0);

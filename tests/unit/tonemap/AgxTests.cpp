@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "../UnitTestSuite.hpp"
 
-#include "Fallout4HDR/tonemap/Agx.hpp"
-#include "Fallout4HDR/output/Hdr10Color.hpp"
+#include "FO4Isotope/tonemap/Agx.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 
 #include <array>
@@ -73,7 +73,7 @@ void TestIndependentCtmFloat32SourceOracle()
             {148.77968, 20.1763, 3.0576978}}
     };
     // Source parity stays at the registered 2.4 contrast independently of
-    // Fallout4HDR's production default.
+    // FO4Isotope's production default.
     const ToneMapperParameters sourceParameters{.agxContrast = 2.4};
     for (const auto& reference : references)
         CheckRgb(MapAgxSourceToBt2020Nits(
@@ -175,7 +175,7 @@ constexpr std::array kExpandedReferences{
 void TestExpandedIndependentCtmFloat32SourceOracle()
 {
     // Source parity stays at the registered 2.4 contrast independently of
-    // Fallout4HDR's production default.
+    // FO4Isotope's production default.
     const ToneMapperParameters sourceParameters{.agxContrast = 2.4};
     for (const auto& reference : kExpandedReferences)
         CheckRgb(MapAgxSourceToBt2020Nits(

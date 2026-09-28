@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LicenseRef-Fallout4HDR-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "GraphicsDiagnostics.hpp"
 #include "ShaderRegistry.hpp"
@@ -7,7 +7,7 @@
 #include <utility>
 #include "RendererLifetime.hpp"
 #include "LiveSettings.hpp"
-#include <Fallout4HDR/ui/HdrSettingsInput.hpp>
+#include <FO4Isotope/ui/HdrSettingsInput.hpp>
 #include <format>
 #include <string>
 
@@ -633,7 +633,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
     }
     catch (...)
     {
-        ::OutputDebugStringA("Fallout4HDR: M6 lifecycle diagnostics failed.\n");
+        ::OutputDebugStringA("FO4Isotope: M6 lifecycle diagnostics failed.\n");
     }
 }
 
