@@ -417,7 +417,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Output", "UiPaperWhiteNits", RequiredKey::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", RequiredKey::videoWhiteNits},
     {"ToneMapper", "Algorithm", RequiredKey::algorithm},
-    {"ACES2LMT", "LookStrength", RequiredKey::acesLookStrength},
+    {"ACES2", "LookStrength", RequiredKey::acesLookStrength},
     {"AgX", "MiddleGray", RequiredKey::agxMiddleGrayEv},
     {"AgX", "Contrast", RequiredKey::agxContrast},
     {"AgX", "HdrPurity", RequiredKey::agxHdrPurity},
@@ -610,7 +610,7 @@ PluginConfigurationError ParseNumber(std::string_view value,
 PluginConfigurationError ParseAlgorithm(std::string_view value,
     ProductionToneMapperAlgorithm& target) noexcept
 {
-    constexpr std::array names{std::string_view{"ACES2LMT"}, std::string_view{"AgX"}, std::string_view{"GT7"}};
+    constexpr std::array names{std::string_view{"ACES2"}, std::string_view{"AgX"}, std::string_view{"GT7"}};
     const auto found = std::ranges::find(names, value);
     if (found == names.end()) return PluginConfigurationError::unsupportedAlgorithm;
     target = static_cast<ProductionToneMapperAlgorithm>(found - names.begin());
@@ -1056,7 +1056,7 @@ std::string_view ToString(
 {
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt: return "ACES2LMT";
+    case ProductionToneMapperAlgorithm::aces2: return "ACES2";
     case ProductionToneMapperAlgorithm::agX: return "AgX";
     case ProductionToneMapperAlgorithm::gt7: return "GT7";
     }

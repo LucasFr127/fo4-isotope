@@ -12,7 +12,7 @@ namespace fo4hdr::tests {
 void TestOperatorParameterMatching(const OperatorLutBuildRequest& desired)
 {
     for (const auto algorithm : {
-             ProductionToneMapperAlgorithm::aces2Lmt,
+             ProductionToneMapperAlgorithm::aces2,
              ProductionToneMapperAlgorithm::agX,
              ProductionToneMapperAlgorithm::gt7})
     {
@@ -23,7 +23,7 @@ void TestOperatorParameterMatching(const OperatorLutBuildRequest& desired)
         auto inactiveMismatch = parameterDesired;
         switch (algorithm)
         {
-        case ProductionToneMapperAlgorithm::aces2Lmt:
+        case ProductionToneMapperAlgorithm::aces2:
             selectedMismatch.toneMapperParameters.acesLookStrength = 0.5;
             inactiveMismatch.toneMapperParameters.agxContrast = 3.0;
             break;
@@ -95,7 +95,7 @@ void TestOperatorLutDeviceReplacementTransitions()
         OperatorLutCompletionAction::publish);
 
     auto lmtDesired = requeued;
-    lmtDesired.algorithm = ProductionToneMapperAlgorithm::aces2Lmt;
+    lmtDesired.algorithm = ProductionToneMapperAlgorithm::aces2;
     ++lmtDesired.settingsGeneration;
     ++lmtDesired.requestGeneration;
     FO4HDR_CHECK(ClassifyOperatorLutCompletion(

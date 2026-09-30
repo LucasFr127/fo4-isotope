@@ -134,7 +134,7 @@ struct ImageControlProductionCheck
             const auto controlled = ApplyImageControlsOracle(graded, 0, 1, blacks);
             const fo4hdr::LinearRgb source{controlled[0], controlled[1], controlled[2]};
             const auto expected =
-                aces ? fo4hdr::MapAces2LmtToBt2020Nits(*aces, source) : MapProductionOperator(mapper, source, 1000);
+                aces ? fo4hdr::MapAdaptedAces2ToBt2020Nits(*aces, source) : MapProductionOperator(mapper, source, 1000);
             const NativeGradeRgb reference{expected.red, expected.green, expected.blue};
             nits[i] = {Binary16ToFloat(half[i][0]), Binary16ToFloat(half[i][1]), Binary16ToFloat(half[i][2])};
             const NativeGradeRgb actual{nits[i].red, nits[i].green, nits[i].blue};
@@ -438,12 +438,12 @@ struct ImageControlFixture
         D3D11_SUBRESOURCE_DATA uiData{transparent.data(), sizeof(transparent), 0};
         auto ui =
             CreateTexture(*device.device.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE, &uiData);
-        for (const auto mapper : {TestedToneMapper::aces2Lmt, TestedToneMapper::agX, TestedToneMapper::gt7}) {
+        for (const auto mapper : {TestedToneMapper::aces2, TestedToneMapper::agX, TestedToneMapper::gt7}) {
             const auto algorithm = ProductionAlgorithm(mapper);
             const auto lut = CreateOperatorLut(*device.device.Get(), algorithm, 1000);
-            const auto aces = mapper == TestedToneMapper::aces2Lmt ? fo4hdr::CreateAces2Transform(1000)
+            const auto aces = mapper == TestedToneMapper::aces2 ? fo4hdr::CreateAces2Transform(1000)
                                                                    : fo4hdr::Aces2TransformHandle{};
-            FO4HDR_WARP_CHECK(mapper != TestedToneMapper::aces2Lmt || aces);
+            FO4HDR_WARP_CHECK(mapper != TestedToneMapper::aces2 || aces);
             CheckDirectOperator({mapper, lut, nearBlack, directOperatorShader, directOperatorOutput});
             for (const auto &corpus : {corpora[0], corpora[1], corpora[2], nearBlack}) {
                 const bool nearBlackCorpus = corpus[1].red < 0;

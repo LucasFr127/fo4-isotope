@@ -163,10 +163,10 @@ MakeUnorm8Pixels(const std::array<Float4, kWidth>& samples)
     float displayPeakNits) noexcept
 {
     switch (toneMapper) {
-    case TestedToneMapper::aces2Lmt: {
+    case TestedToneMapper::aces2: {
         const auto transform = fo4hdr::CreateAces2Transform(displayPeakNits);
         return transform ?
-            fo4hdr::MapAces2LmtToBt2020Nits(*transform, scene) :
+            fo4hdr::MapAdaptedAces2ToBt2020Nits(*transform, scene) :
             fo4hdr::LinearRgb{};
     }
     case TestedToneMapper::agX:
@@ -181,8 +181,8 @@ MakeUnorm8Pixels(const std::array<Float4, kWidth>& samples)
     TestedToneMapper toneMapper) noexcept
 {
     switch (toneMapper) {
-    case TestedToneMapper::aces2Lmt:
-        return fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt;
+    case TestedToneMapper::aces2:
+        return fo4hdr::ProductionToneMapperAlgorithm::aces2;
     case TestedToneMapper::agX:
         return fo4hdr::ProductionToneMapperAlgorithm::agX;
     case TestedToneMapper::gt7:
@@ -195,7 +195,7 @@ MakeUnorm8Pixels(const std::array<Float4, kWidth>& samples)
     TestedToneMapper toneMapper) noexcept
 {
     switch (toneMapper) {
-    case TestedToneMapper::aces2Lmt: return 1U;
+    case TestedToneMapper::aces2: return 1U;
     case TestedToneMapper::agX: return 2U;
     case TestedToneMapper::gt7: return 3U;
     }

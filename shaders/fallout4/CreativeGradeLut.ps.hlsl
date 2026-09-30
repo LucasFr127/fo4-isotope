@@ -8,13 +8,13 @@
 // look through a project-owned radial HDR extension, and insert the selected
 // production operator exactly once before TAA. Apply a project-authored
 // grade-strength blend and BT.709 image controls
-// before that operator. ACES 2 LMT, AgX, and GT7 use a device-scoped
+// before that operator. ACES 2, AgX, and GT7 use a device-scoped
 // immutable FP16 operator LUT generated outside the hot path. Every operator
 // publishes absolute linear BT.2020 and uses UI-white-relative BT.2020
 // transport so later native backbuffer UI may retain its own
 // paper white while temporal history keeps fixed scene units.
 // See THIRD_PARTY_NOTICES.md.
-// Direct Academy ACES 2 remains an internal component of the composed LMT
+// Direct Academy ACES 2 remains an internal component of the adapted ACES 2
 // source response; only the three production operators are selectable.
 
 #include "../tonemap/OperatorLut.hlsli"
@@ -81,7 +81,7 @@ void main(
         hdrLinear, result, luminanceRemoval, colorRemoval);
     result = Fo4HdrApplyImageControls(result);
     result = Fo4HdrApplySelectiveColor(result);
-    // Modes 1..3 are ACES2LMT, AgX, and GT7. They share the t7/s7 LUT seam.
+    // Modes 1..3 are ACES2, AgX, and GT7. They share the t7/s7 LUT seam.
     if (Fo4HdrProductionMode >= 1u && Fo4HdrProductionMode <= 3u)
     {
         const float3 absoluteBt2020Nits = Fo4HdrSampleOperatorLut(

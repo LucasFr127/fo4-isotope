@@ -42,10 +42,10 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
     FO4HDR_CHECK(rewritten.find("ColorGradingMethod=NativeReference\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
-        "[ToneMapper]\r\nAlgorithm=ACES2LMT\r\n") !=
+        "[ToneMapper]\r\nAlgorithm=ACES2\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
-        "[ACES2LMT]\r\nLookStrength=0.35\r\n") !=
+        "[ACES2]\r\nLookStrength=0.35\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "[AgX]\r\nMiddleGray=-0.25\r\nContrast=2.8\r\n"
@@ -145,7 +145,7 @@ void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfac
 void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
     constexpr std::string_view legacyExposure =
-        "[ToneMapper]\nAlgorithm=ACES2LMT\nExposureEV=-0.5\n"
+        "[ToneMapper]\nAlgorithm=ACES2\nExposureEV=-0.5\n"
         "[Image]\nGradeTransfer=PreserveHDRColor\nContrast=0\n";
     const auto migrated = RewriteHdrSettingsIni(
         legacyExposure, settings, interfaceSettings);
@@ -168,7 +168,7 @@ void TestSettingsPersistenceRewrite()
 {
     HdrSettings settings{};
     HdrInterfaceSettings interfaceSettings{};
-    settings.productionAlgorithm = ProductionToneMapperAlgorithm::aces2Lmt;
+    settings.productionAlgorithm = ProductionToneMapperAlgorithm::aces2;
     settings.toneMapperParameters = {
         .acesLookStrength = 0.35,
         .agxMiddleGrayEv = -0.25,
@@ -378,7 +378,7 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(persistedProfiles.find(
         "[LUT:textures/distributed.dds]\nInherit=1\n") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("[ACES2LMT]\nLookStrength=0.4") !=
+    FO4HDR_CHECK(persisted.find("[ACES2]\nLookStrength=0.4") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("[AgX]\nMiddleGray=0.25\nContrast=3") !=
         std::string::npos);

@@ -299,7 +299,7 @@ namespace {
 {
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt: settings.mode = 1U; return true;
+    case ProductionToneMapperAlgorithm::aces2: settings.mode = 1U; return true;
     case ProductionToneMapperAlgorithm::agX: settings.mode = 2U; return true;
     case ProductionToneMapperAlgorithm::gt7: settings.mode = 3U; return true;
     default: return false;
@@ -440,7 +440,7 @@ void ApplyOperatorKey(
     settings.displayPeakNits = displayPeakNits;
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::aces2:
         settings.toneMapperParameters.acesLookStrength =
             parameters.acesLookStrength;
         break;

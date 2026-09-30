@@ -58,7 +58,7 @@ constexpr std::array<PersistedKey, 32> kPersistedKeys{{
     {"Output", "UiPaperWhiteNits", &HdrSettings::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", &HdrSettings::videoWhiteNits},
     {"ToneMapper", "Algorithm", nullptr, nullptr, true},
-    {"ACES2LMT", "LookStrength", nullptr, nullptr, false, false, false,
+    {"ACES2", "LookStrength", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::acesLookStrength},
     {"AgX", "MiddleGray", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::agxMiddleGrayEv},
@@ -718,7 +718,7 @@ private:
     void AppendMissingGroups()
     {
         constexpr std::array<std::string_view, 9> groups{"Output", "ToneMapper",
-            "ACES2LMT", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface"};
+            "ACES2", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface"};
         for (const auto group : groups)
         {
             if (group == "SelectiveColor") AppendMissingSelective();

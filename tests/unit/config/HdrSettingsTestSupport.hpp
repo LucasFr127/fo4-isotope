@@ -14,7 +14,7 @@ DeveloperMode=0
 DisplayPeakNits=1000
 UiPaperWhiteNits=203
 [ToneMapper]
-Algorithm=ACES2LMT
+Algorithm=ACES2
 [Image]
 Exposure=0
 [Debug]
@@ -50,7 +50,7 @@ ToggleKey=F12
 Scale=1.5
 WindowWidth=900
 WindowHeight=760
-[ACES2LMT]
+[ACES2]
 LookStrength=0.25
 [AgX]
 MiddleGray=-0.25

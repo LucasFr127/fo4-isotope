@@ -18,7 +18,7 @@
 // without changing neutral scene values, and stop at absolute display-linear
 // Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
 // the shared forward path retains the official AP1 formation clamp.
-// ACES2LMT alone blends a recomputed zero-toe shadow response into the scalar
+// ACES2 alone blends a recomputed zero-toe shadow response into the scalar
 // tone scale below internal 0.18 and uses a fixed-width gamut shoulder to avoid
 // the reference reach/gamut crossing discontinuity.
 // The official display-encoding/PQ stage is intentionally omitted because the
@@ -558,7 +558,7 @@ namespace {
     return {output[0], output[1], output[2]};
 }
 
-[[nodiscard]] Vec3 EvaluateAces2LmtGamutInput(
+[[nodiscard]] Vec3 EvaluateAdaptedAces2GamutInput(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength) noexcept
@@ -586,7 +586,7 @@ namespace {
 
 }  // namespace
 
-Aces2CompressionBoundary EvaluateAces2LmtCompressionBoundary(
+Aces2CompressionBoundary EvaluateAdaptedAces2CompressionBoundary(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength) noexcept
@@ -594,7 +594,7 @@ Aces2CompressionBoundary EvaluateAces2LmtCompressionBoundary(
     if (!IsLookStrengthValid(lookStrength)) return {};
     Aces2CompressionBoundary boundary{};
     static_cast<void>(CompressGamut(
-        EvaluateAces2LmtGamutInput(transform, sceneLinearBt709, lookStrength),
+        EvaluateAdaptedAces2GamutInput(transform, sceneLinearBt709, lookStrength),
         transform.odt, &boundary, true));
     return boundary;
 }
@@ -608,22 +608,22 @@ LinearRgb EvaluateAces2LutNits(
     return EvaluateAces2GamutOutputNits(transform, toneMapped);
 }
 
-LinearRgb EvaluateAces2LmtLutNits(
+LinearRgb EvaluateAdaptedAces2LutNits(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength) noexcept
 {
     if (!IsLookStrengthValid(lookStrength)) return {};
     return EvaluateAces2GamutOutputNits(transform,
-        EvaluateAces2LmtGamutInput(transform, sceneLinearBt709, lookStrength), true);
+        EvaluateAdaptedAces2GamutInput(transform, sceneLinearBt709, lookStrength), true);
 }
 
-LinearRgb MapAces2LmtToBt2020Nits(
+LinearRgb MapAdaptedAces2ToBt2020Nits(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength) noexcept
 {
-    const auto output = EvaluateAces2LmtLutNits(
+    const auto output = EvaluateAdaptedAces2LutNits(
         transform, sceneLinearBt709, lookStrength);
     return {
         std::clamp(output.red, 0.0, transform.odt.peakLuminance),

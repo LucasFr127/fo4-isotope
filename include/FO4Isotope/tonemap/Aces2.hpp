@@ -49,12 +49,12 @@ using Aces2TransformHandle =
 // reference reach/gamut crossing discontinuity. Direct Academy APIs stay unchanged.
 // Input/output units and containment rules otherwise match the direct ACES2
 // functions. Invalid strength fails black.
-[[nodiscard]] LinearRgb EvaluateAces2LmtLutNits(
+[[nodiscard]] LinearRgb EvaluateAdaptedAces2LutNits(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength = 1.0) noexcept;
 
-[[nodiscard]] LinearRgb MapAces2LmtToBt2020Nits(
+[[nodiscard]] LinearRgb MapAdaptedAces2ToBt2020Nits(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength = 1.0) noexcept;
@@ -80,9 +80,9 @@ struct Aces2CompressionBoundary
 
 // Diagnostic boundary after the contrast LMT and local shadow tone scale. This is
 // test/diagnostic geometry only; production evaluates the combined transform
-// while baking the ACES2LMT coefficient lattice. Invalid strength returns an
+// while baking the ACES2 coefficient lattice. Invalid strength returns an
 // invalid boundary.
-[[nodiscard]] Aces2CompressionBoundary EvaluateAces2LmtCompressionBoundary(
+[[nodiscard]] Aces2CompressionBoundary EvaluateAdaptedAces2CompressionBoundary(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709,
     double lookStrength = 1.0) noexcept;

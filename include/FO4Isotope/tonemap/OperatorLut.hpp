@@ -43,7 +43,7 @@ struct OperatorLutData
     double inputOffset{};
     double displayPeakNits{};
     ProductionToneMapperAlgorithm algorithm{
-        ProductionToneMapperAlgorithm::aces2Lmt};
+        ProductionToneMapperAlgorithm::aces2};
     ToneMapperParameters toneMapperParameters{};
 
     [[nodiscard]] bool IsValid() const noexcept;

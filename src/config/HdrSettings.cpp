@@ -289,7 +289,7 @@ bool ValidateToneMapperParameters(
 {
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::aces2:
         return InRange(parameters.acesLookStrength,
             kMinimumAcesLookStrength, kMaximumAcesLookStrength);
     case ProductionToneMapperAlgorithm::agX:
@@ -306,7 +306,7 @@ namespace {
 HdrSettingsValidationError ValidateHdrAlgorithms(const HdrSettings& settings) noexcept
 {
 
-    constexpr std::array algorithms{ProductionToneMapperAlgorithm::aces2Lmt,
+    constexpr std::array algorithms{ProductionToneMapperAlgorithm::aces2,
         ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7};
     if (std::ranges::find(algorithms, settings.productionAlgorithm) == algorithms.end())
         return HdrSettingsValidationError::unsupportedAlgorithm;

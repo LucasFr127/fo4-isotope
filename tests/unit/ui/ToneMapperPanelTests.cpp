@@ -64,7 +64,7 @@ void TestToneMapperPanelSmoke()
     };
 
     for (const auto algorithm : {
-             ProductionToneMapperAlgorithm::aces2Lmt,
+             ProductionToneMapperAlgorithm::aces2,
              ProductionToneMapperAlgorithm::agX,
              ProductionToneMapperAlgorithm::gt7})
     {

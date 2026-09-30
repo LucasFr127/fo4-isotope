@@ -67,7 +67,7 @@ void TestIndependentAces2LmtSourcePrecision()
     {
         const auto scene = LinearRgb{2.0, 0.7, 0.5};
         const auto unchanged = MapAces2ToBt2020Nits(*direct, scene);
-        const auto looked = MapAces2LmtToBt2020Nits(*direct, scene);
+        const auto looked = MapAdaptedAces2ToBt2020Nits(*direct, scene);
         FO4HDR_CHECK(std::max({std::abs(unchanged.red - looked.red),
             std::abs(unchanged.green - looked.green),
             std::abs(unchanged.blue - looked.blue)}) > 0.01);
@@ -179,16 +179,16 @@ void CheckCompressionCrossing(const Aces2Transform& transform, Crossing crossing
 {
     double lower = crossing.lower;
     double upper = crossing.upper;
-    auto lowerState = EvaluateAces2LmtCompressionBoundary(
+    auto lowerState = EvaluateAdaptedAces2CompressionBoundary(
         transform, {0, 0, lower}, crossing.strength);
-    const auto upperState = EvaluateAces2LmtCompressionBoundary(
+    const auto upperState = EvaluateAdaptedAces2CompressionBoundary(
         transform, {0, 0, upper}, crossing.strength);
     FO4HDR_CHECK(lowerState.valid && upperState.valid);
     FO4HDR_CHECK(lowerState.chromaMinusGamut > 0 && upperState.chromaMinusGamut > 0);
     FO4HDR_CHECK((lowerState.gamutMinusReach >= 0) != (upperState.gamutMinusReach >= 0));
     for (int iteration = 0; iteration < 40; ++iteration) {
         const double middle = (lower + upper) * 0.5;
-        const auto state = EvaluateAces2LmtCompressionBoundary(
+        const auto state = EvaluateAdaptedAces2CompressionBoundary(
             transform, {0, 0, middle}, crossing.strength);
         FO4HDR_CHECK(state.valid);
         if ((lowerState.gamutMinusReach >= 0) == (state.gamutMinusReach >= 0)) {
@@ -198,9 +198,9 @@ void CheckCompressionCrossing(const Aces2Transform& transform, Crossing crossing
             upper = middle;
         }
     }
-    const auto before = EvaluateAces2LmtLutNits(
+    const auto before = EvaluateAdaptedAces2LutNits(
         transform, {0, 0, lower}, crossing.strength);
-    const auto after = EvaluateAces2LmtLutNits(
+    const auto after = EvaluateAdaptedAces2LutNits(
         transform, {0, 0, upper}, crossing.strength);
     // Check uncontained outputs: final channel clipping must not hide a jump.
     FO4HDR_CHECK(std::abs(before.red - after.red) < 1e-6);
@@ -238,9 +238,9 @@ void TestAces2ContinuousColor()
 
     const LinearRgb axisScene{0.14804731352493253, 0.1, 0.004};
     for (const double strength : {0.0, 0.5, 1.0}) {
-        const auto center = EvaluateAces2LmtLutNits(*transform, axisScene, strength);
+        const auto center = EvaluateAdaptedAces2LutNits(*transform, axisScene, strength);
         for (const double delta : {-1e-10, 1e-10})
-            CheckRgb(center, EvaluateAces2LmtLutNits(*transform,
+            CheckRgb(center, EvaluateAdaptedAces2LutNits(*transform,
                 {axisScene.red + delta, axisScene.green, axisScene.blue}, strength), 1e-8);
     }
 }
@@ -301,10 +301,10 @@ void CheckLookInputs(const Aces2Transform& transform, double peak)
         LinearRgb{2, 0.4, 0.05}, LinearRgb{0, 0.1, 8},
         LinearRgb{16, 4, 1}, LinearRgb{65504, 65504, 65504}};
     for (const auto input : inputs) {
-        CheckRgb(MapAces2LmtToBt2020Nits(transform, input, 1),
-            MapAces2LmtToBt2020Nits(transform, input), 0);
+        CheckRgb(MapAdaptedAces2ToBt2020Nits(transform, input, 1),
+            MapAdaptedAces2ToBt2020Nits(transform, input), 0);
         for (const double strength : {0.0, 0.25, 0.5, 0.75, 1.0}) {
-            const auto mapped = MapAces2LmtToBt2020Nits(transform, input, strength);
+            const auto mapped = MapAdaptedAces2ToBt2020Nits(transform, input, strength);
             CheckContainedRgb(mapped, peak);
         }
     }
@@ -313,11 +313,11 @@ void CheckLookInputs(const Aces2Transform& transform, double peak)
 void CheckLookRamps(const Aces2Transform& transform, double peak)
 {
     for (const double strength : {0.0, 0.25, 0.5, 0.75, 1.0}) {
-        CheckRgb(MapAces2LmtToBt2020Nits(transform, {}, strength), {}, 0);
+        CheckRgb(MapAdaptedAces2ToBt2020Nits(transform, {}, strength), {}, 0);
         double previous{};
         for (int i = 0; i <= 4096; ++i) {
             const double y = std::exp2(-24.0 + i * 40.0 / 4096);
-            const auto mapped = MapAces2LmtToBt2020Nits(transform, {y, y, y}, strength);
+            const auto mapped = MapAdaptedAces2ToBt2020Nits(transform, {y, y, y}, strength);
             CheckContainedRgb(mapped, peak);
             FO4HDR_CHECK(mapped.red + 1e-7 >= previous);
             FO4HDR_CHECK(std::abs(mapped.red - mapped.green) <= peak * 1e-5);
@@ -329,7 +329,7 @@ void CheckLookRamps(const Aces2Transform& transform, double peak)
         previous = 0.0;
         for (int i = 0; i <= 2048; ++i) {
             const double y = 0.05 + i * 0.2 / 2048;
-            const auto mapped = MapAces2LmtToBt2020Nits(transform, {y, y, y}, strength);
+            const auto mapped = MapAdaptedAces2ToBt2020Nits(transform, {y, y, y}, strength);
             FO4HDR_CHECK(std::isfinite(mapped.red));
             FO4HDR_CHECK(mapped.red + 1e-7 >= previous);
             previous = mapped.red;
@@ -341,29 +341,29 @@ void CheckLookSemantics(const Aces2Transform& transform)
 {
     for (const double y : {0.181, 0.5, 1.0, 8.0}) {
         const LinearRgb input{y, y, y};
-        CheckRgb(EvaluateAces2LmtLutNits(transform, input, 0),
+        CheckRgb(EvaluateAdaptedAces2LutNits(transform, input, 0),
             EvaluateAces2LutNits(transform, input), 0);
     }
     const LinearRgb shadow{0.18 / 64, 0.18 / 64, 0.18 / 64};
-    FO4HDR_CHECK(MapAces2LmtToBt2020Nits(transform, shadow, 0).red >
+    FO4HDR_CHECK(MapAdaptedAces2ToBt2020Nits(transform, shadow, 0).red >
         MapAces2ToBt2020Nits(transform, shadow).red * 10.0);
     const LinearRgb chromatic{2, 0.4, 0.05};
-    const auto noLook = MapAces2LmtToBt2020Nits(transform, chromatic, 0);
-    const auto halfLook = MapAces2LmtToBt2020Nits(transform, chromatic, 0.5);
-    const auto fullLook = MapAces2LmtToBt2020Nits(transform, chromatic, 1);
+    const auto noLook = MapAdaptedAces2ToBt2020Nits(transform, chromatic, 0);
+    const auto halfLook = MapAdaptedAces2ToBt2020Nits(transform, chromatic, 0.5);
+    const auto fullLook = MapAdaptedAces2ToBt2020Nits(transform, chromatic, 1);
     FO4HDR_CHECK(std::abs(halfLook.red - noLook.red) > 1e-3);
     FO4HDR_CHECK(std::abs(halfLook.red - fullLook.red) > 1e-3);
     // A scene-linear Look blend must not become a blend of rendered outputs.
     FO4HDR_CHECK(std::abs(halfLook.red - (noLook.red + fullLook.red) * 0.5) > 1e-3);
-    CheckRgb(MapAces2LmtToBt2020Nits(transform,
+    CheckRgb(MapAdaptedAces2ToBt2020Nits(transform,
             {-1, std::numeric_limits<double>::quiet_NaN(),
                 std::numeric_limits<double>::infinity()}, 0.5),
-        MapAces2LmtToBt2020Nits(transform, {}, 0.5), 0);
+        MapAdaptedAces2ToBt2020Nits(transform, {}, 0.5), 0);
     for (const double invalid : {-0.01, 1.01,
             std::numeric_limits<double>::quiet_NaN(),
             std::numeric_limits<double>::infinity()}) {
-        CheckRgb(MapAces2LmtToBt2020Nits(transform, {1, 1, 1}, invalid), {}, 0);
-        FO4HDR_CHECK(!EvaluateAces2LmtCompressionBoundary(
+        CheckRgb(MapAdaptedAces2ToBt2020Nits(transform, {1, 1, 1}, invalid), {}, 0);
+        FO4HDR_CHECK(!EvaluateAdaptedAces2CompressionBoundary(
             transform, {0, 0, 8}, invalid).valid);
     }
 }
@@ -399,7 +399,7 @@ void TestAces2LookStrength()
     for (const auto& reference : shadowReferences) {
         const double y = 0.18 * std::exp2(reference.stops);
         for (std::size_t index = 0; index < reference.luminance.size(); ++index) {
-            const auto mapped = MapAces2LmtToBt2020Nits(
+            const auto mapped = MapAdaptedAces2ToBt2020Nits(
                 *transform, {y, y, y}, static_cast<double>(index) * 0.5);
             const double luminance = mapped.red * 0.2627 +
                 mapped.green * 0.6780 + mapped.blue * 0.0593;
@@ -417,7 +417,7 @@ DeveloperMode=0
 DisplayPeakNits=1000
 UiPaperWhiteNits=203
 [ToneMapper]
-Algorithm=ACES2LMT
+Algorithm=ACES2
 [Image]
 Exposure=0
 [Debug]
@@ -440,7 +440,7 @@ void Replace(std::string& text, std::string_view before,
 void CheckUnsupportedAlgorithm(std::string_view algorithm)
 {
     auto text = ProductionConfiguration();
-    Replace(text, "Algorithm=ACES2LMT", "Algorithm=" + std::string(algorithm));
+    Replace(text, "Algorithm=ACES2", "Algorithm=" + std::string(algorithm));
     const auto parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(!parsed.valid);
     FO4HDR_CHECK(parsed.error ==
@@ -563,8 +563,8 @@ void TestProductionConfiguration()
     FO4HDR_CHECK(parsed.value.enabled);
     FO4HDR_CHECK(parsed.value.productionRequested);
     FO4HDR_CHECK(parsed.value.productionAlgorithm ==
-        ProductionToneMapperAlgorithm::aces2Lmt);
-    FO4HDR_CHECK(ToString(parsed.value.productionAlgorithm) == "ACES2LMT");
+        ProductionToneMapperAlgorithm::aces2);
+    FO4HDR_CHECK(ToString(parsed.value.productionAlgorithm) == "ACES2");
     FO4HDR_CHECK(parsed.value.displayPeakNits == 1000.0);
     FO4HDR_CHECK(parsed.value.uiPaperWhiteNits == 203.0);
     FO4HDR_CHECK(parsed.value.exposureEv == 0.0);
@@ -575,7 +575,7 @@ void TestProductionConfiguration()
              std::pair{"GT7", ProductionToneMapperAlgorithm::gt7}})
     {
         text = ProductionConfiguration();
-        Replace(text, "Algorithm=ACES2LMT",
+        Replace(text, "Algorithm=ACES2",
             "Algorithm=" + std::string(algorithm.first));
         parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(parsed.valid);
@@ -585,8 +585,8 @@ void TestProductionConfiguration()
     }
 
     for (const auto retiredOrUnknown : {
-             "ACES2", "ACES1", "ACESFitted", "AgXPunchy", "ACES",
-             "ACES 2 LMT", "ACES2-LMT", "ACESLMT", "aces2",
+             "ACES2LMT", "ACES1", "ACESFitted", "AgXPunchy", "ACES",
+             "ACES 2", "ACES2-LMT", "ACESLMT", "aces2",
              "aces2lmt", "agx", "gt7"})
         CheckUnsupportedAlgorithm(retiredOrUnknown);
 

@@ -225,7 +225,7 @@ template <class Render>
 void VerifyNativeReferenceOperators(Device& device, const Render& render,
     ToneMapConstants& settings, const NativeReferenceOperatorTest& test)
 {
-    for (const auto mapper : {TestedToneMapper::aces2Lmt, TestedToneMapper::agX, TestedToneMapper::gt7}) {
+    for (const auto mapper : {TestedToneMapper::aces2, TestedToneMapper::agX, TestedToneMapper::gt7}) {
         const auto algorithm = ProductionAlgorithm(mapper);
         const auto op = CreateOperatorLut(*device.device.Get(), algorithm, 1000);
         settings.productionMode = ProductionMode(mapper);
@@ -506,9 +506,9 @@ std::array<NativeGradeRgb,kWidth> ReadNativeGradeRgb(ID3D11DeviceContext& contex
 fo4hdr::Aces2TransformHandle CreateNativeGradeOracle(TestedToneMapper mapper, float peak)
 {
     // Reuse the immutable source-oracle tables for this peak.
-    auto aces = mapper == TestedToneMapper::aces2Lmt ?
+    auto aces = mapper == TestedToneMapper::aces2 ?
         fo4hdr::CreateAces2Transform(peak) : fo4hdr::Aces2TransformHandle{};
-    if (mapper == TestedToneMapper::aces2Lmt && !aces)
+    if (mapper == TestedToneMapper::aces2 && !aces)
         throw std::runtime_error("Native grading ACES source oracle creation failed");
     return aces;
 }
@@ -602,7 +602,7 @@ struct NativeGradeReadback
         for (std::size_t i = 0; i < kWidth; ++i) {
             const auto& r = references[i];
             const auto ref = aces ?
-                fo4hdr::MapAces2LmtToBt2020Nits(*aces,{r[0],r[1],r[2]}) :
+                fo4hdr::MapAdaptedAces2ToBt2020Nits(*aces,{r[0],r[1],r[2]}) :
                 MapProductionOperator(test.mapper,{r[0],r[1],r[2]},test.peak);
             oracle[i] = {ref.red,ref.green,ref.blue};
             stats.CheckNits({r, nits[i], oracle[i], half[i]},
@@ -694,7 +694,7 @@ void VerifyNativeGradeColorChain(Device& device,
     const auto pqConstants = CreateConstantBuffer(*device.device.Get(), OutputConstants{kWidth,kHeight,1,0});
     std::array<ID3D11SamplerState*, 8> samplers{sceneSampler,nullptr,nullptr,
         shaders.linear.Get(),shaders.linear.Get(),shaders.linear.Get(),shaders.linear.Get(),shaders.linear.Get()};
-    for (const auto mapper : {TestedToneMapper::aces2Lmt, TestedToneMapper::agX, TestedToneMapper::gt7})
+    for (const auto mapper : {TestedToneMapper::aces2, TestedToneMapper::agX, TestedToneMapper::gt7})
     for (const float peak : {400.0F, 1000.0F, 2000.0F}) {
         const auto algorithm = ProductionAlgorithm(mapper);
         const auto operatorLut = CreateOperatorLut(*device.device.Get(), algorithm, peak);

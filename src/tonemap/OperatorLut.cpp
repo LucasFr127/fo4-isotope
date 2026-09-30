@@ -86,7 +86,7 @@ struct PreparedOperator
 {
     explicit PreparedOperator(const OperatorLutData& data) noexcept :
         algorithm(data.algorithm), parameters(data.toneMapperParameters),
-        aces2(algorithm == ProductionToneMapperAlgorithm::aces2Lmt ?
+        aces2(algorithm == ProductionToneMapperAlgorithm::aces2 ?
             CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
         agx(algorithm == ProductionToneMapperAlgorithm::agX ?
             CreateAgxTransform(data.displayPeakNits, parameters) :
@@ -105,7 +105,7 @@ struct PreparedOperator
     {
         switch (algorithm)
         {
-        case ProductionToneMapperAlgorithm::aces2Lmt: return aces2 != nullptr;
+        case ProductionToneMapperAlgorithm::aces2: return aces2 != nullptr;
         case ProductionToneMapperAlgorithm::agX: return agx.has_value();
         case ProductionToneMapperAlgorithm::gt7: return gt7 != nullptr;
         }
@@ -116,9 +116,9 @@ struct PreparedOperator
     {
         switch (algorithm)
         {
-        case ProductionToneMapperAlgorithm::aces2Lmt:
+        case ProductionToneMapperAlgorithm::aces2:
             return aces2 != nullptr ?
-                EvaluateAces2LmtLutNits(*aces2, sceneLinear,
+                EvaluateAdaptedAces2LutNits(*aces2, sceneLinear,
                     parameters.acesLookStrength) : LinearRgb{};
         case ProductionToneMapperAlgorithm::agX:
             return agx.has_value() ? EvaluateAgxLutNits(*agx, sceneLinear) : LinearRgb{};
@@ -132,13 +132,13 @@ struct PreparedOperator
 [[nodiscard]] bool IsAces2Algorithm(
     ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == ProductionToneMapperAlgorithm::aces2Lmt;
+    return algorithm == ProductionToneMapperAlgorithm::aces2;
 }
 
 [[nodiscard]] bool IsLutAlgorithm(
     ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == ProductionToneMapperAlgorithm::aces2Lmt ||
+    return algorithm == ProductionToneMapperAlgorithm::aces2 ||
         algorithm == ProductionToneMapperAlgorithm::agX ||
         algorithm == ProductionToneMapperAlgorithm::gt7;
 }
@@ -182,7 +182,7 @@ struct PreparedOperator
 [[nodiscard]] double ShaperCenter(
     ProductionToneMapperAlgorithm algorithm, double peak) noexcept
 {
-    if (algorithm == ProductionToneMapperAlgorithm::aces2Lmt) return 2.4;
+    if (algorithm == ProductionToneMapperAlgorithm::aces2) return 2.4;
     return algorithm == ProductionToneMapperAlgorithm::gt7 ?
         std::log2(8.0 * peak / kSceneReferenceWhiteNits) : 6.0;
 }
@@ -471,7 +471,7 @@ double OperatorLutInputOffset(ProductionToneMapperAlgorithm algorithm) noexcept
 {
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::aces2:
     case ProductionToneMapperAlgorithm::agX:
     case ProductionToneMapperAlgorithm::gt7: return 1.0 / 65536.0;
     }

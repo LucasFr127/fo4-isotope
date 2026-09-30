@@ -15,7 +15,7 @@ namespace fo4hdr::tests::gpu {
 
 enum class TestedToneMapper
 {
-    aces2Lmt,
+    aces2,
     agX,
     gt7
 };

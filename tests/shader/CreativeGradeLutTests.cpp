@@ -336,10 +336,10 @@ private:
     static constexpr float peak = 1000.0F;
     static constexpr float uiWhite = 300.0F;
     static constexpr std::array toneMappers{
-        TestedToneMapper::aces2Lmt, TestedToneMapper::agX,
+        TestedToneMapper::aces2, TestedToneMapper::agX,
         TestedToneMapper::gt7};
     static constexpr std::array algorithmNames{
-        "ACES2LMT", "AgX", "GT7"};
+        "ACES2", "AgX", "GT7"};
     Device& device;
     ID3D11VertexShader* vertexShader;
     ID3D11SamplerState* sceneSampler;
@@ -420,10 +420,10 @@ private:
                 0U, peak, kReferenceWhiteNits, uiWhite, 1.0F,
                 kReferenceWhiteNits,
                 static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
-                    fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, peak)),
+                    fo4hdr::ProductionToneMapperAlgorithm::aces2, peak)),
                 static_cast<float>(
                     fo4hdr::OperatorLutInputShaperMaximum(
-                        fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt,
+                        fo4hdr::ProductionToneMapperAlgorithm::aces2,
                         peak))});
         gradeTarget[0] = gradedOutput.rtv.Get();
         ReadGradeOutput(gradeOnlyConstants.Get(),
@@ -444,9 +444,9 @@ private:
             0U, peak, kReferenceWhiteNits, uiWhite, 1.0F,
             kReferenceWhiteNits,
             static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
-                fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, peak)),
+                fo4hdr::ProductionToneMapperAlgorithm::aces2, peak)),
             static_cast<float>(fo4hdr::OperatorLutInputShaperMaximum(
-                fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, peak))};
+                fo4hdr::ProductionToneMapperAlgorithm::aces2, peak))};
         ungradedSettings.vanillaGradeStrength = 0.0F;
         ungradedConstants = CreateConstantBuffer(
             *device.device.Get(), ungradedSettings);

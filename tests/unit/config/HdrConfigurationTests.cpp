@@ -20,7 +20,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.profileIssues.empty());
     FO4HDR_CHECK(shipped.distributedProfiles.count > 0);
     FO4HDR_CHECK(shipped.value.productionAlgorithm ==
-        ProductionToneMapperAlgorithm::aces2Lmt);
+        ProductionToneMapperAlgorithm::aces2);
     FO4HDR_CHECK(shipped.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);
@@ -242,7 +242,7 @@ void TestConfigurationMethodErrors()
 void TestConfigurationOperatorErrors()
 {
     for (const auto invalidParameter : {
-             "[ACES2LMT]\nLookStrength=-0.01\n",
+             "[ACES2]\nLookStrength=-0.01\n",
              "[AgX]\nMiddleGray=nan\n",
              "[AgX]\nMiddleGray=0.5\n",
              "[AgX]\nContrast=2.3\n",

@@ -18,7 +18,7 @@
 // without changing neutral scene values, and stop at absolute display-linear
 // Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
 // the shared forward path retains the official AP1 formation clamp.
-// ACES2LMT alone blends a recomputed zero-toe shadow response into the scalar
+// ACES2 alone blends a recomputed zero-toe shadow response into the scalar
 // tone scale below internal 0.18 and uses a fixed-width gamut shoulder to avoid
 // the reference reach/gamut crossing discontinuity.
 // The official display-encoding/PQ stage is intentionally omitted because the

@@ -56,8 +56,8 @@ void DrawSettingsControlLabel(std::string_view label) noexcept
 
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == ProductionToneMapperAlgorithm::aces2Lmt ?
-        "ACES 2 LMT" : ToString(algorithm).data();
+    return algorithm == ProductionToneMapperAlgorithm::aces2 ?
+        "ACES 2" : ToString(algorithm).data();
 }
 
 namespace {
@@ -116,11 +116,11 @@ struct ColorSettingsTabs
     {
         const HdrSettings defaults{};
         constexpr std::array operatorAlgorithms{
-            ProductionToneMapperAlgorithm::aces2Lmt,
+            ProductionToneMapperAlgorithm::aces2,
             ProductionToneMapperAlgorithm::agX,
             ProductionToneMapperAlgorithm::gt7};
         const char* operators[]{
-            "ACES 2 LMT", "AgX", "GT7"};
+            "ACES 2", "AgX", "GT7"};
         int algorithm = ToneMapperChoiceIndex(operatorAlgorithms, settings.productionAlgorithm);
         DrawSettingsControlLabel("Tone Mapper");
         bool algorithmChanged = ImGui::Combo(
@@ -428,7 +428,7 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     auto& parameters = settings.toneMapperParameters;
     switch (settings.productionAlgorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::aces2:
         return detail::DrawSettingsPanelSlider(
             "Contrast Look Strength", parameters.acesLookStrength, {
             defaults.acesLookStrength,

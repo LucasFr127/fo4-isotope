@@ -101,7 +101,7 @@ struct Gt7OperatorUi
     {
         const std::array alternatives{
             MapProductionOperator(
-                TestedToneMapper::aces2Lmt, input, peak),
+                TestedToneMapper::aces2, input, peak),
             fo4hdr::MapAgxToBt2020Nits(input, peak)};
         for (std::size_t alternative = 0;
              alternative < alternatives.size(); ++alternative)

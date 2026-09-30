@@ -56,8 +56,8 @@ double Milliseconds(Clock::time_point start, Clock::time_point end)
 const char *Name(Algorithm algorithm)
 {
     switch (algorithm) {
-    case Algorithm::aces2Lmt:
-        return "ACES2LMT";
+    case Algorithm::aces2:
+        return "ACES2";
     case Algorithm::agX:
         return "AgX";
     case Algorithm::gt7:
@@ -68,13 +68,13 @@ const char *Name(Algorithm algorithm)
 
 bool IsAces2Family(Algorithm algorithm)
 {
-    return algorithm == Algorithm::aces2Lmt;
+    return algorithm == Algorithm::aces2;
 }
 
 UINT ProductionMode(Algorithm algorithm)
 {
     switch (algorithm) {
-    case Algorithm::aces2Lmt:
+    case Algorithm::aces2:
         return 1U;
     case Algorithm::agX:
         return 2U;
@@ -389,8 +389,8 @@ struct OperatorMeasurements
 
     fo4hdr::LinearRgb Reference(const fo4hdr::LinearRgb &scene) const
     {
-        return algorithm == Algorithm::aces2Lmt
-                   ? fo4hdr::MapAces2LmtToBt2020Nits(*aces, scene, parameters.acesLookStrength)
+        return algorithm == Algorithm::aces2
+                   ? fo4hdr::MapAdaptedAces2ToBt2020Nits(*aces, scene, parameters.acesLookStrength)
                    : (algorithm == Algorithm::agX ? fo4hdr::MapAgxToBt2020Nits(scene, peak, parameters)
                                                   : fo4hdr::MapGt7ToBt2020Nits(scene, peak, parameters));
     }
@@ -444,16 +444,16 @@ struct OperatorMeasurements
     OperatorVerdict Evaluate() const
     {
         const auto broadEnd = dataset.broadEnd, holdoutBegin = dataset.holdoutBegin, holdoutEnd = dataset.holdoutEnd;
-        // ACES2LMT is an experimental draft look with higher local
+        // ACES2 is an experimental draft look with higher local
         // curvature. Its representation retains the 0.7%-of-peak
         // maximum gate; every other operator retains 0.5% and the mean is shared.
-        const auto maximumBound = std::max(1.0, peak * (algorithm == Algorithm::aces2Lmt ? 0.007 : 0.005));
+        const auto maximumBound = std::max(1.0, peak * (algorithm == Algorithm::aces2 ? 0.007 : 0.005));
         const auto broadMeanError = broadErrorSum / (static_cast<double>(broadEnd) * 3.0);
         const auto holdoutMeanError = holdoutErrorSum / (static_cast<double>(holdoutEnd - holdoutBegin) * 3.0);
         const auto meanBound = std::max(0.1, peak * 0.0005);
         const bool analyticalPassed =
             maximumApproximationError <= maximumBound && broadMeanError <= meanBound && holdoutMeanError <= meanBound;
-        const auto darkBound = algorithm == Algorithm::aces2Lmt ? 3.0 : 32.0;
+        const auto darkBound = algorithm == Algorithm::aces2 ? 3.0 : 32.0;
         const bool passed = SamplingPassed(darkBound) && NeutralPassed() && analyticalPassed;
         return {maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound, passed};
     }
@@ -690,7 +690,7 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
     Require(device.CreateSamplerState(&descriptor, &sampler), "Create production-style LUT sampler");
     const OperatorExecution execution{device, context, *shader.Get(), *sampler.Get()};
     int failures{};
-    for (const auto algorithm : {Algorithm::aces2Lmt, Algorithm::agX, Algorithm::gt7}) {
+    for (const auto algorithm : {Algorithm::aces2, Algorithm::agX, Algorithm::gt7}) {
         for (const auto peak : {400.0, 430.0, 1000.0, 2000.0}) {
             failures += VerifyCase(execution, {algorithm, peak, benchmark});
         }
@@ -701,7 +701,7 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
         for (const double strength : {0.0, 0.25, 0.5, 0.75}) {
             fo4hdr::ToneMapperParameters parameters{};
             parameters.acesLookStrength = strength;
-            failures += VerifyCase(execution, {Algorithm::aces2Lmt, peak, false, parameters});
+            failures += VerifyCase(execution, {Algorithm::aces2, peak, false, parameters});
         }
         for (unsigned corner = 0; corner < 16; ++corner) {
             const auto parameters = AgxCornerParameters(corner);

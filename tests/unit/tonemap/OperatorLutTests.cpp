@@ -36,9 +36,9 @@ using test::SampleOperatorLut;
     double peak,
     const Aces2Transform* aces2) noexcept
 {
-    if (algorithm == ProductionToneMapperAlgorithm::aces2Lmt)
+    if (algorithm == ProductionToneMapperAlgorithm::aces2)
         return aces2 != nullptr ?
-            MapAces2LmtToBt2020Nits(*aces2, scene) : LinearRgb{};
+            MapAdaptedAces2ToBt2020Nits(*aces2, scene) : LinearRgb{};
     if (algorithm == ProductionToneMapperAlgorithm::agX)
         return MapAgxToBt2020Nits(scene, peak);
     if (algorithm == ProductionToneMapperAlgorithm::gt7)
@@ -51,7 +51,7 @@ constexpr auto infinity = std::numeric_limits<double>::infinity();
 constexpr auto invalidAlgorithm =
     static_cast<ProductionToneMapperAlgorithm>(0xFF);
 constexpr std::array algorithms{
-    ProductionToneMapperAlgorithm::aces2Lmt,
+    ProductionToneMapperAlgorithm::aces2,
     ProductionToneMapperAlgorithm::agX,
     ProductionToneMapperAlgorithm::gt7};
 
@@ -232,7 +232,7 @@ struct CorpusStatistics
         // 0.7%-of-peak representation bound. Every other operator keeps
         // the established 0.5% gate; all modes retain the same mean gate.
         const auto maximumBound = std::max(1.0, peak *
-            (algorithm == ProductionToneMapperAlgorithm::aces2Lmt ?
+            (algorithm == ProductionToneMapperAlgorithm::aces2 ?
                 0.007 : 0.005));
         const auto meanBound = std::max(0.1, peak * 0.0005);
         const auto broadMeanError = broadTotalError /
@@ -353,7 +353,7 @@ struct LutTestCase
     [[nodiscard]] double MaximumErrorBound() const
     {
         return std::max(1.0, peak *
-            (algorithm == ProductionToneMapperAlgorithm::aces2Lmt ? 0.007 : 0.005));
+            (algorithm == ProductionToneMapperAlgorithm::aces2 ? 0.007 : 0.005));
     }
 
     void CheckMetadata() const
@@ -465,7 +465,7 @@ struct LutTestCase
             static_cast<unsigned>(algorithm), peak, darkCorpus.size(), darkMaximumNits,
             darkMaximumPqCodes, darkTotalPqCodes / (darkCorpus.size() * 3.0));
         FO4HDR_CHECK(darkMaximumPqCodes <=
-            (algorithm == ProductionToneMapperAlgorithm::aces2Lmt ? 3.0 : 32.0));
+            (algorithm == ProductionToneMapperAlgorithm::aces2 ? 3.0 : 32.0));
     }
 
     void CheckRepeatedBuild() const
@@ -475,10 +475,10 @@ struct LutTestCase
         FO4HDR_CHECK(duplicate.rgba16 == lut.rgba16);
 
         // Exercise sanitization independently from the finite corpus.
-        // ACES2LMT maps non-finite input to zero; AgX/GT7 retain their
+        // ACES2 maps non-finite input to zero; AgX/GT7 retain their
         // positive-infinity-to-finite-FP16-maximum input policy.
         const auto high = algorithm ==
-            ProductionToneMapperAlgorithm::aces2Lmt ? 0.0 : 65504.0;
+            ProductionToneMapperAlgorithm::aces2 ? 0.0 : 65504.0;
         CheckRgb(SampleOperatorLut(lut, {-1.0, 0.18, 1.0}),
             SampleOperatorLut(lut, {0.0, 0.18, 1.0}), 0.0);
         CheckRgb(SampleOperatorLut(lut, {nan, -infinity, infinity}),
@@ -513,10 +513,10 @@ void CheckOperatorLutCase(ProductionToneMapperAlgorithm algorithm, double peak)
     auto lut = BuildOperatorLut(algorithm, peak);
     FO4HDR_CHECK(lut.IsValid());
     if (!lut.IsValid()) return;
-    const auto aces2 = algorithm == ProductionToneMapperAlgorithm::aces2Lmt ?
+    const auto aces2 = algorithm == ProductionToneMapperAlgorithm::aces2 ?
         CreateAces2Transform(peak) : Aces2TransformHandle{};
-    FO4HDR_CHECK(algorithm != ProductionToneMapperAlgorithm::aces2Lmt || aces2 != nullptr);
-    if (algorithm == ProductionToneMapperAlgorithm::aces2Lmt && !aces2) return;
+    FO4HDR_CHECK(algorithm != ProductionToneMapperAlgorithm::aces2 || aces2 != nullptr);
+    if (algorithm == ProductionToneMapperAlgorithm::aces2 && !aces2) return;
     const LutTestCase checks{algorithm, peak, lut, aces2.get()};
     checks.CheckMetadata();
     checks.CheckTexels();

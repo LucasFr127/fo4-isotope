@@ -173,10 +173,10 @@ void VerifyVideoPixelShader(
             0U, 1000.0F, kReferenceWhiteNits, kReferenceWhiteNits,
             1.0F, videoWhiteNits,
             static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
-                fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, 1000.0)),
+                fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0)),
             static_cast<float>(
                 fo4hdr::OperatorLutInputShaperMaximum(
-                    fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt,
+                    fo4hdr::ProductionToneMapperAlgorithm::aces2,
                     1000.0))});
     ID3D11ShaderResourceView* resources[]{input.srv.Get()};
     ID3D11SamplerState* samplers[]{sampler};
@@ -438,10 +438,10 @@ struct TemporalScenario : TemporalVariant
                 1U, 1000.0F, kReferenceWhiteNits, 300.0F,
                 1.0F, kReferenceWhiteNits,
                 static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
-                    fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, 1000.0)),
+                    fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0)),
                 static_cast<float>(
                     fo4hdr::OperatorLutInputShaperMaximum(
-                        fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt,
+                        fo4hdr::ProductionToneMapperAlgorithm::aces2,
                         1000.0))});
         resources = {
             scene.srv.Get(), zero.srv.Get(), zero.srv.Get(), depth.srv.Get(),
@@ -559,9 +559,9 @@ struct TemporalScenario : TemporalVariant
             1U, 1000.0F, kReferenceWhiteNits, 300.0F,
             1.0F, kReferenceWhiteNits,
             static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
-                fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, 1000.0)),
+                fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0)),
             static_cast<float>(fo4hdr::OperatorLutInputShaperMaximum(
-                fo4hdr::ProductionToneMapperAlgorithm::aces2Lmt, 1000.0))};
+                fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0))};
         auto hostileTemporalValues = temporalValues;
         hostileTemporalValues.values[2] = {
             0.25F, 0.25F, 0.25F, 0.25F};

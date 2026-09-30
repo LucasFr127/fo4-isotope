@@ -107,7 +107,7 @@ struct ShippingShaderRun
         });
         RunSection(options.filter, "separated-ui-aces2-lmt", [&] {
             VerifySeparatedUiProductionPath(
-                device, TestedToneMapper::aces2Lmt);
+                device, TestedToneMapper::aces2);
         });
         RunSection(options.filter, "separated-ui-agx", [&] {
             VerifySeparatedUiProductionPath(device, TestedToneMapper::agX);
@@ -220,7 +220,7 @@ struct ShippingShaderRun
                       << AdapterName() << '\n';
             return 0;
         }
-        std::cout << "shipping HDR10, ACES 2 LMT, "
+        std::cout << "shipping HDR10, ACES 2, "
                      "AgX, GT7, CreativeGradeLut, UI, Video, FXAA, "
                      "and both temporal variants passed on "
                   << AdapterName() << '\n';

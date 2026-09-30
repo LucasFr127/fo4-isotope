@@ -31,7 +31,7 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(ValidateHdrSettings(defaults) ==
         HdrSettingsValidationError::none);
     FO4HDR_CHECK(defaults.productionAlgorithm ==
-        ProductionToneMapperAlgorithm::aces2Lmt);
+        ProductionToneMapperAlgorithm::aces2);
     FO4HDR_CHECK(defaults.toneMapperParameters == ToneMapperParameters{});
     FO4HDR_CHECK(defaults.toneMapperParameters.acesLookStrength == 1.0);
     FO4HDR_CHECK(defaults.toneMapperParameters.agxMiddleGrayEv == 0.0);
@@ -106,7 +106,7 @@ void TestActiveOperatorParameters()
     parameters.gt7ShoulderStart = 0.55;
     parameters.gt7ColorBlend = 0.25;
     auto active = ActiveToneMapperParameters(
-        ProductionToneMapperAlgorithm::aces2Lmt, parameters);
+        ProductionToneMapperAlgorithm::aces2, parameters);
     FO4HDR_CHECK(active.acesLookStrength == 0.25);
     FO4HDR_CHECK(active.agxContrast == ToneMapperParameters{}.agxContrast);
     FO4HDR_CHECK(active.gt7ToeStrength ==
@@ -238,7 +238,7 @@ void TestToneMapperParameterRanges()
         double maximum;
     };
     constexpr std::array parameterRanges{
-        ParameterRange{ProductionToneMapperAlgorithm::aces2Lmt,
+        ParameterRange{ProductionToneMapperAlgorithm::aces2,
             &ToneMapperParameters::acesLookStrength,
             kMinimumAcesLookStrength, kMaximumAcesLookStrength},
         ParameterRange{ProductionToneMapperAlgorithm::agX,
@@ -331,7 +331,7 @@ void TestSettingsValidation()
     FO4HDR_CHECK(ValidateHdrSettings(value) ==
         HdrSettingsValidationError::unsupportedAlgorithm);
     value = {};
-    value.productionAlgorithm = ProductionToneMapperAlgorithm::aces2Lmt;
+    value.productionAlgorithm = ProductionToneMapperAlgorithm::aces2;
     FO4HDR_CHECK(ValidateHdrSettings(value) ==
         HdrSettingsValidationError::none);
     TestToneMapperParameterRanges();

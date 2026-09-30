@@ -103,7 +103,7 @@ struct LutGradeOverride
 
 enum class ProductionToneMapperAlgorithm : std::uint8_t
 {
-    aces2Lmt,
+    aces2,
     agX,
     gt7
 };
@@ -238,7 +238,7 @@ struct ToneMapperParameters
     ToneMapperParameters active{};
     switch (algorithm)
     {
-    case ProductionToneMapperAlgorithm::aces2Lmt:
+    case ProductionToneMapperAlgorithm::aces2:
         active.acesLookStrength = parameters.acesLookStrength;
         break;
     case ProductionToneMapperAlgorithm::agX:
@@ -261,7 +261,7 @@ struct ToneMapperParameters
 struct HdrSettings
 {
     ProductionToneMapperAlgorithm productionAlgorithm{
-        ProductionToneMapperAlgorithm::aces2Lmt};
+        ProductionToneMapperAlgorithm::aces2};
     ToneMapperParameters toneMapperParameters{};
     double displayPeakNits{1000.0};
     double uiPaperWhiteNits{kDefaultUiPaperWhiteNits};
