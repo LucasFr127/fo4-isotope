@@ -20,7 +20,8 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.profileIssues.empty());
     FO4HDR_CHECK(shipped.distributedProfiles.count > 0);
     FO4HDR_CHECK(shipped.value.productionAlgorithm ==
-        ProductionToneMapperAlgorithm::aces2);
+        ProductionToneMapperAlgorithm::gt7);
+    FO4HDR_CHECK(shipped.value.productionAlgorithm == HdrSettings{}.productionAlgorithm);
     FO4HDR_CHECK(shipped.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);

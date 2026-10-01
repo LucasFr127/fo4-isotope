@@ -261,7 +261,7 @@ struct ToneMapperParameters
 struct HdrSettings
 {
     ProductionToneMapperAlgorithm productionAlgorithm{
-        ProductionToneMapperAlgorithm::aces2};
+        ProductionToneMapperAlgorithm::gt7};
     ToneMapperParameters toneMapperParameters{};
     double displayPeakNits{1000.0};
     double uiPaperWhiteNits{kDefaultUiPaperWhiteNits};
