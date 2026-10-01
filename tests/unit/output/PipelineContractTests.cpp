@@ -123,7 +123,7 @@ void TestDeveloperConfiguration()
 {
     constexpr std::string_view disabled = R"ini(
 [General]
-Enabled=1
+HdrEnabled=1
 DeveloperMode=0
 
 [Debug]

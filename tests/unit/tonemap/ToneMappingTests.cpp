@@ -411,7 +411,7 @@ void TestAces2LookStrength()
 [[nodiscard]] std::string ProductionConfiguration()
 {
     return R"ini([General]
-Enabled=1
+HdrEnabled=1
 DeveloperMode=0
 [Output]
 DisplayPeakNits=1000
@@ -419,7 +419,7 @@ UiPaperWhiteNits=203
 [ToneMapper]
 Algorithm=ACES2
 [Image]
-Exposure=0
+ExposureEV=0
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=0
@@ -496,8 +496,8 @@ void CheckConfigurationExposure()
              std::pair{"4", 16.0}})
     {
         text = ProductionConfiguration();
-        Replace(text, "Exposure=0",
-            "Exposure=" + std::string(exposure.first));
+        Replace(text, "ExposureEV=0",
+            "ExposureEV=" + std::string(exposure.first));
         parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(parsed.valid);
         FO4HDR_CHECK(test::Approx(parsed.value.sceneExposureMultiplier,
@@ -506,8 +506,8 @@ void CheckConfigurationExposure()
     for (const auto invalid : {"-4.0001", "4.0001"})
     {
         text = ProductionConfiguration();
-        Replace(text, "Exposure=0",
-            "Exposure=" + std::string(invalid));
+        Replace(text, "ExposureEV=0",
+            "ExposureEV=" + std::string(invalid));
         parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(!parsed.valid);
         FO4HDR_CHECK(parsed.error ==
@@ -515,13 +515,13 @@ void CheckConfigurationExposure()
     }
 
     text = ProductionConfiguration();
-    Replace(text, "Exposure=0", "Exposure=0\nExposure=1");
+    Replace(text, "ExposureEV=0", "ExposureEV=0\nExposureEV=1");
     parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(!parsed.valid);
     FO4HDR_CHECK(parsed.error ==
         PluginConfigurationError::duplicateKey);
     text = ProductionConfiguration();
-    Replace(text, "Exposure=0\n", "");
+    Replace(text, "ExposureEV=0\n", "");
     parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(!parsed.valid);
     FO4HDR_CHECK(parsed.error ==
@@ -547,7 +547,7 @@ ForceHdrSwapChainFailure=0
     FO4HDR_CHECK(parsed.value.sceneExposureMultiplier == 1.0);
 
     text = ProductionConfiguration();
-    Replace(text, "Enabled=1", "Enabled=0");
+    Replace(text, "HdrEnabled=1", "HdrEnabled=0");
     parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(!parsed.value.productionRequested);

@@ -133,7 +133,7 @@ void TestConfigurationEndpoints()
         FO4HDR_CHECK(endpoint.valid);
         FO4HDR_CHECK(endpoint.value.blacks == blacks);
     }
-    for (const auto key : {"VanillaGradeLuminance", "VanillaGradeColor"})
+    for (const auto key : {"VanillaGradeLuminanceStrength", "VanillaGradeColorStrength"})
         for (const auto endpointValue : {0.0, 100.0})
         {
             const auto endpoint = ParsePluginConfiguration(
@@ -141,7 +141,7 @@ void TestConfigurationEndpoints()
                 "\n[Effects]\n" + key + "=" +
                 std::to_string(endpointValue) + "\n");
             FO4HDR_CHECK(endpoint.valid);
-            FO4HDR_CHECK((std::string_view{key} == "VanillaGradeLuminance" ?
+            FO4HDR_CHECK((std::string_view{key} == "VanillaGradeLuminanceStrength" ?
                     endpoint.value.vanillaGradeLuminancePercent :
                     endpoint.value.vanillaGradeColorPercent) == endpointValue);
         }
@@ -242,13 +242,13 @@ void TestConfigurationMethodErrors()
 void TestConfigurationOperatorErrors()
 {
     for (const auto invalidParameter : {
-             "[ACES2]\nLookStrength=-0.01\n",
-             "[AgX]\nMiddleGray=nan\n",
-             "[AgX]\nMiddleGray=0.5\n",
+             "[ACES2]\nContrastLookStrength=-0.01\n",
+             "[AgX]\nMiddleGrayOffsetEV=nan\n",
+             "[AgX]\nMiddleGrayOffsetEV=0.5\n",
              "[AgX]\nContrast=2.3\n",
              "[AgX]\nContrast=3.51\n",
-             "[AgX]\nHdrPurity=0.25\n",
-             "[AgX]\nHdrPurity=1.01\n",
+             "[AgX]\nHdrColorResponse=0.25\n",
+             "[AgX]\nHdrColorResponse=1.01\n",
              "[AgX]\nShoulderPower=0.99\n",
              "[AgX]\nShoulderPower=2.2\n",
              "[GT7]\nToeStrength=2.01\n",
@@ -280,8 +280,8 @@ void TestConfigurationRangeErrors()
              "Temperature=-101",
              "Tint=101",
              "VanillaColorGradingStrength=101",
-             "VanillaGradeLuminance=-1",
-             "VanillaGradeColor=nan",
+             "VanillaGradeLuminanceStrength=-1",
+             "VanillaGradeColorStrength=nan",
              "BloomStrength=-1",
              "Scale=1.1",
              "WindowWidth=519",
@@ -314,7 +314,7 @@ void TestConfigurationDuplicateEffects()
         PluginConfigurationError::duplicateKey);
 
     text = ExtendedProductionConfiguration();
-    text += "\n[Effects]\nVanillaGradeColor=50\n";
+    text += "\n[Effects]\nVanillaGradeColorStrength=50\n";
     parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(!parsed.valid);
     FO4HDR_CHECK(parsed.error == PluginConfigurationError::duplicateKey);

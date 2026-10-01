@@ -45,19 +45,19 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
         "[ToneMapper]\r\nAlgorithm=ACES2\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
-        "[ACES2]\r\nLookStrength=0.35\r\n") !=
+        "[ACES2]\r\nContrastLookStrength=0.35\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
-        "[AgX]\r\nMiddleGray=-0.25\r\nContrast=2.8\r\n"
-        "HdrPurity=0.55\r\nShoulderPower=2.05\r\n") !=
+        "[AgX]\r\nMiddleGrayOffsetEV=-0.25\r\nContrast=2.8\r\n"
+        "HdrColorResponse=0.55\r\nShoulderPower=2.05\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "[GT7]\r\nToeStrength=1.4\r\nShoulderStart=0.52\r\n"
         "ColorBlend=0.3\r\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("[Image]\r\nExposure=0.25\r\n") !=
+    FO4HDR_CHECK(rewritten.find("[Image]\r\nExposureEV=0.25\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
-        "Exposure=0.25\r\nContrast=-20\r\nBlacks=-40\r\n") !=
+        "ExposureEV=0.25\r\nContrast=-20\r\nBlacks=-40\r\n") !=
         std::string::npos);
 }
 
@@ -102,7 +102,7 @@ void CheckRewrittenEffects(const std::string& rewritten)
     FO4HDR_CHECK(rewritten.find("[Effects]\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "VanillaColorGradingStrength=100\r\n"
-        "VanillaGradeLuminance=65\r\nVanillaGradeColor=35\r\n"
+        "VanillaGradeLuminanceStrength=65\r\nVanillaGradeColorStrength=35\r\n"
         "LutProfilesEnabled=1\r\n"
         "BloomStrength=175\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("BloomStrength=175\r\n") !=
@@ -132,7 +132,7 @@ void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfac
     FO4HDR_CHECK(positionOnly.find("WindowY=123\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("ToggleKey=Ctrl+J\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("DisplayPeakNits=430\r\n") != std::string::npos);
-    FO4HDR_CHECK(positionOnly.find("Exposure=0.25\r\n") != std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("ExposureEV=0.25\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("ColorGradingMethod=NativeReference\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(RewriteHdrWindowPositionIni("[Interface]\nToggleKey=F10\n", 1, 2)
@@ -149,9 +149,9 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
         "[Image]\nGradeTransfer=PreserveHDRColor\nContrast=0\n";
     const auto migrated = RewriteHdrSettingsIni(
         legacyExposure, settings, interfaceSettings);
-    FO4HDR_CHECK(migrated.find("ExposureEV") == std::string::npos);
+    FO4HDR_CHECK(migrated.find("[ToneMapper]\nAlgorithm=ACES2\nExposureEV") == std::string::npos);
     FO4HDR_CHECK(migrated.find("GradeTransfer") == std::string::npos);
-    FO4HDR_CHECK(migrated.find("Exposure=0.25") != std::string::npos);
+    FO4HDR_CHECK(migrated.find("ExposureEV=0.25") != std::string::npos);
     FO4HDR_CHECK(RewriteHdrWindowPositionIni(legacyExposure, 1, 2)
         .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
 
@@ -196,7 +196,7 @@ void TestSettingsPersistenceRewrite()
     interfaceSettings.toggleKey = {0x4AU, kSettingsHotkeyControl};
     constexpr std::string_view original =
         "# keep this comment\r\n"
-        "[General]\r\nEnabled=1\r\nUnknown=kept\r\n"
+        "[General]\r\nHdrEnabled=1\r\nUnknown=kept\r\n"
         "[Output]\r\nDisplayPeakNits=1000\r\n"
         "UiPaperWhiteNits=203\r\n"
         "[Effects]\r\nThirdPartyNumber=2\r\n"
@@ -359,12 +359,12 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     const std::string persisted(std::istreambuf_iterator<char>(input), {});
     FO4HDR_CHECK(persisted.find("DisplayPeakNits=430") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("[Image]\nExposure=0.75") !=
+    FO4HDR_CHECK(persisted.find("[Image]\nExposureEV=0.75") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("Blacks=35") != std::string::npos);
-    FO4HDR_CHECK(persisted.find("VanillaGradeLuminance=60") !=
+    FO4HDR_CHECK(persisted.find("VanillaGradeLuminanceStrength=60") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("VanillaGradeColor=30") !=
+    FO4HDR_CHECK(persisted.find("VanillaGradeColorStrength=30") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("stale.dds") == std::string::npos);
     FO4HDR_CHECK(persisted.find("[LUT:") == std::string::npos);
@@ -378,15 +378,15 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(persistedProfiles.find(
         "[LUT:textures/distributed.dds]\nInherit=1\n") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("[ACES2]\nLookStrength=0.4") !=
+    FO4HDR_CHECK(persisted.find("[ACES2]\nContrastLookStrength=0.4") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("[AgX]\nMiddleGray=0.25\nContrast=3") !=
+    FO4HDR_CHECK(persisted.find("[AgX]\nMiddleGrayOffsetEV=0.25\nContrast=3") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find(
         "[GT7]\nToeStrength=1.5\nShoulderStart=0.5") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("GradeTransfer") == std::string::npos);
-    FO4HDR_CHECK(persisted.find("ExposureEV") == std::string::npos);
+    FO4HDR_CHECK(persisted.find("ExposureEV=0.75") != std::string::npos);
     FO4HDR_CHECK(persisted.find("Scale=1.5") != std::string::npos);
     const auto reloaded = LoadPluginConfiguration(path);
     FO4HDR_CHECK(reloaded.valid);
@@ -546,7 +546,7 @@ void TestPersistedDisplayProfiles(PersistenceFixture& fixture)
     const auto firstProfileSection = validProfileText.find("[DisplayProfile:");
     FO4HDR_CHECK(firstProfileSection != std::string::npos);
     const auto firstProfileText = validProfileText.substr(firstProfileSection);
-    FO4HDR_CHECK(firstProfileText.find("Exposure=") == std::string::npos);
+    FO4HDR_CHECK(firstProfileText.find("ExposureEV=") == std::string::npos);
     FO4HDR_CHECK(firstProfileText.find("Algorithm=") == std::string::npos);
     const auto firstProfileHeaderEnd =
         validProfileText.find('\n', firstProfileSection);

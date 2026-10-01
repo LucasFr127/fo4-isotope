@@ -41,7 +41,7 @@ void TestGradePackParsing()
 {
     const auto parsed = ParseGradeProfileConfiguration(
         "\xEF\xBB\xBF"
-        "[General]\nEnabled=invalid-but-ignored\n"
+        "[General]\nHdrEnabled=invalid-but-ignored\n"
         "[LUT:Textures\\Effects\\Night.DDS]\nColor=35\n"
         "[IMGS:Fallout4.ESM|00ABCD]\nInherit=1\n");
     FO4HDR_CHECK(parsed.valid);
@@ -182,7 +182,7 @@ void WriteDistributedGradePacks(const GradePackFixture& fixture)
 {
     const auto& [mainPath, profileDirectory, personalPath, highPath, lowPath, invalidPath, mainText, personalText] = fixture;
         WriteGradePack(highPath, std::string("\xEF\xBB\xBF") + R"ini([Image]
-Exposure=4
+ExposureEV=4
 [LUT:Textures\Shared.DDS]
 Color=82
 [LUT:textures/z-only.dds]

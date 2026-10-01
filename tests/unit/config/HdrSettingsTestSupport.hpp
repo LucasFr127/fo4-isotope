@@ -8,7 +8,7 @@ namespace fo4hdr::tests {
 [[nodiscard]] inline std::string LegacyProductionConfiguration()
 {
     return R"ini([General]
-Enabled=1
+HdrEnabled=1
 DeveloperMode=0
 [Output]
 DisplayPeakNits=1000
@@ -16,7 +16,7 @@ UiPaperWhiteNits=203
 [ToneMapper]
 Algorithm=ACES2
 [Image]
-Exposure=0
+ExposureEV=0
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=0
@@ -42,8 +42,8 @@ ColorGradingMethod=NativeReference
 GradeTransfer=PreserveHDRColor
 [Effects]
 VanillaColorGradingStrength=60
-VanillaGradeLuminance=75
-VanillaGradeColor=40
+VanillaGradeLuminanceStrength=75
+VanillaGradeColorStrength=40
 BloomStrength=175
 [Interface]
 ToggleKey=F12
@@ -51,11 +51,11 @@ Scale=1.5
 WindowWidth=900
 WindowHeight=760
 [ACES2]
-LookStrength=0.25
+ContrastLookStrength=0.25
 [AgX]
-MiddleGray=-0.25
+MiddleGrayOffsetEV=-0.25
 Contrast=2.9
-HdrPurity=0.6
+HdrColorResponse=0.6
 ShoulderPower=2.1
 [GT7]
 ToeStrength=1.4
