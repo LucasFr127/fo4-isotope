@@ -389,7 +389,7 @@ struct ColorSettingsTabs
                 "the overall grading strength stays global.");
             ImGui::SeparatorText("Bloom");
             if (DrawImageSetting({"Bloom Strength", "bloom-strength", &HdrSettings::bloomStrengthPercent,
-                    {0.0F, 200.0F, "%.0f%%", "Adjusts the bloom contribution. "
+                    {0.0F, 100.0F, "%.0f%%", "Adjusts the bloom contribution. "
                         "0% removes bloom; 100% keeps its original strength."}}))
                 commitRequested = true;
             ImGui::SeparatorText("Color Grading");

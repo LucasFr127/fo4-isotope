@@ -140,7 +140,7 @@ inline constexpr double kMaximumSaturationPercent{200.0};
 inline constexpr double kMinimumVanillaColorGradingPercent{0.0};
 inline constexpr double kMaximumVanillaColorGradingPercent{100.0};
 inline constexpr double kMinimumBloomStrengthPercent{0.0};
-inline constexpr double kMaximumBloomStrengthPercent{200.0};
+inline constexpr double kMaximumBloomStrengthPercent{100.0};
 inline constexpr double kDefaultUiPaperWhiteNits{203.0};
 inline constexpr double kDefaultVideoWhiteNits{203.0};
 inline constexpr double kImageMiddleGrayPivot{0.18};

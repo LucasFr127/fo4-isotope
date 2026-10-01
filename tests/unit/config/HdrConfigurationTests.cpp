@@ -189,7 +189,7 @@ void TestExtendedConfiguration()
         parsed.value.vanillaColorGradingStrengthPercent == 60.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 75.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 40.0);
-    FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 175.0);
+    FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 75.0);
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey == 0x7BU);
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers == 0U);
     FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.5);
@@ -282,7 +282,7 @@ void TestConfigurationRangeErrors()
              "VanillaColorGradingStrength=101",
              "VanillaGradeLuminanceStrength=-1",
              "VanillaGradeColorStrength=nan",
-             "BloomStrength=-1",
+             "BloomStrength=-1", "BloomStrength=101",
              "Scale=1.1",
              "WindowWidth=519",
              "WindowHeight=1001"})

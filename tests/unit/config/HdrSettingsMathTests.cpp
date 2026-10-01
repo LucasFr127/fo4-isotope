@@ -174,7 +174,7 @@ void TestAdjustedSettingsMath()
     adjusted.vanillaColorGradingStrengthPercent = 25.0;
     adjusted.vanillaGradeLuminancePercent = 25.0;
     adjusted.vanillaGradeColorPercent = 75.0;
-    adjusted.bloomStrengthPercent = 200.0;
+    adjusted.bloomStrengthPercent = 100.0;
     const auto adjustedMath = DeriveHdrSettingsMath(adjusted);
     FO4HDR_CHECK(adjustedMath.sceneExposureMultiplier == 16.0);
     FO4HDR_CHECK(adjustedMath.contrastSlope == 2.0);
@@ -185,7 +185,7 @@ void TestAdjustedSettingsMath()
     FO4HDR_CHECK(adjustedMath.vanillaColorGradingBlend == 0.25);
     FO4HDR_CHECK(adjustedMath.vanillaGradeLuminanceRemoval == 0.75);
     FO4HDR_CHECK(adjustedMath.vanillaGradeColorRemoval == 0.25);
-    FO4HDR_CHECK(adjustedMath.bloomMultiplier == 2.0);
+    FO4HDR_CHECK(adjustedMath.bloomMultiplier == 1.0);
     for (const auto blacks : {-100.0, 100.0})
     {
         HdrSettings blacksOnly{};
@@ -375,6 +375,8 @@ void TestSettingsValidation()
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
     check(&HdrSettings::vanillaGradeColorPercent, nan,
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
+    check(&HdrSettings::bloomStrengthPercent, 100.01,
+        HdrSettingsValidationError::bloomStrengthOutOfRange);
     check(&HdrSettings::bloomStrengthPercent, -0.01,
         HdrSettingsValidationError::bloomStrengthOutOfRange);
     TestColorBalanceEndpoints();

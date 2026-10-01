@@ -104,8 +104,8 @@ void CheckRewrittenEffects(const std::string& rewritten)
         "VanillaColorGradingStrength=100\r\n"
         "VanillaGradeLuminanceStrength=65\r\nVanillaGradeColorStrength=35\r\n"
         "LutProfilesEnabled=1\r\n"
-        "BloomStrength=175\r\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("BloomStrength=175\r\n") !=
+        "BloomStrength=75\r\n") != std::string::npos);
+    FO4HDR_CHECK(rewritten.find("BloomStrength=75\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find("[Interface]\r\nScale=1.75\r\n") !=
         std::string::npos);
@@ -187,7 +187,7 @@ void TestSettingsPersistenceRewrite()
     settings.blacks = -40.0;
     settings.vanillaGradeLuminancePercent = 65.0;
     settings.vanillaGradeColorPercent = 35.0;
-    settings.bloomStrengthPercent = 175.0;
+    settings.bloomStrengthPercent = 75.0;
     interfaceSettings.scale = 1.75;
     interfaceSettings.windowWidth = 880.0;
     interfaceSettings.windowHeight = 740.0;

@@ -292,7 +292,7 @@ void VerifyBloomStrengthPixelShader(
         auto* constants = finalAffine
             ? affineImageSpaceConstants.Get()
             : imageSpaceConstants.Get();
-        for (const float strength : {0.0F, 1.0F, 2.0F}) {
+        for (const float strength : {0.0F, 0.5F, 1.0F}) {
             ToneMapConstants settings{
                 0U, 1000.0F, kReferenceWhiteNits, kReferenceWhiteNits,
                 1.0F, kReferenceWhiteNits, 0.0F, 0.0F};

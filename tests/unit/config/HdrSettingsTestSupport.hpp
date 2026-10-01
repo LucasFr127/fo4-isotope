@@ -44,7 +44,7 @@ GradeTransfer=PreserveHDRColor
 VanillaColorGradingStrength=60
 VanillaGradeLuminanceStrength=75
 VanillaGradeColorStrength=40
-BloomStrength=175
+BloomStrength=75
 [Interface]
 ToggleKey=F12
 Scale=1.5
