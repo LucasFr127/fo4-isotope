@@ -303,7 +303,8 @@ if has_config("fo4hdr_build_tests") then
         add_packages("imgui")
         add_files("src/ui/HdrSettingsInput.cpp")
         add_files("src/ui/DisplayCalibrationPanel.cpp",
-            "src/ui/ToneMapperPanel.cpp", "src/ui/LutProfilesPanel.cpp")
+            "src/ui/ToneMapperPanel.cpp", "src/ui/ToneMapperRecommendations.cpp",
+            "src/ui/LutProfilesPanel.cpp")
         add_files("src/graphics/OperatorLutWorker.cpp")
         add_files("src/graphics/d3d11/ContextQuerySafety.cpp",
             "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp")

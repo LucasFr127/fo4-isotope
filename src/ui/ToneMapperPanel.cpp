@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "ToneMapperPanel.hpp"
+#include "ToneMapperRecommendations.hpp"
 #include "LutProfilesPanel.hpp"
 #include "FO4Isotope/ui/SettingsWindow.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
@@ -9,8 +10,10 @@
 #include "SettingsPanelSlider.hpp"
 
 #include <imgui.h>
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 
 namespace fo4hdr {
 
@@ -60,12 +63,56 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
         "ACES 2" : ToString(algorithm).data();
 }
 
+const char* ToneMapperRecommendationStatus(
+    double value, const ToneMapperRecommendedRange& range) noexcept
+{
+    if (!range.available) return "Recommended range unavailable for this control.";
+    if (!std::isfinite(value)) return "Control value is invalid.";
+    // Slider edits round through float; include only that endpoint representation.
+    const auto minimum = std::min(range.minimum,
+        static_cast<double>(static_cast<float>(range.minimum)));
+    const auto maximum = std::max(range.maximum,
+        static_cast<double>(static_cast<float>(range.maximum)));
+    if (value < minimum || value > maximum)
+        return "Outside recommended range: visible LUT differences are possible.";
+    return nullptr;
+}
+
 namespace {
 
 using detail::DrawRestoreDefaultButton;
 using detail::DrawSettingsControlLabel;
 using detail::DrawSettingsSlider;
 using detail::SettingsSliderRange;
+
+struct ToneMapperControl
+{
+    const char* label;
+    double ToneMapperParameters::* parameter;
+    detail::SettingsSliderPresentation presentation;
+};
+
+[[nodiscard]] bool DrawRecommendedToneMapperSlider(
+    HdrSettings& settings, const ToneMapperControl& control) noexcept
+{
+    const auto& [label, parameter, presentation] = control;
+    auto& value = settings.toneMapperParameters.*parameter;
+    const auto changed = detail::DrawSettingsPanelSlider(label, value, presentation);
+    const auto range = GetToneMapperRecommendedRange(
+        settings.productionAlgorithm, settings.displayPeakNits, parameter);
+    if (range.available)
+    {
+        std::array<char, 32> minimum{}, maximum{};
+        std::snprintf(minimum.data(), minimum.size(), presentation.format,
+            range.minimum * presentation.displayScale);
+        std::snprintf(maximum.data(), maximum.size(), presentation.format,
+            range.maximum * presentation.displayScale);
+        ImGui::TextWrapped("Recommended %s - %s", minimum.data(), maximum.data());
+    }
+    if (const auto* status = ToneMapperRecommendationStatus(value, range))
+        ImGui::TextWrapped("%s", status);
+    return changed;
+}
 
 struct ColorSettingsTabs
 {
@@ -425,66 +472,65 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
 [[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings) noexcept
 {
     const ToneMapperParameters defaults{};
-    auto& parameters = settings.toneMapperParameters;
     switch (settings.productionAlgorithm)
     {
     case ProductionToneMapperAlgorithm::aces2:
-        return detail::DrawSettingsPanelSlider(
-            "Contrast Look Strength", parameters.acesLookStrength, {
+        return DrawRecommendedToneMapperSlider(settings, {
+            "Contrast Look Strength", &ToneMapperParameters::acesLookStrength, {
             defaults.acesLookStrength,
             kMinimumAcesLookStrength, kMaximumAcesLookStrength,
             100.0, "%.0f%%",
-            "Strength of the added contrast look before the ACES output "
-            "transform. 0% removes the look; 100% keeps the original look."});
+            "Strength of the Contrast LMT before the adapted ACES 2 output "
+            "transform. 0% removes the look; 100% keeps the original look."}});
     case ProductionToneMapperAlgorithm::agX:
     {
         bool changed{};
-        changed |= detail::DrawSettingsPanelSlider(
-            "Middle Gray", parameters.agxMiddleGrayEv, {
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Middle Gray", &ToneMapperParameters::agxMiddleGrayEv, {
             defaults.agxMiddleGrayEv,
             kMinimumAgxMiddleGrayEv, kMaximumAgxMiddleGrayEv,
             1.0, "%.2f EV",
-            "Adjusts AgX middle-gray brightness while keeping display peak fixed."});
-        changed |= detail::DrawSettingsPanelSlider(
-            "Contrast", parameters.agxContrast, { defaults.agxContrast,
+            "Adjusts AgX middle-gray brightness while keeping display peak fixed."}});
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Contrast", &ToneMapperParameters::agxContrast, { defaults.agxContrast,
             kMinimumAgxContrast, kMaximumAgxContrast,
-            1.0, "%.2f", "Controls AgX sigmoid contrast."});
-        changed |= detail::DrawSettingsPanelSlider(
-            "Highlight Shoulder", parameters.agxHdrShoulderPower, {
+            1.0, "%.2f", "Controls AgX sigmoid contrast."}});
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Highlight Shoulder", &ToneMapperParameters::agxHdrShoulderPower, {
             defaults.agxHdrShoulderPower,
             kMinimumAgxHdrShoulderPower, kMaximumAgxHdrShoulderPower,
-            1.0, "%.2fx", "Adjusts AgX highlight compression near the display peak."});
-        changed |= detail::DrawSettingsPanelSlider(
-            "HDR Color Response", parameters.agxHdrPurity, {
+            1.0, "%.2fx", "Adjusts AgX highlight compression near the display peak."}});
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "HDR Color Response", &ToneMapperParameters::agxHdrPurity, {
             defaults.agxHdrPurity,
             kMinimumAgxHdrPurity, kMaximumAgxHdrPurity,
             1.0, "%.2f",
             "Balances hue and saturation before and after AgX's HDR remapping. "
             "Higher values favor the remapped response and can also shift "
-            "scene brightness."});
+            "scene brightness."}});
         return changed;
     }
     case ProductionToneMapperAlgorithm::gt7:
     {
         bool changed{};
-        changed |= detail::DrawSettingsPanelSlider(
-            "Shadow Toe", parameters.gt7ToeStrength, {
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Shadow Toe", &ToneMapperParameters::gt7ToeStrength, {
             defaults.gt7ToeStrength,
             kMinimumGt7ToeStrength, kMaximumGt7ToeStrength,
-            1.0, "%.2f", "Adjusts GT7 shadow compression. Higher values deepen shadows."});
-        changed |= detail::DrawSettingsPanelSlider(
-            "Shoulder Start", parameters.gt7ShoulderStart, {
+            1.0, "%.2f", "Adjusts GT7 shadow compression. Higher values deepen shadows."}});
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Shoulder Start", &ToneMapperParameters::gt7ShoulderStart, {
             defaults.gt7ShoulderStart,
             kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart,
             100.0, "%.1f%%",
-            "Sets where the GT7 highlight shoulder begins as a fraction of display peak."});
-        changed |= detail::DrawSettingsPanelSlider(
-            "Color Blend", parameters.gt7ColorBlend, {
+            "Sets where the GT7 highlight shoulder begins as a fraction of display peak."}});
+        changed |= DrawRecommendedToneMapperSlider(settings, {
+            "Color Blend", &ToneMapperParameters::gt7ColorBlend, {
             defaults.gt7ColorBlend,
             kMinimumGt7ColorBlend, kMaximumGt7ColorBlend,
             1.0, "%.2f",
             "Controls hue and saturation handling in highlights. 0 uses "
-            "per-channel RGB curves; higher values favor the ICtCp color treatment."});
+            "per-channel RGB curves; higher values favor the ICtCp color treatment."}});
         return changed;
     }
     }

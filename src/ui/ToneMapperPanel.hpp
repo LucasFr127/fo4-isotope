@@ -3,7 +3,10 @@
 #include "FO4Isotope/config/HdrSettings.hpp"
 namespace fo4hdr {
 struct SettingsWindowView;
+struct ToneMapperRecommendedRange;
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;
+[[nodiscard]] const char* ToneMapperRecommendationStatus(
+    double value, const ToneMapperRecommendedRange& range) noexcept;
 void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     const SettingsWindowView& view, float footerHeight) noexcept;
 [[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings) noexcept;

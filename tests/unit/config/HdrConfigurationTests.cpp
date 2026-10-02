@@ -245,17 +245,17 @@ void TestConfigurationOperatorErrors()
     for (const auto invalidParameter : {
              "[ACES2]\nContrastLookStrength=-0.01\n",
              "[AgX]\nMiddleGrayOffsetEV=nan\n",
-             "[AgX]\nMiddleGrayOffsetEV=0.5\n",
-             "[AgX]\nContrast=2.3\n",
+             "[AgX]\nMiddleGrayOffsetEV=0.51\n",
+             "[AgX]\nContrast=2.19\n",
              "[AgX]\nContrast=3.51\n",
-             "[AgX]\nHdrColorResponse=0.25\n",
+             "[AgX]\nHdrColorResponse=0.24\n",
              "[AgX]\nHdrColorResponse=1.01\n",
              "[AgX]\nShoulderPower=0.99\n",
-             "[AgX]\nShoulderPower=2.2\n",
+             "[AgX]\nShoulderPower=2.26\n",
              "[GT7]\nToeStrength=2.01\n",
              "[GT7]\nShoulderStart=0.34\n",
              "[GT7]\nColorBlend=-0.01\n",
-             "[GT7]\nColorBlend=0.9\n"})
+             "[GT7]\nColorBlend=1.01\n"})
     {
         const auto invalid = ParsePluginConfiguration(
             LegacyProductionConfiguration() + "\n" + invalidParameter);
