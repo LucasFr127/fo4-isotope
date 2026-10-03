@@ -37,6 +37,11 @@ struct LinearRgb
 [[nodiscard]] double EncodeSt2084Pq(double nits) noexcept;
 [[nodiscard]] LinearRgb EncodeSt2084Pq(LinearRgb nits) noexcept;
 
+// BT.2124 potential visibility metric for absolute linear BT.2020 nits.
+// Invalid channels outside finite [0, 10000] return positive infinity.
+[[nodiscard]] double DeltaEItpBt2020Nits(
+    LinearRgb reference, LinearRgb candidate) noexcept;
+
 [[nodiscard]] std::uint16_t QuantizeR10Unorm(double encoded) noexcept;
 [[nodiscard]] double NormalizeR10Unorm(std::uint16_t code) noexcept;
 

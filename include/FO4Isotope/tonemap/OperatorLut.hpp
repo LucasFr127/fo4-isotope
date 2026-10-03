@@ -10,9 +10,9 @@
 
 namespace fo4hdr {
 
-// Smallest qualified coefficient grids; the smooth shaper also resolves shadows.
-inline constexpr std::uint32_t kAces2OperatorLutEdge{128};
-inline constexpr std::uint32_t kAgxOperatorLutEdge{92};
+// Smallest measured default-qualified logical grids, starting at 64 per edge.
+inline constexpr std::uint32_t kAces2OperatorLutEdge{119};
+inline constexpr std::uint32_t kAgxOperatorLutEdge{81};
 inline constexpr std::uint32_t kGt7OperatorLutEdge{64};
 inline constexpr std::uint32_t kOperatorLutCoefficientPadding{2};
 inline constexpr double kOperatorLutSceneMaximum{65504.0};

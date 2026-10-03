@@ -7,10 +7,12 @@
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "resources/HdrResourcePolicy.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
+#include "reference/OperatorLutTestSupport.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -19,6 +21,13 @@
 
 namespace fo4hdr::tests {
 namespace {
+
+using test::EvaluateOperatorLutQuality;
+using test::kOperatorLutPercentileDeltaEItp;
+using test::OperatorLutMaximumDeltaEItp;
+using test::OperatorLutQuality;
+using test::OperatorLutQualityMeasurements;
+using test::OperatorLutQualityRegion;
 
 void TestBt709ToBt2020()
 {
@@ -161,6 +170,168 @@ void TestSt2084ReferenceVectors()
         EncodeSt2084Pq(0.0));
     FO4HDR_CHECK(QuantizeR10Unorm(-1.0) == 0);
     FO4HDR_CHECK(QuantizeR10Unorm(2.0) == 1023);
+}
+
+void TestDeltaEItpReferenceVectors()
+{
+    struct Reference
+    {
+        LinearRgb reference;
+        LinearRgb candidate;
+        double expected;
+    };
+    constexpr std::array vectors{
+        Reference{{100, 100, 100}, {101, 101, 101}, 0.7192686058769748},
+        Reference{{100, 50, 25}, {101, 49, 26}, 3.1331495828677633},
+        Reference{{92.24570899406527, 92.24570899406527, 92.24570899406527},
+            {93.53771861465454, 93.53771861465454, 93.53771861465454}, 1.0},
+        Reference{{0, 0, 0}, {0, 0, 0}, 0.0},
+        Reference{{10000, 10000, 10000}, {10000, 10000, 10000}, 0.0}
+    };
+    for (const auto& vector : vectors)
+    {
+        const auto error = DeltaEItpBt2020Nits(vector.reference, vector.candidate);
+        FO4HDR_CHECK(test::Approx(error, vector.expected, 1.0e-10));
+        FO4HDR_CHECK(error == DeltaEItpBt2020Nits(vector.candidate, vector.reference));
+        FO4HDR_CHECK(DeltaEItpBt2020Nits(vector.reference, vector.reference) == 0.0);
+    }
+}
+
+void TestDeltaEItpInvalidInputs()
+{
+    constexpr LinearRgb valid{100, 50, 25};
+    const auto infinity = std::numeric_limits<double>::infinity();
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto invalid : {-1.0, std::nextafter(10000.0, infinity),
+             -infinity, infinity, nan})
+    {
+        for (const auto channel : {&LinearRgb::red, &LinearRgb::green, &LinearRgb::blue})
+        {
+            auto operand = valid;
+            operand.*channel = invalid;
+            FO4HDR_CHECK(DeltaEItpBt2020Nits(operand, valid) == infinity);
+            FO4HDR_CHECK(DeltaEItpBt2020Nits(valid, operand) == infinity);
+            FO4HDR_CHECK(DeltaEItpBt2020Nits(operand, operand) == infinity);
+        }
+    }
+}
+
+void TestOperatorLutQualityPercentiles()
+{
+    for (const auto count : {1U, 99U, 100U, 101U})
+    {
+        OperatorLutQualityMeasurements measurements;
+        for (auto index = count; index > 0U; --index)
+        {
+            measurements.Record(static_cast<double>(index), OperatorLutQualityRegion::broad);
+            measurements.Record(static_cast<double>(index) * 0.5,
+                OperatorLutQualityRegion::holdout);
+        }
+        measurements.Record(200.0, OperatorLutQualityRegion::other);
+        const auto summary = measurements.Summary();
+        const auto expected = static_cast<double>(count - count / 100U);
+        FO4HDR_CHECK(summary.available);
+        FO4HDR_CHECK(summary.maximumDeltaEItp == 200.0);
+        FO4HDR_CHECK(summary.broadP99DeltaEItp == expected);
+        FO4HDR_CHECK(summary.holdoutP99DeltaEItp == expected * 0.5);
+        FO4HDR_CHECK(summary.sampleCount == count * 2U + 1U);
+        FO4HDR_CHECK(measurements.Summary().broadP99DeltaEItp == expected);
+    }
+}
+
+void TestOperatorLutMaximumPolicy()
+{
+    struct Boundary
+    {
+        ProductionToneMapperAlgorithm algorithm;
+        double nominal;
+        double cutoff;
+    };
+    constexpr std::array boundaries{
+        Boundary{ProductionToneMapperAlgorithm::aces2, 4.8, 4.85},
+        Boundary{ProductionToneMapperAlgorithm::agX, 2.4, 2.45},
+        Boundary{ProductionToneMapperAlgorithm::gt7, 2.4, 2.45}
+    };
+    const auto infinity = std::numeric_limits<double>::infinity();
+    for (const auto boundary : boundaries)
+    {
+        FO4HDR_CHECK(OperatorLutMaximumDeltaEItp(boundary.algorithm) == boundary.nominal);
+        OperatorLutQuality quality{true, boundary.nominal, 1.0, 1.0, 2U};
+        FO4HDR_CHECK(quality.MeetsPracticalLimit(boundary.algorithm));
+        quality.maximumDeltaEItp = std::nextafter(boundary.nominal, infinity);
+        FO4HDR_CHECK(quality.MeetsPracticalLimit(boundary.algorithm));
+        quality.maximumDeltaEItp = std::nextafter(boundary.cutoff, 0.0);
+        FO4HDR_CHECK(quality.MeetsPracticalLimit(boundary.algorithm));
+        quality.maximumDeltaEItp = boundary.cutoff;
+        FO4HDR_CHECK(!quality.MeetsPracticalLimit(boundary.algorithm));
+        quality.maximumDeltaEItp = std::nextafter(boundary.cutoff, infinity);
+        FO4HDR_CHECK(!quality.MeetsPracticalLimit(boundary.algorithm));
+    }
+    const auto unknown = static_cast<ProductionToneMapperAlgorithm>(0xFF);
+    FO4HDR_CHECK(OperatorLutMaximumDeltaEItp(unknown) == 0.0);
+    const OperatorLutQuality zeroError{true, 0.0, 0.0, 0.0, 2U};
+    FO4HDR_CHECK(!zeroError.MeetsPracticalLimit(unknown));
+    FO4HDR_CHECK(!zeroError.MeetsFidelityGoal(unknown));
+}
+
+void TestOperatorLutQualityLimits()
+{
+    constexpr auto algorithm = ProductionToneMapperAlgorithm::gt7;
+    OperatorLutQuality quality{true, OperatorLutMaximumDeltaEItp(algorithm),
+        kOperatorLutPercentileDeltaEItp, kOperatorLutPercentileDeltaEItp, 2U};
+    FO4HDR_CHECK(quality.MeetsPracticalLimit(algorithm));
+    FO4HDR_CHECK(!quality.MeetsFidelityGoal(algorithm));
+    const auto infinity = std::numeric_limits<double>::infinity();
+    for (const auto field : {&OperatorLutQuality::broadP99DeltaEItp,
+             &OperatorLutQuality::holdoutP99DeltaEItp})
+    {
+        auto exceeded = quality;
+        exceeded.*field = std::nextafter(exceeded.*field, infinity);
+        FO4HDR_CHECK(!exceeded.MeetsPracticalLimit(algorithm));
+    }
+    for (const auto field : {&OperatorLutQuality::maximumDeltaEItp,
+             &OperatorLutQuality::broadP99DeltaEItp,
+             &OperatorLutQuality::holdoutP99DeltaEItp})
+    {
+        auto invalid = quality;
+        invalid.*field = std::numeric_limits<double>::quiet_NaN();
+        FO4HDR_CHECK(!invalid.MeetsPracticalLimit(algorithm));
+    }
+    quality.maximumDeltaEItp = 1.0;
+    FO4HDR_CHECK(quality.MeetsFidelityGoal(algorithm));
+    quality.maximumDeltaEItp = std::nextafter(1.0, infinity);
+    FO4HDR_CHECK(!quality.MeetsFidelityGoal(algorithm));
+    quality.available = false;
+    FO4HDR_CHECK(!quality.MeetsPracticalLimit(algorithm));
+    quality.available = true;
+    quality.sampleCount = 0U;
+    FO4HDR_CHECK(!quality.MeetsPracticalLimit(algorithm));
+}
+
+void TestOperatorLutQualityInvalidMeasurements()
+{
+    OperatorLutQualityMeasurements empty;
+    FO4HDR_CHECK(!empty.Summary().available);
+    empty.Record(0.0, OperatorLutQualityRegion::broad);
+    FO4HDR_CHECK(!empty.Summary().available);
+    OperatorLutQualityMeasurements missingBroad;
+    missingBroad.Record(0.0, OperatorLutQualityRegion::holdout);
+    FO4HDR_CHECK(!missingBroad.Summary().available);
+    const auto infinity = std::numeric_limits<double>::infinity();
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+    for (const auto invalid : {-1.0, -infinity, infinity, nan})
+        for (const auto region : {OperatorLutQualityRegion::broad,
+                 OperatorLutQualityRegion::holdout, OperatorLutQualityRegion::other})
+        {
+            OperatorLutQualityMeasurements measurements;
+            measurements.Record(invalid, region);
+            measurements.Record(0.0, OperatorLutQualityRegion::broad);
+            measurements.Record(0.0, OperatorLutQualityRegion::holdout);
+            FO4HDR_CHECK(!measurements.Summary().available);
+        }
+    FO4HDR_CHECK(!EvaluateOperatorLutQuality({}).available);
+    std::atomic<std::uint64_t> generation{2U};
+    FO4HDR_CHECK(!EvaluateOperatorLutQuality({}, {&generation, 1U}).available);
 }
 
 void TestWideGamutReadinessAndSdrHandoff()
@@ -769,6 +940,12 @@ void RunHdrCoreTests()
     TestDisplayStandardsOracle();
     TestDisplaySignalContainment();
     TestSt2084ReferenceVectors();
+    TestDeltaEItpReferenceVectors();
+    TestDeltaEItpInvalidInputs();
+    TestOperatorLutQualityPercentiles();
+    TestOperatorLutMaximumPolicy();
+    TestOperatorLutQualityLimits();
+    TestOperatorLutQualityInvalidMeasurements();
     TestWideGamutReadinessAndSdrHandoff();
     TestAboveWhiteSurvivesReferencePipeline();
     TestTemporalIntermediateRoundTrip();

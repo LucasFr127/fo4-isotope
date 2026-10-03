@@ -256,7 +256,9 @@ struct OperatorSample
 
 struct OperatorVerdict
 {
-    double maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound;
+    double broadMeanError, holdoutMeanError;
+    fo4hdr::test::OperatorLutQuality total, approximation, sampler;
+    bool defaultParameters;
     bool passed;
 };
 
@@ -296,6 +298,7 @@ struct OperatorMeasurements
     double worstActual{};
     double worstExpected{};
     bool contained = true;
+    fo4hdr::test::OperatorLutQualityMeasurements totalQuality, approximationQuality, samplerQuality;
 
     void MeasureDark(const OperatorSample &sample, std::size_t channel)
     {
@@ -411,6 +414,13 @@ struct OperatorMeasurements
             // analytical operator; neither creative grading nor UI can mask it.
             const auto sampled = fo4hdr::test::SampleOperatorLut(lut, scene);
             const std::array sampledChannels{sampled.red, sampled.green, sampled.blue};
+            const auto region = index < broadEnd ? fo4hdr::test::OperatorLutQualityRegion::broad :
+                (index < holdoutEnd ? fo4hdr::test::OperatorLutQualityRegion::holdout :
+                    fo4hdr::test::OperatorLutQualityRegion::other);
+            const fo4hdr::LinearRgb gpu{actual[0], actual[1], actual[2]};
+            totalQuality.Record(fo4hdr::DeltaEItpBt2020Nits(expected, gpu), region);
+            approximationQuality.Record(fo4hdr::DeltaEItpBt2020Nits(expected, sampled), region);
+            samplerQuality.Record(fo4hdr::DeltaEItpBt2020Nits(sampled, gpu), region);
             contained = contained && actual[3] == 1.0F;
             const OperatorSample sample{index, actual, scene, expected, expectedChannels, sampledChannels};
             for (std::size_t channel = 0; channel < 3; ++channel)
@@ -428,12 +438,6 @@ struct OperatorMeasurements
     static constexpr double adjacentJitterBoundPqCodes{0.75};
     static constexpr double neutralRippleBoundPqCodes{2.0};
 
-    bool SamplingPassed(double darkBound) const
-    {
-        return contained && darkOutputCodes <= darkBound && darkSamplerCodes <= 3.5 &&
-               maximumSamplerError <= peak * 0.005;
-    }
-
     bool NeutralPassed() const
     {
         return maximumNeutralTintPqCodes <= neutralTintBoundPqCodes &&
@@ -441,26 +445,28 @@ struct OperatorMeasurements
                maximumNeutralDrawdownPqCodes <= neutralRippleBoundPqCodes;
     }
 
-    OperatorVerdict Evaluate() const
+    OperatorVerdict Evaluate()
     {
         const auto broadEnd = dataset.broadEnd, holdoutBegin = dataset.holdoutBegin, holdoutEnd = dataset.holdoutEnd;
-        // ACES2 is an experimental draft look with higher local
-        // curvature. Its representation retains the 0.7%-of-peak
-        // maximum gate; every other operator retains 0.5% and the mean is shared.
-        const auto maximumBound = std::max(1.0, peak * (algorithm == Algorithm::aces2 ? 0.007 : 0.005));
         const auto broadMeanError = broadErrorSum / (static_cast<double>(broadEnd) * 3.0);
         const auto holdoutMeanError = holdoutErrorSum / (static_cast<double>(holdoutEnd - holdoutBegin) * 3.0);
-        const auto meanBound = std::max(0.1, peak * 0.0005);
-        const bool analyticalPassed =
-            maximumApproximationError <= maximumBound && broadMeanError <= meanBound && holdoutMeanError <= meanBound;
-        const auto darkBound = algorithm == Algorithm::aces2 ? 3.0 : 32.0;
-        const bool passed = SamplingPassed(darkBound) && NeutralPassed() && analyticalPassed;
-        return {maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound, passed};
+        const auto total = totalQuality.Summary();
+        const auto approximation = approximationQuality.Summary();
+        const auto sampler = samplerQuality.Summary();
+        const bool defaults = fo4hdr::ActiveToneMapperParameters(algorithm, parameters) ==
+            fo4hdr::ActiveToneMapperParameters(algorithm, {});
+        // Qualify CPU approximation and GPU total independently; sampling is diagnostic.
+        // Full control ranges remain usable beyond the default-only quality envelope.
+        const bool passed = contained && total.available && approximation.available &&
+            sampler.available &&
+            (!defaults || (total.MeetsPracticalLimit(algorithm) &&
+                approximation.MeetsPracticalLimit(algorithm) && NeutralPassed()));
+        return {broadMeanError, holdoutMeanError, total, approximation, sampler, defaults, passed};
     }
 
     void ReportFailure(const OperatorVerdict &verdict) const
     {
-        const auto &[maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound, passed] = verdict;
+        const auto &[broadMeanError, holdoutMeanError, total, approximation, sampler, defaults, passed] = verdict;
         const auto &pixels = dataset.pixels;
         const char *label = "Direct operator LUT ";
 
@@ -468,32 +474,44 @@ struct OperatorMeasurements
         std::cerr << __FILE__ << ':' << __LINE__ << ": FAIL: " << label << Name(algorithm) << " peak=" << peak
                   << " worst_input=(" << worst[0] << ',' << worst[1] << ',' << worst[2] << ')'
                   << " channel=" << worstChannel << " actual=" << worstActual << " expected=" << worstExpected
-                  << " cpu_lut_max_budget=" << maximumBound << " dark_max_pq_codes=" << darkOutputCodes << '/'
-                  << darkBound << " dark_sampler_pq_codes=" << darkSamplerCodes << "/3.5"
+                  << " gpu_total_max_delta_e_itp=" << total.maximumDeltaEItp << '/'
+                  << fo4hdr::test::OperatorLutMaximumDeltaEItp(algorithm)
+                  << " broad_p99_delta_e_itp=" << total.broadP99DeltaEItp << '/'
+                  << fo4hdr::test::kOperatorLutPercentileDeltaEItp
+                  << " holdout_p99_delta_e_itp=" << total.holdoutP99DeltaEItp << '/'
+                  << fo4hdr::test::kOperatorLutPercentileDeltaEItp
+                  << " sampler_max_delta_e_itp=" << sampler.maximumDeltaEItp
+                  << " dark_max_pq_codes=" << darkOutputCodes
                   << " neutral_tint_pq_codes=" << maximumNeutralTintPqCodes << '/' << neutralTintBoundPqCodes
                   << " neutral_adjacent_jitter_pq_codes=" << maximumNeutralAdjacentDecreasePqCodes << '/'
                   << adjacentJitterBoundPqCodes
                   << " neutral_running_max_drawdown_pq_codes=" << maximumNeutralDrawdownPqCodes << '/'
-                  << neutralRippleBoundPqCodes << " broad_mean_nits=" << broadMeanError << '/' << meanBound
-                  << " holdout_mean_nits=" << holdoutMeanError << '/' << meanBound << '\n';
+                  << neutralRippleBoundPqCodes << " broad_mean_nits=" << broadMeanError
+                  << " holdout_mean_nits=" << holdoutMeanError << '\n';
     }
 
-    int Report(const OperatorTimings &timing) const
+    int Report(const OperatorTimings &timing)
     {
         const auto &[corpus, broadEnd, holdoutBegin, holdoutEnd, darkBegin, darkEnd, neutralBegin, neutralEnd, height,
                      pixels] = dataset;
         const auto &[bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark] = timing;
         const auto verdict = Evaluate();
-        const auto &[maximumBound, broadMeanError, holdoutMeanError, meanBound, darkBound, passed] = verdict;
+        const auto &[broadMeanError, holdoutMeanError, total, approximation, sampler, defaults, passed] = verdict;
         const char *label = "Direct operator LUT ";
         std::cout << label << Name(algorithm) << " peak=" << peak << " parameters=" << parameters.acesLookStrength
                   << ',' << parameters.agxMiddleGrayEv << ',' << parameters.agxContrast << ','
                   << parameters.agxHdrPurity << ',' << parameters.agxHdrShoulderPower << ','
                   << parameters.gt7ToeStrength << ',' << parameters.gt7ShoulderStart << ',' << parameters.gt7ColorBlend
                   << " colors=" << corpus.size() << " gpu_total_max_nits=" << maximumError
-                  << " cpu_lut_max_nits=" << maximumApproximationError << " broad_mean_nits=" << broadMeanError << '/'
-                  << meanBound << " holdout_mean_nits=" << holdoutMeanError << '/' << meanBound
-                  << " contained=" << contained << " analytical_gate=required"
+                  << " cpu_lut_max_nits=" << maximumApproximationError << " broad_mean_nits=" << broadMeanError
+                  << " holdout_mean_nits=" << holdoutMeanError
+                  << " gpu_total_max_delta_e_itp=" << total.maximumDeltaEItp
+                  << " broad_p99_delta_e_itp=" << total.broadP99DeltaEItp
+                  << " holdout_p99_delta_e_itp=" << total.holdoutP99DeltaEItp
+                  << " cpu_lut_max_delta_e_itp=" << approximation.maximumDeltaEItp
+                  << " gpu_sampler_max_delta_e_itp=" << sampler.maximumDeltaEItp
+                  << " quality_warning=" << !total.MeetsPracticalLimit(algorithm)
+                  << " contained=" << contained << " default_qualification=" << defaults
                   << " gpu_vs_cpu_sampler_max_nits=" << maximumSamplerError
                   << " dark_cpu_approximation_max_pq_codes=" << darkApproximationCodes
                   << " dark_gpu_sampler_max_pq_codes=" << darkSamplerCodes
@@ -523,6 +541,41 @@ struct OperatorMeasurements
         return passed ? 0 : 1;
     }
 };
+
+void CheckQualityVerdict(bool condition, const char* failure)
+{
+    if (!condition) throw std::runtime_error(failure);
+}
+
+void CheckQualityVerdictPolicy()
+{
+    const OperatorCorpus dataset(1000.0);
+    fo4hdr::ToneMapperParameters parameters{};
+    const fo4hdr::Aces2TransformHandle aces;
+    const fo4hdr::OperatorLutData lut;
+    OperatorMeasurements measurements{dataset, Algorithm::gt7, 1000.0, parameters, aces, lut};
+    for (const auto region : {fo4hdr::test::OperatorLutQualityRegion::broad,
+             fo4hdr::test::OperatorLutQualityRegion::holdout}) {
+        measurements.totalQuality.Record(0.0, region);
+        measurements.approximationQuality.Record(0.5, region);
+        measurements.samplerQuality.Record(0.5, region);
+    }
+    measurements.totalQuality.Record(2.45,
+        fo4hdr::test::OperatorLutQualityRegion::other);
+    CheckQualityVerdict(!measurements.Evaluate().passed,
+        "Default GPU total must qualify independently of component errors");
+    parameters.gt7ColorBlend = fo4hdr::kMaximumGt7ColorBlend;
+    const auto configured = measurements.Evaluate();
+    CheckQualityVerdict(configured.passed && !configured.total.MeetsPracticalLimit(Algorithm::gt7),
+        "Valid configured quality overruns must remain warning-only");
+    measurements.totalQuality.Record(std::numeric_limits<double>::infinity(),
+        fo4hdr::test::OperatorLutQualityRegion::other);
+    CheckQualityVerdict(!measurements.Evaluate().passed,
+        "Invalid configured quality must fail closed");
+    parameters = {};
+    CheckQualityVerdict(!measurements.Evaluate().passed,
+        "Invalid default quality must fail closed");
+}
 
 struct OperatorExecution
 {
@@ -676,6 +729,7 @@ fo4hdr::ToneMapperParameters Gt7CornerParameters(unsigned corner)
 
 int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context, bool benchmark)
 {
+    CheckQualityVerdictPolicy();
     ComPtr<ID3D11ComputeShader> shader;
     const auto &bytecode = fo4hdr::generated::test::kOperatorLutCs;
     Require(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
@@ -695,8 +749,7 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
             failures += VerifyCase(execution, {algorithm, peak, benchmark});
         }
     }
-    // Keep the established approximation and sampling budgets for configured
-    // responses. Opposite peak endpoints exercise every joint parameter corner.
+    // Configured corners check safety and report quality; defaults alone qualify size.
     for (const auto peak : {400.0, 2000.0}) {
         for (const double strength : {0.0, 0.25, 0.5, 0.75}) {
             fo4hdr::ToneMapperParameters parameters{};

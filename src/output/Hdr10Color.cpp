@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace fo4hdr {
 namespace {
@@ -39,6 +40,31 @@ LinearRgb Transform(const Matrix& matrix, LinearRgb rgb) noexcept
 double BoundLight(double nits, double ceiling) noexcept
 {
     return nits > 0.0 ? std::min(nits, ceiling) : 0.0;
+}
+
+bool IsMetricInput(LinearRgb value) noexcept
+{
+    const auto valid = [](double channel) {
+        return std::isfinite(channel) && channel >= 0.0 && channel <= 10000.0;
+    };
+    return valid(value.red) && valid(value.green) && valid(value.blue);
+}
+
+LinearRgb ConvertToItp(LinearRgb value) noexcept
+{
+    // Normative double-precision BT.2124 matrices; T is one-half Ct.
+    // https://www.itu.int/rec/R-REC-BT.2124-0-201901-I/en
+    constexpr Matrix rgbToLms{{
+        {1688.0 / 4096.0, 2146.0 / 4096.0, 262.0 / 4096.0},
+        {683.0 / 4096.0, 2951.0 / 4096.0, 462.0 / 4096.0},
+        {99.0 / 4096.0, 309.0 / 4096.0, 3688.0 / 4096.0}
+    }};
+    constexpr Matrix lmsToItp{{
+        {2048.0 / 4096.0, 2048.0 / 4096.0, 0.0},
+        {6610.0 / 8192.0, -13613.0 / 8192.0, 7003.0 / 8192.0},
+        {17933.0 / 4096.0, -17390.0 / 4096.0, -543.0 / 4096.0}
+    }};
+    return Transform(lmsToItp, EncodeSt2084Pq(Transform(rgbToLms, value)));
 }
 
 }  // namespace
@@ -76,6 +102,15 @@ LinearRgb EncodeSt2084Pq(LinearRgb nits) noexcept
 {
     return {EncodeSt2084Pq(nits.red), EncodeSt2084Pq(nits.green),
         EncodeSt2084Pq(nits.blue)};
+}
+
+double DeltaEItpBt2020Nits(LinearRgb reference, LinearRgb candidate) noexcept
+{
+    if (!IsMetricInput(reference) || !IsMetricInput(candidate))
+        return std::numeric_limits<double>::infinity();
+    const auto a = ConvertToItp(reference);
+    const auto b = ConvertToItp(candidate);
+    return 720.0 * std::hypot(a.red - b.red, a.green - b.green, a.blue - b.blue);
 }
 
 std::uint16_t QuantizeR10Unorm(double encoded) noexcept

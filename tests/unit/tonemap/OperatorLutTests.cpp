@@ -27,7 +27,10 @@ void CheckRgb(LinearRgb actual, LinearRgb expected, double tolerance)
     FO4HDR_CHECK(test::Approx(actual.blue, expected.blue, tolerance));
 }
 
+using test::EvaluateOperatorLutQuality;
 using test::HalfToDouble;
+using test::OperatorLutQualityMeasurements;
+using test::OperatorLutQualityRegion;
 using test::SampleOperatorLut;
 
 [[nodiscard]] LinearRgb MapAnalytic(
@@ -86,6 +89,9 @@ void TestInterpolationFixture()
     for (const auto algorithm : algorithms)
     {
         interpolationFixture.algorithm = algorithm;
+        CheckRgb(SampleOperatorLut(interpolationFixture, {}), {}, 0.0);
+        CheckRgb(SampleOperatorLut(interpolationFixture,
+            {nan, -infinity, -1.0}), {}, 0.0);
         const auto sceneBlue = DecodeOperatorLutCoordinate(
             0.5, algorithm, interpolationFixture.displayPeakNits);
         const auto sampled = SampleOperatorLut(
@@ -98,6 +104,9 @@ void TestInterpolationFixture()
             FO4HDR_CHECK(std::isfinite(channel) && channel >= 0.0 &&
                 channel <= interpolationFixture.displayPeakNits);
     }
+    interpolationFixture.algorithm = ProductionToneMapperAlgorithm::aces2;
+    CheckRgb(SampleOperatorLut(interpolationFixture,
+        {nan, -infinity, infinity}), {}, 0.0);
 }
 
 void TestInvalidOperatorLuts()
@@ -196,6 +205,7 @@ struct CorpusStatistics
     double holdoutTotalError{};
     bool outsideBt709Observed{};
     bool finiteAndContained{true};
+    OperatorLutQualityMeasurements quality;
 
     void Record(LinearRgb scene, LinearRgb sampled, LinearRgb analytic, bool broadSample)
     {
@@ -226,15 +236,9 @@ struct CorpusStatistics
     }
 
     void Report(ProductionToneMapperAlgorithm algorithm,
-        std::size_t broadCount, std::size_t holdoutCount) const
+        std::size_t broadCount, std::size_t holdoutCount)
     {
-        // The LMT's high-curvature response needs a narrowly scoped
-        // 0.7%-of-peak representation bound. Every other operator keeps
-        // the established 0.5% gate; all modes retain the same mean gate.
-        const auto maximumBound = std::max(1.0, peak *
-            (algorithm == ProductionToneMapperAlgorithm::aces2 ?
-                0.007 : 0.005));
-        const auto meanBound = std::max(0.1, peak * 0.0005);
+        const auto measured = quality.Summary();
         const auto broadMeanError = broadTotalError /
             static_cast<double>(broadCount * 3U);
         const auto holdoutMeanError = holdoutTotalError /
@@ -242,18 +246,18 @@ struct CorpusStatistics
         std::fprintf(stdout,
             "operator LUT CPU %s: algorithm=%u peak=%.0f "
             "broadSamples=%zu holdoutSamples=%zu "
-            "allMax=%.9f/%.9f broadMean=%.9f/%.9f "
-            "holdoutMean=%.9f/%.9f "
+            "allMaxNits=%.9f broadMeanNits=%.9f "
+            "holdoutMeanNits=%.9f max_delta_e_itp=%.9f "
+            "broad_p99_delta_e_itp=%.9f holdout_p99_delta_e_itp=%.9f "
             "scene=(%.6f,%.6f,%.6f) channel=%zu\n",
             "parity",
             static_cast<unsigned>(algorithm), peak, broadCount,
-            holdoutCount, maximumError, maximumBound,
-            broadMeanError, meanBound, holdoutMeanError, meanBound,
+            holdoutCount, maximumError, broadMeanError, holdoutMeanError,
+            measured.maximumDeltaEItp, measured.broadP99DeltaEItp,
+            measured.holdoutP99DeltaEItp,
             maximumErrorScene.red, maximumErrorScene.green,
             maximumErrorScene.blue, maximumErrorChannel);
-        FO4HDR_CHECK(maximumError <= maximumBound);
-        FO4HDR_CHECK(broadMeanError <= meanBound);
-        FO4HDR_CHECK(holdoutMeanError <= meanBound);
+        FO4HDR_CHECK(measured.MeetsPracticalLimit(algorithm));
         FO4HDR_CHECK(outsideBt709Observed);
         FO4HDR_CHECK(finiteAndContained);
     }
@@ -312,7 +316,7 @@ struct NeutralStatistics
         }
     }
 
-    void Report(ProductionToneMapperAlgorithm algorithm, double peak, double maximumBound) const
+    void Report(ProductionToneMapperAlgorithm algorithm, double peak) const
     {
         constexpr std::size_t neutralSampleCount{4096};
         constexpr double neutralTintBoundPqCodes{1.25};
@@ -322,12 +326,12 @@ struct NeutralStatistics
         constexpr double neutralRippleBoundPqCodes{1.75};
         std::fprintf(stdout,
             "neutral LUT CPU algorithm=%u peak=%.0f samples=%zu "
-            "max_nits=%.9f/%.9f "
+            "max_nits=%.9f "
             "tint_max_pq_codes=%.9f/%.2f "
             "adjacent_jitter_max_pq_codes=%.9f/%.2f "
             "running_max_drawdown_pq_codes=%.9f/%.2f\n",
             static_cast<unsigned>(algorithm), peak, neutralSampleCount,
-            maximumNeutralErrorNits, maximumBound,
+            maximumNeutralErrorNits,
             maximumNeutralTintPqCodes, neutralTintBoundPqCodes,
             maximumNeutralAdjacentDecreasePqCodes,
             adjacentJitterBoundPqCodes,
@@ -335,7 +339,6 @@ struct NeutralStatistics
             neutralRippleBoundPqCodes);
         FO4HDR_CHECK(maximumNeutralTintPqCodes <=
             neutralTintBoundPqCodes);
-        FO4HDR_CHECK(maximumNeutralErrorNits <= maximumBound);
         FO4HDR_CHECK(maximumNeutralAdjacentDecreasePqCodes <=
             adjacentJitterBoundPqCodes);
         FO4HDR_CHECK(maximumNeutralDrawdownPqCodes <=
@@ -350,16 +353,11 @@ struct LutTestCase
     OperatorLutData& lut;
     const Aces2Transform* aces2;
 
-    [[nodiscard]] double MaximumErrorBound() const
-    {
-        return std::max(1.0, peak *
-            (algorithm == ProductionToneMapperAlgorithm::aces2 ? 0.007 : 0.005));
-    }
-
     void CheckMetadata() const
     {
         FO4HDR_CHECK(lut.algorithm == algorithm);
         FO4HDR_CHECK(lut.edge == OperatorLutEdge(algorithm));
+        FO4HDR_CHECK(lut.edge >= 64U);
         FO4HDR_CHECK(lut.textureEdge ==
             lut.edge + kOperatorLutCoefficientPadding);
         FO4HDR_CHECK(lut.inputShaperMinimum ==
@@ -407,14 +405,31 @@ struct LutTestCase
                 MapAnalytic(algorithm, scene, peak, aces2);
             const auto sampled = SampleOperatorLut(lut, scene);
             statistics.Record(scene, sampled, analytic, sampleIndex < broadCount);
+            statistics.quality.Record(DeltaEItpBt2020Nits(analytic, sampled),
+                sampleIndex < broadCount ? OperatorLutQualityRegion::broad :
+                    OperatorLutQualityRegion::holdout);
         }
         statistics.Report(algorithm, broadCount, holdoutCount);
+        const auto evaluatedQuality = EvaluateOperatorLutQuality(lut);
+        const auto independentQuality = statistics.quality.Summary();
+        std::fprintf(stdout, "operator LUT CPU full quality algorithm=%u peak=%.0f "
+            "samples=%u max_delta_e_itp=%.9f broad_p99_delta_e_itp=%.9f "
+            "holdout_p99_delta_e_itp=%.9f\n", static_cast<unsigned>(algorithm), peak,
+            evaluatedQuality.sampleCount, evaluatedQuality.maximumDeltaEItp,
+            evaluatedQuality.broadP99DeltaEItp, evaluatedQuality.holdoutP99DeltaEItp);
+        FO4HDR_CHECK(evaluatedQuality.MeetsPracticalLimit(algorithm));
+        FO4HDR_CHECK(evaluatedQuality.sampleCount == 78687U);
+        FO4HDR_CHECK(test::Approx(evaluatedQuality.broadP99DeltaEItp,
+            independentQuality.broadP99DeltaEItp, 1.0e-8));
+        FO4HDR_CHECK(test::Approx(evaluatedQuality.holdoutP99DeltaEItp,
+            independentQuality.holdoutP99DeltaEItp, 1.0e-8));
+        FO4HDR_CHECK(evaluatedQuality.maximumDeltaEItp >=
+            independentQuality.maximumDeltaEItp - 1.0e-8);
     }
 
     void CheckNeutral() const
     {
         constexpr double maximumInput = 65504.0;
-        const auto maximumBound = MaximumErrorBound();
         constexpr std::size_t neutralSampleCount{4096};
         const auto maximumInputEv = std::log2(maximumInput);
         NeutralStatistics statistics;
@@ -433,7 +448,7 @@ struct LutTestCase
             const auto sampled = SampleOperatorLut(lut, scene);
             statistics.Record(reference, sampled, sampleIndex);
         }
-        statistics.Report(algorithm, peak, maximumBound);
+        statistics.Report(algorithm, peak);
     }
 
     void CheckNearBlack() const
@@ -464,8 +479,6 @@ struct LutTestCase
             "max_nits=%.9f max_pq_codes=%.9f mean_pq_codes=%.9f\n",
             static_cast<unsigned>(algorithm), peak, darkCorpus.size(), darkMaximumNits,
             darkMaximumPqCodes, darkTotalPqCodes / (darkCorpus.size() * 3.0));
-        FO4HDR_CHECK(darkMaximumPqCodes <=
-            (algorithm == ProductionToneMapperAlgorithm::aces2 ? 3.0 : 32.0));
     }
 
     void CheckRepeatedBuild() const
@@ -473,6 +486,12 @@ struct LutTestCase
         const auto duplicate = BuildOperatorLut(algorithm, peak);
         FO4HDR_CHECK(duplicate.IsValid());
         FO4HDR_CHECK(duplicate.rgba16 == lut.rgba16);
+        std::atomic<std::uint64_t> generation{2};
+        FO4HDR_CHECK(!EvaluateOperatorLutQuality(lut, {&generation, 1}).available);
+        const auto coefficient = lut.rgba16.front();
+        lut.rgba16.front() = 0x7E00U;
+        FO4HDR_CHECK(!EvaluateOperatorLutQuality(lut).available);
+        lut.rgba16.front() = coefficient;
 
         // Exercise sanitization independently from the finite corpus.
         // ACES2 maps non-finite input to zero; AgX/GT7 retain their

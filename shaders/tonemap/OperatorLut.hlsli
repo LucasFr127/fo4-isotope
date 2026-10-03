@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#ifndef FALLOUT4HDR_OPERATOR_LUT_HLSLI
-#define FALLOUT4HDR_OPERATOR_LUT_HLSLI
+#ifndef FO4ISOTOPE_OPERATOR_LUT_HLSLI
+#define FO4ISOTOPE_OPERATOR_LUT_HLSLI
 
 // These dimensions must match the CPU lattice and coefficient texture.
-static const float kFo4HdrAces2OperatorLutEdge = 128.0f;
-static const float kFo4HdrAgxOperatorLutEdge = 92.0f;
+static const float kFo4HdrAces2OperatorLutEdge = 119.0f;
+static const float kFo4HdrAgxOperatorLutEdge = 81.0f;
 static const float kFo4HdrGt7OperatorLutEdge = 64.0f;
 
 
