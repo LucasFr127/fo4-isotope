@@ -438,7 +438,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Effects", "VanillaColorGradingStrength", RequiredKey::vanillaColorGradingStrength},
     {"Effects", "VanillaGradeLuminanceStrength", RequiredKey::vanillaGradeLuminance},
     {"Effects", "VanillaGradeColorStrength", RequiredKey::vanillaGradeColor},
-    {"Effects", "LutProfilesEnabled", RequiredKey::lutProfilesEnabled},
+    {"Effects", "GradeProfilesEnabled", RequiredKey::lutProfilesEnabled},
     {"Effects", "BloomStrength", RequiredKey::bloomStrength},
     {"Interface", "ToggleKey", RequiredKey::toggleKey},
     {"Interface", "Scale", RequiredKey::interfaceScale},

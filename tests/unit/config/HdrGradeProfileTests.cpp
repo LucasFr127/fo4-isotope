@@ -144,7 +144,7 @@ void TestGradeProfileParsing()
 {
     const auto parsed = ParsePluginConfiguration(
         ExtendedProductionConfiguration() +
-        "\n[Effects]\nLutProfilesEnabled=0\n"
+        "\n[Effects]\nGradeProfilesEnabled=0\n"
         "[LUT:Textures\\Effects\\Night.DDS]\nColor=35\n"
         "[LUT:textures/effects/day.dds]\nLuminance=65\nColor=75\n"
         "[IMGS:Fallout4.ESM|00ABCD]\nLuminance=55\n");
@@ -197,7 +197,7 @@ void TestGradeProfileRoundTrip()
     FO4HDR_CHECK(saved.find("StaleOwnedValue") == std::string::npos);
     FO4HDR_CHECK(saved.find("[Unrelated]\nKeep=1\n") !=
         std::string::npos);
-    FO4HDR_CHECK(saved.find("LutProfilesEnabled=0") != std::string::npos);
+    FO4HDR_CHECK(saved.find("GradeProfilesEnabled=0") != std::string::npos);
     FO4HDR_CHECK(saved.find(
         "[LUT:textures/effects/night.dds]\nColor=35\nLuminance=65\n") !=
         std::string::npos);

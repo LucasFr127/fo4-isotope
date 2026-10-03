@@ -89,7 +89,7 @@ constexpr std::array<PersistedKey, 32> kPersistedKeys{{
         &HdrSettings::vanillaGradeLuminancePercent},
     {"Effects", "VanillaGradeColorStrength",
         &HdrSettings::vanillaGradeColorPercent},
-    {"Effects", "LutProfilesEnabled", nullptr, nullptr, false, false,
+    {"Effects", "GradeProfilesEnabled", nullptr, nullptr, false, false,
         false, nullptr, true},
     {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent},
     {"Interface", "Scale", nullptr, &HdrInterfaceSettings::scale},

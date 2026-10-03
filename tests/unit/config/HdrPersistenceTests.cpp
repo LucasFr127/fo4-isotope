@@ -103,7 +103,7 @@ void CheckRewrittenEffects(const std::string& rewritten)
     FO4HDR_CHECK(rewritten.find(
         "VanillaColorGradingStrength=100\r\n"
         "VanillaGradeLuminanceStrength=65\r\nVanillaGradeColorStrength=35\r\n"
-        "LutProfilesEnabled=1\r\n"
+        "GradeProfilesEnabled=1\r\n"
         "BloomStrength=75\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("BloomStrength=75\r\n") !=
         std::string::npos);

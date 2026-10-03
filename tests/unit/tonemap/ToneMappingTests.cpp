@@ -586,7 +586,7 @@ void TestProductionConfiguration()
 
     for (const auto retiredOrUnknown : {
              "ACES2LMT", "ACES1", "ACESFitted", "AgXPunchy", "ACES",
-             "ACES 2", "ACES2-LMT", "ACESLMT", "aces2",
+             "ACES 2", "ACES 2 LMT", "ACES2-LMT", "ACESLMT", "aces2",
              "aces2lmt", "agx", "gt7"})
         CheckUnsupportedAlgorithm(retiredOrUnknown);
 
