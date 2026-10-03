@@ -3,6 +3,7 @@
 
 namespace fo4hdr::tests {
 
+void RunFrameTraceBufferTests();
 void RunShaderTestOptionsTests();
 void RunApproximateComparisonTests();
 void RunBoundedWaitReleaseTests();
