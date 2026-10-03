@@ -46,6 +46,7 @@ struct Section
 
 constexpr Section kSections[]{
     {"frame-trace-buffer", fo4hdr::tests::RunFrameTraceBufferTests},
+    {"shared-ui-content", fo4hdr::tests::RunSharedUiContentTests},
     {"approximate-comparison", fo4hdr::tests::RunApproximateComparisonTests},
     {"bounded-wait-release", fo4hdr::tests::RunBoundedWaitReleaseTests},
     {"armor-ui-composition", fo4hdr::tests::RunArmorUiCompositionTests},
