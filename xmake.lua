@@ -315,7 +315,7 @@ if has_config("fo4hdr_build_tests") then
     target("fo4hdr-shader-tests")
         set_kind("binary")
         set_default(true)
-        add_deps("fo4hdr-core", "fo4hdr-shaders")
+        add_deps("fo4hdr-core", "fo4hdr-shaders", "fo4hdr-renderer")
         add_files("tests/shader/**.cpp")
         add_files("tests/support/**.cpp")
         remove_files("tests/support/reference/Aces2LmtSourceOracle.cpp",

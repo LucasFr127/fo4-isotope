@@ -14,6 +14,8 @@ void VerifyCalibrationPatterns(Device& device);
 
 void VerifyContextQuerySafety();
 
+void VerifyPresentationResize(Device& device);
+
 void VerifyDirectPresentation(Device& device);
 
 void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay = false);

@@ -89,7 +89,7 @@ struct SwapChainResize
 
     HRESULT ResizeHdr() const
     {
-        const auto hdrCount = std::max<UINT>(2, bufferCount);
+        const auto hdrCount = bufferCount == 0 ? 0 : std::max<UINT>(2, bufferCount);
         const auto result = InvokeCapturedNext(record->nextResizeBuffers, swapChain,
             hdrCount, width, height, DXGI_FORMAT_R10G10B10A2_UNORM, flags);
         if (FAILED(result)) g_referenceHealthy = false;
