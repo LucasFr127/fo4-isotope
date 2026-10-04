@@ -27,6 +27,8 @@
 #include <backends/imgui_impl_dx11.h>
 #include <imgui.h>
 #include "../d3d11/BorrowedComputeState.hpp"
+#include "../d3d11/BorrowedFullscreenState.hpp"
+#include "../hooks/ContextHooks.hpp"
 #include "FO4Isotope/ui/SettingsWindow.hpp"
 #include <algorithm>
 #include <cstring>
@@ -178,7 +180,7 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
 } // namespace
 
 // The caller retains borrowed state until the direct backbuffer write completes.
-[[nodiscard]] bool DispatchPresentation(
+[[nodiscard]] bool DrawPresentation(
     ID3D11DeviceContext* context,
     ID3D11ShaderResourceView* scene,
     const CompositionConstants& compositionConstants) noexcept
@@ -195,14 +197,25 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
     ID3D11ShaderResourceView* inputs[]{
         scene, g_uiTransport.gameUiBackdropSrv.Get(),
         g_uiTransport.gameUiSrv.Get(), g_uiTransport.uiSrv.Get()};
-    ID3D11UnorderedAccessView* output = g_presentation.presentationBackBufferUav.Get();
+    ID3D11RenderTargetView* output = g_presentation.presentationBackBufferRtv.Get();
     ID3D11Buffer* constants = g_presentation.constants.Get();
-    context->CSSetShaderResources(0, 4, inputs);
-    context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
-    context->CSSetConstantBuffers(0, 1, &constants);
-    context->CSSetShader(g_presentation.presentShader.Get(), nullptr, 0);
-    context->Dispatch((g_presentation.width + 7) / 8,
-        (g_presentation.height + 7) / 8, 1);
+    context->PSSetShaderResources(0, 4, inputs);
+    context->OMSetRenderTargets(1, &output, nullptr);
+    context->PSSetConstantBuffers(0, 1, &constants);
+    context->VSSetShader(g_presentation.presentVertexShader.Get(), nullptr, 0);
+    context->HSSetShader(nullptr, nullptr, 0);
+    context->DSSetShader(nullptr, nullptr, 0);
+    context->GSSetShader(nullptr, nullptr, 0);
+    context->PSSetShader(g_presentation.presentShader.Get(), nullptr, 0);
+    context->IASetInputLayout(nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    const D3D11_VIEWPORT viewport{0, 0, static_cast<float>(g_presentation.width),
+        static_cast<float>(g_presentation.height), 0, 1};
+    context->RSSetState(g_presentation.presentRasterizer.Get());
+    context->RSSetViewports(1, &viewport);
+    context->OMSetDepthStencilState(g_presentation.presentDepth.Get(), 0);
+    context->OMSetBlendState(g_presentation.presentBlend.Get(), nullptr, UINT(-1));
+    context->Draw(3, 0);
     return true;
 }
 
@@ -236,6 +249,15 @@ bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
     return g_scene.currentScene != nullptr && g_scene.currentSceneDomain == requiredDomain;
 }
 
+ID3D11DeviceContext* PrepareGpuPerformanceSample(IDXGISwapChain* swapChain,
+    ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    if (!PerformanceResolutionMatches(swapChain, g_configuration.measurePerformance) ||
+        !EnsureGpuPerformanceQueries(device, g_configuration.measurePerformance)) return nullptr;
+    PollGpuPerformanceQueries(context);
+    return context;
+}
+
 [[nodiscard]] bool RenderReferenceFrame(
     IDXGISwapChain* swapChain, ID3D11Device* device,
     ID3D11DeviceContext* context) noexcept
@@ -248,15 +270,16 @@ bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
     if (!EnsureResources(swapChain, device, context) ||
         !CurrentSceneMatches(requiredDomain))
         return false;
-    const auto measureGpu = PerformanceResolutionMatches(swapChain, g_configuration.measurePerformance) &&
-        EnsureGpuPerformanceQueries(device, g_configuration.measurePerformance);
-    if (measureGpu) PollGpuPerformanceQueries(context);
-    BorrowedComputeState priorState(context, g_rendererDevice.activeContext1.Get(),
+    ScopedPresentationContext ownedContext(context);
+    if (!ownedContext.Ready()) return false;
+    auto* measurementContext = PrepareGpuPerformanceSample(swapChain, device, context);
+    BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
-    ScopedGpuPerformanceSample gpuSample(measureGpu ? context : nullptr);
+    if (!priorState.Ready()) return false;
+    ScopedGpuPerformanceSample gpuSample(measurementContext);
     const auto settingsOverlayPresent = DrawDeveloperUi(context);
     const auto compositionConstants = ReferenceComposition(requiredDomain, settingsOverlayPresent);
-    return DispatchPresentation(context, g_scene.currentScene.Get(),
+    return DrawPresentation(context, g_scene.currentScene.Get(),
         compositionConstants);
 }
 
@@ -268,8 +291,11 @@ bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
         !EnsureResources(swapChain, device, context))
         return false;
 
-    BorrowedComputeState priorState(context, g_rendererDevice.activeContext1.Get(),
+    ScopedPresentationContext ownedContext(context);
+    if (!ownedContext.Ready()) return false;
+    BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
+    if (!priorState.Ready()) return false;
 
     const CompositionConstants compositionConstants{
         .width = g_presentation.width,
@@ -282,7 +308,7 @@ bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
             static_cast<std::uint32_t>(g_uiTransport.gameUiBackdropCapturedThisFrame),
         .gameUiCaptured = static_cast<std::uint32_t>(g_uiTransport.gameUiCapturedThisFrame),
     };
-    return DispatchPresentation(context, g_presentation.presentationProxySrv.Get(),
+    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(),
         compositionConstants);
 }
 

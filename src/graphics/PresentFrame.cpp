@@ -767,7 +767,7 @@ struct PresentFrame
                 .fp16WorkingImage = g_scene.currentScene != nullptr,
                 .r10g10b10a2Presentation =
                     g_presentation.r10Presentation &&
-                    g_presentation.presentationBackBufferUav.Get() != nullptr,
+                    g_presentation.presentationBackBufferRtv.Get() != nullptr,
                 .flipModel = g_presentation.flipModel,
                 .bufferCount = g_presentation.bufferCount,
                 .pqBt2020PresentSupported =

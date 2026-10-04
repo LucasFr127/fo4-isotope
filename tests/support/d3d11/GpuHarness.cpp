@@ -14,6 +14,7 @@
 #include <string_view>
 #include <vector>
 #include "reference/NativeGradeReference.hpp"
+#include "FO4Isotope/ShippingShaders.generated.hpp"
 
 namespace fo4hdr::tests::gpu {
 
@@ -411,6 +412,52 @@ void DispatchPresentation(Device& device, const PresentationDispatch& request)
     context.CSSetShaderResources(0, 4, noInputs.data());
 }
 
+PresentationShaders CreatePresentationShaders(ID3D11Device& device)
+{
+    PresentationShaders result;
+    result.vertex = CreateVertexShader(device, generated::kPresentFullscreenVs);
+    result.pixel = CreatePixelShader(device, generated::kPresentPixelsPs);
+    D3D11_RASTERIZER_DESC rasterizer{};
+    rasterizer.FillMode = D3D11_FILL_SOLID;
+    rasterizer.CullMode = D3D11_CULL_NONE;
+    rasterizer.DepthClipEnable = TRUE;
+    D3D11_DEPTH_STENCIL_DESC depth{};
+    depth.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    D3D11_BLEND_DESC blend{};
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    CheckHresult(device.CreateRasterizerState(&rasterizer, &result.rasterizer),
+        "Create presentation rasterizer");
+    CheckHresult(device.CreateDepthStencilState(&depth, &result.depth), "Create presentation depth state");
+    CheckHresult(device.CreateBlendState(&blend, &result.blend), "Create presentation blend state");
+    return result;
+}
+
+void DrawPresentation(Device& device, const PresentationDraw& request)
+{
+    auto& context = *device.context.Get();
+    const auto& shaders = *request.shaders;
+    const D3D11_VIEWPORT viewport{0, 0, static_cast<float>(request.width),
+        static_cast<float>(request.height), 0, 1};
+    context.IASetInputLayout(nullptr);
+    context.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    context.VSSetShader(shaders.vertex.Get(), nullptr, 0);
+    context.HSSetShader(nullptr, nullptr, 0);
+    context.DSSetShader(nullptr, nullptr, 0);
+    context.GSSetShader(nullptr, nullptr, 0);
+    context.PSSetShader(shaders.pixel.Get(), nullptr, 0);
+    context.PSSetConstantBuffers(0, 1, &request.constants);
+    context.PSSetShaderResources(0, 4, request.inputs.data());
+    context.RSSetState(shaders.rasterizer.Get());
+    context.RSSetViewports(1, &viewport);
+    context.OMSetBlendState(shaders.blend.Get(), nullptr, UINT(-1));
+    context.OMSetDepthStencilState(shaders.depth.Get(), 0);
+    context.OMSetRenderTargets(1, &request.output, nullptr);
+    context.Draw(3, 0);
+    context.OMSetRenderTargets(0, nullptr, nullptr);
+    const std::array<ID3D11ShaderResourceView*, 4> noInputs{};
+    context.PSSetShaderResources(0, 4, noInputs.data());
+}
+
 PresentationWindow::PresentationWindow()
     : handle(CreateWindowExW(0, L"STATIC", L"FO4Isotope presentation test",
         WS_OVERLAPPEDWINDOW, 0, 0, 128, 128, nullptr, nullptr,
@@ -434,12 +481,12 @@ ComPtr<IDXGISwapChain1> CreatePresentationChain(Device& device, HWND window,
     description.Height = height;
     description.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
     description.SampleDesc.Count = 1;
-    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_UNORDERED_ACCESS;
+    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     description.BufferCount = 2;
     description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     ComPtr<IDXGISwapChain1> chain;
     CheckHresult(factory->CreateSwapChainForHwnd(device.device.Get(), window,
-        &description, nullptr, nullptr, &chain), "Create R10 flip-discard UAV chain");
+        &description, nullptr, nullptr, &chain), "Create R10 flip-discard RTV chain");
     return chain;
 }
 
@@ -447,8 +494,8 @@ Texture GetPresentationBuffer(Device& device, IDXGISwapChain1& chain)
 {
     Texture result;
     CheckHresult(chain.GetBuffer(0, IID_PPV_ARGS(&result.texture)), "Get flip buffer zero");
-    CheckHresult(device.device->CreateUnorderedAccessView(result.texture.Get(),
-        nullptr, &result.uav), "Create real flip-buffer UAV");
+    CheckHresult(device.device->CreateRenderTargetView(result.texture.Get(),
+        nullptr, &result.rtv), "Create real flip-buffer RTV");
     D3D11_TEXTURE2D_DESC description{};
     result.texture->GetDesc(&description);
     description.Usage = D3D11_USAGE_STAGING;

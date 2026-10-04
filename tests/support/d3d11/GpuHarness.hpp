@@ -289,6 +289,28 @@ struct PresentationDispatch
 
 void DispatchPresentation(Device& device, const PresentationDispatch& request);
 
+struct PresentationShaders
+{
+    ComPtr<ID3D11VertexShader> vertex;
+    ComPtr<ID3D11PixelShader> pixel;
+    ComPtr<ID3D11RasterizerState> rasterizer;
+    ComPtr<ID3D11DepthStencilState> depth;
+    ComPtr<ID3D11BlendState> blend;
+};
+
+PresentationShaders CreatePresentationShaders(ID3D11Device& device);
+
+struct PresentationDraw
+{
+    const PresentationShaders* shaders;
+    ID3D11Buffer* constants;
+    std::array<ID3D11ShaderResourceView*, 4> inputs;
+    ID3D11RenderTargetView* output;
+    UINT width, height;
+};
+
+void DrawPresentation(Device& device, const PresentationDraw& request);
+
 struct PresentationWindow
 {
     HWND handle;

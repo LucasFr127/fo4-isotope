@@ -142,12 +142,14 @@ template <std::size_t Size>
 
 [[nodiscard]] bool PresentationCompositionReady() noexcept
 {
-    return g_presentation.presentShader && g_presentation.constants;
+    return g_presentation.presentShader && g_presentation.presentVertexShader &&
+        g_presentation.presentRasterizer && g_presentation.presentDepth &&
+        g_presentation.presentBlend && g_presentation.constants;
 }
 
 [[nodiscard]] bool PresentationOutputReady() noexcept
 {
-    return g_presentation.presentationBackBuffer && g_presentation.presentationBackBufferUav;
+    return g_presentation.presentationBackBuffer && g_presentation.presentationBackBufferRtv;
 }
 
 [[nodiscard]] bool MatchesPresentationBuffer(const D3D11_TEXTURE2D_DESC& description) noexcept
@@ -170,7 +172,7 @@ struct PresentationProxyCreation
 {
     D3D11_TEXTURE2D_DESC description{};
     ComPtr<ID3D11Texture2D> backBuffer;
-    ComPtr<ID3D11UnorderedAccessView> outputUav;
+    ComPtr<ID3D11RenderTargetView> outputRtv;
     ComPtr<ID3D11Texture2D> proxy;
     ComPtr<ID3D11UnorderedAccessView> proxyUav;
     ComPtr<ID3D11RenderTargetView> rtv;
@@ -181,7 +183,7 @@ struct PresentationProxyCreation
         if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) return false;
         backBuffer->GetDesc(&description);
         if (!MatchesPresentationBuffer(description)) return false;
-        return SUCCEEDED(device->CreateUnorderedAccessView(backBuffer.Get(), nullptr, &outputUav));
+        return SUCCEEDED(device->CreateRenderTargetView(backBuffer.Get(), nullptr, &outputRtv));
     }
 
     [[nodiscard]] bool CreateProxy(ID3D11Device* device) noexcept
@@ -210,7 +212,7 @@ struct PresentationProxyCreation
     {
         g_presentation.presentationViews.fill(nullptr);
         g_presentation.presentationBackBuffer = std::move(backBuffer);
-        g_presentation.presentationBackBufferUav = std::move(outputUav);
+        g_presentation.presentationBackBufferRtv = std::move(outputRtv);
         g_presentation.presentationProxy = std::move(proxy);
         g_presentation.presentationProxyRtv = std::move(rtv);
         g_presentation.presentationProxySrv = std::move(srv);
@@ -222,7 +224,7 @@ struct PresentationProxyCreation
 [[nodiscard]] bool CreatePresentationProxy(
     IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
 {
-    if (PresentationProxyReady() && g_presentation.presentationBackBufferUav) return true;
+    if (PresentationProxyReady() && g_presentation.presentationBackBufferRtv) return true;
     if (swapChain == nullptr || device == nullptr) return false;
     PresentationProxyCreation creation;
     if (!creation.AcquireOutput(swapChain, device)) return false;
@@ -257,12 +259,12 @@ struct PresentationProxyCreation
     return HdrFlipDescriptorSupported(description);
 }
 
-[[nodiscard]] bool SupportsPresentationUav(ID3D11Device* device) noexcept
+[[nodiscard]] bool SupportsPresentationTarget(ID3D11Device* device) noexcept
 {
     UINT formatSupport{};
     return SUCCEEDED(device->CheckFormatSupport(
         DXGI_FORMAT_R10G10B10A2_UNORM, &formatSupport)) &&
-        (formatSupport & D3D11_FORMAT_SUPPORT_TYPED_UNORDERED_ACCESS_VIEW) != 0;
+        (formatSupport & D3D11_FORMAT_SUPPORT_RENDER_TARGET) != 0;
 }
 
 [[nodiscard]] bool SupportsPresentationColorSpace(DXGI_COLOR_SPACE_TYPE colorSpace) noexcept
@@ -275,7 +277,7 @@ struct PresentationProxyCreation
 [[nodiscard]] bool ValidateOutputColorSupport(
     IDXGISwapChain* swapChain, ID3D11Device* device, HWND window) noexcept
 {
-    if (!SupportsPresentationUav(device)) return false;
+    if (!SupportsPresentationTarget(device)) return false;
     if (!g_presentation.swapChain3 &&
         FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&g_presentation.swapChain3))))
         return false;
@@ -305,12 +307,34 @@ struct PresentationProxyCreation
     return true;
 }
 
+[[nodiscard]] bool CreatePresentationShaders(ID3D11Device* device) noexcept
+{
+    return SUCCEEDED(device->CreatePixelShader(generated::kPresentPixelsPs.data(),
+            generated::kPresentPixelsPs.size(), nullptr, &g_presentation.presentShader)) &&
+        SUCCEEDED(device->CreateVertexShader(generated::kPresentFullscreenVs.data(),
+            generated::kPresentFullscreenVs.size(), nullptr, &g_presentation.presentVertexShader));
+}
+
+[[nodiscard]] bool CreatePresentationPipelineStates(ID3D11Device* device) noexcept
+{
+    D3D11_RASTERIZER_DESC rasterizer{};
+    rasterizer.FillMode = D3D11_FILL_SOLID;
+    rasterizer.CullMode = D3D11_CULL_NONE;
+    rasterizer.DepthClipEnable = TRUE;
+    D3D11_DEPTH_STENCIL_DESC depth{};
+    depth.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    D3D11_BLEND_DESC blend{};
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    return SUCCEEDED(device->CreateRasterizerState(&rasterizer, &g_presentation.presentRasterizer)) &&
+        SUCCEEDED(device->CreateDepthStencilState(&depth, &g_presentation.presentDepth)) &&
+        SUCCEEDED(device->CreateBlendState(&blend, &g_presentation.presentBlend));
+}
+
 [[nodiscard]] bool CreatePresentationComposition(ID3D11Device* device) noexcept
 {
     if (g_presentation.width == 0 || g_presentation.height == 0) return false;
     if (!CreateTextureViews(device, g_presentation.width, g_presentation.height)) return false;
-    if (FAILED(CreateComputeShader(device, generated::kPresentPixelsCs, &g_presentation.presentShader)))
-        return false;
+    if (!CreatePresentationShaders(device) || !CreatePresentationPipelineStates(device)) return false;
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = sizeof(CompositionConstants);
     description.Usage = D3D11_USAGE_DYNAMIC;
@@ -364,7 +388,7 @@ void RetirePresentationOutput() noexcept
 {
     // Armor closes before this phase; its borrowed proxy UAV retires before output.
     g_presentation.presentationProxyUav.Reset();
-    g_presentation.presentationBackBufferUav.Reset();
+    g_presentation.presentationBackBufferRtv.Reset();
 }
 
 void ResetPresentationResources(bool retainColorControl) noexcept
@@ -377,6 +401,10 @@ void ResetPresentationResources(bool retainColorControl) noexcept
     ResetUiTransportCaptureState();
     g_presentation.constants.Reset();
     g_presentation.presentShader.Reset();
+    g_presentation.presentVertexShader.Reset();
+    g_presentation.presentRasterizer.Reset();
+    g_presentation.presentDepth.Reset();
+    g_presentation.presentBlend.Reset();
     // A failed resize leaves this same chain alive. Its control interface holds
     // no buffer view and is needed to recover SDR if the transition was rejected.
     if (!retainColorControl)

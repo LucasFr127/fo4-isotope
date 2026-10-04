@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "SceneLayers.hlsli"
 
-RWTexture2D<float4> PresentTarget : register(u0);
-
-[numthreads(8, 8, 1)]
-void main(uint3 pixel : SV_DispatchThreadID)
+float4 main(float4 position : SV_Position) : SV_Target
 {
-    if (any(pixel.xy >= FrameSize)) return;
-    float3 value = EvaluateFrameLayers(pixel.xy);
+    const uint2 pixel = uint2(position.xy);
+    float3 value = EvaluateFrameLayers(pixel);
     if (FrameMode == 0u)
         value = saturate(value);
     else
@@ -17,5 +14,5 @@ void main(uint3 pixel : SV_DispatchThreadID)
         // no intermediate storage, rounding, or full-frame output copy.
         value = Fo4HdrEncodeAbsoluteLight(value);
     }
-    PresentTarget[pixel.xy] = float4(value, 1.0f);
+    return float4(value, 1.0f);
 }

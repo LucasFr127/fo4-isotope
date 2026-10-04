@@ -17,14 +17,18 @@ struct PresentationResources
 {
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> presentationBackBuffer;
-    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> presentationBackBufferUav;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationBackBufferRtv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> presentationProxy;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationProxyRtv;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> presentationProxySrv;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> presentationProxyUav;
     std::array<ID3D11RenderTargetView*, kMaximumPresentationViews>
         presentationViews{};
-    Microsoft::WRL::ComPtr<ID3D11ComputeShader> presentShader;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> presentShader;
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> presentVertexShader;
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> presentRasterizer;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilState> presentDepth;
+    Microsoft::WRL::ComPtr<ID3D11BlendState> presentBlend;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constants;
     LinearColorDomain presentationProxyDomain{LinearColorDomain::unknown};
     std::uint64_t colorDomainGeneration{};

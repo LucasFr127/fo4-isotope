@@ -33,6 +33,30 @@ namespace fo4hdr {
 
 using Microsoft::WRL::ComPtr;
 
+namespace {
+thread_local ID3D11DeviceContext* ownedPresentationContext{};
+
+bool ObserveGameContext(ID3D11DeviceContext* context) noexcept
+{
+    return context == g_rendererDevice.activeContext && context != ownedPresentationContext;
+}
+} // namespace
+
+ScopedPresentationContext::ScopedPresentationContext(ID3D11DeviceContext* context) noexcept
+{
+    if (ownedPresentationContext || context != g_rendererDevice.activeContext) return;
+    const auto* record = FindContext(context);
+    if (!record || !record->immediate) return;
+    if (!record->computeQueries.CanDispatch()) return;
+    context_ = context;
+    ownedPresentationContext = context;
+}
+
+ScopedPresentationContext::~ScopedPresentationContext() noexcept
+{
+    if (context_) ownedPresentationContext = nullptr;
+}
+
 ULONG STDMETHODCALLTYPE HookContextRelease(
     ID3D11DeviceContext* context) noexcept
 {
@@ -202,7 +226,7 @@ void STDMETHODCALLTYPE HookPsSetShader(
 {
     auto* record = FindContext(context);
     if (record == nullptr || record->nextPsSetShader == nullptr) return;
-    if (context != g_rendererDevice.activeContext)
+    if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextPsSetShader, context, shader, classes, classCount);
         return;
@@ -367,7 +391,7 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(
 {
     auto* record = FindContext(context);
     if (record == nullptr || record->nextOmSetRenderTargets == nullptr) return;
-    if (context != g_rendererDevice.activeContext)
+    if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextOmSetRenderTargets, context, count, views, depth);
         return;
@@ -397,7 +421,7 @@ void BindRenderTargetsAndUavs(const RenderTargetsAndUavsRequest& request) noexce
     if (record == nullptr ||
         record->nextOmSetRenderTargetsAndUavs == nullptr)
         return;
-    if (context != g_rendererDevice.activeContext)
+    if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextOmSetRenderTargetsAndUavs, context,
             rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts);
@@ -429,6 +453,11 @@ void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad,
     auto* record = FindContext(context);
     if (record == nullptr || record->*NextMember == nullptr) return;
     const auto next = record->*NextMember;
+    if (context == ownedPresentationContext)
+    {
+        InvokeCapturedNext(next, context, arguments...);
+        return;
+    }
     auto draw = [=]() { InvokeCapturedNext(next, context, arguments...); };
     const DrawInvocation invocation{
         [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw};

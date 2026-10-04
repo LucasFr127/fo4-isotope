@@ -194,7 +194,8 @@ function Test-LayoutNames {
     $paths = @{ 'src/config/Template.hpp' = 'src/config/Template.hpp' }
     foreach ($file in @('src/config/Settings.cpp', 'src/config/Template.inl',
         'src/graphics/d3d11/ScopedD3D11State.hpp', 'tests/unit/main.cpp',
-        'runtime/1.10.163/PluginVersion.cpp', 'shaders/output/PresentPixels.cs.hlsl',
+        'runtime/1.10.163/PluginVersion.cpp', 'shaders/output/PresentPixels.ps.hlsl',
+        'shaders/output/PresentFullscreen.vs.hlsl',
         'shaders/output/DisplayMath.hlsli')) {
         Assert-LayoutNativeName $file $paths
     }

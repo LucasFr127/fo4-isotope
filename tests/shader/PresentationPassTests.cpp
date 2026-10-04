@@ -131,7 +131,7 @@ struct DirectPresentationInputs
     Texture& scene;
     Texture& layer;
     Texture& output;
-    ID3D11ComputeShader* shader;
+    const PresentationShaders* shader;
 };
 
 void CheckPresentationOverlayPixel(UINT actual, UINT& hidden, bool remember, bool visible)
@@ -176,28 +176,28 @@ void VerifyDirectPresentationOverlay(Device& device, const DirectPresentationInp
     const auto shownConstants = CreateConstantBuffer(*device.device.Get(),
         CompositionConstants{width,height,3,203,203,1000,0,0,1});
     std::array<UINT, width * height> hiddenPixels{};
-    DispatchPresentation(device, { shader, hiddenConstants.Get(),
-        {scene.srv.Get(),nullptr,nullptr,nullptr}, output.uav.Get(), width, height});
+    DrawPresentation(device, { shader, hiddenConstants.Get(),
+        {scene.srv.Get(),nullptr,nullptr,nullptr}, output.rtv.Get(), width, height});
     ReadPresentationOverlay(device, {output, hiddenPixels, true, false});
     pixels.fill({1,1,1,1});
     device.context->UpdateSubresource(layer.texture.Get(), 0, nullptr, pixels.data(), width*sizeof(Float4), 0);
-    DispatchPresentation(device, { shader, shownConstants.Get(),
-        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.uav.Get(), width, height});
+    DrawPresentation(device, { shader, shownConstants.Get(),
+        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
     ReadPresentationOverlay(device, {output, hiddenPixels, false, true});
     // Closing the overlay must ignore retained pixels without clearing its texture.
-    DispatchPresentation(device, { shader, hiddenConstants.Get(),
-        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.uav.Get(), width, height});
+    DrawPresentation(device, { shader, hiddenConstants.Get(),
+        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
     ReadPresentationOverlay(device, {output, hiddenPixels, false, false});
     const auto nan = std::numeric_limits<float>::quiet_NaN();
     pixels.fill({nan,nan,nan,nan});
     device.context->UpdateSubresource(layer.texture.Get(), 0, nullptr, pixels.data(), width*sizeof(Float4), 0);
-    DispatchPresentation(device, { shader, hiddenConstants.Get(),
-        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.uav.Get(), width, height});
+    DrawPresentation(device, { shader, hiddenConstants.Get(),
+        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
     ReadPresentationOverlay(device, {output, hiddenPixels, false, false});
 }
 
 void VerifyDirectPresentationExtremes(Device& device, Texture& scene, Texture& output,
-    ID3D11ComputeShader* shader)
+    const PresentationShaders* shader)
 {
     constexpr UINT width=37, height=19;
     std::array<Float4, width*height> pixels{};
@@ -211,8 +211,8 @@ void VerifyDirectPresentationExtremes(Device& device, Texture& scene, Texture& o
     device.context->UpdateSubresource(scene.texture.Get(),0,nullptr,pixels.data(),width*sizeof(Float4),0);
     const auto extremeConstants = CreateConstantBuffer(*device.device.Get(),
         CompositionConstants{width,height,3,203,203,1000,0,0});
-    DispatchPresentation(device, {shader,extremeConstants.Get(),{scene.srv.Get(),nullptr,nullptr,nullptr},
-        output.uav.Get(),width,height});
+    DrawPresentation(device, {shader,extremeConstants.Get(),{scene.srv.Get(),nullptr,nullptr,nullptr},
+        output.rtv.Get(),width,height});
     device.context->CopyResource(output.staging.Get(),output.texture.Get());
     D3D11_MAPPED_SUBRESOURCE extremeMap{};
     CheckHresult(device.context->Map(output.staging.Get(),0,D3D11_MAP_READ,0,&extremeMap),"Read extreme presentation values");
@@ -232,15 +232,16 @@ void VerifyDirectPresentationExtremes(Device& device, Texture& scene, Texture& o
 
 ComPtr<ID3D11InfoQueue> VerifyRejectedPresentationView(Device& device, Texture& output)
 {
-    D3D11_UNORDERED_ACCESS_VIEW_DESC incompatible{};
-    incompatible.Format = DXGI_FORMAT_R32_FLOAT;
-    incompatible.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+    D3D11_TEXTURE2D_DESC description{};
+    output.texture->GetDesc(&description);
+    FO4HDR_WARP_CHECK((description.BindFlags & D3D11_BIND_UNORDERED_ACCESS) == 0);
+    FO4HDR_WARP_CHECK((description.BindFlags & D3D11_BIND_RENDER_TARGET) != 0);
     ComPtr<ID3D11UnorderedAccessView> rejected;
     ComPtr<ID3D11InfoQueue> diagnostics;
     (void)device.device.As(&diagnostics);
     CheckDebugMessages(device);
     FO4HDR_WARP_CHECK(FAILED(device.device->CreateUnorderedAccessView(
-        output.texture.Get(), &incompatible, &rejected)));
+        output.texture.Get(), nullptr, &rejected)));
     FO4HDR_WARP_CHECK(!rejected);
     if (diagnostics) diagnostics->ClearStoredMessages();
     return diagnostics;
@@ -249,7 +250,7 @@ ComPtr<ID3D11InfoQueue> VerifyRejectedPresentationView(Device& device, Texture& 
 void VerifyDirectPresentation(Device& device)
 {
     constexpr UINT width = 37, height = 19;
-    const auto shader = CreateShader(*device.device.Get(), fo4hdr::generated::kPresentPixelsCs);
+    const auto shader = CreatePresentationShaders(*device.device.Get());
     const auto referenceShader = CreateShader(*device.device.Get(), fo4hdr::generated::test::kLayerEvaluationCs);
     std::array<Float4, width * height> pixels{};
     for (UINT i = 0; i < pixels.size(); ++i)
@@ -275,15 +276,15 @@ void VerifyDirectPresentation(Device& device)
                 layer.srv.Get(), layer.srv.Get(), layers ? layer.srv.Get() : nullptr};
             DispatchPresentation(device, { referenceShader.Get(), constants.Get(), inputs,
                 reference.uav.Get(), width, height});
-            DispatchPresentation(device, { shader.Get(), constants.Get(), inputs,
-                output.uav.Get(), width, height});
+            DrawPresentation(device, { &shader, constants.Get(), inputs,
+                output.rtv.Get(), width, height});
             CheckDirectPresentation(device, {reference, output, mode, layers});
             // D3D11 keeps buffer zero's logical identity across flip presentation.
-            CheckHresult(chain->Present(0, 0), "Present retained UAV test");
+            CheckHresult(chain->Present(0, 0), "Present retained RTV test");
         }
     }
-    VerifyDirectPresentationOverlay(device, {scene, layer, output, shader.Get()});
-    VerifyDirectPresentationExtremes(device, scene, output, shader.Get());
+    VerifyDirectPresentationOverlay(device, {scene, layer, output, &shader});
+    VerifyDirectPresentationExtremes(device, scene, output, &shader);
     CheckDebugMessages(device);
     FO4HDR_WARP_CHECK(FAILED(chain->ResizeBuffers(2, 17, 11, DXGI_FORMAT_UNKNOWN, 0)));
     if (diagnostics) diagnostics->ClearStoredMessages();
@@ -297,7 +298,7 @@ void VerifyDirectPresentation(Device& device)
     output.texture->GetDesc(&resized);
     FO4HDR_WARP_CHECK(resized.Width == 17 && resized.Height == 11);
     const auto constants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{17, 11, 11, 203, 203, 1000, 0, 0});
-    DispatchPresentation(device, { shader.Get(), constants.Get(), {}, output.uav.Get(), 17, 11});
+    DrawPresentation(device, { &shader, constants.Get(), {}, output.rtv.Get(), 17, 11});
     device.context->CopyResource(output.staging.Get(), output.texture.Get());
     D3D11_MAPPED_SUBRESOURCE mapped{};
     CheckHresult(device.context->Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Read resized chain");
@@ -315,7 +316,7 @@ struct PresentationBenchmarkSubmission
     Texture& output;
     Texture& scratch;
     Texture& overlay;
-    ID3D11ComputeShader* shader;
+    const PresentationShaders* shader;
     ID3D11Buffer* constants;
     ID3D11Buffer* hiddenConstants;
     std::array<ID3D11ShaderResourceView*,4> inputs;
@@ -327,15 +328,15 @@ struct PresentationBenchmarkSubmission
         constexpr float transparent[4]{};
         if (arm == 1)
             context.ClearRenderTargetView(overlay.rtv.Get(), transparent);
-        DispatchPresentation(device, {shader,
-            arm == 0 ? hiddenConstants : constants, inputs, output.uav.Get(), 2560, 1440});
+        DrawPresentation(device, {shader,
+            arm == 0 ? hiddenConstants : constants, inputs, output.rtv.Get(), 2560, 1440});
     }
 
     void Submit(UINT arm) const
     {
         if (compareHiddenOverlay) { SubmitOverlay(arm); return; }
-        DispatchPresentation(device, {shader, constants, inputs,
-            arm == 0 ? output.uav.Get() : scratch.uav.Get(), 2560, 1440});
+        DrawPresentation(device, {shader, constants, inputs,
+            arm == 0 ? output.rtv.Get() : scratch.rtv.Get(), 2560, 1440});
         if (arm != 0)
             device.context->CopyResource(output.texture.Get(), scratch.texture.Get());
     }
@@ -429,13 +430,13 @@ void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay)
     auto chain = CreatePresentationChain(device, window.handle, width, height);
     auto output = GetPresentationBuffer(device, *chain.Get());
     auto scratch = CreateSizedTexture(*device.device.Get(), { width, height,
-        DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_UNORDERED_ACCESS});
+        DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET});
     std::vector<std::array<std::uint16_t, 4>> pixels(width * height,
         {FloatToBinary16(0.4F), FloatToBinary16(0.2F), FloatToBinary16(0.1F), FloatToBinary16(0.5F)});
     const D3D11_SUBRESOURCE_DATA data{pixels.data(), width * 8, 0};
     auto scene = CreateSizedTexture(*device.device.Get(), { width, height,
         DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE, &data});
-    const auto shader = CreateShader(*device.device.Get(), fo4hdr::generated::kPresentPixelsCs);
+    const auto shader = CreatePresentationShaders(*device.device.Get());
     const auto constants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1});
     const auto hiddenConstants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1,0});
     auto overlay = CreateSizedTexture(*device.device.Get(), { width, height,
@@ -446,7 +447,7 @@ void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay)
     constexpr float transparent[4]{};
     context.ClearRenderTargetView(overlay.rtv.Get(), transparent);
     const PresentationBenchmarkSubmission submission{device, output, scratch, overlay,
-        shader.Get(), constants.Get(), hiddenConstants.Get(), inputs, compareHiddenOverlay};
+        &shader, constants.Get(), hiddenConstants.Get(), inputs, compareHiddenOverlay};
     PresentationBenchmarkTiming timing(device);
     for (UINT i = 0; i < 16; ++i) { submission.Submit(0); submission.Submit(1); }
     timing.Measure(submission);

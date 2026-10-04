@@ -84,6 +84,7 @@ struct ShippingShaderRun
         RunSection(options.filter, "output-dither", [&] { VerifyOutputDitherExperiment(device); });
         RunSection(options.filter, "presentation-state", [&] {
             VerifyPresentationState(device);
+            VerifyPresentationContext(device);
             VerifyNativeReferenceState(device);
         });
         RunSection(options.filter, "scoped-pixel-binding-restoration", [&] {

@@ -36,6 +36,8 @@ void VerifyPresentationProxy(Device& device);
 
 void VerifyOutputDitherExperiment(Device& device);
 
+void VerifyPresentationContext(Device& device);
+
 void VerifyPresentationState(Device& device);
 
 void VerifySeparatedUiProductionPath(Device& device, TestedToneMapper toneMapper);

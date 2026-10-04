@@ -534,27 +534,19 @@ void ClearCreationOutputs(
     DXGI_SWAP_CHAIN_DESC description{};
     if (FAILED(swapChain->GetDesc(&description))) return false;
     return HdrFlipDescriptorSupported(description) && description.SampleDesc.Count == 1 &&
-        (description.BufferUsage & DXGI_USAGE_UNORDERED_ACCESS) != 0;
+        (description.BufferUsage & DXGI_USAGE_RENDER_TARGET_OUTPUT) != 0;
 }
 
 struct HdrCandidateValidation
 {
     ComPtr<ID3D11Texture2D> backBuffer;
-    ComPtr<ID3D11UnorderedAccessView> outputUav;
+    ComPtr<ID3D11RenderTargetView> outputRtv;
     ComPtr<IDXGISwapChain3> chain3;
-
-    [[nodiscard]] bool HasTypedStore(ID3D11Device* device) noexcept
-    {
-        D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{DXGI_FORMAT_R10G10B10A2_UNORM, 0};
-        return SUCCEEDED(device->CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2,
-            &support, sizeof(support))) &&
-            (support.OutFormatSupport2 & D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE) != 0;
-    }
 
     [[nodiscard]] bool AcquireOutput(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
     {
-        return HasTypedStore(device) && SUCCEEDED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) &&
-            SUCCEEDED(device->CreateUnorderedAccessView(backBuffer.Get(), nullptr, &outputUav));
+        return SUCCEEDED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) &&
+            SUCCEEDED(device->CreateRenderTargetView(backBuffer.Get(), nullptr, &outputRtv));
     }
 
     [[nodiscard]] bool SupportsColor(DXGI_COLOR_SPACE_TYPE color) noexcept
@@ -698,7 +690,7 @@ private:    void ReleaseFailedCreationClaim()
         g_evidence.hdrCreationAttemptCount.fetch_add(1, std::memory_order_relaxed);
         auto modified = *request_.description;
         modified.BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
-        modified.BufferUsage |= DXGI_USAGE_UNORDERED_ACCESS | DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        modified.BufferUsage |= DXGI_USAGE_RENDER_TARGET_OUTPUT;
         modified.BufferCount = std::max<UINT>(2, modified.BufferCount);
         modified.SampleDesc.Count = 1;
         modified.SampleDesc.Quality = 0;

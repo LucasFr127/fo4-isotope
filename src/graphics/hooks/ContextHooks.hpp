@@ -18,6 +18,19 @@
 
 namespace fo4hdr {
 
+class ScopedPresentationContext
+{
+public:
+    explicit ScopedPresentationContext(ID3D11DeviceContext* context) noexcept;
+    ~ScopedPresentationContext() noexcept;
+    ScopedPresentationContext(const ScopedPresentationContext&) = delete;
+    ScopedPresentationContext& operator=(const ScopedPresentationContext&) = delete;
+    [[nodiscard]] bool Ready() const noexcept { return context_ != nullptr; }
+
+private:
+    ID3D11DeviceContext* context_{};
+};
+
 ULONG STDMETHODCALLTYPE HookContextRelease(
     ID3D11DeviceContext* context) noexcept;
 
