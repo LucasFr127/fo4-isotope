@@ -14,6 +14,8 @@ void VerifyCalibrationPatterns(Device& device);
 
 void VerifyContextQuerySafety();
 
+void VerifyPresentationSwapChain(Device& device);
+
 void VerifyPresentationResize(Device& device);
 
 void VerifyDirectPresentation(Device& device);
