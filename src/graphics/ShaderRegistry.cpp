@@ -229,6 +229,7 @@ void CreatedShaderIdentity::Observe(const void* bytecode, std::size_t length, bo
     const auto crc32 = ComputeRenoDxShaderCrc32(
         std::span<const std::byte>(static_cast<const std::byte*>(bytecode), length));
     descriptor = FindRenoDxFallout4Shader(crc32);
+    diagnosticCrc = developerMode ? crc32 : 0;
     if (developerMode)
     {
         pipboyRole = IdentifyPipboyScreenShader(crc32, length);
@@ -251,12 +252,15 @@ void CreatedShaderIdentity::AttachPipboyRole(HRESULT result, ID3D11PixelShader**
 
 void CreatedShaderIdentity::Register(HRESULT result, ID3D11PixelShader** shader) const
 {
+    if (!CreatedSuccessfully(result, shader)) return;
+    if (diagnosticCrc != 0)
+        (void)(*shader)->SetPrivateData(kFrameTraceShaderCrc, sizeof(diagnosticCrc), &diagnosticCrc);
     AttachPipboyRole(result, shader);
-    if (CreatedSuccessfully(result, shader) && descriptor != nullptr)
+    if (descriptor != nullptr)
         RegisterShader(*shader, descriptor->pass);
-    if (CreatedSuccessfully(result, shader) && lateGameUiComposite)
+    if (lateGameUiComposite)
         RegisterLateGameUiShader(g_lateGameUiShaders, *shader);
-    if (CreatedSuccessfully(result, shader) && lateGameUiBackdrop)
+    if (lateGameUiBackdrop)
         RegisterLateGameUiShader(g_lateGameUiBackdropShaders, *shader);
 }
 

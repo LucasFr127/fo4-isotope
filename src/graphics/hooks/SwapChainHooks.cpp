@@ -3,6 +3,7 @@
 #include "SwapChainHooks.hpp"
 
 #include "HookRecords.hpp"
+#include "../FrameTrace.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
 #include "../PresentFrame.hpp"
@@ -157,8 +158,12 @@ HRESULT STDMETHODCALLTYPE HookPresent(
         if (record == nullptr || record->nextPresent == nullptr) return E_FAIL;
         if (!record->ownsRendererClaim)
             return InvokeCapturedNext(record->nextPresent, swapChain, syncInterval, flags);
+        PollFrameTraceHotkey(swapChain);
+        TraceFramePresent(swapChain, FrameTraceKind::nativePresent, {syncInterval, flags});
         const bool rendered = PreparePresentFrame(swapChain, record->developerHdrDescriptor);
+        TraceFramePresent(swapChain, FrameTraceKind::nextPresent, {syncInterval, flags});
         const auto result = InvokeCapturedNext(record->nextPresent, swapChain, syncInterval, flags);
+        TraceFramePresent(swapChain, FrameTraceKind::presentResult, {syncInterval, flags, result});
         const bool deviceLost = result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET;
         if (deviceLost)
         {

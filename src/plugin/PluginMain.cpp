@@ -501,7 +501,9 @@ struct ObserverBoundaries
         active.imageSpace = fo4hdr::game::InitializeImageSpaceObserver(
             active.nativeLut, legacyServices.trampoline, legacyServices.pluginHandle);
         active.armorUi = fo4hdr::game::InitializeArmorUiObserver(
-            ProductionRequested(diagnosticsConfiguration),
+            ProductionRequested(diagnosticsConfiguration) ||
+                (diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode &&
+                    diagnosticsConfiguration.value.traceRenderPipeline),
             legacyServices.trampoline, legacyServices.pluginHandle);
     }
 #endif

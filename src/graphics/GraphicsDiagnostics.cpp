@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "GraphicsDiagnostics.hpp"
+#include "FrameTrace.hpp"
 #include "ShaderRegistry.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include <algorithm>
@@ -626,6 +627,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
     if (sink == nullptr) return;
     try
     {
+        ReportFrameTrace(sink);
         const auto graphics = fo4hdr::ReadGraphicsObservation();
         if (!ShouldReportLifecycle(graphics)) return;
         ReportRendererStatus(graphics, sink);

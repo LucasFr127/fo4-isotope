@@ -27,12 +27,16 @@ inline constexpr GUID kPipboyScreenShaderRole{0x626617e9, 0x64b7, 0x4725,
 [[nodiscard]] bool IsLateGameUiBackdropShader(ID3D11PixelShader* shader) noexcept;
 void ResetShaderRegistry() noexcept;
 
+inline constexpr GUID kFrameTraceShaderCrc{0xa9074e87, 0xf4b9, 0x4398,
+    {0x9a, 0xb4, 0xa0, 0x42, 0x7a, 0xcb, 0x7f, 0x56}};
+
 struct CreatedShaderIdentity
 {
     const RenoDxShaderDescriptor* descriptor{};
     bool lateGameUiComposite{};
     bool lateGameUiBackdrop{};
     PipboyScreenShader pipboyRole{};
+    std::uint32_t diagnosticCrc{};
 
     void Observe(const void* bytecode, std::size_t length, bool developerMode);
     void Register(HRESULT result, ID3D11PixelShader** shader) const;

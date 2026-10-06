@@ -11,6 +11,7 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "PresentationPass.hpp"
+#include "../FrameTrace.hpp"
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include "../resources/PresentationResources.hpp"
 #include "../resources/SceneResources.hpp"
@@ -215,6 +216,7 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
     context->RSSetViewports(1, &viewport);
     context->OMSetDepthStencilState(g_presentation.presentDepth.Get(), 0);
     context->OMSetBlendState(g_presentation.presentBlend.Get(), nullptr, UINT(-1));
+    ScopedFrameTraceOwnedCall owned;
     context->Draw(3, 0);
     return true;
 }

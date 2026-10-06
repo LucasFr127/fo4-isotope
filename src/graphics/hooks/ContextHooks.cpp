@@ -14,6 +14,7 @@
 
 #include "DeviceHooks.hpp"
 #include "HookRecords.hpp"
+#include "../FrameTrace.hpp"
 #include "../DisplayDiscovery.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
@@ -139,6 +140,7 @@ void STDMETHODCALLTYPE HookExecuteCommandList(
 {
     auto* record = FindContext(context);
     if (record == nullptr || record->nextExecuteCommandList == nullptr) return;
+    TraceFrameCommandList(context, *record, commands, restoreState);
     // FinishCommandList closes deferred query scopes. Executing a finished
     // list therefore does not introduce an unbounded unknown immediate scope.
     // Block re-entrant compute only while next executes; preserve our immediate
@@ -447,7 +449,7 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(
 }
 
 template <auto NextMember, class... Arguments>
-void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad,
+void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad, FrameTraceKind kind,
     Arguments... arguments) noexcept
 {
     auto* record = FindContext(context);
@@ -458,7 +460,10 @@ void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad,
         InvokeCapturedNext(next, context, arguments...);
         return;
     }
-    auto draw = [=]() { InvokeCapturedNext(next, context, arguments...); };
+    auto draw = [=]() {
+        TraceFrameDraw(context, *record, kind, {static_cast<std::uint32_t>(arguments)...});
+        InvokeCapturedNext(next, context, arguments...);
+    };
     const DrawInvocation invocation{
         [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw};
     ExecuteObservedDraw(*record, context, exactIndexedQuad, invocation);
@@ -467,20 +472,20 @@ void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad,
 void STDMETHODCALLTYPE HookDraw(
     ID3D11DeviceContext* context, UINT vertexCount, UINT startVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDraw>(context, false, vertexCount, startVertex);
+    ForwardDrawCall<&ContextRecord::nextDraw>(context, false, FrameTraceKind::draw, vertexCount, startVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexed(
     ID3D11DeviceContext* context, UINT indexCount, UINT startIndex, INT baseVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context, indexCount == 6, indexCount, startIndex, baseVertex);
+    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context, indexCount == 6, FrameTraceKind::drawIndexed, indexCount, startIndex, baseVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexedInstanced(
     ID3D11DeviceContext* context, UINT indices, UINT instances,
     UINT startIndex, INT baseVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, false,
+    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, false, FrameTraceKind::drawIndexedInstanced,
         indices, instances, startIndex, baseVertex, startInstance);
 }
 
@@ -488,8 +493,48 @@ void STDMETHODCALLTYPE HookDrawInstanced(
     ID3D11DeviceContext* context, UINT vertices, UINT instances,
     UINT startVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, false,
+    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, false, FrameTraceKind::drawInstanced,
         vertices, instances, startVertex, startInstance);
+}
+
+void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, ID3D11Resource* source) noexcept
+{
+    auto* record = FindContext(context);
+    if (!record || !record->nextCopyResource) return;
+    TraceFrameCopy(context, *record, {FrameTraceKind::copy, destination, source});
+    try { InvokeCapturedNext(record->nextCopyResource, context, destination, source); }
+    catch (...) { RecordAbiException(); }
+}
+
+void STDMETHODCALLTYPE HookCopySubresourceRegion(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, UINT destinationSubresource, UINT x, UINT y, UINT z,
+    ID3D11Resource* source, UINT sourceSubresource, const D3D11_BOX* box) noexcept
+{
+    auto* record = FindContext(context);
+    if (!record || !record->nextCopySubresourceRegion) return;
+    if (FrameTraceRequested())
+    {
+        FrameTraceArguments args{destinationSubresource, x, y, z, sourceSubresource, box ? 1U : 0U};
+        if (box) { args[6] = box->left; args[7] = box->top; args[8] = box->front;
+            args[9] = box->right; args[10] = box->bottom; args[11] = box->back; }
+        TraceFrameCopy(context, *record, {FrameTraceKind::copyRegion, destination, source, args});
+    }
+    try {
+        InvokeCapturedNext(record->nextCopySubresourceRegion, context,
+            destination, destinationSubresource, x, y, z, source, sourceSubresource, box);
+    }
+    catch (...) { RecordAbiException(); }
+}
+
+void STDMETHODCALLTYPE HookClearRenderTargetView(ID3D11DeviceContext* context,
+    ID3D11RenderTargetView* target, const FLOAT* color) noexcept
+{
+    auto* record = FindContext(context);
+    if (!record || !record->nextClearRenderTargetView) return;
+    TraceFrameClear(context, *record, target, color);
+    try { InvokeCapturedNext(record->nextClearRenderTargetView, context, target, color); }
+    catch (...) { RecordAbiException(); }
 }
 
 } // namespace fo4hdr

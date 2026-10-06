@@ -12,9 +12,10 @@ enum class ArmorUiOwner : std::uint32_t
     other
 };
 
+void SetArmorUiObservationEnabled(bool enabled) noexcept;
 void SetArmorUiCorrectionEnabled(bool enabled) noexcept;
 [[nodiscard]] bool ArmorUiCorrectionEnabled() noexcept;
-// Native scopes follow correction eligibility. Resets advance the generation
+// Native scopes follow correction or observation eligibility. Resets advance the generation
 // while preserving that request, so stale scopes cannot start transactions.
 [[nodiscard]] bool ArmorUiScopeEnabled() noexcept;
 [[nodiscard]] std::uint64_t ArmorUiScopeGeneration() noexcept;

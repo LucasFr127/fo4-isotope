@@ -7,8 +7,9 @@
 namespace {
 
 constexpr std::uint64_t kCorrectionBit = 1;
-constexpr std::uint64_t kRequestBits = kCorrectionBit;
-constexpr std::uint32_t kGenerationShift = 1;
+constexpr std::uint64_t kObservationBit = 2;
+constexpr std::uint64_t kRequestBits = kCorrectionBit | kObservationBit;
+constexpr std::uint32_t kGenerationShift = 2;
 constexpr std::uint64_t kInitialRequestState =
     std::uint64_t{1} << kGenerationShift;
 
@@ -97,6 +98,11 @@ void AdvanceRequestGeneration() noexcept
 }  // namespace
 
 namespace fo4hdr {
+
+void SetArmorUiObservationEnabled(bool enabled) noexcept
+{
+    ChangeRequestState(kObservationBit, enabled);
+}
 
 void SetArmorUiCorrectionEnabled(bool enabled) noexcept
 {

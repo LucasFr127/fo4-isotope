@@ -12,9 +12,10 @@
 
 namespace fo4hdr::tests::gpu {
 
-constexpr std::array<std::string_view, 19> kSectionNames{
+constexpr std::array<std::string_view, 20> kSectionNames{
     "operator-lut",
     "context-query-safety",
+    "frame-trace",
     "presentation-facade",
     "presentation-resize",
     "presentation-proxy",
@@ -77,6 +78,7 @@ struct ShippingShaderRun
                 *device.device.Get(), *device.context.Get(), false);
         });
         RunSection(options.filter, "context-query-safety", VerifyContextQuerySafety);
+        RunSection(options.filter, "frame-trace", [&] { VerifyFrameTrace(device); });
         RunSection(options.filter, "presentation-facade", [&] { VerifyPresentationSwapChain(device); });
         RunSection(options.filter, "presentation-resize", [&] { VerifyPresentationResize(device); });
         RunSection(options.filter, "presentation-proxy", [&] {

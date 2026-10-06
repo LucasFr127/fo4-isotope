@@ -13,6 +13,7 @@
 #include "DeviceHooks.hpp"
 
 #include "HookRecords.hpp"
+#include "../FrameTrace.hpp"
 #include "ContextHooks.hpp"
 #include "SwapChainHooks.hpp"
 #include "../DisplayDiscovery.hpp"
@@ -402,6 +403,15 @@ template <std::size_t Count>
             std::span<void* const>(current, slots),
             std::span<void*>(record->shadow.data(), slots), patches))
         return false;
+    if (FrameTraceRequested())
+    {
+        const std::array mutationPatches{
+            VtablePatch{kContextCopySubresourceRegion, reinterpret_cast<void*>(&HookCopySubresourceRegion)},
+            VtablePatch{kContextCopyResource, reinterpret_cast<void*>(&HookCopyResource)},
+            VtablePatch{kContextClearRenderTargetView, reinterpret_cast<void*>(&HookClearRenderTargetView)}};
+        if (!ValidateShadowPredecessors(current, mutationPatches)) return false;
+        for (const auto& patch : mutationPatches) record->shadow[patch.index] = patch.replacement;
+    }
     record->originalVtable = current;
     record->nextRelease =
         reinterpret_cast<ContextRelease>(current[kRelease]);
@@ -419,6 +429,9 @@ template <std::size_t Count>
     record->nextEnd = reinterpret_cast<EndQuery>(current[kContextEnd]);
     record->nextExecuteCommandList =
         reinterpret_cast<ExecuteCommandList>(current[kContextExecuteCommandList]);
+    record->nextCopySubresourceRegion = reinterpret_cast<CopySubresourceRegion>(current[kContextCopySubresourceRegion]);
+    record->nextCopyResource = reinterpret_cast<CopyResource>(current[kContextCopyResource]);
+    record->nextClearRenderTargetView = reinterpret_cast<ClearRenderTargetView>(current[kContextClearRenderTargetView]);
     record->computeQueries = {};
     record->nextOmSetRenderTargets = reinterpret_cast<OmSetRenderTargets>(
         current[kContextOmSetRenderTargets]);

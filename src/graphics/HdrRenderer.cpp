@@ -13,6 +13,7 @@
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/hooks/HookOwnership.hpp"
 #include "GraphicsDiagnostics.hpp"
+#include "FrameTrace.hpp"
 #include "LiveSettings.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include "passes/ArmorCompositionPass.hpp"
@@ -111,6 +112,7 @@ void UnbindPresentationProxy() noexcept
 
 void ResetResources(bool retainColorControl) noexcept
 {
+    RetireFrameTrace();
     g_nativeReferenceStatus = "Waiting for a color grading draw.";
     CloseArmorEncodedCompositionForLifecycle();
     // A held comparison is transient UI state. Restore its unsaved Image
@@ -694,7 +696,12 @@ void PublishGraphicsRequest(const PluginConfiguration& configuration, bool hdrRe
 void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexcept
 {
     g_configuration = configuration;
-    SetArmorUiBoundaryCallback(ArmorEncodedBoundary);
+    SetArmorUiBoundaryCallback([](const ArmorUiScopeToken& scope, bool entering) noexcept {
+        TraceNativeBoundary(scope, entering);
+        ArmorEncodedBoundary(scope, entering);
+    });
+    SetArmorUiObservationEnabled(InitializeFrameTrace(
+        configuration.developerMode && configuration.traceRenderPipeline));
     SetArmorUiCorrectionEnabled(configuration.enabled && configuration.productionRequested);
     InitializeLiveSettings(configuration);
 }

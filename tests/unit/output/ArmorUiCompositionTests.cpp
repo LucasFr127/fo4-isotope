@@ -29,6 +29,7 @@ void ResetState()
 {
     SetArmorUiBoundaryCallback(nullptr);
     SetArmorUiCorrectionEnabled(false);
+    SetArmorUiObservationEnabled(false);
     ResetArmorUiScope();
     g_boundaryTokens = {};
     g_boundaryEntering = {};
@@ -169,6 +170,29 @@ void TestDepthLimitAndThreadIsolation()
     FO4HDR_CHECK(CurrentArmorUiScope().serial == mainToken.serial);
 }
 
+void TestObservationWithoutCorrection()
+{
+    ResetState();
+    FO4HDR_CHECK(!ArmorUiScopeEnabled());
+    const auto generation = ArmorUiScopeGeneration();
+    SetArmorUiObservationEnabled(true);
+    FO4HDR_CHECK(ArmorUiScopeEnabled() && !ArmorUiCorrectionEnabled());
+    FO4HDR_CHECK(ArmorUiScopeGeneration() != generation);
+    SetArmorUiBoundaryCallback(&RecordBoundary);
+    {
+        ArmorUiScope scope{{.owner = ArmorUiOwner::powerArmor, .threadId = 71,
+            .postAa = true, .hasRoot = true}};
+        FO4HDR_CHECK(scope.Entered());
+        FO4HDR_CHECK(CurrentArmorUiScope().threadId == 71);
+    }
+    FO4HDR_CHECK(g_boundaryCount == 2 && g_boundaryEntering[0] && !g_boundaryEntering[1]);
+    FO4HDR_CHECK(g_boundaryTokens[0].serial == g_boundaryTokens[1].serial);
+    ResetArmorUiScope();
+    FO4HDR_CHECK(ArmorUiScopeEnabled() && !ArmorUiCorrectionEnabled());
+    SetArmorUiObservationEnabled(false);
+    FO4HDR_CHECK(!ArmorUiScopeEnabled());
+}
+
 void TestCompositionExitPolicy()
 {
     using Exit = ArmorUiCompositionExit;
@@ -189,6 +213,7 @@ void RunArmorUiCompositionTests()
     TestScopesAndBoundaries();
     TestRejectedNestedScopeMasksOuterScope();
     TestDepthLimitAndThreadIsolation();
+    TestObservationWithoutCorrection();
     TestCompositionExitPolicy();
     ResetState();
 }

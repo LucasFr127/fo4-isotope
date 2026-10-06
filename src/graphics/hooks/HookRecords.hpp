@@ -34,6 +34,9 @@ inline constexpr std::size_t kContextBegin = 27;
 inline constexpr std::size_t kContextEnd = 28;
 inline constexpr std::size_t kContextOmSetRenderTargets = 33;
 inline constexpr std::size_t kContextOmSetRenderTargetsAndUavs = 34;
+inline constexpr std::size_t kContextCopySubresourceRegion = 46;
+inline constexpr std::size_t kContextCopyResource = 47;
+inline constexpr std::size_t kContextClearRenderTargetView = 50;
 inline constexpr std::size_t kContextExecuteCommandList = 58;
 inline constexpr std::size_t kContextBaseSlots = 115;
 
@@ -70,6 +73,10 @@ using BeginQuery = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11Asynchro
 using EndQuery = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11Asynchronous*);
 using ExecuteCommandList = void(STDMETHODCALLTYPE*)(
     ID3D11DeviceContext*, ID3D11CommandList*, BOOL);
+using CopySubresourceRegion = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,
+    ID3D11Resource*, UINT, UINT, UINT, UINT, ID3D11Resource*, UINT, const D3D11_BOX*);
+using CopyResource = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11Resource*, ID3D11Resource*);
+using ClearRenderTargetView = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, ID3D11RenderTargetView*, const FLOAT*);
 using OmSetRenderTargets = void(STDMETHODCALLTYPE*)(
     ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*,
     ID3D11DepthStencilView*);
@@ -110,6 +117,9 @@ struct ContextRecord : DrawObservation
     BeginQuery nextBegin{};
     EndQuery nextEnd{};
     ExecuteCommandList nextExecuteCommandList{};
+    CopySubresourceRegion nextCopySubresourceRegion{};
+    CopyResource nextCopyResource{};
+    ClearRenderTargetView nextClearRenderTargetView{};
     OmSetRenderTargets nextOmSetRenderTargets{};
     OmSetRenderTargetsAndUavs nextOmSetRenderTargetsAndUavs{};
     std::array<void*, kMaximumVtableSlots> shadow{};
