@@ -134,6 +134,7 @@ $specifications = @(
     [ordered]@{ Name = "Fxaa"; Symbol = "kFxaa"; Source = "shaders/fallout4/Fxaa.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB2[1]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "Video"; Symbol = "kVideo"; Source = "shaders/fallout4/Video.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB13[2]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentPixelsPs"; Symbol = "kPresentPixelsPs"; Source = "shaders/output/PresentPixels.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[3]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture2d (float,float,float,float) t1", "dcl_resource_texture2d (float,float,float,float) t2", "dcl_resource_texture2d (float,float,float,float) t3", "dcl_output o0.xyzw") },
+    [ordered]@{ Name = "SharedUiSeedPs"; Symbol = "kSharedUiSeedPs"; Source = "shaders/output/SharedUiSeed.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[1]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentFullscreenVs"; Symbol = "kPresentFullscreenVs"; Source = "shaders/output/PresentFullscreen.vs.hlsl"; Profile = "vs_5_0"; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position") }
 )
 $testSpecifications = @(

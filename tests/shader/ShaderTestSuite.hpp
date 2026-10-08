@@ -18,6 +18,8 @@ void VerifyFrameTrace(Device& device);
 
 void VerifyPresentationSwapChain(Device& device);
 
+void VerifySharedUiComposition(Device& device);
+
 void VerifyPresentationResize(Device& device);
 
 void VerifyDirectPresentation(Device& device);

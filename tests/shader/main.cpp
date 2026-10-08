@@ -12,13 +12,14 @@
 
 namespace fo4hdr::tests::gpu {
 
-constexpr std::array<std::string_view, 20> kSectionNames{
+constexpr std::array<std::string_view, 21> kSectionNames{
     "operator-lut",
     "context-query-safety",
     "frame-trace",
     "presentation-facade",
     "presentation-resize",
     "presentation-proxy",
+    "shared-ui-composition",
     "presentation-state",
     "direct-presentation",
     "output-dither",
@@ -84,6 +85,7 @@ struct ShippingShaderRun
         RunSection(options.filter, "presentation-proxy", [&] {
             VerifyPresentationProxy(device);
         });
+        RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); });
         RunSection(options.filter, "direct-presentation", [&] { VerifyDirectPresentation(device); });
         RunSection(options.filter, "output-dither", [&] { VerifyOutputDitherExperiment(device); });
         RunSection(options.filter, "presentation-state", [&] {

@@ -320,7 +320,8 @@ if has_config("fo4hdr_build_tests") then
         add_files("src/graphics/d3d11/**.cpp")
         add_files("src/graphics/passes/ArmorEncodedComposition.cpp",
             "src/graphics/passes/NativeReferenceGradePass.cpp",
-            "src/graphics/resources/NativeReferenceResources.cpp")
+            "src/graphics/resources/NativeReferenceResources.cpp",
+            "src/graphics/resources/SharedUiComposition.cpp")
         add_includedirs(
             "include", "src/graphics", "tests/support",
             path.join(os.projectdir(), "build", "generated"))
