@@ -4,8 +4,6 @@
 #include "FO4Isotope/config/HdrSettings.hpp"
 #include "FO4Isotope/output/Hdr10Color.hpp"
 
-#include <Windows.h>
-
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -18,18 +16,6 @@
 namespace fo4hdr {
 namespace {
 namespace detail {
-
-bool ValidGradePercent(double value) noexcept
-{
-    return std::isfinite(value) && value >= 0.0 && value <= 100.0;
-}
-
-bool ValidGradeOverride(const LutGradeOverride& value) noexcept
-{
-    return (value.overrideLuminance || value.overrideColor) &&
-        ValidGradePercent(value.luminancePercent) &&
-        ValidGradePercent(value.colorPercent);
-}
 
 std::size_t Utf8SequenceLength(unsigned char lead) noexcept
 {
@@ -101,91 +87,6 @@ bool ValidGradeFormId(std::string_view value) noexcept
         value.find_first_not_of('0') != std::string_view::npos;
 }
 
-bool NormalizeProfileKey(GradeProfileKind kind, std::string_view path,
-    std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept
-{
-    if (kind == GradeProfileKind::lutAsset) return NormalizeLutGradePath(path, normalized);
-    return kind == GradeProfileKind::imageSpace && NormalizeImageSpaceGradeKey(path, normalized);
-}
-
-const LutGradeProfile* FindGradeProfile(const LutGradeProfiles& profiles,
-    GradeProfileKind kind,
-    const std::array<char, kMaximumLutGradePathLength + 1>& key) noexcept
-{
-    const auto count = std::min(profiles.count, profiles.entries.size());
-    const auto end = profiles.entries.begin() + count;
-    const auto found = std::find_if(profiles.entries.begin(), end,
-        [&](const auto& profile) { return profile.kind == kind && profile.path == key; });
-    return found == end ? nullptr : &*found;
-}
-
-const LutGradeProfile* FindProfileByKey(const LutGradeProfiles& profiles,
-    GradeProfileKind kind, std::string_view key) noexcept
-{
-    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
-    if (!NormalizeProfileKey(kind, key, normalized)) return nullptr;
-    return FindGradeProfile(profiles, kind, normalized);
-}
-
-bool SetGradeProfile(LutGradeProfiles& profiles, LutGradeProfile profile) noexcept
-{
-    if (profiles.count > profiles.entries.size()) return false;
-    if (!ValidGradeOverride({profile.luminancePercent, profile.overrideLuminance,
-            profile.colorPercent, profile.overrideColor})) return false;
-    auto* existing = const_cast<LutGradeProfile*>(FindGradeProfile(profiles, profile.kind, profile.path));
-    if (existing == nullptr)
-    {
-        if (profiles.count >= profiles.entries.size()) return false;
-        existing = &profiles.entries[profiles.count++];
-    }
-    *existing = profile;
-    return true;
-}
-
-bool SetProfileByKey(LutGradeProfiles& profiles, GradeProfileKind kind,
-    std::string_view key, LutGradeOverride value) noexcept
-{
-    LutGradeProfile profile{.luminancePercent = value.luminancePercent,
-        .colorPercent = value.colorPercent, .overrideLuminance = value.overrideLuminance,
-        .overrideColor = value.overrideColor, .kind = kind};
-    if (!NormalizeProfileKey(kind, key, profile.path)) return false;
-    return SetGradeProfile(profiles, profile);
-}
-
-bool RemoveGradeProfile(LutGradeProfiles& profiles,
-    GradeProfileKind kind, std::string_view key) noexcept
-{
-    if (profiles.count > profiles.entries.size()) return false;
-    const auto* profile = FindProfileByKey(profiles, kind, key);
-    if (profile == nullptr) return false;
-    const auto index = static_cast<std::size_t>(profile - profiles.entries.data());
-    for (std::size_t current = index + 1; current < profiles.count; ++current)
-        profiles.entries[current - 1] = profiles.entries[current];
-    profiles.entries[--profiles.count] = {};
-    return true;
-}
-
-ResolvedLutGrade ApplyGradeProfile(const LutGradeProfile* profile,
-    ResolvedLutGrade result) noexcept
-{
-    if (profile == nullptr) return result;
-    if (profile->overrideLuminance) result.luminancePercent = profile->luminancePercent;
-    if (profile->overrideColor) result.colorPercent = profile->colorPercent;
-    return result;
-}
-
-bool ValidateGradeProfile(const LutGradeProfile& profile) noexcept
-{
-    if (!ValidGradeOverride({profile.luminancePercent, profile.overrideLuminance,
-            profile.colorPercent, profile.overrideColor})) return false;
-    const auto terminator = std::find(profile.path.begin(), profile.path.end(), '\0');
-    if (terminator == profile.path.end()) return false;
-    const std::string_view path(profile.path.data(),
-        static_cast<std::size_t>(terminator - profile.path.begin()));
-    std::array<char, kMaximumLutGradePathLength + 1> normalized{};
-    return NormalizeProfileKey(profile.kind, path, normalized) && normalized == profile.path;
-}
-
 }  // namespace detail
 }  // namespace
 
@@ -223,92 +124,6 @@ bool ValidateGradeProfile(const LutGradeProfile& profile) noexcept
     if (value[separator] != '|') return false;
     return detail::ValidGradePlugin(value.substr(0, separator)) &&
         detail::ValidGradeFormId(value.substr(separator + 1));
-}
-
-[[nodiscard]] const LutGradeProfile* FindLutGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view path) noexcept
-{
-    return detail::FindProfileByKey(profiles, GradeProfileKind::lutAsset, path);
-}
-
-[[nodiscard]] LutGradeProfile* FindLutGradeProfile(
-    LutGradeProfiles& profiles, std::string_view path) noexcept
-{
-    return const_cast<LutGradeProfile*>(FindLutGradeProfile(static_cast<const LutGradeProfiles&>(profiles), path));
-}
-
-[[nodiscard]] const LutGradeProfile* FindImageSpaceGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view key) noexcept
-{
-    return detail::FindProfileByKey(profiles, GradeProfileKind::imageSpace, key);
-}
-
-[[nodiscard]] LutGradeProfile* FindImageSpaceGradeProfile(
-    LutGradeProfiles& profiles, std::string_view key) noexcept
-{
-    return const_cast<LutGradeProfile*>(FindImageSpaceGradeProfile(static_cast<const LutGradeProfiles&>(profiles), key));
-}
-
-[[nodiscard]] bool SetLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path, LutGradeOverride value) noexcept
-{
-    return detail::SetProfileByKey(profiles, GradeProfileKind::lutAsset, path, value);
-}
-
-[[nodiscard]] bool SetImageSpaceGradeProfile(LutGradeProfiles& profiles,
-    std::string_view key, LutGradeOverride value) noexcept
-{
-    return detail::SetProfileByKey(profiles, GradeProfileKind::imageSpace, key, value);
-}
-
-[[nodiscard]] bool AddLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path, LutGradeOverride value) noexcept
-{
-    if (FindLutGradeProfile(profiles, path) != nullptr) return false;
-    return SetLutGradeProfile(profiles, path, value);
-}
-
-[[nodiscard]] bool RemoveLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path) noexcept
-{
-    return detail::RemoveGradeProfile(profiles, GradeProfileKind::lutAsset, path);
-}
-
-[[nodiscard]] bool RemoveImageSpaceGradeProfile(LutGradeProfiles& profiles,
-    std::string_view key) noexcept
-{
-    return detail::RemoveGradeProfile(profiles, GradeProfileKind::imageSpace, key);
-}
-
-[[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view path,
-    double globalLuminancePercent, double globalColorPercent) noexcept
-{
-    const ResolvedLutGrade global{globalLuminancePercent, globalColorPercent};
-    if (!profiles.enabled) return global;
-    return detail::ApplyGradeProfile(FindLutGradeProfile(profiles, path), global);
-}
-
-[[nodiscard]] ResolvedLutGrade ResolveImageSpaceGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view lutPath,
-    std::string_view imageSpaceKey, ResolvedLutGrade global) noexcept
-{
-    const auto result = ResolveLutGradeProfile(profiles, lutPath,
-        global.luminancePercent, global.colorPercent);
-    if (!profiles.enabled) return result;
-    return detail::ApplyGradeProfile(FindImageSpaceGradeProfile(profiles, imageSpaceKey), result);
-}
-
-[[nodiscard]] bool ValidateLutGradeProfiles(const LutGradeProfiles& profiles) noexcept
-{
-    if (profiles.count > profiles.entries.size()) return false;
-    for (std::size_t index = 0; index < profiles.count; ++index)
-    {
-        const auto& profile = profiles.entries[index];
-        if (!detail::ValidateGradeProfile(profile)) return false;
-        if (detail::FindGradeProfile(profiles, profile.kind, profile.path) != &profile) return false;
-    }
-    return true;
 }
 
 namespace {
@@ -369,7 +184,6 @@ enum class RequiredKey : std::size_t
     vanillaColorGradingStrength,
     vanillaGradeLuminance,
     vanillaGradeColor,
-    lutProfilesEnabled,
     colorGradingMethod,
     bloomStrength,
     toggleKey,
@@ -378,6 +192,25 @@ enum class RequiredKey : std::size_t
     settingsWindowHeight,
     settingsWindowX,
     settingsWindowY,
+    weatherEnabled,
+    weatherLuminanceBase,
+    weatherLuminanceGain,
+    weatherLuminanceMinimum,
+    weatherLuminanceMaximum,
+    weatherLuminanceIntercept,
+    weatherLuminanceSunlight,
+    weatherLuminanceGlare,
+    weatherLuminanceAmbient,
+    weatherLuminanceColorChange,
+    weatherColorBase,
+    weatherColorGain,
+    weatherColorMinimum,
+    weatherColorMaximum,
+    weatherColorIntercept,
+    weatherColorSunlight,
+    weatherColorGlare,
+    weatherColorAmbient,
+    weatherColorColorChange,
     count
 };
 
@@ -406,6 +239,25 @@ enum class RequiredKey : std::size_t
 
 struct ConfigurationKey { std::string_view section; std::string_view name; RequiredKey key; };
 constexpr ConfigurationKey kConfigurationKeys[]{
+    {"WeatherLutResponse", "Enabled", RequiredKey::weatherEnabled},
+    {"WeatherLutResponse", "LuminanceBase", RequiredKey::weatherLuminanceBase},
+    {"WeatherLutResponse", "LuminanceGain", RequiredKey::weatherLuminanceGain},
+    {"WeatherLutResponse", "LuminanceMinimum", RequiredKey::weatherLuminanceMinimum},
+    {"WeatherLutResponse", "LuminanceMaximum", RequiredKey::weatherLuminanceMaximum},
+    {"WeatherLutResponse", "LuminanceIntercept", RequiredKey::weatherLuminanceIntercept},
+    {"WeatherLutResponse", "LuminanceSunlight", RequiredKey::weatherLuminanceSunlight},
+    {"WeatherLutResponse", "LuminanceGlare", RequiredKey::weatherLuminanceGlare},
+    {"WeatherLutResponse", "LuminanceAmbient", RequiredKey::weatherLuminanceAmbient},
+    {"WeatherLutResponse", "LuminanceColorChange", RequiredKey::weatherLuminanceColorChange},
+    {"WeatherLutResponse", "ColorBase", RequiredKey::weatherColorBase},
+    {"WeatherLutResponse", "ColorGain", RequiredKey::weatherColorGain},
+    {"WeatherLutResponse", "ColorMinimum", RequiredKey::weatherColorMinimum},
+    {"WeatherLutResponse", "ColorMaximum", RequiredKey::weatherColorMaximum},
+    {"WeatherLutResponse", "ColorIntercept", RequiredKey::weatherColorIntercept},
+    {"WeatherLutResponse", "ColorSunlight", RequiredKey::weatherColorSunlight},
+    {"WeatherLutResponse", "ColorGlare", RequiredKey::weatherColorGlare},
+    {"WeatherLutResponse", "ColorAmbient", RequiredKey::weatherColorAmbient},
+    {"WeatherLutResponse", "ColorColorChange", RequiredKey::weatherColorColorChange},
     {"General", "DeveloperMode", RequiredKey::developerMode},
     {"Debug", "TraceRenderPipeline", RequiredKey::traceRenderPipeline},
     {"Debug", "MeasurePerformance", RequiredKey::measurePerformance},
@@ -438,7 +290,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Effects", "VanillaColorGradingStrength", RequiredKey::vanillaColorGradingStrength},
     {"Effects", "VanillaGradeLuminanceStrength", RequiredKey::vanillaGradeLuminance},
     {"Effects", "VanillaGradeColorStrength", RequiredKey::vanillaGradeColor},
-    {"Effects", "GradeProfilesEnabled", RequiredKey::lutProfilesEnabled},
     {"Effects", "BloomStrength", RequiredKey::bloomStrength},
     {"Interface", "ToggleKey", RequiredKey::toggleKey},
     {"Interface", "Scale", RequiredKey::interfaceScale},
@@ -447,7 +298,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Interface", "WindowX", RequiredKey::settingsWindowX},
     {"Interface", "WindowY", RequiredKey::settingsWindowY},
     {"Image", "ExposureEV", RequiredKey::exposureEv},
-    {"ToneMapper", "ExposureEV", RequiredKey::exposureEv},
     {"SelectiveColor", "RedHue", RequiredKey::selectiveRedHue},
     {"SelectiveColor", "RedSaturation", RequiredKey::selectiveRedSaturation},
     {"SelectiveColor", "RedBrightness", RequiredKey::selectiveRedBrightness},
@@ -480,9 +330,38 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     result = found->key;
     return true;
 }
+[[nodiscard]] double* WeatherNumericTarget(PluginConfiguration& configuration,
+    RequiredKey key) noexcept
+{
+    struct Target { RequiredKey key; double* value; };
+    const Target targets[]{
+        {RequiredKey::weatherLuminanceBase, &configuration.weatherGradeResponse.luminance.base},
+        {RequiredKey::weatherLuminanceGain, &configuration.weatherGradeResponse.luminance.gain},
+        {RequiredKey::weatherLuminanceMinimum, &configuration.weatherGradeResponse.luminance.minimum},
+        {RequiredKey::weatherLuminanceMaximum, &configuration.weatherGradeResponse.luminance.maximum},
+        {RequiredKey::weatherLuminanceIntercept, &configuration.weatherGradeResponse.luminance.intercept},
+        {RequiredKey::weatherLuminanceSunlight, &configuration.weatherGradeResponse.luminance.coefficients[0]},
+        {RequiredKey::weatherLuminanceGlare, &configuration.weatherGradeResponse.luminance.coefficients[1]},
+        {RequiredKey::weatherLuminanceAmbient, &configuration.weatherGradeResponse.luminance.coefficients[2]},
+        {RequiredKey::weatherLuminanceColorChange, &configuration.weatherGradeResponse.luminance.coefficients[3]},
+        {RequiredKey::weatherColorBase, &configuration.weatherGradeResponse.color.base},
+        {RequiredKey::weatherColorGain, &configuration.weatherGradeResponse.color.gain},
+        {RequiredKey::weatherColorMinimum, &configuration.weatherGradeResponse.color.minimum},
+        {RequiredKey::weatherColorMaximum, &configuration.weatherGradeResponse.color.maximum},
+        {RequiredKey::weatherColorIntercept, &configuration.weatherGradeResponse.color.intercept},
+        {RequiredKey::weatherColorSunlight, &configuration.weatherGradeResponse.color.coefficients[0]},
+        {RequiredKey::weatherColorGlare, &configuration.weatherGradeResponse.color.coefficients[1]},
+        {RequiredKey::weatherColorAmbient, &configuration.weatherGradeResponse.color.coefficients[2]},
+        {RequiredKey::weatherColorColorChange, &configuration.weatherGradeResponse.color.coefficients[3]},
+    };
+    const auto found = std::ranges::find(targets, key, &Target::key);
+    return found == std::end(targets) ? nullptr : found->value;
+}
+
 [[nodiscard]] double* NumericTarget(PluginConfiguration& configuration,
     RequiredKey key) noexcept
 {
+    if (auto* weather = WeatherNumericTarget(configuration, key)) return weather;
     auto& regions = configuration.selectiveColor.regions;
     struct Target { RequiredKey key; double* value; };
     const Target targets[]{
@@ -542,6 +421,25 @@ constexpr ConfigurationKey kConfigurationKeys[]{
 }
 struct ConfigurationRange { RequiredKey key; std::array<double, 2> range; };
 constexpr ConfigurationRange kConfigurationRanges[]{
+    {RequiredKey::weatherLuminanceBase, {0.0, 100.0}},
+    {RequiredKey::weatherLuminanceGain, {0.0, kMaximumWeatherGradeGain}},
+    {RequiredKey::weatherLuminanceMinimum, {0.0, 100.0}},
+    {RequiredKey::weatherLuminanceMaximum, {0.0, 100.0}},
+    {RequiredKey::weatherLuminanceIntercept, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherLuminanceSunlight, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherLuminanceGlare, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherLuminanceAmbient, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherLuminanceColorChange, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherColorBase, {0.0, 100.0}},
+    {RequiredKey::weatherColorGain, {0.0, kMaximumWeatherGradeGain}},
+    {RequiredKey::weatherColorMinimum, {0.0, 100.0}},
+    {RequiredKey::weatherColorMaximum, {0.0, 100.0}},
+    {RequiredKey::weatherColorIntercept, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherColorSunlight, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherColorGlare, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherColorAmbient, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+    {RequiredKey::weatherColorColorChange, {-kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient}},
+
     {RequiredKey::displayPeakNits, {kMinimumDisplayPeakNits, kMaximumDisplayPeakNits}},
     {RequiredKey::uiPaperWhiteNits, {kMinimumUiPaperWhiteNits, kMaximumUiPaperWhiteNits}},
     {RequiredKey::videoWhiteNits, {kMinimumUiPaperWhiteNits, kMaximumUiPaperWhiteNits}},
@@ -630,9 +528,9 @@ bool& BooleanTarget(PluginConfiguration& parsed, RequiredKey key) noexcept
 {
     struct Target { RequiredKey key; bool* value; };
     const Target targets[]{
+        {RequiredKey::weatherEnabled, &parsed.weatherGradeResponse.enabled},
         {RequiredKey::developerMode, &parsed.developerMode},
         {RequiredKey::selectiveColorEnabled, &parsed.selectiveColor.enabled},
-        {RequiredKey::lutProfilesEnabled, &parsed.lutGradeProfiles.enabled},
         {RequiredKey::traceRenderPipeline, &parsed.traceRenderPipeline},
         {RequiredKey::measurePerformance, &parsed.measurePerformance},
         {RequiredKey::developerHdr10Reference, &parsed.developerHdr10Reference},
@@ -668,17 +566,22 @@ PluginConfigurationError ParseSetting(PluginConfiguration& parsed,
 bool HasDiagnosticRequest(const PluginConfiguration& parsed) noexcept
 {
     const std::array flags{parsed.traceRenderPipeline, parsed.measurePerformance,
-        parsed.developerHdr10Reference, parsed.showDeveloperOverlay, parsed.forceHdrSwapChainFailure};
+        parsed.developerHdr10Reference, parsed.showDeveloperOverlay,
+        parsed.forceHdrSwapChainFailure};
     return std::ranges::find(flags, true) != flags.end();
+}
+
+bool DiagnosticReferenceAvailable(const PluginConfiguration& parsed) noexcept
+{
+    if (!parsed.showDeveloperOverlay && !parsed.forceHdrSwapChainFailure) return true;
+    return parsed.developerHdr10Reference || parsed.productionRequested;
 }
 
 PluginConfigurationError ValidateDiagnosticConfiguration(const PluginConfiguration& parsed) noexcept
 {
     if (HasDiagnosticRequest(parsed) && !parsed.developerMode)
         return PluginConfigurationError::invalidCombination;
-    const auto referenceFeature = parsed.showDeveloperOverlay || parsed.forceHdrSwapChainFailure;
-    const auto referenceAvailable = parsed.developerHdr10Reference || parsed.productionRequested;
-    if (referenceFeature && !referenceAvailable) return PluginConfigurationError::invalidCombination;
+    if (!DiagnosticReferenceAvailable(parsed)) return PluginConfigurationError::invalidCombination;
     return PluginConfigurationError::none;
 }
 
@@ -696,7 +599,7 @@ PluginConfigurationError ValidateConfiguration(const PluginConfiguration& parsed
 class ConfigurationParser
 {
 public:
-    explicit ConfigurationParser(bool profilesOnly) noexcept : profilesOnly_(profilesOnly)
+    ConfigurationParser() noexcept
     {
         // Files containing only diagnostic keys remain valid, but cannot request a production operator.
         output_.value.enabled = true;
@@ -712,8 +615,6 @@ public:
             if (const auto error = ParseLine(line); error != PluginConfigurationError::none)
                 return Failure(error);
         }
-        if (const auto error = FinishProfile(); error != PluginConfigurationError::none)
-            return Failure(error);
         if (const auto error = FinishConfiguration(); error != PluginConfigurationError::none)
             return Failure(error);
         output_.error = PluginConfigurationError::none;
@@ -738,79 +639,16 @@ private:
         return std::move(output_);
     }
 
-    PluginConfigurationError FinishProfile() noexcept
-    {
-        if (!hasProfile_) return PluginConfigurationError::none;
-        const auto hasOverride = currentProfile_.overrideColor || currentProfile_.overrideLuminance;
-        if (!inherit_ && !hasOverride) return PluginConfigurationError::invalidSyntax;
-        auto& profiles = inherit_ ? output_.profileInheritances : output_.value.lutGradeProfiles;
-        if (profiles.count == profiles.entries.size()) return PluginConfigurationError::valueOutOfRange;
-        profiles.entries[profiles.count++] = currentProfile_;
-        return PluginConfigurationError::none;
-    }
-
-    PluginConfigurationError StartProfile(bool imageSpace) noexcept
-    {
-        std::array<char, kMaximumLutGradePathLength + 1> path{};
-        const auto key = section_.substr(imageSpace ? 5 : 4);
-        const auto kind = imageSpace ? GradeProfileKind::imageSpace : GradeProfileKind::lutAsset;
-        if (!detail::NormalizeProfileKey(kind, key, path)) return PluginConfigurationError::invalidSyntax;
-        if (detail::FindGradeProfile(output_.value.lutGradeProfiles, kind, path) ||
-            detail::FindGradeProfile(output_.profileInheritances, kind, path))
-            return PluginConfigurationError::duplicateKey;
-        currentProfile_ = {};
-        currentProfile_.path = path;
-        currentProfile_.kind = kind;
-        hasProfile_ = true;
-        return PluginConfigurationError::none;
-    }
-
     PluginConfigurationError ParseSection(std::string_view line) noexcept
     {
-        if (const auto error = FinishProfile(); error != PluginConfigurationError::none) return error;
         if (line.size() < 3 || line.back() != ']') return PluginConfigurationError::invalidSyntax;
         section_ = Trim(line.substr(1, line.size() - 2));
         if (section_.empty()) return PluginConfigurationError::invalidSyntax;
-        hasProfile_ = false;
-        inherit_ = false;
-        if (section_.starts_with("IMGS:")) return StartProfile(true);
-        if (section_.starts_with("LUT:")) return StartProfile(false);
         return PluginConfigurationError::none;
-    }
-
-    PluginConfigurationError ParseInheritance(std::string_view value) noexcept
-    {
-        const auto hasOverride = currentProfile_.overrideColor || currentProfile_.overrideLuminance;
-        if (inherit_ || hasOverride)
-            return PluginConfigurationError::duplicateKey;
-        if (value != "1") return PluginConfigurationError::invalidBoolean;
-        inherit_ = true;
-        return PluginConfigurationError::none;
-    }
-
-    PluginConfigurationError ParseProfileValue(std::string_view key, std::string_view value) noexcept
-    {
-        if (key == "Inherit") return ParseInheritance(value);
-        if (key != "Color" && key != "Luminance") return PluginConfigurationError::invalidSyntax;
-        if (inherit_) return PluginConfigurationError::duplicateKey;
-        return ParseProfileChannel(key == "Color", value);
-    }
-
-    PluginConfigurationError ParseProfileChannel(bool color, std::string_view value) noexcept
-    {
-        auto& present = color ? currentProfile_.overrideColor : currentProfile_.overrideLuminance;
-        auto& target = color ? currentProfile_.colorPercent : currentProfile_.luminancePercent;
-        if (present) return PluginConfigurationError::duplicateKey;
-        const auto error = ParseNumber(value,
-            {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent}, target);
-        if (error == PluginConfigurationError::none) present = true;
-        return error;
     }
 
     PluginConfigurationError ParseValue(std::string_view key, std::string_view value) noexcept
     {
-        if (hasProfile_) return ParseProfileValue(key, value);
-        if (profilesOnly_) return PluginConfigurationError::none;
         RequiredKey required{};
         if (!MatchKey(section_, key, required)) return PluginConfigurationError::none;
         auto& seen = seen_[static_cast<std::size_t>(required)];
@@ -850,14 +688,13 @@ private:
         auto& parsed = output_.value;
         // An explicit diagnostic reference request suppresses the production path.
         parsed.productionRequested = parsed.enabled && present && !parsed.developerHdr10Reference;
+        if (!Seen(RequiredKey::weatherEnabled))
+            parsed.weatherGradeResponse.enabled = parsed.productionRequested;
         return ValidateConfiguration(parsed);
     }
 
     PluginConfigurationError FinishConfiguration() noexcept
     {
-        if (profilesOnly_)
-            return ValidateLutGradeProfiles(output_.value.lutGradeProfiles) ?
-                PluginConfigurationError::none : PluginConfigurationError::valueOutOfRange;
         const auto end = seen_.begin() + static_cast<std::size_t>(RequiredKey::requiredCount);
         if (std::find(seen_.begin(), end, false) != end) return PluginConfigurationError::missingKey;
         return FinishProductionRequest();
@@ -865,144 +702,15 @@ private:
 
     PluginConfigurationResult output_{};
     std::array<bool, static_cast<std::size_t>(RequiredKey::count)> seen_{};
-    bool profilesOnly_{};
-    bool inherit_{};
-    bool hasProfile_{};
     std::string_view section_;
-    LutGradeProfile currentProfile_{};
     std::size_t lineNumber_{};
 };
-
-PluginConfigurationResult ParseConfiguration(std::string_view text, bool profilesOnly) noexcept
-{
-    return ConfigurationParser(profilesOnly).Parse(text);
-}
-
-bool ContainsProfile(const LutGradeProfiles* profiles, const LutGradeProfile& profile) noexcept
-{
-    return profiles && detail::FindGradeProfile(*profiles, profile.kind, profile.path);
-}
-
-[[nodiscard]] bool AppendUnclaimedProfiles(
-    LutGradeProfiles& destination, const LutGradeProfiles& source,
-    const LutGradeProfiles* suppressed = nullptr,
-    const LutGradeProfiles* alsoSuppressed = nullptr) noexcept
-{
-    for (std::size_t index = 0; index < source.count; ++index)
-    {
-        const auto& profile = source.entries[index];
-        const std::array<const LutGradeProfiles*, 3> claimed{&destination, suppressed, alsoSuppressed};
-        if (std::ranges::any_of(claimed, [&](const auto* profiles) {
-                return ContainsProfile(profiles, profile);
-            })) continue;
-        if (destination.count == destination.entries.size()) return false;
-        destination.entries[destination.count++] = profile;
-    }
-    return true;
-}
-
-void RemoveInheritanceMasks(LutGradeProfiles& profiles) noexcept
-{
-    std::size_t retained{};
-    const auto count = profiles.count;
-    for (std::size_t index = 0; index < count; ++index)
-        if (profiles.entries[index].overrideColor ||
-            profiles.entries[index].overrideLuminance)
-            profiles.entries[retained++] = profiles.entries[index];
-    profiles.count = retained;
-    for (auto index = retained; index < count; ++index)
-        profiles.entries[index] = {};
-}
-
-[[nodiscard]] PluginConfigurationResult ReadConfiguration(
-    const std::filesystem::path& path, bool profilesOnly)
-{
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) return {};
-    const std::string text(std::istreambuf_iterator<char>(stream), {});
-    if (stream.bad()) return {};
-    return ParseConfiguration(text, profilesOnly);
-}
-
-void CollectProfileFile(const std::filesystem::directory_entry& entry,
-    std::vector<std::filesystem::path>& files, PluginConfigurationResult& result)
-{
-
-    if (CompareStringOrdinal(entry.path().extension().c_str(), -1,
-            L".ini", -1, TRUE) == CSTR_EQUAL &&
-        CompareStringOrdinal(entry.path().filename().c_str(), -1,
-            L"Personal.ini", -1, TRUE) != CSTR_EQUAL)
-    {
-        std::error_code entryError;
-        if (entry.is_regular_file(entryError)) files.push_back(entry.path());
-        else if (entryError)
-            result.profileIssues.push_back({entry.path(),
-                PluginConfigurationError::fileUnavailable, 0});
-    }
-}
-
-void LoadDistributedFile(const std::filesystem::path& file, PluginConfigurationResult& result)
-{
-    auto parsed = ReadConfiguration(file, true);
-    if (!parsed.valid)
-    {
-        result.profileIssues.push_back({file, parsed.error, parsed.line});
-        return;
-    }
-    auto candidate = result.distributedProfiles;
-    if (!AppendUnclaimedProfiles(candidate, parsed.value.lutGradeProfiles) ||
-        !AppendUnclaimedProfiles(candidate, parsed.profileInheritances))
-    {
-        parsed.valid = false;
-        parsed.error = PluginConfigurationError::valueOutOfRange;
-    }
-    if (!parsed.valid)
-        result.profileIssues.push_back({file, parsed.error, parsed.line});
-    else
-        result.distributedProfiles = candidate;
-}
-
-void LoadDistributedProfiles(const std::filesystem::path& directory,
-    PluginConfigurationResult& result)
-{
-    std::error_code error;
-    if (!std::filesystem::exists(directory, error) && !error) return;
-    std::vector<std::filesystem::path> files;
-    std::filesystem::directory_iterator iterator(directory, error);
-    const std::filesystem::directory_iterator end;
-    while (!error && iterator != end)
-    {
-        CollectProfileFile(*iterator, files, result);
-        iterator.increment(error);
-    }
-    if (error)
-    {
-        result.profileIssues.push_back({directory,
-            PluginConfigurationError::fileUnavailable, 0});
-        return;
-    }
-    std::sort(files.begin(), files.end(), [](const auto& left, const auto& right) {
-        const auto leftName = left.filename().native();
-        const auto rightName = right.filename().native();
-        const auto order = CompareStringOrdinal(leftName.c_str(), -1,
-            rightName.c_str(), -1, TRUE);
-        return order == CSTR_EQUAL ? leftName > rightName :
-            order == CSTR_GREATER_THAN;
-    });
-    for (const auto& file : files) LoadDistributedFile(file, result);
-    RemoveInheritanceMasks(result.distributedProfiles);
-}
 
 }  // namespace
 
 PluginConfigurationResult ParsePluginConfiguration(std::string_view text) noexcept
 {
-    return ParseConfiguration(text, false);
-}
-
-PluginConfigurationResult ParseGradeProfileConfiguration(std::string_view text) noexcept
-{
-    return ParseConfiguration(text, true);
+    return ConfigurationParser{}.Parse(text);
 }
 
 PluginConfigurationResult LoadPluginConfiguration(
@@ -1010,40 +718,11 @@ PluginConfigurationResult LoadPluginConfiguration(
 {
     try
     {
-        auto result = ReadConfiguration(path, false);
-        if (!result.valid) return result;
-        const auto directory = path.parent_path() / path.stem();
-        LoadDistributedProfiles(directory, result);
-        const auto personalPath = directory / L"Personal.ini";
-        PluginConfigurationResult personal;
-        std::error_code error;
-        if (std::filesystem::exists(personalPath, error))
-        {
-            personal = ReadConfiguration(personalPath, true);
-            if (!personal.valid)
-            {
-                result.profileIssues.push_back({personalPath,
-                    personal.error, personal.line});
-                personal = {};
-            }
-        }
-        else if (error)
-            result.profileIssues.push_back({personalPath,
-                PluginConfigurationError::fileUnavailable, 0});
-        auto merged = personal.value.lutGradeProfiles;
-        merged.enabled = result.value.lutGradeProfiles.enabled;
-        if (!AppendUnclaimedProfiles(merged, result.value.lutGradeProfiles,
-                &personal.profileInheritances) ||
-            !AppendUnclaimedProfiles(merged, result.distributedProfiles,
-                &personal.profileInheritances, &result.profileInheritances))
-        {
-            result.valid = false;
-            result.error = PluginConfigurationError::valueOutOfRange;
-            return result;
-        }
-        RemoveInheritanceMasks(merged);
-        result.value.lutGradeProfiles = merged;
-        return result;
+        std::ifstream stream(path, std::ios::binary);
+        if (!stream) return {};
+        const std::string text(std::istreambuf_iterator<char>(stream), {});
+        if (stream.bad()) return {};
+        return ParsePluginConfiguration(text);
     }
     catch (...)
     {

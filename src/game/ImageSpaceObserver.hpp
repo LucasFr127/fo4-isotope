@@ -33,7 +33,7 @@ struct ImageSpaceEffectListState
 
 }  // namespace fo4hdr
 
-namespace RE { class ImageSpaceManager; class ImageSpaceLUTData; }
+namespace RE { class ImageSpaceManager; class ImageSpaceLUTData; class ImageSpaceBaseData; }
 namespace fo4hdr { struct NativeLutObservation; }
 namespace fo4hdr::game {
 [[nodiscard]] bool InitializeImageSpaceObserver(bool requested,
@@ -44,6 +44,21 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
 
 namespace fo4hdr::game::imagespace_detail {
 using Status = ImageSpaceObservationStatus;
+struct WeatherGradeSlotColors
+{
+    std::array<std::uint8_t, 3> sunlight{};
+    std::array<std::uint8_t, 3> glare{};
+    std::array<std::array<std::uint8_t, 3>, 6> diffuse{};
+};
+
+[[nodiscard]] bool DecodeWeatherGradeFeatures(
+    const std::array<WeatherGradeSlotColors, 8>& colors,
+    const std::array<std::uint8_t, 8>& chronologicalSlots,
+    std::size_t slot, WeatherGradeFeatures& result) noexcept;
+void AccumulateWeatherGradeReference(WeatherGradeAggregate& aggregate,
+    const WeatherGradeFeatures* features) noexcept;
+void FinalizeWeatherGradeAggregate(WeatherGradeAggregate& aggregate) noexcept;
+
 struct LutValues
 {
     std::array<std::array<char, 260>, 4> paths{};
@@ -55,7 +70,9 @@ struct Provenance
 {
     LutValues values{};
     std::array<ImageSpaceIdentity, 4> identities{};
+    std::array<WeatherGradeAggregate, 4> weatherGrades{};
     std::uint32_t validSlots{};
+    std::uint32_t weatherGradeValidSlots{};
     std::uint64_t generation{};
     std::uint64_t revision{};
     std::uint64_t observationRevision{};
@@ -95,6 +112,10 @@ private:
 
 namespace fo4hdr::game {
 void BuildImageSpaceCatalog() noexcept;
+[[nodiscard]] bool ImageSpaceCatalogReady() noexcept;
+[[nodiscard]] bool LookupImageSpaceIdentity(
+    const RE::ImageSpaceBaseData* data, ImageSpaceIdentity& result,
+    std::array<char, 260>& lutPath, WeatherGradeAggregate& weatherGrade) noexcept;
 }  // namespace fo4hdr::game
 
 namespace fo4hdr { class GameSnapshotStore; }

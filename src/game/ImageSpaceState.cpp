@@ -66,6 +66,73 @@ bool ValidateImageSpaceEffectListPrefix(
 }  // namespace fo4hdr
 
 namespace fo4hdr::game::imagespace_detail {
+namespace {
+double CodeBrightness(const std::array<std::uint8_t, 3>& color) noexcept
+{
+    return (2125U * color[0] + 7154U * color[1] + 721U * color[2]) / 2550000.0;
+}
+
+double SunlightWarmth(const std::array<std::uint8_t, 3>& color) noexcept
+{
+    return (static_cast<double>(color[0]) - color[2]) /
+        (color[0] + color[1] + color[2] + 1.0);
+}
+}
+
+bool DecodeWeatherGradeFeatures(
+    const std::array<WeatherGradeSlotColors, 8>& colors,
+    const std::array<std::uint8_t, 8>& chronologicalSlots,
+    std::size_t slot, WeatherGradeFeatures& result) noexcept
+{
+    result = {};
+    if (slot >= colors.size()) return false;
+    std::uint32_t visited{};
+    std::size_t position{};
+    for (std::size_t index = 0; index < chronologicalSlots.size(); ++index)
+    {
+        const auto candidate = chronologicalSlots[index];
+        if (candidate >= colors.size() || (visited & (1U << candidate))) return false;
+        visited |= 1U << candidate;
+        if (candidate == slot) position = index;
+    }
+    const auto previous = chronologicalSlots[(position + colors.size() - 1) % colors.size()];
+    const auto next = chronologicalSlots[(position + 1) % colors.size()];
+    const auto& current = colors[slot];
+    result.sunlight = CodeBrightness(current.sunlight);
+    result.glare = CodeBrightness(current.glare);
+    for (const auto& direction : current.diffuse) result.ambient += CodeBrightness(direction);
+    result.ambient /= current.diffuse.size();
+    result.colorChange = SunlightWarmth(current.sunlight) -
+        (SunlightWarmth(colors[previous].sunlight) + SunlightWarmth(colors[next].sunlight)) / 2.0;
+    return ValidateWeatherGradeFeatures(result);
+}
+
+void AccumulateWeatherGradeReference(WeatherGradeAggregate& aggregate,
+    const WeatherGradeFeatures* features) noexcept
+{
+    ++aggregate.referenceCount;
+    if (features == nullptr || !ValidateWeatherGradeFeatures(*features)) return;
+    ++aggregate.validReferenceCount;
+    aggregate.features.sunlight += features->sunlight;
+    aggregate.features.glare += features->glare;
+    aggregate.features.ambient += features->ambient;
+    aggregate.features.colorChange += features->colorChange;
+}
+
+void FinalizeWeatherGradeAggregate(WeatherGradeAggregate& aggregate) noexcept
+{
+    if (aggregate.referenceCount == 0) return;
+    aggregate.availability = WeatherGradeAvailability::incomplete;
+    if (aggregate.referenceCount != aggregate.validReferenceCount) return;
+    const auto divisor = static_cast<double>(aggregate.referenceCount);
+    aggregate.features.sunlight /= divisor;
+    aggregate.features.glare /= divisor;
+    aggregate.features.ambient /= divisor;
+    aggregate.features.colorChange /= divisor;
+    if (ValidateWeatherGradeFeatures(aggregate.features))
+        aggregate.availability = WeatherGradeAvailability::complete;
+}
+
 Publication::Token Publication::Begin() noexcept
 {
     const auto active = active_.fetch_add(1, std::memory_order_acq_rel);

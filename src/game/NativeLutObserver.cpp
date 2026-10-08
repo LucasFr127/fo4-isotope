@@ -145,6 +145,7 @@ const RE::ImageSpaceLUTData* ActiveLut(const RE::ImageSpaceManager& manager) noe
 }
 bool Observe(RE::ImageSpaceEffect* effect, fo4hdr::NativeLutObservation& result) noexcept
 {
+    result.generation = fo4hdr::NativeLutObservationGeneration();
     __try {
         if (!effect || *reinterpret_cast<std::uintptr_t*>(effect) != g_vtable) return false;
         auto* manager = *g_manager;

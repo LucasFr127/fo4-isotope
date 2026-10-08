@@ -424,15 +424,7 @@ namespace
             fo4hdr::LoadPluginConfiguration(
                 *settingsPath);
         if (diagnosticsConfiguration.valid)
-            (void)fo4hdr::InitializeSettingsPersistence(*settingsPath,
-                diagnosticsConfiguration.distributedProfiles);
-        for (const auto& issue : diagnosticsConfiguration.profileIssues)
-        {
-            const auto name = issue.path.u8string();
-            REX::WARN("grade_profile_file ignored={} error={} line={}",
-                std::string_view(reinterpret_cast<const char*>(name.data()),
-                    name.size()), fo4hdr::ToString(issue.error), issue.line);
-        }
+            (void)fo4hdr::InitializeSettingsPersistence(*settingsPath);
     }
     REX::INFO(
         "m6 diagnostics_configuration valid={} error={} line={} "

@@ -64,7 +64,7 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
 void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
     const auto roundTripRewrite = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), settings, interfaceSettings);
+        MinimalProductionConfiguration(), settings, interfaceSettings);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         roundTripRewrite, settings, interfaceSettings) == roundTripRewrite);
     const auto reloadedRewrite =
@@ -83,8 +83,9 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
         settings.vanillaGradeColorPercent);
     auto resetParameters = settings;
     resetParameters.toneMapperParameters = {};
-    resetParameters.vanillaGradeLuminancePercent = 100.0;
-    resetParameters.vanillaGradeColorPercent = 100.0;
+    resetParameters.vanillaGradeLuminancePercent = HdrSettings{}.vanillaGradeLuminancePercent;
+    resetParameters.vanillaGradeColorPercent = HdrSettings{}.vanillaGradeColorPercent;
+    resetParameters.bloomStrengthPercent = HdrSettings{}.bloomStrengthPercent;
     const auto resetParametersReloaded = ParsePluginConfiguration(
         RewriteHdrSettingsIni(
             roundTripRewrite, resetParameters, interfaceSettings));
@@ -95,6 +96,7 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
         resetParametersReloaded.value.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(
         resetParametersReloaded.value.vanillaGradeColorPercent == 100.0);
+    FO4HDR_CHECK(resetParametersReloaded.value.bloomStrengthPercent == 100.0);
 }
 
 void CheckRewrittenEffects(const std::string& rewritten)
@@ -103,7 +105,6 @@ void CheckRewrittenEffects(const std::string& rewritten)
     FO4HDR_CHECK(rewritten.find(
         "VanillaColorGradingStrength=100\r\n"
         "VanillaGradeLuminanceStrength=65\r\nVanillaGradeColorStrength=35\r\n"
-        "GradeProfilesEnabled=1\r\n"
         "BloomStrength=75\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("BloomStrength=75\r\n") !=
         std::string::npos);
@@ -144,21 +145,20 @@ void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfac
 
 void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
-    constexpr std::string_view legacyExposure =
-        "[ToneMapper]\nAlgorithm=ACES2\nExposureEV=-0.5\n"
+    constexpr std::string_view retiredGradeTransfer =
+        "[ToneMapper]\nAlgorithm=ACES2\n"
         "[Image]\nGradeTransfer=PreserveHDRColor\nContrast=0\n";
     const auto migrated = RewriteHdrSettingsIni(
-        legacyExposure, settings, interfaceSettings);
-    FO4HDR_CHECK(migrated.find("[ToneMapper]\nAlgorithm=ACES2\nExposureEV") == std::string::npos);
+        retiredGradeTransfer, settings, interfaceSettings);
     FO4HDR_CHECK(migrated.find("GradeTransfer") == std::string::npos);
     FO4HDR_CHECK(migrated.find("ExposureEV=0.25") != std::string::npos);
-    FO4HDR_CHECK(RewriteHdrWindowPositionIni(legacyExposure, 1, 2)
+    FO4HDR_CHECK(RewriteHdrWindowPositionIni(retiredGradeTransfer, 1, 2)
         .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
 
     auto precise = settings;
     precise.exposureEv = 0.123456;
     const auto preciseSaved = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), precise, interfaceSettings);
+        MinimalProductionConfiguration(), precise, interfaceSettings);
     const auto preciseLoaded = ParsePluginConfiguration(preciseSaved);
     FO4HDR_CHECK(preciseLoaded.valid);
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
@@ -204,7 +204,7 @@ void TestSettingsPersistenceRewrite()
     const auto rewritten = RewriteHdrSettingsIni(
         original, settings, interfaceSettings);
     const auto bomRewritten = RewriteHdrSettingsIni(
-        std::string("\xEF\xBB\xBF") + LegacyProductionConfiguration(),
+        std::string("\xEF\xBB\xBF") + MinimalProductionConfiguration(),
         settings, interfaceSettings);
     CheckRewrittenOutput(rewritten, bomRewritten);
     CheckRewrittenRoundTrip(settings, interfaceSettings);
@@ -300,7 +300,7 @@ PersistenceFixture CreatePersistenceFixture()
     const auto personalPath = profileDirectory / "Personal.ini";
     {
         std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        output << LegacyProductionConfiguration()
+        output << MinimalProductionConfiguration()
                << "\n[Image]\nGradeTransfer=PreserveHDRColor\n"
                << "[LUT:stale.dds]\nColor=1\n";
     }
@@ -309,20 +309,21 @@ PersistenceFixture CreatePersistenceFixture()
             profileDirectory / "Z.ini", std::ios::binary | std::ios::trunc);
         output << "[LUT:textures/distributed.dds]\nColor=66\n";
     }
+    {
+        std::ofstream output(personalPath, std::ios::binary | std::ios::trunc);
+        output << "user-owned sidecar\r\n[LUT:test.dds]\r\nColor=nan\r\n";
+    }
     auto startup = LoadPluginConfiguration(path);
     FO4HDR_CHECK(startup.valid);
-    FO4HDR_CHECK(startup.distributedProfiles.count == 1);
-    FO4HDR_CHECK(InitializeSettingsPersistence(
-        path, startup.distributedProfiles));
-    startup.distributedProfiles = {};
+    FO4HDR_CHECK(InitializeSettingsPersistence(path));
     HdrSettings settings{};
     settings.displayPeakNits = 430.0;
     settings.exposureEv = 0.75;
     settings.blacks = 35.0;
     settings.vanillaGradeLuminancePercent = 60.0;
     settings.vanillaGradeColorPercent = 30.0;
-    FO4HDR_CHECK(SetLutGradeProfile(settings.lutGradeProfiles,
-        "Textures\\Effects\\Night.DDS", { 60.0, true, 25.0, true}));
+    settings.weatherGradeResponse.luminance.base = 85.0;
+    settings.weatherGradeResponse.color.gain = 0.75;
     settings.toneMapperParameters = {
         .acesLookStrength = 0.4,
         .agxMiddleGrayEv = 0.25,
@@ -366,18 +367,13 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
         std::string::npos);
     FO4HDR_CHECK(persisted.find("VanillaGradeColorStrength=30") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("stale.dds") == std::string::npos);
-    FO4HDR_CHECK(persisted.find("[LUT:") == std::string::npos);
-    std::ifstream gradeProfileInput(personalPath, std::ios::binary);
-    const std::string persistedProfiles(
-        std::istreambuf_iterator<char>(gradeProfileInput), {});
-    gradeProfileInput.close();
-    FO4HDR_CHECK(persistedProfiles.find(
-        "[LUT:textures/effects/night.dds]\nColor=25\nLuminance=60\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(persistedProfiles.find(
-        "[LUT:textures/distributed.dds]\nInherit=1\n") !=
-        std::string::npos);
+    FO4HDR_CHECK(persisted.find("[LUT:stale.dds]\nColor=1\n") != std::string::npos);
+    std::ifstream personalInput(personalPath, std::ios::binary);
+    const std::string personalBytes(std::istreambuf_iterator<char>(personalInput), {});
+    FO4HDR_CHECK(personalBytes == "user-owned sidecar\r\n[LUT:test.dds]\r\nColor=nan\r\n");
+    std::ifstream distributedInput(profileDirectory / "Z.ini", std::ios::binary);
+    const std::string distributedBytes(std::istreambuf_iterator<char>(distributedInput), {});
+    FO4HDR_CHECK(distributedBytes == "[LUT:textures/distributed.dds]\nColor=66\n");
     FO4HDR_CHECK(persisted.find("[ACES2]\nContrastLookStrength=0.4") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("[AgX]\nMiddleGrayOffsetEV=0.25\nContrast=3") !=
@@ -386,7 +382,6 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
         "[GT7]\nToeStrength=1.5\nShoulderStart=0.5") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("GradeTransfer") == std::string::npos);
-    FO4HDR_CHECK(persisted.find("ExposureEV=0.75") != std::string::npos);
     FO4HDR_CHECK(persisted.find("Scale=1.5") != std::string::npos);
     const auto reloaded = LoadPluginConfiguration(path);
     FO4HDR_CHECK(reloaded.valid);
@@ -396,8 +391,8 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
         settings.vanillaGradeLuminancePercent);
     FO4HDR_CHECK(reloaded.value.vanillaGradeColorPercent ==
         settings.vanillaGradeColorPercent);
-    FO4HDR_CHECK(reloaded.value.lutGradeProfiles ==
-        settings.lutGradeProfiles);
+    FO4HDR_CHECK(reloaded.value.weatherGradeResponse ==
+        settings.weatherGradeResponse);
     FO4HDR_CHECK(reloaded.value.toneMapperParameters ==
         settings.toneMapperParameters);
     FO4HDR_CHECK(reloaded.value.colorGradingMethod == settings.colorGradingMethod);
@@ -420,6 +415,7 @@ void TestPersistedWindowPosition(PersistenceFixture& fixture)
     FO4HDR_CHECK(RequestHdrWindowPositionSave(100, 130));
     interfaceSettings.windowX = 200;
     interfaceSettings.windowY = 230;
+    // Submission is nonblocking while the autosave worker holds the request lock.
     const auto newerGeneration = RetryPersistenceRequest(
         [&] { return RequestHdrSettingsSave(settings, interfaceSettings); });
     FO4HDR_CHECK(newerGeneration != 0);

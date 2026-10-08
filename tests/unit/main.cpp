@@ -21,8 +21,8 @@ void RunHdrSettingsTests()
     TestHotkeyFormatting();
     TestSettingsDefaultsAndMath();
     TestSettingsValidation();
-    TestLutGradeProfiles();
-    TestGradeProfilePacks();
+    TestWeatherGradeConfiguration();
+    TestWeatherGradeResponse();
     TestToneMapperPanelSmoke();
     TestVanillaGradePanelSmoke();
     TestOptionalConfigurationValues();

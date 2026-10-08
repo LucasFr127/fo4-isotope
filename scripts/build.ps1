@@ -29,6 +29,13 @@ try {
         throw "Build failed."
     }
 
+    $retiredDefault = Resolve-Fo4HdrChildPath `
+        -Parent (Join-Path $repoRoot "dist") `
+        -RelativePath "$Runtime/Data/F4SE/Plugins/FO4Isotope/Default.ini"
+    if (Test-Path -LiteralPath $retiredDefault -PathType Leaf) {
+        Remove-Item -LiteralPath $retiredDefault -Force
+    }
+
     xmake install -v FO4Isotope
     if ($LASTEXITCODE -ne 0) {
         throw "Plugin staging failed."

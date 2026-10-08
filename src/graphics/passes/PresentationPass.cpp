@@ -123,14 +123,17 @@ SettingsDisplayView UiDisplaySnapshot() noexcept
     result.sdrWhiteNits = source.sdrWhiteNits;
     return result;
 }
-LutProfilesView UiLutProfilesSnapshot() noexcept
+WeatherLutResponseView UiWeatherLutResponseSnapshot() noexcept
 {
     const bool current = g_liveSettingsThreadCompatible.load(std::memory_order_acquire) &&
         g_lutInspectorFrame == g_frame;
     if (current)
         return {g_lutInspectorLuts, g_lutInspectorValidatedSlots, g_lutInspectorStatus,
-            g_lutInspectorImageSpaces, g_lutInspectorImageSpaceSlots, g_lutInspectorImageSpaceStatus};
-    LutProfilesView view;
+            g_lutInspectorImageSpaces, g_lutInspectorImageSpaceSlots, g_lutInspectorImageSpaceStatus,
+            g_lutInspectorReferencingContexts, g_lutInspectorResolved,
+            g_lutInspectorAutomaticSlots, g_lutInspectorFallbackReasons,
+            g_lutInspectorGradingBypassed};
+    WeatherLutResponseView view;
     view.status = NativeLutObserverMessage();
     view.imageSpaceStatus = "Waiting for a qualified ImageSpace blend.";
     return view;
@@ -159,7 +162,7 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.desiredSettingsGeneration = g_desiredSettingsGeneration;
     result.lutRequestGeneration = g_lutRequestGeneration;
     result.display = UiDisplaySnapshot();
-    result.lutProfiles = UiLutProfilesSnapshot();
+    result.weatherLutResponse = UiWeatherLutResponseSnapshot();
     result.pipboy = UiPipboySnapshot();
     return result;
 }

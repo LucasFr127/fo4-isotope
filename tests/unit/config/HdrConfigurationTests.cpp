@@ -17,11 +17,10 @@ void TestShippedConfiguration()
     const auto shipped = LoadPluginConfiguration(
         std::filesystem::path{"config/FO4Isotope.ini"});
     FO4HDR_CHECK(shipped.valid);
-    FO4HDR_CHECK(shipped.profileIssues.empty());
-    FO4HDR_CHECK(shipped.distributedProfiles.count > 0);
+    FO4HDR_CHECK(shipped.value.enabled && shipped.value.productionRequested);
+    FO4HDR_CHECK(shipped.value.weatherGradeResponse == WeatherGradeResponseSettings{});
     FO4HDR_CHECK(shipped.value.productionAlgorithm ==
         ProductionToneMapperAlgorithm::gt7);
-    FO4HDR_CHECK(shipped.value.productionAlgorithm == HdrSettings{}.productionAlgorithm);
     FO4HDR_CHECK(shipped.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);
@@ -60,12 +59,37 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!shipped.value.forceHdrSwapChainFailure);
 }
 
-void TestLegacyRoundTrip(const PluginConfigurationResult& parsed)
+void TestProductionConfiguration()
+{
+    auto text = MinimalProductionConfiguration();
+    const auto production = ParsePluginConfiguration(text);
+    FO4HDR_CHECK(production.valid);
+    FO4HDR_CHECK(production.value.enabled && production.value.productionRequested);
+    FO4HDR_CHECK(!production.value.developerMode);
+
+    const auto hdr = text.find("HdrEnabled=1");
+    text.replace(hdr, 12, "HdrEnabled=0");
+    const auto disabled = ParsePluginConfiguration(text);
+    FO4HDR_CHECK(disabled.valid);
+    FO4HDR_CHECK(!disabled.value.enabled && !disabled.value.productionRequested);
+
+    text.replace(hdr, 12, "HdrEnabled=1");
+    const auto developer = text.find("DeveloperMode=0");
+    text.replace(developer, 15, "DeveloperMode=1");
+    const auto reference = text.find("DeveloperHdr10Reference=0");
+    text.replace(reference, 25, "DeveloperHdr10Reference=1");
+    const auto diagnostic = ParsePluginConfiguration(text);
+    FO4HDR_CHECK(diagnostic.valid);
+    FO4HDR_CHECK(diagnostic.value.enabled && diagnostic.value.developerHdr10Reference);
+    FO4HDR_CHECK(!diagnostic.value.productionRequested);
+}
+
+void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
 {
     auto sourceContrastSettings = static_cast<HdrSettings>(parsed.value);
     sourceContrastSettings.toneMapperParameters.agxContrast = 2.4;
     const auto sourceContrastSaved = RewriteHdrSettingsIni(
-        LegacyProductionConfiguration(), sourceContrastSettings, {});
+        MinimalProductionConfiguration(), sourceContrastSettings, {});
     FO4HDR_CHECK(sourceContrastSaved.find("Contrast=2.4\n") !=
         std::string::npos);
     const auto sourceContrastReloaded =
@@ -80,7 +104,7 @@ void TestLegacyRoundTrip(const PluginConfigurationResult& parsed)
         auto settings = static_cast<HdrSettings>(parsed.value);
         settings.colorGradingMethod = method;
         const auto saved = RewriteHdrSettingsIni(
-            LegacyProductionConfiguration(), settings, {});
+            MinimalProductionConfiguration(), settings, {});
         const auto loaded = ParsePluginConfiguration(saved);
         FO4HDR_CHECK(loaded.valid);
         FO4HDR_CHECK(loaded.value.colorGradingMethod == method);
@@ -93,15 +117,15 @@ void TestLegacyRoundTrip(const PluginConfigurationResult& parsed)
     }
 }
 
-void TestLegacyConfiguration()
+void TestMinimalConfiguration()
 {
     auto parsed = ParsePluginConfiguration(
-        LegacyProductionConfiguration());
+        MinimalProductionConfiguration());
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(parsed.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(parsed.value.toneMapperParameters.agxContrast == 2.7);
-    TestLegacyRoundTrip(parsed);
+    TestDefaultRoundTrip(parsed);
     FO4HDR_CHECK(parsed.value.videoWhiteNits == 203.0);
     FO4HDR_CHECK(parsed.value.contrast == 0.0);
     FO4HDR_CHECK(parsed.value.blacks == 0.0);
@@ -124,12 +148,30 @@ void TestLegacyConfiguration()
     FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);
 }
 
+void TestToneMapperConfigurationRanges()
+{
+    for (const auto parameters : {
+             ToneMapperParameters{0.0, -0.5, 2.2, 0.25, 1.75, 1.0, 0.35, 0.0},
+             ToneMapperParameters{1.0, 0.5, 3.0, 0.6, 2.25, 1.5, 0.6, 1.0},
+             ToneMapperParameters{0.5, 0.4, 2.3, 0.3, 2.2, 1.2, 0.5, 0.9}})
+    {
+        HdrSettings settings;
+        settings.toneMapperParameters = parameters;
+        const auto saved = RewriteHdrSettingsIni(
+            MinimalProductionConfiguration(), settings, {});
+        const auto loaded = ParsePluginConfiguration(saved);
+        FO4HDR_CHECK(loaded.valid);
+        FO4HDR_CHECK(loaded.value.toneMapperParameters == parameters);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
+    }
+}
+
 void TestConfigurationEndpoints()
 {
     for (const auto blacks : {-100.0, 100.0})
     {
         const auto endpoint = ParsePluginConfiguration(
-            LegacyProductionConfiguration() +
+            MinimalProductionConfiguration() +
             "\n[Image]\nBlacks=" + std::to_string(blacks) + "\n");
         FO4HDR_CHECK(endpoint.valid);
         FO4HDR_CHECK(endpoint.value.blacks == blacks);
@@ -138,7 +180,7 @@ void TestConfigurationEndpoints()
         for (const auto endpointValue : {0.0, 100.0})
         {
             const auto endpoint = ParsePluginConfiguration(
-                LegacyProductionConfiguration() +
+                MinimalProductionConfiguration() +
                 "\n[Effects]\n" + key + "=" +
                 std::to_string(endpointValue) + "\n");
             FO4HDR_CHECK(endpoint.valid);
@@ -148,7 +190,7 @@ void TestConfigurationEndpoints()
         }
 
     const auto unknown = ParsePluginConfiguration(
-        LegacyProductionConfiguration() +
+        MinimalProductionConfiguration() +
         "\n[Image]\nThirdPartyImageSetting=malformed\n"
         "MidtoneBrightness=malformed\n"
         "[Effects]\nThirdPartyEffectSetting=invalid\n"
@@ -157,7 +199,7 @@ void TestConfigurationEndpoints()
     FO4HDR_CHECK(unknown.value.blacks == 0.0);
     for (const auto value : {"Original", "PreserveHDRColor"})
         FO4HDR_CHECK(ParsePluginConfiguration(
-            LegacyProductionConfiguration() +
+            MinimalProductionConfiguration() +
             "\n[Image]\nGradeTransfer=" + value + "\n").valid);
 }
 
@@ -201,7 +243,9 @@ void TestExtendedConfiguration()
 void TestOptionalConfigurationValues()
 {
     TestShippedConfiguration();
-    TestLegacyConfiguration();
+    TestProductionConfiguration();
+    TestMinimalConfiguration();
+    TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();
 }
@@ -211,7 +255,7 @@ void TestConfigurationMethodErrors()
     for (const auto token : {"Independent", "Native Reference", "radial", "999"})
     {
         const auto parsed = ParsePluginConfiguration(
-            LegacyProductionConfiguration() +
+            MinimalProductionConfiguration() +
             "\n[Image]\nColorGradingMethod=" + token + "\n");
         FO4HDR_CHECK(!parsed.valid);
         FO4HDR_CHECK(parsed.error ==
@@ -220,19 +264,19 @@ void TestConfigurationMethodErrors()
         FO4HDR_CHECK(!parsed.value.productionRequested);
     }
     const auto duplicateMethod = ParsePluginConfiguration(
-        LegacyProductionConfiguration() +
+        MinimalProductionConfiguration() +
         "\n[Image]\nColorGradingMethod=Radial\n"
         "ColorGradingMethod=NativeReference\n");
     FO4HDR_CHECK(!duplicateMethod.valid);
     FO4HDR_CHECK(duplicateMethod.error == PluginConfigurationError::duplicateKey);
     const auto duplicateParameter = ParsePluginConfiguration(
-        LegacyProductionConfiguration() +
+        MinimalProductionConfiguration() +
         "\n[AgX]\nContrast=2.4\nContrast=2.5\n");
     FO4HDR_CHECK(!duplicateParameter.valid);
     FO4HDR_CHECK(duplicateParameter.error ==
         PluginConfigurationError::duplicateKey);
     const auto distinctContrastKeys = ParsePluginConfiguration(
-        LegacyProductionConfiguration() +
+        MinimalProductionConfiguration() +
         "\n[Image]\nContrast=-25\n[AgX]\nContrast=2.75\n");
     FO4HDR_CHECK(distinctContrastKeys.valid);
     FO4HDR_CHECK(distinctContrastKeys.value.contrast == -25.0);
@@ -242,6 +286,13 @@ void TestConfigurationMethodErrors()
 
 void TestConfigurationOperatorErrors()
 {
+    const auto retiredLookSection = ParsePluginConfiguration(
+        MinimalProductionConfiguration() +
+        "\n[ACES2LMT]\nContrastLookStrength=0.25\n");
+    FO4HDR_CHECK(retiredLookSection.valid);
+    FO4HDR_CHECK(retiredLookSection.value.toneMapperParameters.acesLookStrength ==
+        ToneMapperParameters{}.acesLookStrength);
+
     for (const auto invalidParameter : {
              "[ACES2]\nContrastLookStrength=-0.01\n",
              "[AgX]\nMiddleGrayOffsetEV=nan\n",
@@ -258,7 +309,7 @@ void TestConfigurationOperatorErrors()
              "[GT7]\nColorBlend=1.01\n"})
     {
         const auto invalid = ParsePluginConfiguration(
-            LegacyProductionConfiguration() + "\n" + invalidParameter);
+            MinimalProductionConfiguration() + "\n" + invalidParameter);
         FO4HDR_CHECK(!invalid.valid);
         FO4HDR_CHECK(invalid.error ==
             (std::string_view{invalidParameter}.find("nan") !=
@@ -283,7 +334,8 @@ void TestConfigurationRangeErrors()
              "VanillaColorGradingStrength=101",
              "VanillaGradeLuminanceStrength=-1",
              "VanillaGradeColorStrength=nan",
-             "BloomStrength=-1", "BloomStrength=101",
+             "BloomStrength=-1",
+             "BloomStrength=100.01",
              "Scale=1.1",
              "WindowWidth=519",
              "WindowHeight=1001"})
@@ -328,7 +380,7 @@ void TestConfigurationToggleKeys()
     for (const auto toggle : {"F1", "F10", "F24", "Alt+H", "Space",
              "Ctrl+Shift+H", "Ctrl+Alt+Shift+Numpad0"})
     {
-        text = LegacyProductionConfiguration() +
+        text = MinimalProductionConfiguration() +
             "\n[Interface]\nToggleKey=" + toggle + "\n";
         FO4HDR_CHECK(ParsePluginConfiguration(text).valid);
     }
@@ -336,7 +388,7 @@ void TestConfigurationToggleKeys()
              "Alt+", "Ctrl+Ctrl+H", "Win+H", "Alt+F4", "Alt+Tab",
              "Ctrl+Alt+Delete", "Escape", "Ctrl+Escape", "Alt+Enter"})
     {
-        text = LegacyProductionConfiguration() +
+        text = MinimalProductionConfiguration() +
             "\n[Interface]\nToggleKey=" + toggle + "\n";
         parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(!parsed.valid);

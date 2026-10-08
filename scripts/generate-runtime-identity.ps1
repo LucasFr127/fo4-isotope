@@ -254,6 +254,12 @@ $lutLines = @(
 )
 
 $imageSpace = $manifest.imageSpaceObserver
+$weatherGrade = $imageSpace.weatherGrade
+$weatherGradeLines = @(
+    "inline constexpr std::size_t kWeatherGradeSunlightColorIndex = $($weatherGrade.sunlightColorIndex);",
+    "inline constexpr std::size_t kWeatherGradeGlareColorIndex = $($weatherGrade.glareColorIndex);",
+    "inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ $($weatherGrade.rgbByteShifts -join ', ') }};"
+)
 $targetNames = @('Weather', 'Accumulate', 'RoomBlend', 'SetLut')
 $targetAbis = @('void(Sky*)', 'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
     'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
@@ -317,6 +323,7 @@ $lines = @(
     ($armorLines -join "`n"),
     ($lutLines -join "`n"),
     ($imageSpaceLines -join "`n"),
+    ($weatherGradeLines -join "`n"),
     "",
     "inline constexpr std::string_view kRuntimeVersion = `"$manifestVersion`";",
     "inline constexpr std::string_view kRuntimeStatus = `"$($entry.status)`";",

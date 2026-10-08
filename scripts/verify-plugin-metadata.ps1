@@ -32,7 +32,6 @@ foreach ($path in @(
     $stagedDll,
     (Join-Path $pluginRoot "FO4Isotope.pdb"),
     (Join-Path $pluginRoot "FO4Isotope.ini"),
-    (Join-Path $pluginRoot "FO4Isotope\Default.ini"),
     $stagedManifest
 )) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

@@ -15,6 +15,7 @@
 #include <iomanip>
 #include <iterator>
 #include <new>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -50,10 +51,50 @@ struct PersistedKey
     bool hotkey{};
     bool colorGradingMethod{};
     double ToneMapperParameters::*toneMapperNumber{};
-    bool lutProfilesEnabled{};
+    WeatherGradeChannel WeatherGradeResponseSettings::*weatherChannel{};
+    double WeatherGradeChannel::*weatherNumber{};
+    std::size_t weatherCoefficient{4};
+    bool weatherEnabled{};
 };
 
-constexpr std::array<PersistedKey, 32> kPersistedKeys{{
+constexpr std::array<PersistedKey, 50> kPersistedKeys{{
+    {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
+    {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
+    {"WeatherLutResponse", "LuminanceGain", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::gain, 4},
+    {"WeatherLutResponse", "LuminanceMinimum", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::minimum, 4},
+    {"WeatherLutResponse", "LuminanceMaximum", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::maximum, 4},
+    {"WeatherLutResponse", "LuminanceIntercept", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::intercept, 4},
+    {"WeatherLutResponse", "LuminanceSunlight", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, nullptr, 0},
+    {"WeatherLutResponse", "LuminanceGlare", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, nullptr, 1},
+    {"WeatherLutResponse", "LuminanceAmbient", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, nullptr, 2},
+    {"WeatherLutResponse", "LuminanceColorChange", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::luminance, nullptr, 3},
+    {"WeatherLutResponse", "ColorBase", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::base, 4},
+    {"WeatherLutResponse", "ColorGain", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::gain, 4},
+    {"WeatherLutResponse", "ColorMinimum", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::minimum, 4},
+    {"WeatherLutResponse", "ColorMaximum", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::maximum, 4},
+    {"WeatherLutResponse", "ColorIntercept", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::intercept, 4},
+    {"WeatherLutResponse", "ColorSunlight", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, nullptr, 0},
+    {"WeatherLutResponse", "ColorGlare", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, nullptr, 1},
+    {"WeatherLutResponse", "ColorAmbient", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, nullptr, 2},
+    {"WeatherLutResponse", "ColorColorChange", nullptr, nullptr, false, false, false, nullptr,
+        &WeatherGradeResponseSettings::color, nullptr, 3},
     {"Output", "DisplayPeakNits", &HdrSettings::displayPeakNits},
     {"Output", "UiPaperWhiteNits", &HdrSettings::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", &HdrSettings::videoWhiteNits},
@@ -89,8 +130,6 @@ constexpr std::array<PersistedKey, 32> kPersistedKeys{{
         &HdrSettings::vanillaGradeLuminancePercent},
     {"Effects", "VanillaGradeColorStrength",
         &HdrSettings::vanillaGradeColorPercent},
-    {"Effects", "GradeProfilesEnabled", nullptr, nullptr, false, false,
-        false, nullptr, true},
     {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent},
     {"Interface", "Scale", nullptr, &HdrInterfaceSettings::scale},
     {"Interface", "WindowWidth", nullptr,
@@ -134,10 +173,6 @@ constexpr std::array<SelectivePersistedKey, 21> kSelectivePersistedKeys{{
 }};
 
 std::filesystem::path g_iniPath;
-std::filesystem::path g_personalIniPath;
-// Full saves derive personal profile overrides from this startup snapshot;
-// distributed INIs remain read-only for the process lifetime.
-LutGradeProfiles g_distributedProfiles{};
 HdrSettings g_requestedSettings{};
 HdrInterfaceSettings g_requestedInterfaceSettings{};
 double g_requestedWindowX{-1.0};
@@ -232,11 +267,33 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
     return result;
 }
 
+[[nodiscard]] std::string WeatherKeyValue(
+    const PersistedKey& key, const WeatherGradeResponseSettings& settings)
+{
+    std::string result(key.key);
+    result.push_back('=');
+    if (key.weatherEnabled)
+    {
+        result.push_back(settings.enabled ? '1' : '0');
+        return result;
+    }
+    const auto& channel = settings.*key.weatherChannel;
+    const auto value = key.weatherNumber != nullptr ? channel.*key.weatherNumber :
+        channel.coefficients[key.weatherCoefficient];
+    std::array<char, 64> buffer{};
+    const auto formatted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+        std::chars_format::general, std::numeric_limits<double>::max_digits10);
+    result.append(buffer.data(), formatted.ptr);
+    return result;
+}
+
 [[nodiscard]] std::string KeyValue(
     const PersistedKey& key,
     const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings)
 {
+    if (key.section == "WeatherLutResponse")
+        return WeatherKeyValue(key, settings.weatherGradeResponse);
     std::string result(key.key);
     result.push_back('=');
     if (key.algorithm)
@@ -250,8 +307,6 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
     else if (key.toneMapperNumber != nullptr)
         result.append(FormatNumber(
             settings.toneMapperParameters.*key.toneMapperNumber));
-    else if (key.lutProfilesEnabled)
-        result.push_back(settings.lutGradeProfiles.enabled ? '1' : '0');
     else
         result.append(FormatNumber(settings.*key.number));
     return result;
@@ -478,109 +533,6 @@ private:
     return DisplayCalibrationIniWriter(profile, original).Rewrite(original);
 }
 
-[[nodiscard]] const LutGradeProfile* FindMatchingProfile(
-    const LutGradeProfiles& profiles,
-    const LutGradeProfile& profile) noexcept
-{
-    return profile.kind == GradeProfileKind::lutAsset ?
-        FindLutGradeProfile(profiles, profile.path.data()) :
-        FindImageSpaceGradeProfile(profiles, profile.path.data());
-}
-
-[[nodiscard]] bool SameProfileValues(
-    const LutGradeProfile& left,
-    const LutGradeProfile& right) noexcept
-{
-    return left.kind == right.kind && left.path == right.path &&
-        left.overrideColor == right.overrideColor &&
-        left.overrideLuminance == right.overrideLuminance &&
-        (!left.overrideColor || left.colorPercent == right.colorPercent) &&
-        (!left.overrideLuminance ||
-            left.luminancePercent == right.luminancePercent);
-}
-
-class GradeProfileIniWriter
-{
-public:
-    [[nodiscard]] std::string Rewrite(std::string_view original,
-        const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
-    {
-        const auto hasBom = original.starts_with(kUtf8Bom);
-        if (hasBom) original.remove_prefix(kUtf8Bom.size());
-        newline_ = IniNewline(original);
-        result_.reserve(original.size() + kUtf8Bom.size() +
-            (profiles.count + distributedProfiles.count) * 320);
-        if (hasBom) result_.append(kUtf8Bom);
-        CopyOtherSections(original);
-        FinishIniLine(result_, newline_);
-        AppendOverrides(profiles, distributedProfiles);
-        AppendInherited(profiles, distributedProfiles);
-        return std::move(result_);
-    }
-
-private:
-    void CopyOtherSections(std::string_view original)
-    {
-        bool gradeProfileSection{};
-        while (!original.empty())
-        {
-            const auto line = TakeIniLine(original);
-            if (line.IsSection())
-            {
-                const auto section = line.Section();
-                gradeProfileSection = section.starts_with("LUT:") || section.starts_with("IMGS:");
-            }
-            if (gradeProfileSection) continue;
-            result_.append(line.raw);
-            if (line.terminated) result_.append(newline_);
-        }
-    }
-
-    void AppendProfile(const LutGradeProfile& profile, bool inherit)
-    {
-        result_.append(profile.kind == GradeProfileKind::imageSpace ? "[IMGS:" : "[LUT:")
-            .append(profile.path.data()).append("]").append(newline_);
-        if (inherit)
-        {
-            result_.append("Inherit=1").append(newline_);
-            return;
-        }
-        if (profile.overrideColor)
-            result_.append("Color=").append(FormatNumber(profile.colorPercent)).append(newline_);
-        if (profile.overrideLuminance)
-            result_.append("Luminance=").append(FormatNumber(profile.luminancePercent)).append(newline_);
-    }
-
-    void AppendOverrides(const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
-    {
-        for (std::size_t index = 0; index < profiles.count; ++index)
-        {
-            const auto& profile = profiles.entries[index];
-            const auto* distributed = FindMatchingProfile(distributedProfiles, profile);
-            if (distributed == nullptr || !SameProfileValues(profile, *distributed))
-                AppendProfile(profile, false);
-        }
-    }
-
-    void AppendInherited(const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
-    {
-        for (std::size_t index = 0; index < distributedProfiles.count; ++index)
-        {
-            const auto& profile = distributedProfiles.entries[index];
-            if (FindMatchingProfile(profiles, profile) == nullptr) AppendProfile(profile, true);
-        }
-    }
-
-    std::string result_;
-    std::string_view newline_;
-};
-
-[[nodiscard]] std::string RewriteGradeProfileSections(std::string_view original,
-    const LutGradeProfiles& profiles, const LutGradeProfiles& distributedProfiles)
-{
-    return GradeProfileIniWriter{}.Rewrite(original, profiles, distributedProfiles);
-}
-
 class SettingsIniWriter
 {
 public:
@@ -619,8 +571,8 @@ private:
     {
         // A full save performs one-way migration of retired names.
         if (positionOnly_) return false;
-        if (section_ == "ToneMapper") return name == "ExposureEV";
-        return section_ == "Image" && name == "GradeTransfer";
+        return (section_ == "Image" && name == "GradeTransfer") ||
+            (section_ == "Effects" && name == "GradeProfilesEnabled");
     }
 
     [[nodiscard]] bool ReplaceKnownKey(std::string_view name)
@@ -717,8 +669,9 @@ private:
 
     void AppendMissingGroups()
     {
-        constexpr std::array<std::string_view, 9> groups{"Output", "ToneMapper",
-            "ACES2", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface"};
+        constexpr std::array<std::string_view, 10> groups{"Output", "ToneMapper",
+            "ACES2", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface",
+            "WeatherLutResponse"};
         for (const auto group : groups)
         {
             if (group == "SelectiveColor") AppendMissingSelective();
@@ -830,25 +783,6 @@ private:
     }
 }
 
-[[nodiscard]] bool SavePersonalProfiles(const HdrSettings& settings)
-{
-    std::error_code error;
-    std::filesystem::create_directories(
-        g_personalIniPath.parent_path(), error);
-    if (error) return false;
-    std::string personalOriginal;
-    if (!ReadPersistenceFile(
-            g_personalIniPath, personalOriginal, true)) return false;
-    const auto personalUpdated = RewriteGradeProfilesIni(
-        personalOriginal, settings.lutGradeProfiles,
-        g_distributedProfiles);
-    if (!ParseGradeProfileConfiguration(personalUpdated).valid)
-        return false;
-    if (!ReplacePersistenceFile(
-            g_personalIniPath, personalUpdated)) return false;
-    return true;
-}
-
 [[nodiscard]] bool SaveSettings(
     const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings,
@@ -856,19 +790,15 @@ private:
 {
     try
     {
-        if (!positionOnly && !SavePersonalProfiles(settings)) return false;
-
         std::string original;
         if (!ReadPersistenceFile(g_iniPath, original)) return false;
         if (positionOnly)
             return ReplacePersistenceFile(g_iniPath,
                 RewriteHdrWindowPositionIni(original,
                     interfaceSettings.windowX, interfaceSettings.windowY));
-        auto mainSettings = settings;
-        mainSettings.lutGradeProfiles.count = 0;
         return ReplacePersistenceFile(g_iniPath,
             RewriteHdrSettingsIni(
-                original, mainSettings, interfaceSettings));
+                original, settings, interfaceSettings));
     }
     catch (...)
     {
@@ -1056,22 +986,12 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
 }
 
 [[nodiscard]] bool InitializePersistencePaths(
-    const std::filesystem::path& iniPath, const LutGradeProfiles& distributedProfiles) noexcept
+    const std::filesystem::path& iniPath) noexcept
 {
     try
     {
         const auto virtualMainPath = std::filesystem::absolute(iniPath);
         g_iniPath = ResolveBackingPath(virtualMainPath);
-        const auto virtualPersonalPath = virtualMainPath.parent_path() /
-            virtualMainPath.stem() / L"Personal.ini";
-        std::error_code error;
-        const auto personalExists =
-            std::filesystem::exists(virtualPersonalPath, error);
-        if (error) return false;
-        g_personalIniPath = personalExists ?
-            ResolveBackingPath(virtualPersonalPath) :
-            g_iniPath.parent_path() / g_iniPath.stem() / L"Personal.ini";
-        g_distributedProfiles = distributedProfiles;
     }
     catch (...) { return false; }
     return true;
@@ -1101,6 +1021,7 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
     return ValidateHdrSettings(settings) == HdrSettingsValidationError::none &&
         ValidateHdrInterfaceSettings(interfaceSettings) == HdrInterfaceSettingsValidationError::none;
 }
+
 }  // namespace
 
 std::string RewriteHdrWindowPositionIni(
@@ -1121,32 +1042,15 @@ std::string RewriteHdrSettingsIni(
 {
     if (!ValidSettingsForPersistence(settings, interfaceSettings))
         return std::string(original);
-    return RewriteGradeProfileSections(
-        RewriteIni(original, settings, interfaceSettings),
-        settings.lutGradeProfiles, {});
-}
-
-std::string RewriteGradeProfilesIni(
-    std::string_view original,
-    const LutGradeProfiles& profiles,
-    const LutGradeProfiles& distributedProfiles)
-{
-    if (!ValidateLutGradeProfiles(profiles) ||
-        !ValidateLutGradeProfiles(distributedProfiles))
-        return std::string(original);
-    return RewriteGradeProfileSections(
-        original, profiles, distributedProfiles);
+    return RewriteIni(original, settings, interfaceSettings);
 }
 
 bool InitializeSettingsPersistence(
-    const std::filesystem::path& iniPath,
-    const LutGradeProfiles& distributedProfiles) noexcept
+    const std::filesystem::path& iniPath) noexcept
 {
     if (g_started.load(std::memory_order_acquire))
-        return g_iniPath == iniPath &&
-            g_distributedProfiles == distributedProfiles;
-    if (!ValidateLutGradeProfiles(distributedProfiles)) return false;
-    if (!InitializePersistencePaths(iniPath, distributedProfiles)) return false;
+        return g_iniPath == iniPath;
+    if (!InitializePersistencePaths(iniPath)) return false;
     g_saveEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (g_saveEvent == nullptr) return false;
     const auto thread = CreateThread(

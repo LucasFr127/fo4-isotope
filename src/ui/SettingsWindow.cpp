@@ -487,7 +487,7 @@ void RestoreImageComparison() noexcept
         g_state.compareRestore.vanillaGradeLuminancePercent;
     g_state.uiDraft.vanillaGradeColorPercent =
         g_state.compareRestore.vanillaGradeColorPercent;
-    g_state.uiDraft.lutGradeProfiles = g_state.compareRestore.lutGradeProfiles;
+    g_state.uiDraft.weatherGradeResponse = g_state.compareRestore.weatherGradeResponse;
     g_state.uiCommitRequested = true;
     g_state.compareHeld = false;
 }
@@ -814,7 +814,7 @@ void BeginSavedImageComparison() noexcept
         g_state.persistedSettings.vanillaGradeLuminancePercent;
     g_state.uiDraft.vanillaGradeColorPercent =
         g_state.persistedSettings.vanillaGradeColorPercent;
-    g_state.uiDraft.lutGradeProfiles = g_state.persistedSettings.lutGradeProfiles;
+    g_state.uiDraft.weatherGradeResponse = g_state.persistedSettings.weatherGradeResponse;
     g_state.uiCommitRequested = true;
 }
 

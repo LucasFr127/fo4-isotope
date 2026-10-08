@@ -35,7 +35,6 @@ $expectedRelativeFiles = @(
     "F4SE\Plugins\FO4Isotope.dll",
     "F4SE\Plugins\FO4Isotope.pdb",
     "F4SE\Plugins\FO4Isotope.ini",
-    "F4SE\Plugins\FO4Isotope\Default.ini",
     "F4SE\Plugins\FO4Isotope\runtime-$Runtime.json"
 )
 $actualRelativeFiles = @(
@@ -89,7 +88,7 @@ $newRelativeFiles = @(
 )
 
 $ownedManifestPath =
-    Join-Path $destination ".fallout4hdr-owned-files.json"
+    Join-Path $destination ".fo4isotope-owned-files.json"
 $oldRelativeFiles = @()
 
 if (Test-Path $ownedManifestPath) {
@@ -103,8 +102,8 @@ $obsolete = @(
     $oldRelativeFiles |
     Where-Object {
         $_ -notin $newRelativeFiles -and
-        ([string]$_).Replace('/', '\') -ine
-            "F4SE\Plugins\FO4Isotope\Personal.ini"
+        ([string]$_).Replace('/', '\') -inotlike
+            "F4SE\Plugins\FO4Isotope\*.ini"
     }
 )
 

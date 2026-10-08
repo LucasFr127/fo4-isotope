@@ -111,10 +111,6 @@ rule("fo4hdr.plugin")
             { prefixdir = "F4SE/Plugins" })
         target:add(
             "installfiles",
-            "config/FO4Isotope/Default.ini",
-            { prefixdir = "F4SE/Plugins/FO4Isotope" })
-        target:add(
-            "installfiles",
             path.join(
                 "runtime",
                 get_config("fo4hdr_runtime"),
@@ -216,6 +212,7 @@ target("fo4hdr-core")
     add_files(
         "src/output/RenderPipelineContract.cpp",
         "src/output/NativeLutObservation.cpp",
+        "src/output/WeatherGradeResponse.cpp",
         "src/output/ArmorUiComposition.cpp")
     add_files(
         "src/output/Hdr10Color.cpp",

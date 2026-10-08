@@ -2,6 +2,7 @@
 #pragma once
 
 #include "FO4Isotope/game/GameHdrSnapshot.hpp"
+#include "FO4Isotope/output/WeatherGradeResponse.hpp"
 
 #include <array>
 #include <cstdint>
@@ -42,7 +43,9 @@ struct NativeLutObservation
     std::array<LutSnapshot, 4> luts{};
     std::array<std::uint64_t, 4> expectedShaderViews{};
     std::array<ImageSpaceIdentity, 4> imageSpaces{};
+    std::array<WeatherGradeAggregate, 4> weatherGrades{};
     std::uint32_t imageSpaceValidSlots{};
+    std::uint32_t weatherGradeValidSlots{};
     ImageSpaceObservationStatus imageSpaceStatus{ImageSpaceObservationStatus::unavailable};
     std::uint32_t validSlots{};
     std::uint32_t threadId{};
@@ -60,6 +63,8 @@ void SetImageSpaceObservationReady(bool ready) noexcept;
 [[nodiscard]] std::uint64_t CurrentImageSpaceObservationRevision() noexcept;
 [[nodiscard]] std::uint64_t InvalidateImageSpaceObservation() noexcept;
 [[nodiscard]] std::uint32_t EligibleImageSpaceSlots(
+    const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept;
+[[nodiscard]] std::uint32_t EligibleWeatherGradeSlots(
     const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept;
 [[nodiscard]] const NativeLutObservation& CurrentNativeLutObservation() noexcept;
 [[nodiscard]] bool IsCurrentNativeLutObservation(

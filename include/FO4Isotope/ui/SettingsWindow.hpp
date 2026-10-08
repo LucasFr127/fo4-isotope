@@ -3,6 +3,7 @@
 
 #include "FO4Isotope/config/HdrSettings.hpp"
 #include "FO4Isotope/output/NativeLutObservation.hpp"
+#include "FO4Isotope/output/WeatherGradeResponse.hpp"
 #ifndef NOMINMAX
 #  define NOMINMAX
 #endif
@@ -13,7 +14,7 @@
 
 namespace fo4hdr {
 
-struct LutProfilesView
+struct WeatherLutResponseView
 {
     std::array<LutSnapshot, 4> currentLuts{};
     std::uint32_t validatedSlots{};
@@ -21,6 +22,11 @@ struct LutProfilesView
     std::array<ImageSpaceIdentity, 4> currentImageSpaces{};
     std::uint32_t imageSpaceValidSlots{};
     const char* imageSpaceStatus{};
+    std::array<std::uint32_t, 4> referencingContexts{};
+    std::array<ResolvedLutGrade, 4> resolved{};
+    std::uint32_t automaticSlots{};
+    std::array<const char*, 4> fallbackReasons{};
+    bool gradingBypassed{};
 };
 
 struct SettingsDisplayView
@@ -71,7 +77,7 @@ struct SettingsWindowView
     const char* rendererFailure{"none"};
     std::uint64_t resourceGeneration{}, frame{}, settingsGeneration{}, desiredSettingsGeneration{}, lutRequestGeneration{};
     SettingsDisplayView display;
-    LutProfilesView lutProfiles;
+    WeatherLutResponseView weatherLutResponse;
     SettingsPipboyView pipboy;
 };
 

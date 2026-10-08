@@ -144,11 +144,9 @@ struct ColorSettingsTabs
         return changed;
     }
 
-    LutProfilesView CurrentLutProfilesView() noexcept { return view.lutProfiles; }
-
-    void DrawNativeGradeProfiles() noexcept
+    void DrawAutomaticWeatherResponse() noexcept
     {
-        if (DrawLutProfilesPanel(settings, CurrentLutProfilesView()))
+        if (DrawWeatherLutResponsePanel(settings, view.weatherLutResponse))
             commitRequested = true;
     }
 
@@ -432,7 +430,7 @@ struct ColorSettingsTabs
         {
             ImGui::BeginChild("Effects-content", ImVec2(0.0F, -footerHeight));
             ImGui::TextWrapped("Adjust bloom and the game's color grading. "
-                "Grade profiles override luminance and color for individual LUTs or ImageSpaces; "
+                "Automatic weather response sets luminance and color for weather ImageSpaces; "
                 "the overall grading strength stays global.");
             ImGui::SeparatorText("Bloom");
             if (DrawImageSetting({"Bloom Strength", "bloom-strength", &HdrSettings::bloomStrengthPercent,
@@ -448,8 +446,8 @@ struct ColorSettingsTabs
             DrawColorGradingMethod();
             if (DrawVanillaGradePanel(settings))
                 commitRequested = true;
-            if (ImGui::CollapsingHeader("Grade Profiles"))
-                DrawNativeGradeProfiles();
+            if (ImGui::CollapsingHeader("Automatic Weather LUT Response"))
+                DrawAutomaticWeatherResponse();
             ImGui::EndChild();
             ImGui::EndTabItem();
         }
@@ -542,21 +540,23 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     const HdrSettings defaults{};
     bool changed{};
     changed |= detail::DrawSettingsPanelSlider(
-        "Vanilla Grade Luminance",
+        "Global Grade Luminance",
         settings.vanillaGradeLuminancePercent, {
         defaults.vanillaGradeLuminancePercent,
         kMinimumVanillaColorGradingPercent,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
+        "Global fallback for disabled or unqualified automatic weather response. "
         "Controls the vanilla grade's luminance response before Image "
         "controls. 0% removes that response; 100% keeps it."});
     changed |= detail::DrawSettingsPanelSlider(
-        "Vanilla Grade Color",
+        "Global Grade Color",
         settings.vanillaGradeColorPercent, {
         defaults.vanillaGradeColorPercent,
         kMinimumVanillaColorGradingPercent,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
+        "Global fallback for disabled or unqualified automatic weather response. "
         "Controls the vanilla grade's hue and saturation response before "
         "Image controls. 0% retains the original scene colors rather than "
         "making them gray; 100% keeps the full response."});

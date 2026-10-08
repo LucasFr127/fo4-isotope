@@ -11,61 +11,29 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 
 namespace fo4hdr::tests {
 namespace {
 
-[[nodiscard]] LutSnapshot MakeLut(
-    std::string_view path, float weight, std::uint64_t identity) noexcept
-{
-    LutSnapshot lut{};
-    const auto length = std::min(path.size(), lut.utf8Path.size() - 1);
-    std::copy_n(path.data(), length, lut.utf8Path.data());
-    lut.pathLength = static_cast<std::uint16_t>(length);
-    lut.weight = weight;
-    lut.engineTextureId = identity;
-    return lut;
-}
-
 [[nodiscard]] ImageSpaceIdentity MakeImageSpace(
-    std::string_view key,
-    std::string_view editorId,
-    std::uint32_t formId) noexcept
+    std::string_view key, std::string_view editorId) noexcept
 {
     ImageSpaceIdentity identity{};
-    const auto keyLength = std::min(key.size(), identity.key.size() - 1);
-    const auto editorIdLength =
-        std::min(editorId.size(), identity.editorId.size() - 1);
-    std::copy_n(key.data(), keyLength, identity.key.data());
-    std::copy_n(editorId.data(), editorIdLength, identity.editorId.data());
-    identity.formId = formId;
+    std::copy_n(key.data(), std::min(key.size(), identity.key.size() - 1), identity.key.data());
+    std::copy_n(editorId.data(), std::min(editorId.size(), identity.editorId.size() - 1), identity.editorId.data());
+    identity.formId = 0x00000111U;
     return identity;
 }
 
-struct PanelCase
+void InitializePanelContext(float scale)
 {
-    ImVec2 windowSize;
-    float scale;
-    const std::array<LutSnapshot, 4>& currentLuts;
-    std::uint32_t validatedSlots;
-    const char* status;
-    const std::array<ImageSpaceIdentity, 4>& currentImageSpaces;
-    std::uint32_t imageSpaceValidSlots;
-    const char* imageSpaceStatus;
-    GradeProfileKind selectedKind;
-    std::string_view selectedKey;
-};
-
-void RenderLutProfilesPanel(const PanelCase& testCase)
-{
-    const auto& [windowSize, scale, currentLuts, validatedSlots, status,
-        currentImageSpaces, imageSpaceValidSlots, imageSpaceStatus,
-        selectedKind, selectedKey] = testCase;
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     auto& io = ImGui::GetIO();
     io.IniFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.DisplaySize = ImVec2(1920.0F, 1400.0F);
     io.DeltaTime = 1.0F / 60.0F;
     unsigned char* pixels{};
@@ -75,43 +43,112 @@ void RenderLutProfilesPanel(const PanelCase& testCase)
     FO4HDR_CHECK(width > 0 && height > 0);
     ImGui::GetStyle().ScaleAllSizes(scale);
     ImGui::GetStyle().FontScaleMain = scale;
+}
 
-    HdrSettings settings{};
-    FO4HDR_CHECK(SetLutGradeProfile(settings.lutGradeProfiles,
-        "textures/luts/saved-only.dds", { 72.0, true, 100.0, false}));
-    FO4HDR_CHECK(SetImageSpaceGradeProfile(settings.lutGradeProfiles,
-        "fallout4.esm|012345", { 100.0, false, 64.0, true}));
-    const auto profilesBefore = settings.lutGradeProfiles;
-    fo4hdr::detail::SelectGradeProfile(selectedKind, selectedKey);
-    std::array<char, kMaximumLutGradePathLength + 1> expectedSelection{};
-    FO4HDR_CHECK(fo4hdr::detail::NormalizeGradeProfileKey(
-        selectedKind, selectedKey, expectedSelection));
-    FO4HDR_CHECK(fo4hdr::detail::SelectedGradeProfile().kind == selectedKind);
-    FO4HDR_CHECK(
-        fo4hdr::detail::SelectedGradeProfile().key == expectedSelection);
+struct PanelFrame
+{
+    ImVec2 size;
+    ImVec2& checkboxPosition;
+    std::string* renderedText{};
+};
 
+[[nodiscard]] bool DrawPanelFrame(
+    HdrSettings& settings, const WeatherLutResponseView& view, const PanelFrame& frame)
+{
+    const auto& [size, checkboxPosition, renderedText] = frame;
     ImGui::NewFrame();
-    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
-    if (ImGui::Begin("LUT profiles smoke", nullptr,
+    ImGui::SetNextWindowPos(ImVec2(0.0F, 0.0F), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    bool changed{};
+    if (ImGui::Begin("Weather response smoke", nullptr,
             ImGuiWindowFlags_NoSavedSettings))
     {
-        const auto verticesBefore =
-            ImGui::GetWindowDrawList()->VtxBuffer.Size;
-        FO4HDR_CHECK(!DrawLutProfilesPanel(
-            settings, {currentLuts, validatedSlots, status,
-            currentImageSpaces, imageSpaceValidSlots, imageSpaceStatus}));
-        FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size >
-            verticesBefore);
+        checkboxPosition = ImGui::GetCursorScreenPos();
+        checkboxPosition.x += ImGui::GetFrameHeight() * 0.5F;
+        checkboxPosition.y += ImGui::GetFrameHeight() * 0.5F;
+        ImGui::GetStateStorage()->SetInt(ImGui::GetID("Advanced Formula"), 1);
+        ImGui::GetStateStorage()->SetInt(ImGui::GetID("Current Contributors"), 1);
+        const auto verticesBefore = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        if (renderedText != nullptr)
+        {
+            auto& platform = ImGui::GetPlatformIO();
+            platform.Platform_ClipboardUserData = renderedText;
+            platform.Platform_SetClipboardTextFn = [](ImGuiContext*, const char* text) {
+                auto* output = static_cast<std::string*>(ImGui::GetPlatformIO().Platform_ClipboardUserData);
+                *output = text;
+            };
+            ImGui::LogToClipboard();
+        }
+        changed = DrawWeatherLutResponsePanel(settings, view);
+        if (renderedText != nullptr) ImGui::LogFinish();
+        FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size > verticesBefore);
     }
     ImGui::End();
     ImGui::Render();
-
     const auto* drawData = ImGui::GetDrawData();
     FO4HDR_CHECK(drawData != nullptr);
     FO4HDR_CHECK(drawData->CmdListsCount > 0);
     FO4HDR_CHECK(drawData->TotalVtxCount > 0);
     FO4HDR_CHECK(drawData->TotalIdxCount > 0);
-    FO4HDR_CHECK(settings.lutGradeProfiles == profilesBefore);
+    return changed;
+}
+
+void RenderResponsePanel(
+    ImVec2 windowSize, float scale, const WeatherLutResponseView& view,
+    bool enabled)
+{
+    InitializePanelContext(scale);
+    HdrSettings settings{};
+    settings.weatherGradeResponse.enabled = enabled;
+    settings.weatherGradeResponse.luminance.gain = 0.5;
+    settings.weatherGradeResponse.color.minimum = 40.0;
+    const auto before = settings;
+    ImVec2 checkboxPosition;
+    FO4HDR_CHECK(!DrawPanelFrame(settings, view, {windowSize, checkboxPosition}));
+    FO4HDR_CHECK(settings == before);
+    ImGui::DestroyContext();
+}
+
+void TestBypassedResponseStatus()
+{
+    InitializePanelContext(1.0F);
+    HdrSettings settings{};
+    WeatherLutResponseView view{};
+    view.validatedSlots = 1U;
+    view.imageSpaceValidSlots = 1U;
+    view.automaticSlots = 1U;
+    view.resolved[0] = {65.0, 72.0};
+    view.gradingBypassed = true;
+    view.fallbackReasons[0] = "Production constants unavailable.";
+    ImVec2 checkboxPosition;
+    std::string text;
+    FO4HDR_CHECK(!DrawPanelFrame(settings, view, {ImVec2(900.0F, 1200.0F), checkboxPosition, &text}));
+    FO4HDR_CHECK(text.contains("Production grading bypassed"));
+    FO4HDR_CHECK(text.contains("Production constants unavailable."));
+    FO4HDR_CHECK(!text.contains("Automatic response active."));
+    FO4HDR_CHECK(!text.contains("Global fallback:"));
+    FO4HDR_CHECK(!text.contains("L 65.0% / C 72.0%"));
+    ImGui::DestroyContext();
+}
+void TestResponseEnableInput()
+{
+    InitializePanelContext(1.0F);
+    HdrSettings settings{};
+    const auto before = settings.weatherGradeResponse;
+    const WeatherLutResponseView view{};
+    const ImVec2 windowSize(900.0F, 1200.0F);
+    ImVec2 checkboxPosition;
+    FO4HDR_CHECK(!DrawPanelFrame(settings, view, {windowSize, checkboxPosition}));
+    auto& io = ImGui::GetIO();
+    io.AddMousePosEvent(checkboxPosition.x, checkboxPosition.y);
+    FO4HDR_CHECK(!DrawPanelFrame(settings, view, {windowSize, checkboxPosition}));
+    io.AddMouseButtonEvent(0, true);
+    FO4HDR_CHECK(!DrawPanelFrame(settings, view, {windowSize, checkboxPosition}));
+    io.AddMouseButtonEvent(0, false);
+    FO4HDR_CHECK(DrawPanelFrame(settings, view, {windowSize, checkboxPosition}));
+    auto expected = before;
+    expected.enabled = !before.enabled;
+    FO4HDR_CHECK(settings.weatherGradeResponse == expected);
     ImGui::DestroyContext();
 }
 
@@ -119,49 +156,33 @@ void RenderLutProfilesPanel(const PanelCase& testCase)
 
 void RunLutProfilesPanelTests()
 {
-    constexpr std::string_view longPercentPath{
-        "textures/effects/luts/"
-        "a-very-long-active-grade-name-that-keeps-going-through-a-narrow-"
-        "panel-and-contains-literal-100%-and-%s-format-text.dds"};
-    const std::array<LutSnapshot, 4> empty{};
-    const std::array<LutSnapshot, 4> active{
-        MakeLut(longPercentPath, 0.625F, 11),
-        MakeLut(longPercentPath, 0.375F, 22),
-        LutSnapshot{},
-        LutSnapshot{}};
-    const std::array<LutSnapshot, 4> unresolved{
-        active[0],
-        active[1],
-        MakeLut({}, 0.125F, 33),
-        MakeLut("textures/effects/luts/invalid-weight.dds",
-            std::numeric_limits<float>::infinity(), 44)};
-    const std::array<ImageSpaceIdentity, 4> noImageSpaces{};
-    const std::array<ImageSpaceIdentity, 4> activeImageSpaces{
-        MakeImageSpace("fallout4.esm|000111", "WarmInterior", 0x00000111U),
-        MakeImageSpace("fallout4.esm|000222", {}, 0x00000222U),
-        ImageSpaceIdentity{},
-        ImageSpaceIdentity{}};
+    WeatherLutResponseView waiting{};
+    waiting.status = "No qualified LUT draw; literal %s stays text.";
+    RenderResponsePanel(ImVec2(340.0F, 900.0F), 1.0F, waiting, true);
+    RenderResponsePanel(ImVec2(340.0F, 900.0F), 1.0F, waiting, false);
 
-    RenderLutProfilesPanel({ImVec2(340.0F, 900.0F), 1.0F,
-        empty, 0U, "No qualified LUT draw; literal %s stays text.",
-        noImageSpaces, 0U, nullptr, GradeProfileKind::lutAsset,
-        "textures/luts/saved-only.dds"});
-    RenderLutProfilesPanel({ImVec2(340.0F, 900.0F), 1.0F,
-        empty, 0U, "No current LUT draw.", noImageSpaces, 0U,
-        "ImageSpace observation is waiting.", GradeProfileKind::imageSpace,
-        "fallout4.esm|012345"});
-    RenderLutProfilesPanel({ImVec2(340.0F, 900.0F), 1.0F,
-        unresolved, 0U, "LUT identities are not verified.",
-        activeImageSpaces, 0U, "ImageSpaces are not qualified.",
-        GradeProfileKind::lutAsset, longPercentPath});
-    RenderLutProfilesPanel({ImVec2(340.0F, 900.0F), 1.0F,
-        active, 1U, "One LUT identity is verified.", activeImageSpaces, 1U,
-        "One ImageSpace is qualified.", GradeProfileKind::imageSpace,
-        "fallout4.esm|000111"});
-    RenderLutProfilesPanel({ImVec2(900.0F, 1200.0F), 2.0F,
-        active, 15U, "LUT identities verified at 100% confidence.",
-        activeImageSpaces, 3U, "ImageSpaces qualified for this draw.",
-        GradeProfileKind::imageSpace, "fallout4.esm|000222"});
+    WeatherLutResponseView partial{};
+    partial.status = "One native LUT identity is verified.";
+    partial.imageSpaceStatus = "One ImageSpace aggregate is complete.";
+    partial.currentImageSpaces[0] = MakeImageSpace("fallout4.esm|000111",
+        "A very long editor ID with literal 100% and %s format text");
+    partial.currentImageSpaces[1] = MakeImageSpace("fallout4.esm|000222", {});
+    partial.currentImageSpaces[2].key.fill('x');
+    partial.currentLuts[0].weight = 0.625F;
+    partial.currentLuts[1].weight = 0.375F;
+    partial.currentLuts[3].weight = std::numeric_limits<float>::infinity();
+    partial.validatedSlots = 3U;
+    partial.imageSpaceValidSlots = 3U;
+    partial.automaticSlots = 1U;
+    partial.referencingContexts = {24, 3, 0, 0};
+    partial.resolved[0] = {65.0, 72.0};
+    partial.resolved[1] = {67.0, 100.0};
+    partial.resolved[3].colorPercent = std::numeric_limits<double>::quiet_NaN();
+    partial.fallbackReasons[1] = "Incomplete weather data; global fallback at 100%.";
+    RenderResponsePanel(ImVec2(340.0F, 900.0F), 1.0F, partial, true);
+    RenderResponsePanel(ImVec2(900.0F, 1200.0F), 2.0F, partial, true);
+    TestResponseEnableInput();
+    TestBypassedResponseStatus();
 }
 
 }  // namespace fo4hdr::tests

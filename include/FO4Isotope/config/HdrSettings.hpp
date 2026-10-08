@@ -3,6 +3,7 @@
 
 
 #include "FO4Isotope/output/SelectiveColor.hpp"
+#include "FO4Isotope/output/WeatherGradeResponse.hpp"
 
 #include <algorithm>
 #include <array>
@@ -12,48 +13,7 @@
 
 namespace fo4hdr {
 
-inline constexpr std::size_t kMaximumLutGradeProfiles{64};
 inline constexpr std::size_t kMaximumLutGradePathLength{259};
-
-enum class GradeProfileKind : std::uint8_t
-{
-    lutAsset,
-    imageSpace
-};
-
-struct LutGradeProfile
-{
-    std::array<char, kMaximumLutGradePathLength + 1> path{};
-    double luminancePercent{100.0};
-    double colorPercent{100.0};
-    bool overrideLuminance{};
-    bool overrideColor{};
-    GradeProfileKind kind{GradeProfileKind::lutAsset};
-    bool operator==(const LutGradeProfile&) const = default;
-};
-
-struct LutGradeProfiles
-{
-    std::array<LutGradeProfile, kMaximumLutGradeProfiles> entries{};
-    std::size_t count{};
-    bool enabled{true};
-    bool operator==(const LutGradeProfiles&) const = default;
-};
-
-struct ResolvedLutGrade
-{
-    double luminancePercent{100.0};
-    double colorPercent{100.0};
-    bool operator==(const ResolvedLutGrade&) const = default;
-};
-
-struct LutGradeOverride
-{
-    double luminancePercent;
-    bool overrideLuminance;
-    double colorPercent;
-    bool overrideColor;
-};
 
 [[nodiscard]] bool NormalizeLutGradePath(
     std::string_view path,
@@ -62,44 +22,6 @@ struct LutGradeOverride
 [[nodiscard]] bool NormalizeImageSpaceGradeKey(
     std::string_view key,
     std::array<char, kMaximumLutGradePathLength + 1>& normalized) noexcept;
-
-[[nodiscard]] const LutGradeProfile* FindLutGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view path) noexcept;
-
-[[nodiscard]] LutGradeProfile* FindLutGradeProfile(
-    LutGradeProfiles& profiles, std::string_view path) noexcept;
-
-[[nodiscard]] const LutGradeProfile* FindImageSpaceGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view key) noexcept;
-
-[[nodiscard]] LutGradeProfile* FindImageSpaceGradeProfile(
-    LutGradeProfiles& profiles, std::string_view key) noexcept;
-
-[[nodiscard]] bool SetLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path, LutGradeOverride value) noexcept;
-
-[[nodiscard]] bool SetImageSpaceGradeProfile(LutGradeProfiles& profiles,
-    std::string_view key, LutGradeOverride value) noexcept;
-
-[[nodiscard]] bool AddLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path, LutGradeOverride value) noexcept;
-
-[[nodiscard]] bool RemoveLutGradeProfile(LutGradeProfiles& profiles,
-    std::string_view path) noexcept;
-
-[[nodiscard]] bool RemoveImageSpaceGradeProfile(LutGradeProfiles& profiles,
-    std::string_view key) noexcept;
-
-[[nodiscard]] ResolvedLutGrade ResolveLutGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view path,
-    double globalLuminancePercent, double globalColorPercent) noexcept;
-
-[[nodiscard]] ResolvedLutGrade ResolveImageSpaceGradeProfile(
-    const LutGradeProfiles& profiles, std::string_view lutPath,
-    std::string_view imageSpaceKey, ResolvedLutGrade global) noexcept;
-
-[[nodiscard]] bool ValidateLutGradeProfiles(const LutGradeProfiles& profiles) noexcept;
-
 
 enum class ProductionToneMapperAlgorithm : std::uint8_t
 {
@@ -279,7 +201,7 @@ struct HdrSettings
     double vanillaColorGradingStrengthPercent{100.0};
     double vanillaGradeLuminancePercent{100.0};
     double vanillaGradeColorPercent{100.0};
-    LutGradeProfiles lutGradeProfiles{};
+    WeatherGradeResponseSettings weatherGradeResponse{};
     double bloomStrengthPercent{100.0};
     bool operator==(const HdrSettings&) const = default;
 };
@@ -318,7 +240,7 @@ enum class HdrSettingsValidationError : std::uint8_t
     toneMapperParametersOutOfRange,
     selectiveColorOutOfRange,
     vanillaColorGradingOutOfRange,
-    lutGradeProfilesInvalid,
+    weatherGradeResponseInvalid,
     bloomStrengthOutOfRange
 };
 

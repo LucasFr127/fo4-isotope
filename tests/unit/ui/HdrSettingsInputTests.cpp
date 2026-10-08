@@ -263,10 +263,10 @@ void TestHotkeyFormatting()
     FO4HDR_CHECK(std::string_view(FormatHdrSettingsHotkey({}).data()) == "Alt+H");
     for (const auto value : {"-0.5", "-2", "nan", "65536"})
         FO4HDR_CHECK(!ParsePluginConfiguration(
-            LegacyProductionConfiguration() + "\n[Interface]\nWindowX=" +
+            MinimalProductionConfiguration() + "\n[Interface]\nWindowX=" +
             value + "\nWindowY=0\n").valid);
     FO4HDR_CHECK(ParsePluginConfiguration(
-        LegacyProductionConfiguration() +
+        MinimalProductionConfiguration() +
         "\n[Interface]\nWindowX=100\nWindowY=200\n").valid);
 }
 

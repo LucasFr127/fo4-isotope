@@ -392,8 +392,8 @@ HdrSettingsValidationError ValidateHdrGrading(const HdrSettings& settings) noexc
             kMinimumVanillaColorGradingPercent,
             kMaximumVanillaColorGradingPercent))
         return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
-    if (!ValidateLutGradeProfiles(settings.lutGradeProfiles))
-        return HdrSettingsValidationError::lutGradeProfilesInvalid;
+    if (!ValidateWeatherGradeResponseSettings(settings.weatherGradeResponse))
+        return HdrSettingsValidationError::weatherGradeResponseInvalid;
     if (!InRange(settings.bloomStrengthPercent,
             kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent))
         return HdrSettingsValidationError::bloomStrengthOutOfRange;

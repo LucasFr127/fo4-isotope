@@ -662,6 +662,7 @@ void CommitLiveSettingsAtEndPresent(ID3D11Device* device,
     if (g_lutSubmissionNeeded) SubmitPendingOperatorLutBuild();
     if (SettingsCommitRequested()) CommitUiDraft(context);
     CommitCompletedOperatorLut(device, context);
+    RefreshWeatherGradeResponses();
 }
 
 

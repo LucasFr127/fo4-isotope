@@ -5,7 +5,7 @@
 
 namespace fo4hdr::tests {
 
-[[nodiscard]] inline std::string LegacyProductionConfiguration()
+[[nodiscard]] inline std::string MinimalProductionConfiguration()
 {
     return R"ini([General]
 HdrEnabled=1
@@ -27,7 +27,7 @@ ForceHdrSwapChainFailure=0
 
 [[nodiscard]] inline std::string ExtendedProductionConfiguration()
 {
-    auto text = LegacyProductionConfiguration();
+    auto text = MinimalProductionConfiguration();
     text += R"ini([Output]
 VideoWhiteNits=250
 [Image]

@@ -13,8 +13,4 @@ namespace fo4hdr {
 [[nodiscard]] std::string RewriteHdrSettingsIni(
     std::string_view original, const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings);
-[[nodiscard]] std::string RewriteGradeProfilesIni(
-    std::string_view original, const LutGradeProfiles& profiles,
-    const LutGradeProfiles& distributedProfiles);
-
 }  // namespace fo4hdr

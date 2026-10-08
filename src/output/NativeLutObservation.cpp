@@ -12,6 +12,14 @@ std::atomic<std::uint64_t> g_generation{1};
 thread_local NativeLutObservation g_current{};
 thread_local std::uint64_t g_serial{};
 thread_local std::uint32_t g_depth{};
+
+bool CompleteWeatherGrade(const WeatherGradeAggregate& aggregate) noexcept
+{
+    if (aggregate.availability != WeatherGradeAvailability::complete) return false;
+    if (aggregate.referenceCount == 0) return false;
+    if (aggregate.referenceCount != aggregate.validReferenceCount) return false;
+    return ValidateWeatherGradeFeatures(aggregate.features);
+}
 }
 
 void SetNativeLutObserverStatus(NativeLutObserverStatus status) noexcept
@@ -66,6 +74,22 @@ std::uint32_t EligibleImageSpaceSlots(
         observation.imageSpaceValidSlots & validatedLuts & 15U : 0U;
 }
 
+std::uint32_t EligibleWeatherGradeSlots(
+    const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept
+{
+    auto eligible = EligibleImageSpaceSlots(observation, validatedLuts) &
+        observation.weatherGradeValidSlots;
+    for (std::size_t slot = 0; slot < observation.weatherGrades.size(); ++slot)
+    {
+        const auto& aggregate = observation.weatherGrades[slot];
+        if (!CompleteWeatherGrade(aggregate))
+        {
+            eligible &= ~(1U << slot);
+        }
+    }
+    return eligible;
+}
+
 const NativeLutObservation& CurrentNativeLutObservation() noexcept
 {
     return g_current;
@@ -90,7 +114,8 @@ NativeLutScope::NativeLutScope(const NativeLutObservation& observation) noexcept
     g_current = observation;
     if (++g_serial == 0) ++g_serial;
     g_current.serial = g_serial;
-    g_current.generation = g_generation.load(std::memory_order_acquire);
+    if (g_current.generation == 0)
+        g_current.generation = g_generation.load(std::memory_order_acquire);
 }
 
 NativeLutScope::~NativeLutScope()

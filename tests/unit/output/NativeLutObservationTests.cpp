@@ -7,6 +7,7 @@
 
 #include <array>
 #include <atomic>
+#include <limits>
 #include <optional>
 #include <thread>
 
@@ -169,6 +170,78 @@ void VerifyImageSpaceRevisionInvalidation()
     FO4HDR_CHECK(EligibleImageSpaceSlots(current, 1U) == 1U);
 }
 
+void VerifyWeatherGradeEligibility()
+{
+    constexpr std::uint32_t threadId = 42U;
+    SetNativeLutObserverStatus(NativeLutObserverStatus::ready);
+    SetImageSpaceObservationReady(true);
+    auto observation = MakeObservation(threadId, 15U, 58U);
+    observation.imageSpaceValidSlots = 5U;
+    observation.weatherGradeValidSlots = 15U;
+    observation.imageSpaceStatus = ImageSpaceObservationStatus::matched;
+    observation.imageSpaceRevision = CurrentImageSpaceObservationRevision();
+    for (auto& aggregate : observation.weatherGrades)
+    {
+        aggregate = {.features = {0.2, 0.3, 0.4, -0.5}, .referenceCount = 8,
+            .validReferenceCount = 8, .availability = WeatherGradeAvailability::complete};
+    }
+    NativeLutScope scope(observation);
+    auto current = CurrentNativeLutObservation();
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 5U);
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 1U) == 1U);
+    current.weatherGrades[2].availability = WeatherGradeAvailability::incomplete;
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 1U);
+    current.weatherGrades[2] = current.weatherGrades[0];
+    current.weatherGrades[2].validReferenceCount = 7;
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 1U);
+    current.weatherGrades[2] = current.weatherGrades[0];
+    current.weatherGrades[2].features.sunlight = std::numeric_limits<double>::infinity();
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 1U);
+    current.weatherGrades[2] = current.weatherGrades[0];
+    current.weatherGrades[2].referenceCount = 0;
+    current.weatherGrades[2].validReferenceCount = 0;
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 1U);
+    current.weatherGrades[2] = current.weatherGrades[0];
+    current.weatherGradeValidSlots = 4U;
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 4U);
+    (void)InvalidateImageSpaceObservation();
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 0U);
+    current.imageSpaceRevision = CurrentImageSpaceObservationRevision();
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 4U);
+    ResetNativeLutObservation();
+    FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 15U) == 0U);
+}
+
+void VerifyResetBeforeScopeDoesNotReviveCapture()
+{
+    constexpr std::uint32_t threadId = 44U;
+    SetNativeLutObserverStatus(NativeLutObserverStatus::ready);
+    SetImageSpaceObservationReady(true);
+    auto captured = MakeObservation(threadId);
+    captured.generation = NativeLutObservationGeneration();
+    captured.imageSpaceValidSlots = 1;
+    captured.weatherGradeValidSlots = 1;
+    captured.imageSpaceStatus = ImageSpaceObservationStatus::matched;
+    captured.imageSpaceRevision = CurrentImageSpaceObservationRevision();
+    captured.weatherGrades[0] = {.features = {0.2, 0.3, 0.4, 0.5},
+        .referenceCount = 1, .validReferenceCount = 1,
+        .availability = WeatherGradeAvailability::complete};
+    ResetNativeLutObservation();
+    {
+        NativeLutScope stale(captured);
+        const auto current = CurrentNativeLutObservation();
+        FO4HDR_CHECK(!IsCurrentNativeLutObservation(current, threadId));
+        FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 1U) == 0U);
+    }
+    captured.generation = NativeLutObservationGeneration();
+    {
+        NativeLutScope recovered(captured);
+        const auto current = CurrentNativeLutObservation();
+        FO4HDR_CHECK(IsCurrentNativeLutObservation(current, threadId));
+        FO4HDR_CHECK(EligibleWeatherGradeSlots(current, 1U) == 1U);
+    }
+}
+
 void VerifyUnavailableStates()
 {
     constexpr std::uint32_t threadId = 43U;
@@ -231,6 +304,8 @@ void RunNativeLutObservationTests()
     VerifyThreadIsolation();
     VerifyImageSpaceRevocation();
     VerifyImageSpaceRevisionInvalidation();
+    VerifyWeatherGradeEligibility();
+    VerifyResetBeforeScopeDoesNotReviveCapture();
     VerifyUnavailableStates();
     VerifyBoundedNesting();
     SetNativeLutObserverStatus(NativeLutObserverStatus::unavailable);

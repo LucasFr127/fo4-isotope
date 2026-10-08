@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <string_view>
-#include <vector>
 
 namespace fo4hdr {
 
@@ -17,6 +16,7 @@ struct PluginConfiguration : HdrSettings
     {
         // Default construction must remain a neutral, non-production request.
         exposureEv = 0.0;
+        weatherGradeResponse.enabled = false;
     }
 
     bool enabled{};
@@ -49,13 +49,6 @@ enum class PluginConfigurationError
     invalidCombination
 };
 
-struct GradeProfileFileIssue
-{
-    std::filesystem::path path;
-    PluginConfigurationError error{};
-    std::size_t line{};
-};
-
 struct PluginConfigurationResult
 {
     PluginConfiguration value{};
@@ -63,16 +56,10 @@ struct PluginConfigurationResult
         PluginConfigurationError::fileUnavailable};
     std::size_t line{};
     bool valid{};
-    // Parsing keeps inheritance masks separate from renderable profiles.
-    LutGradeProfiles profileInheritances{};
-    LutGradeProfiles distributedProfiles{};
-    std::vector<GradeProfileFileIssue> profileIssues;
 };
 
 [[nodiscard]] PluginConfigurationResult
 ParsePluginConfiguration(std::string_view text) noexcept;
-[[nodiscard]] PluginConfigurationResult
-ParseGradeProfileConfiguration(std::string_view text) noexcept;
 [[nodiscard]] PluginConfigurationResult
 LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;

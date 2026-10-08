@@ -46,8 +46,7 @@ struct SettingsPersistenceSnapshot
 };
 
 [[nodiscard]] bool InitializeSettingsPersistence(
-    const std::filesystem::path& iniPath,
-    const LutGradeProfiles& distributedProfiles = {}) noexcept;
+    const std::filesystem::path& iniPath) noexcept;
 [[nodiscard]] std::uint64_t RequestHdrSettingsSave(
     const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept;

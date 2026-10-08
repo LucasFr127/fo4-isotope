@@ -31,7 +31,7 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(ValidateHdrSettings(defaults) ==
         HdrSettingsValidationError::none);
     FO4HDR_CHECK(defaults.productionAlgorithm ==
-        ProductionToneMapperAlgorithm::aces2);
+        ProductionToneMapperAlgorithm::gt7);
     FO4HDR_CHECK(defaults.toneMapperParameters == ToneMapperParameters{});
     FO4HDR_CHECK(defaults.toneMapperParameters.acesLookStrength == 1.0);
     FO4HDR_CHECK(defaults.toneMapperParameters.agxMiddleGrayEv == 0.0);
@@ -43,6 +43,7 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ColorBlend == 0.6);
     FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 100.0);
+    FO4HDR_CHECK(defaults.bloomStrengthPercent == 100.0);
 }
 
 void TestSettingsEquality()
@@ -53,6 +54,10 @@ void TestSettingsEquality()
     settingsCopy.selectiveColor.regions[0].hueDegrees = 1.0;
     FO4HDR_CHECK(settingsCopy != defaults);
     settingsCopy.selectiveColor = defaults.selectiveColor;
+    FO4HDR_CHECK(settingsCopy == defaults);
+    settingsCopy.weatherGradeResponse.color.gain = 0.5;
+    FO4HDR_CHECK(settingsCopy != defaults);
+    settingsCopy.weatherGradeResponse = defaults.weatherGradeResponse;
     FO4HDR_CHECK(settingsCopy == defaults);
 
     const HdrInterfaceSettings interfaceDefaults{};
@@ -152,8 +157,8 @@ void TestDefaultSettingsMath()
     FO4HDR_CHECK(derived.shadowsEv == 0.0);
     FO4HDR_CHECK(derived.saturationScale == 1.0);
     FO4HDR_CHECK(derived.vanillaColorGradingBlend == 1.0);
-    FO4HDR_CHECK(derived.vanillaGradeLuminanceRemoval == 0.0);
-    FO4HDR_CHECK(derived.vanillaGradeColorRemoval == 0.0);
+    FO4HDR_CHECK(test::Approx(derived.vanillaGradeLuminanceRemoval, 0.0, 1.0e-15));
+    FO4HDR_CHECK(test::Approx(derived.vanillaGradeColorRemoval, 0.0, 1.0e-15));
     FO4HDR_CHECK(derived.bloomMultiplier == 1.0);
     constexpr std::array<double, 9> identity{
         1.0, 0.0, 0.0,
@@ -174,7 +179,7 @@ void TestAdjustedSettingsMath()
     adjusted.vanillaColorGradingStrengthPercent = 25.0;
     adjusted.vanillaGradeLuminancePercent = 25.0;
     adjusted.vanillaGradeColorPercent = 75.0;
-    adjusted.bloomStrengthPercent = 100.0;
+    adjusted.bloomStrengthPercent = 50.0;
     const auto adjustedMath = DeriveHdrSettingsMath(adjusted);
     FO4HDR_CHECK(adjustedMath.sceneExposureMultiplier == 16.0);
     FO4HDR_CHECK(adjustedMath.contrastSlope == 2.0);
@@ -185,7 +190,14 @@ void TestAdjustedSettingsMath()
     FO4HDR_CHECK(adjustedMath.vanillaColorGradingBlend == 0.25);
     FO4HDR_CHECK(adjustedMath.vanillaGradeLuminanceRemoval == 0.75);
     FO4HDR_CHECK(adjustedMath.vanillaGradeColorRemoval == 0.25);
-    FO4HDR_CHECK(adjustedMath.bloomMultiplier == 1.0);
+    FO4HDR_CHECK(adjustedMath.bloomMultiplier == 0.5);
+    for (const auto strength : {0.0, 100.0})
+    {
+        HdrSettings bloomOnly{};
+        bloomOnly.bloomStrengthPercent = strength;
+        FO4HDR_CHECK(ValidateHdrSettings(bloomOnly) == HdrSettingsValidationError::none);
+        FO4HDR_CHECK(DeriveHdrSettingsMath(bloomOnly).bloomMultiplier == strength / 100.0);
+    }
     for (const auto blacks : {-100.0, 100.0})
     {
         HdrSettings blacksOnly{};
@@ -375,9 +387,9 @@ void TestSettingsValidation()
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
     check(&HdrSettings::vanillaGradeColorPercent, nan,
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
-    check(&HdrSettings::bloomStrengthPercent, 100.01,
-        HdrSettingsValidationError::bloomStrengthOutOfRange);
     check(&HdrSettings::bloomStrengthPercent, -0.01,
+        HdrSettingsValidationError::bloomStrengthOutOfRange);
+    check(&HdrSettings::bloomStrengthPercent, 100.01,
         HdrSettingsValidationError::bloomStrengthOutOfRange);
     TestColorBalanceEndpoints();
 }
