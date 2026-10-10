@@ -13,22 +13,11 @@
   ],
   "definitions": {
     "observerAddress": {
-      "type": "object",
-      "required": [
-        "addressLibraryId",
-        "rva"
-      ],
+      "type": "object", "required": ["addressLibraryId", "rva"],
       "properties": {
-        "addressLibraryId": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "rva": {
-          "type": "string",
-          "pattern": "^0x[0-9A-Fa-f]{8}$"
-        }
-      },
-      "additionalProperties": false
+        "addressLibraryId": { "type": "integer", "minimum": 1 },
+        "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" }
+      }, "additionalProperties": false
     },
     "approvedHash": {
       "type": "string",
@@ -36,337 +25,168 @@
     },
     "hashOrPlaceholder": {
       "anyOf": [
-        {
-          "$ref": "#/definitions/approvedHash"
-        },
-        {
-          "enum": [
-            "FILL_LOCAL",
-            "UNVALIDATED"
-          ]
-        }
+        { "$ref": "#/definitions/approvedHash" },
+        { "enum": ["FILL_LOCAL", "UNVALIDATED"] }
       ]
     }
   },
   "properties": {
     "experimentalScreenUiObserver": {
       "type": "object",
-      "required": [
-        "status",
-        "scope",
-        "abi",
-        "authorityGap",
-        "evidenceQualification",
-        "lifetime",
-        "thread",
-        "completion",
-        "target",
-        "calls"
-      ],
+      "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "completion", "target", "calls"],
       "properties": {
-        "status": {
-          "const": "unvalidated"
-        },
-        "scope": {
-          "const": "screen-space-ui-encoded-entry"
-        },
-        "abi": {
-          "const": "void(UI*)"
-        },
-        "authorityGap": {
-          "type": "string",
-          "minLength": 1
-        },
-        "evidenceQualification": {
-          "type": "string",
-          "minLength": 1
-        },
-        "lifetime": {
-          "type": "string",
-          "minLength": 1
-        },
-        "thread": {
-          "type": "string",
-          "minLength": 1
-        },
-        "completion": {
-          "type": "string",
-          "minLength": 1
-        },
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "screen-space-ui-encoded-entry" },
+        "abi": { "const": "void(UI*)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "evidenceQualification": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
+        "completion": { "type": "string", "minLength": 1 },
         "target": {
-          "type": "object",
-          "required": [
-            "addressLibraryId",
-            "rva",
-            "expectedBytes"
-          ],
+          "type": "object", "required": ["addressLibraryId", "rva", "expectedBytes"],
           "properties": {
-            "addressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "rva": {
-              "type": "string",
-              "pattern": "^0x[0-9A-Fa-f]{8}$"
-            },
+            "addressLibraryId": { "type": "integer", "minimum": 1 },
+            "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
             "expectedBytes": {
-              "type": "array",
-              "minItems": 32,
-              "maxItems": 32,
-              "items": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 255
-              }
+              "type": "array", "minItems": 32, "maxItems": 32,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             }
           },
           "additionalProperties": false
         },
         "calls": {
-          "type": "array",
-          "minItems": 4,
-          "maxItems": 4,
-          "items": {
-            "$ref": "#/properties/experimentalArmorUiObserver/properties/calls/items"
-          }
+          "type": "array", "minItems": 4, "maxItems": 4,
+          "items": { "$ref": "#/properties/experimentalArmorUiObserver/properties/calls/items" }
         }
       },
       "additionalProperties": false
+    },
+    "nativeUiResources": {
+      "type": "object",
+      "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "propertiesSize", "formatOffset", "sourceFormat", "promotedFormat", "mode", "target", "calls"],
+      "properties": {
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "dedicated-pause-blur-fp16" },
+        "abi": { "const": "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "evidenceQualification": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
+        "propertiesSize": { "const": 32 },
+        "formatOffset": { "const": 8 },
+        "sourceFormat": { "const": 24 },
+        "promotedFormat": { "const": 10 },
+        "mode": { "const": 1 },
+        "target": {
+          "type": "object", "required": ["addressLibraryId", "rva", "expectedBytes"],
+          "properties": {
+            "addressLibraryId": { "type": "integer", "minimum": 1 },
+            "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+            "expectedBytes": {
+              "type": "array", "minItems": 16, "maxItems": 16,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          }, "additionalProperties": false
+        },
+        "calls": {
+          "type": "array", "minItems": 2, "maxItems": 2,
+          "items": {
+            "type": "object", "required": ["callerAddressLibraryId", "callerRva", "rva", "slot", "expectedBytes"],
+            "properties": {
+              "callerAddressLibraryId": { "type": "integer", "minimum": 1 },
+              "callerRva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "slot": { "enum": [24, 25] },
+              "expectedBytes": {
+                "type": "array", "minItems": 5, "maxItems": 5,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }, "additionalProperties": false
+          }
+        }
+      }, "additionalProperties": false
     },
     "imageSpaceObserver": {
       "type": "object",
-      "required": [
-        "status",
-        "scope",
-        "authorityGap",
-        "lifetime",
-        "thread",
-        "weatherGrade",
-        "globals",
-        "targets",
-        "calls"
-      ],
+      "required": ["status", "scope", "authorityGap", "lifetime", "thread", "weatherGrade", "globals", "targets", "calls"],
       "properties": {
-        "status": {
-          "const": "unvalidated"
-        },
-        "scope": {
-          "const": "weather-imagespace-provenance"
-        },
-        "authorityGap": {
-          "type": "string",
-          "minLength": 1
-        },
-        "lifetime": {
-          "type": "string",
-          "minLength": 1
-        },
-        "thread": {
-          "type": "string",
-          "minLength": 1
-        },
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "weather-imagespace-provenance" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
         "weatherGrade": {
           "type": "object",
-          "required": [
-            "sunlightColorIndex",
-            "glareColorIndex",
-            "rgbByteShifts",
-            "loadedColorSemantics"
-          ],
+          "required": ["sunlightColorIndex", "glareColorIndex", "rgbByteShifts", "loadedColorSemantics"],
           "properties": {
-            "sunlightColorIndex": {
-              "const": 4
-            },
-            "glareColorIndex": {
-              "const": 15
-            },
-            "rgbByteShifts": {
-              "const": [
-                0,
-                8,
-                16
-              ]
-            },
-            "loadedColorSemantics": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "additionalProperties": false
+            "sunlightColorIndex": { "const": 4 },
+            "glareColorIndex": { "const": 15 },
+            "rgbByteShifts": { "const": [0, 8, 16] },
+            "loadedColorSemantics": { "type": "string", "minLength": 1 }
+          }, "additionalProperties": false
         },
         "globals": {
-          "type": "object",
-          "required": [
-            "lut",
-            "base"
-          ],
+          "type": "object", "required": ["lut", "base"],
           "properties": {
-            "lut": {
-              "$ref": "#/definitions/observerAddress"
-            },
-            "base": {
-              "$ref": "#/definitions/observerAddress"
-            }
-          },
-          "additionalProperties": false
+            "lut": { "$ref": "#/definitions/observerAddress" },
+            "base": { "$ref": "#/definitions/observerAddress" }
+          }, "additionalProperties": false
         },
         "targets": {
-          "type": "array",
-          "minItems": 4,
-          "maxItems": 4,
+          "type": "array", "minItems": 4, "maxItems": 4,
           "items": {
-            "type": "object",
-            "required": [
-              "name",
-              "addressLibraryId",
-              "rva",
-              "abi",
-              "expectedBytes"
-            ],
+            "type": "object", "required": ["name", "addressLibraryId", "rva", "abi", "expectedBytes"],
             "properties": {
-              "name": {
-                "enum": [
-                  "Weather",
-                  "Accumulate",
-                  "RoomBlend",
-                  "SetLut"
-                ]
-              },
-              "addressLibraryId": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "rva": {
-                "type": "string",
-                "pattern": "^0x[0-9A-Fa-f]{8}$"
-              },
-              "abi": {
-                "type": "string",
-                "minLength": 1
-              },
+              "name": { "enum": ["Weather", "Accumulate", "RoomBlend", "SetLut"] },
+              "addressLibraryId": { "type": "integer", "minimum": 1 },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "abi": { "type": "string", "minLength": 1 },
               "expectedBytes": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 32,
-                "items": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 255
-                }
+                "type": "array", "minItems": 1, "maxItems": 32,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
               }
-            },
-            "additionalProperties": false
+            }, "additionalProperties": false
           }
         },
         "calls": {
-          "type": "array",
-          "minItems": 11,
-          "maxItems": 11,
+          "type": "array", "minItems": 11, "maxItems": 11,
           "items": {
-            "type": "object",
-            "required": [
-              "callerAddressLibraryId",
-              "callerRva",
-              "rva",
-              "targetIndex",
-              "expectedBytes"
-            ],
+            "type": "object", "required": ["callerAddressLibraryId", "callerRva", "rva", "targetIndex", "expectedBytes"],
             "properties": {
-              "callerAddressLibraryId": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "callerRva": {
-                "type": "string",
-                "pattern": "^0x[0-9A-Fa-f]{8}$"
-              },
-              "rva": {
-                "type": "string",
-                "pattern": "^0x[0-9A-Fa-f]{8}$"
-              },
-              "targetIndex": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 3
-              },
+              "callerAddressLibraryId": { "type": "integer", "minimum": 1 },
+              "callerRva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "targetIndex": { "type": "integer", "minimum": 0, "maximum": 3 },
               "expectedBytes": {
-                "type": "array",
-                "minItems": 5,
-                "maxItems": 5,
-                "items": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 255
-                }
+                "type": "array", "minItems": 5, "maxItems": 5,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
               }
-            },
-            "additionalProperties": false
+            }, "additionalProperties": false
           }
         }
-      },
-      "additionalProperties": false
+      }, "additionalProperties": false
     },
     "nativeLutObserver": {
       "type": "object",
-      "required": [
-        "status",
-        "scope",
-        "abi",
-        "authorityGap",
-        "lifetime",
-        "effectSubobjectOffset",
-        "textureSrvOffset",
-        "target"
-      ],
+      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "textureSrvOffset", "target"],
       "properties": {
-        "status": {
-          "const": "unvalidated"
-        },
-        "scope": {
-          "const": "synchronous-gamma-correct-lut-render"
-        },
-        "abi": {
-          "const": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)"
-        },
-        "authorityGap": {
-          "type": "string",
-          "minLength": 1
-        },
-        "lifetime": {
-          "type": "string",
-          "minLength": 1
-        },
-        "effectSubobjectOffset": {
-          "const": 280
-        },
-        "textureSrvOffset": {
-          "const": 0
-        },
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "synchronous-gamma-correct-lut-render" },
+        "abi": { "const": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "effectSubobjectOffset": { "const": 280 },
+        "textureSrvOffset": { "const": 0 },
         "target": {
           "type": "object",
-          "required": [
-            "addressLibraryId",
-            "rva",
-            "expectedBytes"
-          ],
+          "required": ["addressLibraryId", "rva", "expectedBytes"],
           "properties": {
-            "addressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "rva": {
-              "type": "string",
-              "pattern": "^0x[0-9A-Fa-f]{8}$"
-            },
+            "addressLibraryId": { "type": "integer", "minimum": 1 },
+            "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
             "expectedBytes": {
-              "type": "array",
-              "minItems": 25,
-              "maxItems": 25,
-              "items": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 255
-              }
+              "type": "array", "minItems": 25, "maxItems": 25,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             }
           },
           "additionalProperties": false
@@ -416,86 +236,31 @@
         "hudRendererIdentity": {
           "type": "object",
           "required": [
-            "status",
-            "comparison",
-            "authorityGap",
-            "keyStorageAddressLibraryId",
-            "keyStorageRva",
-            "keyStorageSection",
-            "keyGetterAddressLibraryId",
-            "keyGetterRva",
-            "keyGetterExpectedBytes",
-            "modelConstructorRva",
-            "modelSetupRva",
-            "modelDestructorRva",
-            "lifetime",
-            "semantics",
+            "status", "comparison", "authorityGap", "keyStorageAddressLibraryId",
+            "keyStorageRva", "keyStorageSection", "keyGetterAddressLibraryId",
+            "keyGetterRva", "keyGetterExpectedBytes", "modelConstructorRva",
+            "modelSetupRva", "modelDestructorRva", "lifetime", "semantics",
             "evidenceQualification"
           ],
           "properties": {
-            "status": {
-              "const": "static-reviewed-native-unvalidated"
-            },
-            "comparison": {
-              "const": "non-null-native-pooled-entry-pointer"
-            },
-            "authorityGap": {
-              "type": "string",
-              "minLength": 1
-            },
-            "keyStorageAddressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "keyStorageRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "keyStorageSection": {
-              "const": ".data"
-            },
-            "keyGetterAddressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "keyGetterRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
+            "status": { "const": "static-reviewed-native-unvalidated" },
+            "comparison": { "const": "non-null-native-pooled-entry-pointer" },
+            "authorityGap": { "type": "string", "minLength": 1 },
+            "keyStorageAddressLibraryId": { "type": "integer", "minimum": 1 },
+            "keyStorageRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "keyStorageSection": { "const": ".data" },
+            "keyGetterAddressLibraryId": { "type": "integer", "minimum": 1 },
+            "keyGetterRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
             "keyGetterExpectedBytes": {
-              "type": "array",
-              "minItems": 26,
-              "maxItems": 26,
-              "items": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 255
-              }
+              "type": "array", "minItems": 26, "maxItems": 26,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             },
-            "modelConstructorRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "modelSetupRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "modelDestructorRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "lifetime": {
-              "type": "string",
-              "minLength": 1
-            },
-            "semantics": {
-              "type": "string",
-              "minLength": 1
-            },
-            "evidenceQualification": {
-              "type": "string",
-              "minLength": 1
-            }
+            "modelConstructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "modelSetupRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "modelDestructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "lifetime": { "type": "string", "minLength": 1 },
+            "semantics": { "type": "string", "minLength": 1 },
+            "evidenceQualification": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false
         },
@@ -511,86 +276,31 @@
         "workshopRendererIdentity": {
           "type": "object",
           "required": [
-            "status",
-            "comparison",
-            "authorityGap",
-            "keyStorageAddressLibraryId",
-            "keyStorageRva",
-            "keyStorageSection",
-            "keyInitializerAddressLibraryId",
-            "keyInitializerRva",
-            "keyInitializerExpectedBytes",
-            "keyDestructorRva",
-            "rendererSetupRva",
-            "menuDestructorRva",
-            "lifetime",
-            "semantics",
+            "status", "comparison", "authorityGap", "keyStorageAddressLibraryId",
+            "keyStorageRva", "keyStorageSection", "keyInitializerAddressLibraryId",
+            "keyInitializerRva", "keyInitializerExpectedBytes", "keyDestructorRva",
+            "rendererSetupRva", "menuDestructorRva", "lifetime", "semantics",
             "evidenceQualification"
           ],
           "properties": {
-            "status": {
-              "const": "static-reviewed-native-unvalidated"
-            },
-            "comparison": {
-              "const": "non-null-native-pooled-entry-pointer"
-            },
-            "authorityGap": {
-              "type": "string",
-              "minLength": 1
-            },
-            "keyStorageAddressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "keyStorageRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "keyStorageSection": {
-              "const": ".data"
-            },
-            "keyInitializerAddressLibraryId": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "keyInitializerRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
+            "status": { "const": "static-reviewed-native-unvalidated" },
+            "comparison": { "const": "non-null-native-pooled-entry-pointer" },
+            "authorityGap": { "type": "string", "minLength": 1 },
+            "keyStorageAddressLibraryId": { "type": "integer", "minimum": 1 },
+            "keyStorageRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "keyStorageSection": { "const": ".data" },
+            "keyInitializerAddressLibraryId": { "type": "integer", "minimum": 1 },
+            "keyInitializerRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
             "keyInitializerExpectedBytes": {
-              "type": "array",
-              "minItems": 39,
-              "maxItems": 39,
-              "items": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 255
-              }
+              "type": "array", "minItems": 39, "maxItems": 39,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             },
-            "keyDestructorRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "rendererSetupRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "menuDestructorRva": {
-              "type": "string",
-              "pattern": "^0x[0-9a-fA-F]{8}$"
-            },
-            "lifetime": {
-              "type": "string",
-              "minLength": 1
-            },
-            "semantics": {
-              "type": "string",
-              "minLength": 1
-            },
-            "evidenceQualification": {
-              "type": "string",
-              "minLength": 1
-            }
+            "keyDestructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "rendererSetupRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "menuDestructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
+            "lifetime": { "type": "string", "minLength": 1 },
+            "semantics": { "type": "string", "minLength": 1 },
+            "evidenceQualification": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false
         },
@@ -665,9 +375,7 @@
       },
       "additionalProperties": false
     },
-    "schemaVersion": {
-      "const": 1
-    },
+    "schemaVersion": { "const": 1 },
     "runtime": {
       "type": "object",
       "required": [
@@ -687,16 +395,8 @@
           "type": "string",
           "pattern": "^0\\.[0-9]+\\.[0-9]+$"
         },
-        "platform": {
-          "enum": [
-            "steam",
-            "gog",
-            "unvalidated"
-          ]
-        },
-        "exeSha256": {
-          "$ref": "#/definitions/hashOrPlaceholder"
-        },
+        "platform": { "enum": ["steam", "gog", "unvalidated"] },
+        "exeSha256": { "$ref": "#/definitions/hashOrPlaceholder" },
         "addressLibraryFile": {
           "type": "string",
           "pattern": "^version-[0-9-]+\\.bin$"
@@ -714,21 +414,11 @@
       "additionalProperties": false,
       "allOf": [
         {
-          "if": {
-            "properties": {
-              "status": {
-                "const": "planned"
-              }
-            }
-          },
+          "if": { "properties": { "status": { "const": "planned" } } },
           "then": {
             "properties": {
-              "platform": {
-                "const": "unvalidated"
-              },
-              "exeSha256": {
-                "const": "UNVALIDATED"
-              }
+              "platform": { "const": "unvalidated" },
+              "exeSha256": { "const": "UNVALIDATED" }
             }
           }
         },
@@ -746,42 +436,17 @@
           },
           "then": {
             "properties": {
-              "platform": {
-                "enum": [
-                  "steam",
-                  "gog"
-                ]
-              },
-              "exeSha256": {
-                "$ref": "#/definitions/approvedHash"
-              }
+              "platform": { "enum": ["steam", "gog"] },
+              "exeSha256": { "$ref": "#/definitions/approvedHash" }
             }
           }
         }
       ]
     },
-    "shaderSetId": {
-      "type": "string",
-      "minLength": 1
-    },
-    "semanticStages": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    },
-    "shaders": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    },
-    "resourceRules": {
-      "type": "array",
-      "items": {
-        "type": "object"
-      }
-    },
+    "shaderSetId": { "type": "string", "minLength": 1 },
+    "semanticStages": { "type": "array", "items": { "type": "object" } },
+    "shaders": { "type": "array", "items": { "type": "object" } },
+    "resourceRules": { "type": "array", "items": { "type": "object" } },
     "commonlibObservation": {
       "type": "object",
       "required": [
@@ -799,62 +464,25 @@
         },
         "uiInteractionProfile": {
           "type": "object",
-          "required": [
-            "status",
-            "event",
-            "semantics",
-            "notificationRvas",
-            "cursorMenuConstructorRva",
-            "cursorMenuFlags",
-            "evidenceQualification",
-            "coverageLimit"
-          ],
+          "required": ["status", "event", "semantics", "notificationRvas", "cursorMenuConstructorRva", "cursorMenuFlags", "evidenceQualification", "coverageLimit"],
           "properties": {
-            "status": {
-              "const": "static-reviewed-native-unvalidated"
-            },
-            "event": {
-              "const": "RE::MenuModeChangeEvent"
-            },
-            "semantics": {
-              "type": "string",
-              "minLength": 1
-            },
+            "status": { "const": "static-reviewed-native-unvalidated" },
+            "event": { "const": "RE::MenuModeChangeEvent" },
+            "semantics": { "type": "string", "minLength": 1 },
             "notificationRvas": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "pattern": "^0x[0-9A-Fa-f]{8}$"
-              }
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" }
             },
-            "cursorMenuConstructorRva": {
-              "type": "string",
-              "pattern": "^0x[0-9A-Fa-f]{8}$"
-            },
-            "cursorMenuFlags": {
-              "type": "string",
-              "pattern": "^0x[0-9A-Fa-f]{8}$"
-            },
-            "evidenceQualification": {
-              "type": "string",
-              "minLength": 1
-            },
-            "coverageLimit": {
-              "type": "string",
-              "minLength": 1
-            }
+            "cursorMenuConstructorRva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+            "cursorMenuFlags": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+            "evidenceQualification": { "type": "string", "minLength": 1 },
+            "coverageLimit": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false
         },
         "relocationSource": {
           "type": "object",
-          "required": [
-            "repository",
-            "commit",
-            "path"
-          ],
+          "required": ["repository", "commit", "path"],
           "properties": {
             "repository": {
               "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
@@ -862,9 +490,7 @@
             "commit": {
               "const": "491a09a0bc71847ee509e3953621a804c468cb17"
             },
-            "path": {
-              "const": "include/RE/IDs.h"
-            }
+            "path": { "const": "include/RE/IDs.h" }
           },
           "additionalProperties": false
         },
@@ -887,14 +513,8 @@
                 "type": "string",
                 "pattern": "^[a-z0-9-]+$"
               },
-              "id": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "rva": {
-                "type": "integer",
-                "minimum": 1
-              },
+              "id": { "type": "integer", "minimum": 1 },
+              "rva": { "type": "integer", "minimum": 1 },
               "kind": {
                 "enum": [
                   "pointer-storage",
@@ -902,20 +522,13 @@
                   "function"
                 ]
               },
-              "commonlibSymbol": {
-                "type": "string",
-                "minLength": 1
-              }
+              "commonlibSymbol": { "type": "string", "minLength": 1 }
             },
             "oneOf": [
               {
                 "properties": {
-                  "provider": {
-                    "const": "image-space-manager"
-                  },
-                  "kind": {
-                    "const": "pointer-storage"
-                  },
+                  "provider": { "const": "image-space-manager" },
+                  "kind": { "const": "pointer-storage" },
                   "commonlibSymbol": {
                     "const": "RE::ID::ImageSpaceManager::Singleton"
                   }
@@ -923,12 +536,8 @@
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "renderer-data"
-                  },
-                  "kind": {
-                    "const": "pointer-storage"
-                  },
+                  "provider": { "const": "renderer-data" },
+                  "kind": { "const": "pointer-storage" },
                   "commonlibSymbol": {
                     "const": "RE::ID::BSGraphics::GetRendererData"
                   }
@@ -936,12 +545,8 @@
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "render-target-manager"
-                  },
-                  "kind": {
-                    "const": "direct-object"
-                  },
+                  "provider": { "const": "render-target-manager" },
+                  "kind": { "const": "direct-object" },
                   "commonlibSymbol": {
                     "const": "RE::ID::BSGraphics::RenderTargetManager::Singleton"
                   }
@@ -949,38 +554,22 @@
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "ui"
-                  },
-                  "kind": {
-                    "const": "pointer-storage"
-                  },
-                  "commonlibSymbol": {
-                    "const": "RE::ID::UI::Singleton"
-                  }
+                  "provider": { "const": "ui" },
+                  "kind": { "const": "pointer-storage" },
+                  "commonlibSymbol": { "const": "RE::ID::UI::Singleton" }
                 }
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "ui-event-spin-lock"
-                  },
-                  "kind": {
-                    "const": "function"
-                  },
-                  "commonlibSymbol": {
-                    "const": "RE::ID::BSSpinLock::lock"
-                  }
+                  "provider": { "const": "ui-event-spin-lock" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": { "const": "RE::ID::BSSpinLock::lock" }
                 }
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "ui-event-memory-manager"
-                  },
-                  "kind": {
-                    "const": "function"
-                  },
+                  "provider": { "const": "ui-event-memory-manager" },
+                  "kind": { "const": "function" },
                   "commonlibSymbol": {
                     "const": "RE::ID::MemoryManager::Singleton"
                   }
@@ -988,12 +577,8 @@
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "ui-event-memory-allocate"
-                  },
-                  "kind": {
-                    "const": "function"
-                  },
+                  "provider": { "const": "ui-event-memory-allocate" },
+                  "kind": { "const": "function" },
                   "commonlibSymbol": {
                     "const": "RE::ID::MemoryManager::Allocate"
                   }
@@ -1001,12 +586,8 @@
               },
               {
                 "properties": {
-                  "provider": {
-                    "const": "ui-event-memory-deallocate"
-                  },
-                  "kind": {
-                    "const": "function"
-                  },
+                  "provider": { "const": "ui-event-memory-deallocate" },
+                  "kind": { "const": "function" },
                   "commonlibSymbol": {
                     "const": "RE::ID::MemoryManager::Deallocate"
                   }
@@ -1030,17 +611,11 @@
           "properties": {
             "sources": {
               "type": "object",
-              "required": [
-                "commonlib"
-              ],
+              "required": ["commonlib"],
               "properties": {
                 "commonlib": {
                   "type": "object",
-                  "required": [
-                    "repository",
-                    "commit",
-                    "paths"
-                  ],
+                  "required": ["repository", "commit", "paths"],
                   "properties": {
                     "repository": {
                       "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
@@ -1064,20 +639,11 @@
               },
               "additionalProperties": false
             },
-            "managerSize": {
-              "const": 440
-            },
-            "currentEofDataOffset": {
-              "const": 128
-            },
+            "managerSize": { "const": 440 },
+            "currentEofDataOffset": { "const": 128 },
             "layout": {
               "type": "object",
-              "required": [
-                "manager",
-                "primitiveArray",
-                "effect",
-                "lut"
-              ],
+              "required": ["manager", "primitiveArray", "effect", "lut"],
               "properties": {
                 "manager": {
                   "type": "object",
@@ -1092,30 +658,14 @@
                     "readyOffset"
                   ],
                   "properties": {
-                    "effectListOffset": {
-                      "const": 16
-                    },
-                    "baseDataOffset": {
-                      "const": 96
-                    },
-                    "overrideBaseDataOffset": {
-                      "const": 104
-                    },
-                    "underwaterBaseDataOffset": {
-                      "const": 112
-                    },
-                    "consoleBaseDataOffset": {
-                      "const": 120
-                    },
-                    "lutDataOffset": {
-                      "const": 304
-                    },
-                    "overrideLutDataOffset": {
-                      "const": 416
-                    },
-                    "readyOffset": {
-                      "const": 436
-                    }
+                    "effectListOffset": { "const": 16 },
+                    "baseDataOffset": { "const": 96 },
+                    "overrideBaseDataOffset": { "const": 104 },
+                    "underwaterBaseDataOffset": { "const": 112 },
+                    "consoleBaseDataOffset": { "const": 120 },
+                    "lutDataOffset": { "const": 304 },
+                    "overrideLutDataOffset": { "const": 416 },
+                    "readyOffset": { "const": 436 }
                   },
                   "additionalProperties": false
                 },
@@ -1129,66 +679,37 @@
                     "sizeOffset"
                   ],
                   "properties": {
-                    "size": {
-                      "const": 24
-                    },
-                    "dataOffset": {
-                      "const": 8
-                    },
-                    "capacityOffset": {
-                      "const": 16
-                    },
-                    "freeIndexOffset": {
-                      "const": 18
-                    },
-                    "sizeOffset": {
-                      "const": 20
-                    }
+                    "size": { "const": 24 },
+                    "dataOffset": { "const": 8 },
+                    "capacityOffset": { "const": 16 },
+                    "freeIndexOffset": { "const": 18 },
+                    "sizeOffset": { "const": 20 }
                   },
                   "additionalProperties": false
                 },
                 "effect": {
                   "type": "object",
-                  "required": [
-                    "storedActiveOffset"
-                  ],
+                  "required": ["storedActiveOffset"],
                   "properties": {
-                    "storedActiveOffset": {
-                      "const": 8
-                    }
+                    "storedActiveOffset": { "const": 8 }
                   },
                   "additionalProperties": false
                 },
                 "lut": {
                   "type": "object",
-                  "required": [
-                    "size",
-                    "entryCount",
-                    "weightOffset",
-                    "textureOffset"
-                  ],
+                  "required": ["size", "entryCount", "weightOffset", "textureOffset"],
                   "properties": {
-                    "size": {
-                      "const": 112
-                    },
-                    "entryCount": {
-                      "const": 4
-                    },
-                    "weightOffset": {
-                      "const": 32
-                    },
-                    "textureOffset": {
-                      "const": 80
-                    }
+                    "size": { "const": 112 },
+                    "entryCount": { "const": 4 },
+                    "weightOffset": { "const": 32 },
+                    "textureOffset": { "const": 80 }
                   },
                   "additionalProperties": false
                 }
               },
               "additionalProperties": false
             },
-            "topLevelEffectCount": {
-              "const": 72
-            },
+            "topLevelEffectCount": { "const": 72 },
             "effects": {
               "type": "array",
               "minItems": 72,
@@ -1196,16 +717,9 @@
               "uniqueItems": true,
               "items": {
                 "type": "object",
-                "required": [
-                  "index",
-                  "symbol"
-                ],
+                "required": ["index", "symbol"],
                 "properties": {
-                  "index": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 71
-                  },
+                  "index": { "type": "integer", "minimum": 0, "maximum": 71 },
                   "symbol": {
                     "type": "string",
                     "pattern": "^EFFECT_[A-Z0-9_x]+$"
@@ -1221,10 +735,7 @@
               "uniqueItems": true,
               "items": {
                 "type": "object",
-                "required": [
-                  "field",
-                  "offset"
-                ],
+                "required": ["field", "offset"],
                 "properties": {
                   "field": {
                     "enum": [
@@ -1242,11 +753,7 @@
                       "cinematicContrast"
                     ]
                   },
-                  "offset": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 436
-                  },
+                  "offset": { "type": "integer", "minimum": 0, "maximum": 436 },
                   "xeditAlias": {
                     "enum": [
                       "Tonemap E",
@@ -1268,21 +775,11 @@
     "manualValidation": {
       "type": "object",
       "description": "Deprecated schema-v1 validation placeholder.",
-      "required": [
-        "scope",
-        "complete",
-        "report"
-      ],
+      "required": ["scope", "complete", "report"],
       "properties": {
-        "scope": {
-          "const": "milestone-1-runtime-load"
-        },
-        "complete": {
-          "const": false
-        },
-        "report": {
-          "type": "null"
-        }
+        "scope": { "const": "milestone-1-runtime-load" },
+        "complete": { "const": false },
+        "report": { "type": "null" }
       },
       "additionalProperties": false
     }
@@ -1293,25 +790,13 @@
       "if": {
         "properties": {
           "runtime": {
-            "properties": {
-              "version": {
-                "const": "1.10.163.0"
-              }
-            },
-            "required": [
-              "version"
-            ]
+            "properties": { "version": { "const": "1.10.163.0" } },
+            "required": ["version"]
           }
         },
-        "required": [
-          "runtime"
-        ]
+        "required": ["runtime"]
       },
-      "then": {
-        "required": [
-          "commonlibObservation"
-        ]
-      }
+      "then": { "required": ["commonlibObservation"] }
     }
   ]
 }

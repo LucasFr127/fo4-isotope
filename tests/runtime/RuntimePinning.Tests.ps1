@@ -165,6 +165,28 @@ try {
         param($key) $key.keyInitializerAddressLibraryId = $key.keyStorageAddressLibraryId
     }
 
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation mode changed' {
+        param($profile) $profile.mode = 0
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation format changed' {
+        param($profile) $profile.promotedFormat = 24
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation ABI changed' {
+        param($profile) $profile.abi = 'void()'
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation missing mapping' {
+        param($profile) $profile.target.PSObject.Properties.Remove('addressLibraryId')
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation wrong CALL target' {
+        param($profile) $profile.calls[0].expectedBytes[1] = 13
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation duplicate CALL' {
+        param($profile) $profile.calls[1].rva = $profile.calls[0].rva
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation reversed slots' {
+        param($profile) $profile.calls[0].slot = 25
+    }
+
     Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI ABI changed' {
         param($profile) $profile.abi = 'void(UI*,uint32_t)'
     }

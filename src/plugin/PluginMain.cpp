@@ -8,6 +8,7 @@
 #include "FO4Isotope/config/SettingsPersistence.hpp"
 #include "../game/GameStateObserver.hpp"
 #include "../game/ArmorUiObserver.hpp"
+#include "../game/NativeUiResources.hpp"
 #include "../game/NativeLutObserver.hpp"
 #include "../game/ImageSpaceObserver.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
@@ -471,6 +472,7 @@ struct ObserverBoundaries
 {
     bool armorUi{};
     bool screenUi{};
+    bool pauseResources{};
     bool nativeLut{};
     bool imageSpace{};
 };
@@ -498,6 +500,9 @@ struct ObserverBoundaries
                 (diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode &&
                     diagnosticsConfiguration.value.traceRenderPipeline),
             legacyServices.trampoline, legacyServices.pluginHandle);
+        active.pauseResources = fo4hdr::game::InitializeNativeUiResources(
+            ProductionRequested(diagnosticsConfiguration),
+            legacyServices.trampoline, legacyServices.pluginHandle);
         active.screenUi = fo4hdr::game::InitializeScreenUiObserver(
             ProductionRequested(diagnosticsConfiguration),
             legacyServices.trampoline, legacyServices.pluginHandle);
@@ -513,6 +518,7 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
     {
         REX::INFO("armor UI composition boundary installed={}", boundaries.armorUi);
         REX::INFO("native screen-space UI boundary installed={}", boundaries.screenUi);
+        REX::INFO("native pause resource allocation boundary installed={}", boundaries.pauseResources);
         REX::INFO("native LUT observation boundary installed={}", boundaries.nativeLut);
         REX::INFO("ImageSpace provenance boundaries installed={}", boundaries.imageSpace);
         REX::INFO(

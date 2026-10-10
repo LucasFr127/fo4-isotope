@@ -131,6 +131,8 @@ struct GraphicsSettingsInputActivation
 // reference diagnostics still require it.
 [[nodiscard]] bool InitializeGraphicsObservation(
     const PluginConfiguration& configuration) noexcept;
+void SetSharedUiPauseResourcesReady(bool ready) noexcept;
+void DisableSharedUiPauseResources() noexcept;
 // Initial Win32 subclass installation must run on the exact HWND owner thread.
 // F4SE lifecycle callbacks provide bounded, D3D-free retry opportunities after
 // the render thread has published the initialized ImGui window. The input

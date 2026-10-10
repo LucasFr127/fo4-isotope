@@ -27,6 +27,7 @@ void RunImageSpaceProvenanceTests();
 void RunScopedD3D11ComputeConstantBufferTests();
 void RunHookTests();
 void RunArmorUiCompositionTests();
+void RunNativeUiResourcesTests();
 void RunHdrCoreTests();
 void RunNativeLutObservationTests();
 void RunPerformanceTests();

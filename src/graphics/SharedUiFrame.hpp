@@ -57,6 +57,7 @@ bool SharedUiStartupSdr() noexcept;
 bool SharedUiStartupAssumed() noexcept;
 std::optional<SharedUiPresentation> SharedUiStartupPresentation() noexcept;
 float SharedUiStartupPaperWhite() noexcept;
+bool SharedUiPauseResourcesReady() noexcept;
 bool SharedUiFrameReady() noexcept;
 bool SharedUiFrameEncoded() noexcept;
 bool SharedUiScopeActive(const ArmorUiScopeToken& token) noexcept;

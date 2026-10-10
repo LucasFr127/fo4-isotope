@@ -28,6 +28,7 @@ enum class SharedUiRejection : std::uint32_t
 };
 
 SharedUiComposition g_seed;
+SharedUiResourceReadiness g_pauseResources;
 SharedUiContent g_content;
 bool g_seedReady{};
 std::atomic<float> g_startupSdrWhite{};
@@ -721,6 +722,19 @@ float SharedUiStartupPaperWhite() noexcept
 
 
 
+void SetSharedUiPauseResourcesReady(bool ready) noexcept
+{
+    g_pauseResources.SetReady(ready);
+}
+void DisableSharedUiPauseResources() noexcept
+{
+    g_pauseResources.Disable();
+}
+bool SharedUiPauseResourcesReady() noexcept
+{
+    return g_pauseResources.Ready();
+}
+
 bool SharedUiFrameReady() noexcept
 {
     const std::array ready{ApplicationPresentationFacadeActive(), !g_armor.armorEncodedActive,
@@ -808,9 +822,9 @@ void ReportSharedUi(GraphicsDiagnosticSink sink)
     if (!g_configuration.productionRequested || !sink) return;
     constexpr std::array names{"none", "native-scope", "scene", "context", "duplicate-seed",
         "seed-failure", "later-scene", "incomplete", "mutation"};
-    sink(std::format("shared-ui seeds={} presented={} rejected={} last_rejection={}",
+    sink(std::format("shared-ui seeds={} presented={} rejected={} last_rejection={} pause_blur_ready={}",
         g_seeds.load(), g_presented.load(), g_rejected.load(),
-        names[static_cast<std::size_t>(g_rejection.load())]));
+        names[static_cast<std::size_t>(g_rejection.load())], SharedUiPauseResourcesReady()));
 }
 
 } // namespace fo4hdr

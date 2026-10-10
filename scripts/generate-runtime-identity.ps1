@@ -321,6 +321,35 @@ foreach ($call in $screenUi.calls) {
 }
 $screenUiLines += '}};'
 
+$nativeUi = $manifest.nativeUiResources
+if ($nativeUi.status -ne 'unvalidated' -or
+    $nativeUi.scope -ne 'dedicated-pause-blur-fp16' -or
+    $nativeUi.abi -ne 'void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)' -or
+    $nativeUi.propertiesSize -ne 32 -or $nativeUi.formatOffset -ne 8 -or
+    $nativeUi.sourceFormat -ne 24 -or $nativeUi.promotedFormat -ne 10 -or
+    $nativeUi.mode -ne 1 -or @($nativeUi.calls).Count -ne 2 -or
+    @($nativeUi.target.expectedBytes).Count -ne 16) {
+    throw 'The native pause resource allocation contract is incomplete.'
+}
+$nativeUiLines = @(
+    "inline constexpr std::uintptr_t kNativeUiTargetRva = $($nativeUi.target.rva);",
+    "inline constexpr std::uint64_t kNativeUiTargetId = $($nativeUi.target.addressLibraryId);",
+    "inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ $($nativeUi.target.expectedBytes -join ', ') }};",
+    "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ $($nativeUi.calls.callerRva -join ', ') }};",
+    "inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ $($nativeUi.calls.callerAddressLibraryId -join ', ') }};",
+    "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ $($nativeUi.calls.rva -join ', ') }};",
+    'inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{'
+)
+for ($index = 0; $index -lt 2; ++$index) {
+    $call = $nativeUi.calls[$index]
+    if ($call.slot -ne (24 + $index) -or @($call.expectedBytes).Count -ne 5 -or
+        $call.expectedBytes[0] -ne 232) {
+        throw 'The native pause allocation call order/fingerprint is invalid.'
+    }
+    $nativeUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
+}
+$nativeUiLines += '}};'
+
 $lut = $manifest.nativeLutObserver
 if ($lut.status -ne 'unvalidated' -or
     $lut.scope -ne 'synchronous-gamma-correct-lut-render' -or
@@ -406,6 +435,7 @@ $lines = @(
     "namespace fo4hdr::generated {",
     ($armorLines -join "`n"),
     ($screenUiLines -join "`n"),
+    ($nativeUiLines -join "`n"),
     ($lutLines -join "`n"),
     ($imageSpaceLines -join "`n"),
     ($weatherGradeLines -join "`n"),

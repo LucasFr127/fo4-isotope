@@ -29,6 +29,29 @@
       { "callerAddressLibraryId": 1075087, "callerRva": "0x00D38700", "rva": "0x00D389B6", "expectedBytes": [232, 197, 176, 48, 1] }
     ]
   },
+  "nativeUiResources": {
+    "status": "unvalidated",
+    "scope": "dedicated-pause-blur-fp16",
+    "abi": "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)",
+    "authorityGap": "Pinned CommonLibF4 owns the target-manager and 0x20 properties layouts but has no named mappings for the initializer registration calls or registrar.",
+    "evidenceQualification": "Static review of retained runtime-1.10.163 loaded-text image and Address Library mapping; exact loaded fingerprints are rechecked before mutation; native validation pending.",
+    "lifetime": "Mode 1 copies all properties synchronously and creates dedicated native texture/RTV/SRV/UAV. Native manager reset releases them; its create callback repeats these registrations after device creation and resize. No descriptor or COM references are retained by the shim.",
+    "thread": "Synchronous native renderer allocation lifetime; one nonoverlapping manager/thread pair per initializer invocation; later resets may use another thread.",
+    "propertiesSize": 32,
+    "formatOffset": 8,
+    "sourceFormat": 24,
+    "promotedFormat": 10,
+    "mode": 1,
+    "target": {
+      "addressLibraryId": 43433,
+      "rva": "0x01D30E90",
+      "expectedBytes": [64, 86, 87, 65, 86, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254, 255]
+    },
+    "calls": [
+      { "callerAddressLibraryId": 1118299, "callerRva": "0x02896680", "rva": "0x02896E7F", "slot": 24, "expectedBytes": [232, 12, 160, 73, 255] },
+      { "callerAddressLibraryId": 1118299, "callerRva": "0x02896680", "rva": "0x02896E97", "slot": 25, "expectedBytes": [232, 244, 159, 73, 255] }
+    ]
+  },
   "experimentalArmorUiObserver": {
     "status": "unvalidated",
     "scope": "power-armor-encoded-peak-composition",

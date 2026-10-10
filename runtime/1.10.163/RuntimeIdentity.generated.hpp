@@ -55,6 +55,16 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 4> kScreenUiCallBytes{{
     {{ 232, 146, 108, 48, 1 }},
     {{ 232, 197, 176, 48, 1 }},
 }};
+inline constexpr std::uintptr_t kNativeUiTargetRva = 0x01D30E90;
+inline constexpr std::uint64_t kNativeUiTargetId = 43433;
+inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ 64, 86, 87, 65, 86, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254, 255 }};
+inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ 0x02896680, 0x02896680 }};
+inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ 1118299, 1118299 }};
+inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ 0x02896E7F, 0x02896E97 }};
+inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{
+    {{ 232, 12, 160, 73, 255 }},
+    {{ 232, 244, 159, 73, 255 }},
+}};
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x028C8B30;
 inline constexpr std::uint64_t kNativeLutRenderId = 1388477;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 280;
@@ -106,7 +116,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "8b2dfd79099ea1d8bdf88aade5611994024e36c83b4df4340d8f5f58a78a5d21";
+inline constexpr std::string_view kManifestSha256 = "620e3ef5bafa171518f890e8213df254aa7773e05740e3e1480e73644c2b01c3";
 inline constexpr std::string_view kCommonLibCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
     0xf97c127cu, 0xd49c4526u, 0x1a87d341u, 0x2a3edc35u

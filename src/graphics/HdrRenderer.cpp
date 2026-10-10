@@ -115,6 +115,7 @@ void UnbindPresentationProxy() noexcept
 void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noexcept
 {
     RetireFrameTrace();
+    if (!retainPresentationBuffer) SetSharedUiPauseResourcesReady(false);
     g_nativeReferenceStatus = "Waiting for a color grading draw.";
     CloseArmorEncodedCompositionForLifecycle();
     // A held comparison is transient UI state. Restore its unsaved Image
