@@ -18,6 +18,43 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kArmorUiCallBytes{{
     {{ 232, 46, 7, 0, 0 }},
     {{ 232, 49, 216, 255, 255 }},
 }};
+inline constexpr std::uintptr_t kHudUiKeyStorageRva = 0x06577910;
+inline constexpr std::uint64_t kHudUiKeyStorageId = 1008555;
+inline constexpr std::uintptr_t kHudUiKeyGetterRva = 0x0204B490;
+inline constexpr std::uint64_t kHudUiKeyGetterId = 1111569;
+inline constexpr std::array<std::uint8_t, 26> kHudUiKeyGetterBytes{{ 64, 83, 72, 131, 236, 32, 139, 5, 124, 196, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 102, 196, 82, 4 }};
+inline constexpr std::uintptr_t kFlatUiKeyStorageRva = 0x065778B0;
+inline constexpr std::uint64_t kFlatUiKeyStorageId = 1540821;
+inline constexpr std::uintptr_t kFlatUiKeyGetterRva = 0x0204B2B0;
+inline constexpr std::uint64_t kFlatUiKeyGetterId = 607213;
+inline constexpr std::array<std::uint8_t, 26> kFlatUiKeyGetterBytes{{ 64, 83, 72, 131, 236, 32, 139, 5, 252, 197, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 230, 197, 82, 4 }};
+inline constexpr std::uintptr_t kArmorUiKeyStorageRva = 0x05ADB9F0;
+inline constexpr std::uint64_t kArmorUiKeyStorageId = 853048;
+inline constexpr std::uintptr_t kArmorUiKeyGetterRva = 0x0127D8E0;
+inline constexpr std::uint64_t kArmorUiKeyGetterId = 160459;
+inline constexpr std::array<std::uint8_t, 26> kArmorUiKeyGetterBytes{{ 64, 83, 72, 131, 236, 32, 139, 5, 12, 225, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 246, 224, 133, 4 }};
+inline constexpr std::uintptr_t kRainUiKeyStorageRva = 0x05ADBA00;
+inline constexpr std::uint64_t kRainUiKeyStorageId = 1291816;
+inline constexpr std::uintptr_t kRainUiKeyGetterRva = 0x0127D940;
+inline constexpr std::uint64_t kRainUiKeyGetterId = 1210792;
+inline constexpr std::array<std::uint8_t, 26> kRainUiKeyGetterBytes{{ 64, 83, 72, 131, 236, 32, 139, 5, 188, 224, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 166, 224, 133, 4 }};
+inline constexpr std::uintptr_t kWorkshopUiKeyStorageRva = 0x05A69168;
+inline constexpr std::uint64_t kWorkshopUiKeyStorageId = 795819;
+inline constexpr std::uintptr_t kWorkshopUiKeyInitializerRva = 0x02A8E510;
+inline constexpr std::uint64_t kWorkshopUiKeyInitializerId = 1434874;
+inline constexpr std::array<std::uint8_t, 39> kWorkshopUiKeyInitializerBytes{{ 72, 131, 236, 40, 72, 141, 21, 253, 173, 41, 0, 72, 141, 13, 70, 172, 253, 2, 232, 25, 56, 11, 255, 72, 141, 13, 210, 61, 20, 0, 72, 131, 196, 40, 233, 149, 134, 234, 255 }};
+inline constexpr std::uintptr_t kScreenUiTargetRva = 0x02043A80;
+inline constexpr std::uint64_t kScreenUiTargetId = 230711;
+inline constexpr std::array<std::uint8_t, 32> kScreenUiTargetBytes{{ 72, 137, 92, 36, 8, 72, 137, 116, 36, 24, 87, 72, 131, 236, 32, 139, 21, 31, 13, 111, 4, 101, 72, 139, 4, 37, 88, 0, 0, 0, 72, 139 }};
+inline constexpr std::array<std::uintptr_t, 4> kScreenUiCallerRvas{{ 0x00D3E4D0, 0x01297BE0, 0x00D3CBE0, 0x00D38700 }};
+inline constexpr std::array<std::uint64_t, 4> kScreenUiCallerIds{{ 1422240, 135719, 408683, 1075087 }};
+inline constexpr std::array<std::uintptr_t, 4> kScreenUiCallRvas{{ 0x00D3E4DB, 0x01298000, 0x00D3CDE9, 0x00D389B6 }};
+inline constexpr std::array<std::array<std::uint8_t, 5>, 4> kScreenUiCallBytes{{
+    {{ 232, 160, 85, 48, 1 }},
+    {{ 232, 123, 186, 218, 0 }},
+    {{ 232, 146, 108, 48, 1 }},
+    {{ 232, 197, 176, 48, 1 }},
+}};
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x028C8B30;
 inline constexpr std::uint64_t kNativeLutRenderId = 1388477;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 280;
@@ -69,8 +106,11 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "326b82f33322232305a661741a9d621160e7dc638ce94db4641b546f2cb8142a";
+inline constexpr std::string_view kManifestSha256 = "8b2dfd79099ea1d8bdf88aade5611994024e36c83b4df4340d8f5f58a78a5d21";
 inline constexpr std::string_view kCommonLibCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
+inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
+    0xf97c127cu, 0xd49c4526u, 0x1a87d341u, 0x2a3edc35u
+}};
 inline constexpr std::array<std::uint32_t, 4> kLateGameUiCompositeDxbcHash{{
     0x525eaea9u, 0xaf037d1bu, 0x3ca0d381u, 0x8531a8b3u
 }};
@@ -198,7 +238,6 @@ inline constexpr std::size_t kImageSpaceLutWeightOffset = 32;
 inline constexpr std::size_t kImageSpaceLutTextureOffset = 80;
 inline constexpr std::uint16_t kImageSpaceTopLevelEffectCount = 72;
 inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
-inline constexpr std::string_view kImageSpaceXEditAliasSourceCommit = "ca51ca1b67c2e84965c56d9163cec2acf20d6722";
 inline constexpr std::string_view kImageSpaceEffectTableSha256 = "fd7918b8a53d003ea49d25ca82590af85571f2d5797dfd16ae343b45c4f94ba4";
 inline constexpr std::array<ImageSpaceEffectSemantic, kImageSpaceTopLevelEffectCount>
     kImageSpaceEffectSemantics{{

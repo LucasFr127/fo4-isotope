@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 namespace fo4hdr {
@@ -9,14 +10,20 @@ enum class ArmorUiOwner : std::uint32_t
 {
     none,
     powerArmor,
-    other
+    other,
+    hud,
+    flatMenu,
+    powerArmorRain,
+    screenSpace,
+    workshop
 };
 
-void SetArmorUiObservationEnabled(bool enabled) noexcept;
 void SetArmorUiCorrectionEnabled(bool enabled) noexcept;
 [[nodiscard]] bool ArmorUiCorrectionEnabled() noexcept;
-// Native scopes follow correction or observation eligibility. Resets advance the generation
-// while preserving that request, so stale scopes cannot start transactions.
+void SetArmorUiObservationEnabled(bool enabled) noexcept;
+[[nodiscard]] bool ArmorUiObservationEnabled() noexcept;
+// Native scopes follow correction or diagnostic observation requests. Resets
+// preserve both requests and invalidate stale scopes for composition.
 [[nodiscard]] bool ArmorUiScopeEnabled() noexcept;
 [[nodiscard]] std::uint64_t ArmorUiScopeGeneration() noexcept;
 void ResetArmorUiScope() noexcept;
@@ -33,6 +40,7 @@ struct ArmorUiScopeToken
     std::uint32_t depth{};
     bool postAa{};
     bool hasRoot{};
+    std::array<char, 32> rendererName{};
 };
 
 [[nodiscard]] ArmorUiScopeToken CurrentArmorUiScope() noexcept;
@@ -55,8 +63,8 @@ struct ArmorUiCompositionExitEvidence
 };
 
 // The outer transaction is paired by native thread and serial. Request changes
-// do not cancel its cleanup; renderer identity changes always require a black
-// handoff instead of decoding through an unqualified immediate context.
+// do not cancel its cleanup; renderer identity changes prohibit recovery work
+// through an unqualified immediate context.
 [[nodiscard]] constexpr ArmorUiCompositionExit DecideArmorUiCompositionExit(
     const ArmorUiCompositionExitEvidence& evidence) noexcept
 {
@@ -73,6 +81,7 @@ struct ArmorUiScopeEntry
     std::uint32_t targetArgument{};
     bool postAa{};
     bool hasRoot{};
+    std::array<char, 32> rendererName{};
 };
 
 class ArmorUiScope

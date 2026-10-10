@@ -20,11 +20,8 @@ void ContextQuerySafety::LeaveCommandList() noexcept
 void ContextQuerySafety::Begin(const void* key) noexcept
 {
     if (key == nullptr) { unknown = true; return; }
-    if (std::find(active.begin(), active.end(), key) != active.end())
-    {
-        unknown = true;
-        return;
-    }
+    // D3D11 restarts an active range on another Begin; one End still closes it.
+    if (std::find(active.begin(), active.end(), key) != active.end()) return;
     const auto empty = std::find(active.begin(), active.end(), nullptr);
     if (empty == active.end()) { unknown = true; return; }
     *empty = key;

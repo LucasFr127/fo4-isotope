@@ -42,6 +42,10 @@ HRESULT STDMETHODCALLTYPE HookCreateRtv(
     ID3D11RenderTargetView** view) noexcept;
 
 bool RememberPresentationView(ID3D11Resource*, ID3D11RenderTargetView*) noexcept;
+[[nodiscard]] bool InstallContextShadow(ID3D11DeviceContext*) noexcept;
+[[nodiscard]] bool InstallSwapChainShadow(IDXGISwapChain*, bool hdrDescriptor,
+    bool ownsRendererClaim) noexcept;
+void RetireApplicationPresentationBuffer(IDXGISwapChain*) noexcept;
 
 [[nodiscard]] GraphicsObservationFailure InstallGraphicsImport() noexcept;
 

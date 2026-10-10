@@ -11,6 +11,7 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "ObservedDraw.hpp"
+#include "../FrameTrace.hpp"
 #include "ArmorCompositionPass.hpp"
 #include "NativeReferenceGradePass.hpp"
 #include "../resources/SceneResources.hpp"
@@ -33,15 +34,37 @@
 #include <cassert>
 #include <cstring>
 #include <string_view>
+#include "../SharedUiFrame.hpp"
 
 namespace fo4hdr {
 namespace {
 using Microsoft::WRL::ComPtr;
 
+TemporalSceneEvidence ReadTemporalSceneEvidence(ID3D11DeviceContext* context,
+    const DrawObservation& record) noexcept
+{
+    const auto exactProxyReady = IsPresentationProxyTarget(record.currentSecondaryRtv) &&
+        g_presentation.presentationProxySrv != nullptr;
+    const auto presentationTarget = exactProxyReady ||
+        RenderTargetMatchesResource(record.currentSecondaryRtv,
+            g_presentation.presentationBackBuffer.Get());
+    const auto linearScene = g_scene.currentSceneDomain == LinearColorDomain::linearBt709Relative ||
+        g_scene.currentSceneDomain == LinearColorDomain::linearBt2020UiRelative;
+    return {.qualifiedSceneSelected = g_scene.currentScene != nullptr && linearScene,
+        .consumesSelectedScene = CurrentPassConsumesSelectedScene(context, record),
+        .presentationTarget = presentationTarget,
+        .exactProxyReady = exactProxyReady,
+        .internalSceneReady = record.currentReplacementActive && !presentationTarget &&
+            IsFirstFp16RenderTarget(record.currentSecondaryRtv) &&
+            IsQualifiedSceneTarget(record.currentSecondaryRtv)};
+}
+
 struct CompletedDrawObservation
 {
     ID3D11DeviceContext* context;
     DrawObservation& record;
+    bool productionOperatorApplied;
+    SharedUiWriteEvidence write;
 
     PipelineHeartbeatEvaluation ObserveHeartbeat() const noexcept
     {
@@ -58,17 +81,22 @@ struct CompletedDrawObservation
         const auto evaluation = ObserveHeartbeat();
         if (evaluation.ready)
         {
-            // The first resource-qualified tone-to-LUT branch is the common
-            // seam. Other image-space branches in the same frame are not
-            // interpreted as contradictory global ordering evidence.
+            // A new LUT write starts a new scene revision, even on a reused target.
             g_scene.currentScene = scene;
+            g_scene.temporalPassObserved = false;
+            g_scene.temporalSceneReady = false;
+            g_scene.videoSceneReady = false;
+            g_scene.productionOperatorApplied = productionOperatorApplied;
             g_scene.currentSceneDomain =
-                g_configuration.productionRequested ?
+                productionOperatorApplied ?
                     LinearColorDomain::linearBt2020UiRelative :
                     LinearColorDomain::linearBt709Relative;
+            if (IsPresentationProxyTarget(record.currentPrimaryRtv))
+                g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
             g_evidence.colorDomain.store(
                 static_cast<std::uint32_t>(g_scene.currentSceneDomain),
                 std::memory_order_release);
+            PublishSharedUiScene(write);
         }
     }
 
@@ -81,21 +109,8 @@ struct CompletedDrawObservation
         g_evidence.temporalAaDrawCount.fetch_add(
             1, std::memory_order_relaxed);
         const auto evaluation = ObserveHeartbeat();
-        const auto exactProxyReady =
-            record.currentSecondaryRtv != nullptr &&
-            record.currentSecondaryRtv ==
-                g_presentation.presentationProxyRtv.Get() &&
-            g_presentation.presentationProxySrv != nullptr;
-        const auto consumesSelectedScene =
-            CurrentPassConsumesSelectedScene(context, record);
-        const auto presentationTarget = exactProxyReady ||
-            RenderTargetMatchesResource(record.currentSecondaryRtv,
-                g_presentation.presentationBackBuffer.Get());
         ApplyTemporalSceneAction(DecideTemporalSceneAction(evaluation,
-                    {.qualifiedSceneSelected = g_scene.currentScene != nullptr,
-                    .consumesSelectedScene = consumesSelectedScene,
-                    .presentationTarget = presentationTarget,
-                    .exactProxyReady = exactProxyReady}));
+            ReadTemporalSceneEvidence(context, record)));
     }
 
     void ApplyTemporalSceneAction(TemporalSceneAction action) const noexcept
@@ -108,6 +123,7 @@ struct CompletedDrawObservation
             return;
         case TemporalSceneAction::rejectMissingProxy:
             g_scene.temporalPassObserved = true;
+            g_scene.temporalSceneReady = false;
             g_evidence.temporalMissingProxyDrawCount.fetch_add(
                 1, std::memory_order_relaxed);
             return;
@@ -117,8 +133,19 @@ struct CompletedDrawObservation
             g_presentation.presentationProxyDomain =
                 g_scene.currentSceneDomain;
             g_scene.temporalSceneReady = true;
+            PublishSharedUiScene(write);
             g_evidence.temporalProxyDrawCount.fetch_add(
                 1, std::memory_order_relaxed);
+            return;
+        case TemporalSceneAction::acceptInternalScene:
+            g_scene.temporalPassObserved = true;
+            g_scene.temporalSceneReady = false;
+            if (auto* scene = AcquireSceneView(record.currentSecondaryRtv))
+            {
+                g_scene.currentScene = scene;
+                g_scene.temporalSceneReady = true;
+                PublishSharedUiScene(write);
+            }
             return;
         }
     }
@@ -133,12 +160,16 @@ struct CompletedDrawObservation
                     AcquireSceneView(record.currentPrimaryRtv))
             {
                 g_scene.currentScene = videoScene;
+                g_scene.temporalPassObserved = false;
+                g_scene.temporalSceneReady = false;
+                g_scene.productionOperatorApplied = false;
                 g_scene.currentSceneDomain =
                     LinearColorDomain::linearBt2020UiRelative;
                 g_evidence.colorDomain.store(static_cast<std::uint32_t>(
                     g_scene.currentSceneDomain),
                     std::memory_order_release);
                 g_scene.videoSceneReady = true;
+                PublishSharedUiScene(write);
             }
     }
 
@@ -148,7 +179,12 @@ struct CompletedDrawObservation
         // another full-aspect FP16 branch cannot become the presentation scene.
         if (!CurrentPassConsumesSelectedScene(context, record)) return;
         if (auto* nextScene = AcquireSceneView(record.currentPrimaryRtv))
+        {
             g_scene.currentScene = nextScene;
+            if (IsPresentationProxyTarget(record.currentPrimaryRtv))
+                g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
+            PublishSharedUiScene(write);
+        }
     }
 
     bool IsSceneAdvancingPass() const noexcept
@@ -176,19 +212,24 @@ struct CompletedDrawObservation
 
     bool IsReferenceObservationReady() const noexcept
     {
-        return record.currentPassKnown && HdrPathRequested() &&
-            g_referenceHealthy && g_gameplayReadyApplied.load(std::memory_order_acquire);
+        if (g_armor.armorEncodedActive && context == g_rendererDevice.activeContext) return false;
+        // Offscreen producers after the UI seed cannot replace its content or temporal proof.
+        if (ApplicationPresentationFacadeActive() && SharedUiFrameEncoded()) return false;
+        const std::array ready{record.currentPassKnown, HdrPathRequested(),
+            g_referenceHealthy.load(), g_productionHealthy.load(),
+            g_gameplayReadyApplied.load(std::memory_order_acquire)};
+        return std::ranges::all_of(ready, [](bool value) { return value; });
     }
 };
 
-void ObserveCompletedDraw(ID3D11DeviceContext* context, DrawObservation& record) noexcept
+void ObserveCompletedDraw(ID3D11DeviceContext* context, DrawObservation& record,
+    bool productionOperatorApplied, SharedUiWriteEvidence write) noexcept
 {
-    if (g_armor.armorEncodedActive && context == g_rendererDevice.activeContext) return;
     // Reference-pass validation must begin at the same render-thread lifecycle
     // boundary as shader substitution. Startup, video, loading, and menu draws
     // still use the original shaders/resources and cannot reject the later
     // gameplay generation merely because their TAA output is not promoted.
-    const CompletedDrawObservation observation{context, record};
+    const CompletedDrawObservation observation{context, record, productionOperatorApplied, write};
     if (!observation.IsReferenceObservationReady()) return;
     if (record.currentPass == RenoDxShaderPass::lut)
         observation.ObserveLut();
@@ -201,268 +242,19 @@ void ObserveCompletedDraw(ID3D11DeviceContext* context, DrawObservation& record)
 } // namespace
 using Microsoft::WRL::ComPtr;
 
-[[nodiscard]] bool IsSingleSampledShaderTexture(const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    return description.ArraySize == 1 && description.SampleDesc.Count == 1 &&
-        (description.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0;
-}
-
 [[nodiscard]] bool IsFirstSingleMip(const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
 {
     return view.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D &&
         view.Texture2D.MostDetailedMip == 0 && view.Texture2D.MipLevels == 1;
 }
 
-[[nodiscard]] bool IsFullResolutionSdrUiTexture(const D3D11_TEXTURE2D_DESC& description,
-    const D3D11_SHADER_RESOURCE_VIEW_DESC& view) noexcept
-{
-    return description.Format == DXGI_FORMAT_R8G8B8A8_UNORM &&
-        view.Format == DXGI_FORMAT_R8G8B8A8_UNORM && IsFirstSingleMip(view) &&
-        description.Width == g_presentation.width && description.Height == g_presentation.height &&
-        IsSingleSampledShaderTexture(description);
-}
-
-[[nodiscard]] bool HasFullResolutionSdrUiSource(
-    ID3D11DeviceContext* context) noexcept
-{
-    if (context == nullptr) return false;
-    if (g_presentation.width == 0 || g_presentation.height == 0)
-        return false;
-    ComPtr<ID3D11ShaderResourceView> source;
-    context->PSGetShaderResources(0, 1, &source);
-    if (!source) return false;
-    ComPtr<ID3D11Resource> resource;
-    ComPtr<ID3D11Texture2D> texture;
-    source->GetResource(&resource);
-    if (!resource || FAILED(resource.As(&texture))) return false;
-    D3D11_TEXTURE2D_DESC description{};
-    texture->GetDesc(&description);
-    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
-    source->GetDesc(&viewDescription);
-    return IsFullResolutionSdrUiTexture(description, viewDescription);
-}
-
-[[nodiscard]] bool HasTexture2dUiMaskSource(
-    ID3D11DeviceContext* context) noexcept
-{
-    if (context == nullptr) return false;
-    ComPtr<ID3D11ShaderResourceView> source;
-    context->PSGetShaderResources(0, 1, &source);
-    if (!source) return false;
-    D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
-    source->GetDesc(&viewDescription);
-    if (viewDescription.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D)
-        return false;
-    ComPtr<ID3D11Resource> resource;
-    ComPtr<ID3D11Texture2D> texture;
-    source->GetResource(&resource);
-    if (!resource || FAILED(resource.As(&texture))) return false;
-    D3D11_TEXTURE2D_DESC description{};
-    texture->GetDesc(&description);
-    return description.Width != 0 && description.Height != 0 && IsSingleSampledShaderTexture(description);
-}
-
-enum class NativeUiCaptureKind : std::uint8_t
-{
-    none,
-    backdrop,
-    composite
-};
-
 [[nodiscard]] bool HdrFrameReadyForDraw() noexcept
 {
-    return HdrPathRequested() && g_referenceHealthy &&
+    return HdrPathRequested() && g_referenceHealthy && g_productionHealthy &&
         g_gameplayReadyApplied.load(std::memory_order_acquire);
 }
 
-class ScopedGameUiCapture
-{
-public:
-    ScopedGameUiCapture(
-        ID3D11DeviceContext* context,
-        DrawObservation& record,
-        bool exactIndexedQuad) noexcept : context_(context), record_(&record)
-    {
-        if (!CanCaptureUiFrame() || !HasCaptureTargets()) return;
 
-        const auto allowlistedUiShader =
-            IsLateGameUiShader(record.expectedBoundShader);
-        const auto allowlistedBackdropShader =
-            IsLateGameUiBackdropShader(record.expectedBoundShader);
-        if (allowlistedUiShader == allowlistedBackdropShader)
-            return;
-
-        ComPtr<ID3D11PixelShader> actualShader;
-        context_->PSGetShader(&actualShader, nullptr, nullptr);
-        if (actualShader.Get() != record.expectedBoundShader)
-            return;
-
-        if (!CapturePreviousTargets()) return;
-        if (!SelectCaptureKind(allowlistedUiShader, exactIndexedQuad)) return;
-        CaptureBlendState();
-        if (!BindCaptureTarget()) return;
-        ActivateCapture();
-    }
-
-    ~ScopedGameUiCapture() noexcept
-    {
-        if (!active_) return;
-        if (context_ == nullptr || record_ == nullptr) return;
-        context_->OMSetBlendState(previousBlend_.Get(),
-            blendFactor_.data(), sampleMask_);
-        ID3D11RenderTargetView* restore = previousRtvs_[0].Get();
-        InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
-            &restore, depthStencil_.Get());
-    }
-
-    ScopedGameUiCapture(const ScopedGameUiCapture&) = delete;
-    ScopedGameUiCapture& operator=(const ScopedGameUiCapture&) = delete;
-
-    [[nodiscard]] bool Active() const noexcept { return active_; }
-    [[nodiscard]] NativeUiCaptureKind Kind() const noexcept { return kind_; }
-
-private:
-    void ActivateCapture() noexcept
-    {
-        context_->OMSetBlendState(
-            g_uiTransport.gameUiBlend.Get(), nullptr, sampleMask_);
-        if (kind_ == NativeUiCaptureKind::backdrop)
-            g_uiTransport.gameUiBackdropCapturedThisFrame = true;
-        else
-            g_uiTransport.gameUiCapturedThisFrame = true;
-        active_ = true;
-    }
-
-    [[nodiscard]] static bool CanCaptureUiFrame() noexcept
-    {
-        return g_configuration.productionRequested && HdrFrameReadyForDraw() &&
-            g_scene.productionOperatorApplied && g_scene.currentScene != nullptr;
-    }
-
-    [[nodiscard]] bool HasCaptureTargets() const noexcept
-    {
-        return record_->currentSinglePresentationTarget && context_ != nullptr &&
-            OriginalRenderTargetSetter(context_) != nullptr && UiCaptureResourcesReady();
-    }
-
-    bool CapturePreviousTargets() noexcept
-    {
-        std::array<ID3D11RenderTargetView*,
-            D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> current{};
-        ID3D11DepthStencilView* depth{};
-        context_->OMGetRenderTargets(static_cast<UINT>(current.size()),
-            current.data(), &depth);
-        for (std::size_t index = 0; index < current.size(); ++index)
-            previousRtvs_[index].Attach(current[index]);
-        depthStencil_.Attach(depth);
-        if (previousRtvs_[0].Get() !=
-                g_presentation.presentationProxyRtv.Get() ||
-            std::any_of(previousRtvs_.begin() + 1, previousRtvs_.end(),
-                [](const auto& view) { return view != nullptr; }))
-            return false;
-
-        std::array<ID3D11UnorderedAccessView*,
-            D3D11_PS_CS_UAV_REGISTER_COUNT> uavs{};
-        context_->OMGetRenderTargetsAndUnorderedAccessViews(
-            0, nullptr, nullptr, 0, static_cast<UINT>(uavs.size()),
-            uavs.data());
-        bool uavBound{};
-        for (auto* uav : uavs)
-        {
-            uavBound |= uav != nullptr;
-            if (uav != nullptr) uav->Release();
-        }
-        return !uavBound;
-    }
-
-    bool SelectCaptureKind(bool allowlistedUiShader, bool exactIndexedQuad) noexcept
-    {
-        const LateGameUiFrame commonArguments{
-            .hdrPathRequested = HdrPathRequested(), .referenceHealthy = g_referenceHealthy.load(),
-            .gameplayReady = g_gameplayReadyApplied.load(std::memory_order_acquire),
-            .productionOperatorApplied = g_scene.productionOperatorApplied,
-            .qualifiedSceneSelected = g_scene.currentScene != nullptr,
-            .exactSinglePresentationTarget = record_->currentSinglePresentationTarget};
-        if (allowlistedUiShader)
-        {
-            if (DecideLateGameUiAction(commonArguments, true,
-                    HasFullResolutionSdrUiSource(context_)) !=
-                LateGameUiAction::captureSeparately)
-                return false;
-            kind_ = NativeUiCaptureKind::composite;
-        }
-        else
-        {
-            if (DecideLateGameUiBackdropAction(commonArguments,
-                    {.allowlistedBackdropShader = true, .exactIndexedQuad = exactIndexedQuad,
-                    .texture2dMaskSource = HasTexture2dUiMaskSource(context_),
-                    .depthDetached = depthStencil_ == nullptr}) !=
-                LateGameUiAction::captureSeparately)
-                return false;
-            kind_ = NativeUiCaptureKind::backdrop;
-        }
-
-        return true;
-    }
-
-    void CaptureBlendState() noexcept
-    {
-        FLOAT factor[4]{};
-        UINT sampleMask{};
-        ID3D11BlendState* blend{};
-        context_->OMGetBlendState(&blend, factor, &sampleMask);
-        previousBlend_.Attach(blend);
-        std::copy(std::begin(factor), std::end(factor), blendFactor_.begin());
-        sampleMask_ = sampleMask;
-    }
-
-    bool BindCaptureTarget() noexcept
-    {
-        auto* target = kind_ == NativeUiCaptureKind::backdrop ?
-            g_uiTransport.gameUiBackdropRtv.Get() :
-            g_uiTransport.gameUiRtv.Get();
-        const auto alreadyCaptured =
-            kind_ == NativeUiCaptureKind::backdrop ?
-            g_uiTransport.gameUiBackdropCapturedThisFrame :
-            g_uiTransport.gameUiCapturedThisFrame;
-        if (!alreadyCaptured)
-        {
-            constexpr float transparent[4]{};
-            context_->ClearRenderTargetView(target, transparent);
-        }
-        InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
-            &target, depthStencil_.Get());
-        std::array<ID3D11RenderTargetView*,
-            D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> installed{};
-        context_->OMGetRenderTargets(static_cast<UINT>(installed.size()),
-            installed.data(), nullptr);
-        const auto installedOwned = installed[0] == target &&
-            std::all_of(installed.begin() + 1, installed.end(),
-                [](const auto* view) { return view == nullptr; });
-        for (auto* view : installed)
-            if (view != nullptr) view->Release();
-        if (!installedOwned)
-        {
-            ID3D11RenderTargetView* restore = previousRtvs_[0].Get();
-            InvokeCapturedNext(OriginalRenderTargetSetter(context_), context_, 1,
-                &restore, depthStencil_.Get());
-            return false;
-        }
-
-        return true;
-    }
-
-    ID3D11DeviceContext* context_{};
-    DrawObservation* record_{};
-    std::array<ComPtr<ID3D11RenderTargetView>,
-        D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> previousRtvs_{};
-    ComPtr<ID3D11DepthStencilView> depthStencil_;
-    ComPtr<ID3D11BlendState> previousBlend_;
-    std::array<float, 4> blendFactor_{};
-    UINT sampleMask_{0xFFFFFFFFU};
-    NativeUiCaptureKind kind_{NativeUiCaptureKind::none};
-    bool active_{};
-};
 
 class ScopedExposureCaptureState
 {
@@ -730,32 +522,27 @@ struct ProductionDrawKind
         heartbeat.currentGeneration && heartbeat.currentFrame;
 }
 
-[[nodiscard]] bool IsProductionTemporalTarget(const DrawObservation& record) noexcept
-{
-    return g_scene.productionOperatorApplied && g_scene.currentScene != nullptr &&
-        record.currentSecondaryRtv != nullptr &&
-        record.currentSecondaryRtv == g_presentation.presentationProxyRtv.Get() &&
-        g_presentation.presentationProxySrv != nullptr;
-}
-
-[[nodiscard]] bool IsProductionTemporal(const DrawObservation& record,
+[[nodiscard]] bool IsProductionTemporal(ID3D11DeviceContext* context, const DrawObservation& record,
     const PipelineHeartbeatEvaluation& heartbeat) noexcept
 {
-    return heartbeat.currentGeneration && heartbeat.currentFrame && heartbeat.ready &&
-        IsProductionTemporalTarget(record);
+    if (!g_scene.productionOperatorApplied) return false;
+    const auto action = DecideTemporalSceneAction(heartbeat, ReadTemporalSceneEvidence(context, record));
+    return action == TemporalSceneAction::acceptProxy ||
+        action == TemporalSceneAction::acceptInternalScene;
 }
 
-[[nodiscard]] bool IsProductionDraw(ProductionDrawKind kind, const DrawObservation& record,
+[[nodiscard]] bool IsProductionDraw(ID3D11DeviceContext* context, const DrawObservation& record,
     bool configurationMatches, const PipelineHeartbeatEvaluation& heartbeat) noexcept
 {
     if (!configurationMatches || !g_configuration.productionRequested) return false;
+    const auto kind = ClassifyProductionDraw(record.currentPass);
     if (kind.toneMap) return IsProductionScene(record, heartbeat);
     if (kind.lut) return IsProductionScene(record, heartbeat) && heartbeat.toneMapFamilyObserved;
     if (kind.temporal)
     {
-        // Unrelated TAA branches bind neutral b13; only scene/proxy lineage
+        // Unrelated TAA branches bind neutral b13; only selected scene lineage
         // may undo and restore production UI-relative transport around history.
-        return IsProductionTemporal(record, heartbeat);
+        return IsProductionTemporal(context, record, heartbeat);
     }
     // Video uses the fixed b13 layout without claiming the gameplay heartbeat.
     return true;
@@ -776,7 +563,7 @@ public:
         const auto heartbeat = g_heartbeat.Evaluate(
             g_evidence.resourceGeneration.load(std::memory_order_acquire), g_frame);
         lut_ = kind.lut;
-        production_ = IsProductionDraw(kind, record, configurationMatches, heartbeat);
+        production_ = IsProductionDraw(context_, record, configurationMatches, heartbeat);
         BindProductionInputs(record, kind.toneMap);
     }
 
@@ -833,7 +620,7 @@ private:
     void BindFallback() noexcept
     {
         MarkWeatherResponseBypassed();
-        g_referenceHealthy = false;
+        g_productionHealthy = false;
         RecordFailure(GraphicsObservationFailure::requiredHeartbeatMissing);
         production_ = false;
         // This draw must not sample the operator LUT with incomplete
@@ -971,26 +758,17 @@ private:
     bool preparedBound_{};
 };
 
-void CloseRetainedArmorReplacement(const DrawObservation& record) noexcept
+void CloseConflictingArmorDraw(const DrawObservation& record, bool sharedUiRejected) noexcept
 {
-    if (record.currentReplacementActive)
+    if (g_armor.armorEncodedSharedSrgb ? sharedUiRejected : record.currentReplacementActive)
     {
         ArmorUiScopeToken outer{};
         outer.serial = g_armor.armorEncodedScope;
         ArmorEncodedBoundary(outer, false);
         g_armor.armorEncodedFailed = true;
-        g_armor.armorEncodedStatus = "Disabled: retained scene replacement inside armor scope";
+        if (g_referenceHealthy)
+            g_armor.armorEncodedStatus = "Rejected frame: conflicting draw inside armor scope";
     }
-}
-
-void RecordNativeUiCapture(NativeUiCaptureKind kind) noexcept
-{
-    if (kind == NativeUiCaptureKind::backdrop)
-        g_evidence.nativeUiBackdropCaptureDrawCount.fetch_add(
-            1, std::memory_order_relaxed);
-    else
-        g_evidence.nativeUiCaptureDrawCount.fetch_add(
-            1, std::memory_order_relaxed);
 }
 
 void RecordProductionDraw(const ScopedProductionBindings& operatorBindings) noexcept
@@ -999,16 +777,19 @@ void RecordProductionDraw(const ScopedProductionBindings& operatorBindings) noex
         ObserveQualifiedSettingsDrawThread();
     if (operatorBindings.UsesProductionOperator())
     {
-        g_scene.productionOperatorApplied = true;
         g_evidence.productionOperatorDrawCount.fetch_add(
             1, std::memory_order_relaxed);
     }
 }
 
+void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    ObservePipboyScreenDraw(context, record);
+}
+
 void ExecuteObservedDraw(
     DrawObservation& record,
     ID3D11DeviceContext* context,
-    bool exactIndexedQuad,
     const DrawInvocation& draw) noexcept
 {
     if (context != g_rendererDevice.activeContext)
@@ -1016,41 +797,38 @@ void ExecuteObservedDraw(
         draw();
         return;
     }
-    if (g_armor.armorEncodedActive && context == g_rendererDevice.activeContext)
+    const bool expectedShader = ValidateExpectedShaderBinding(context, record);
+    const bool sharedUiRejected = ObserveSharedUiDraw(record);
+    if (g_armor.armorEncodedActive)
     {
-        CloseRetainedArmorReplacement(record);
+        CloseConflictingArmorDraw(record, sharedUiRejected);
         draw();
-        ObservePipboyScreenDraw(context, record);
+        ObserveCompletedNativeDraw(context, record);
         return;
     }
-    if (!ValidateExpectedShaderBinding(context, record))
+    if (!expectedShader)
     {
         draw();
-        ObservePipboyScreenDraw(context, record);
+        ObserveCompletedNativeDraw(context, record);
         return;
     }
-    {
-        ScopedGameUiCapture gameUiCapture(
-            context, record, exactIndexedQuad);
-        if (gameUiCapture.Active())
-        {
-            RecordNativeUiCapture(gameUiCapture.Kind());
-            draw();
-            ObservePipboyScreenDraw(context, record);
-            return;
-        }
-    }
+    bool productionOperatorApplied{};
+    SharedUiWriteEvidence write;
     {
         ScopedProductionBindings operatorBindings(context, record);
+        write = CaptureSharedUiWrite(record.currentPass == RenoDxShaderPass::lut &&
+            operatorBindings.UsesProductionOperator(), operatorBindings.UsesProductionSettings() ?
+                g_replacements.configurationKey.uiTransportWhiteNits : 0.0F);
         {
             ScopedNativeReferenceDraw grading(context, record,
                 operatorBindings.UsesProductionSettings());
             draw();
         }
-        ObservePipboyScreenDraw(context, record);
+        ObserveCompletedNativeDraw(context, record);
         RecordProductionDraw(operatorBindings);
+        productionOperatorApplied = operatorBindings.UsesProductionOperator();
     }
-    try { ObserveCompletedDraw(context, record); }
+    try { ObserveCompletedDraw(context, record, productionOperatorApplied, write); }
     catch (...) { RecordAbiException(); }
 }
 

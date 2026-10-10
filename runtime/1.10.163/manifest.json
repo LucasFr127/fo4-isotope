@@ -8,6 +8,27 @@
     "addressLibraryFile": "version-1-10-163-0.bin",
     "status": "runtime-pinned-unvalidated"
   },
+  "experimentalScreenUiObserver": {
+    "status": "unvalidated",
+    "scope": "screen-space-ui-encoded-entry",
+    "abi": "void(UI*)",
+    "authorityGap": "Pinned CommonLibF4 owns UI, IMenu and BSScaleformRenderer layouts and the screen-space render reason, but has no named mapping for this screen-space submission routine or its four callers.",
+    "evidenceQualification": "Static review of retained runtime-1.10.163 loaded text and exact Address Library mappings; live loaded fingerprints are checked before mutation. Current-artifact native validation remains pending.",
+    "lifetime": "Each profiled direct call passes the UI singleton in RCX and ignores RAX. The callee prepares the screen target, iterates menus passing render reason 2 under the native stack lock, and submits the cursor. The shim only forwards UI* and retains no engine pointer.",
+    "thread": "Synchronous entry scope on the observed current thread. Graphics independently requires the active immediate context and compatible Present thread before injection.",
+    "completion": "Scope return is not a GPU completion claim: subsequent native PostDisplay and deferred Scaleform work may draw after it. The shared image remains encoded until the same Present; later scene producers, copies, clears and stale identities retain rejection.",
+    "target": {
+      "addressLibraryId": 230711,
+      "rva": "0x02043A80",
+      "expectedBytes": [72, 137, 92, 36, 8, 72, 137, 116, 36, 24, 87, 72, 131, 236, 32, 139, 21, 31, 13, 111, 4, 101, 72, 139, 4, 37, 88, 0, 0, 0, 72, 139]
+    },
+    "calls": [
+      { "callerAddressLibraryId": 1422240, "callerRva": "0x00D3E4D0", "rva": "0x00D3E4DB", "expectedBytes": [232, 160, 85, 48, 1] },
+      { "callerAddressLibraryId": 135719, "callerRva": "0x01297BE0", "rva": "0x01298000", "expectedBytes": [232, 123, 186, 218, 0] },
+      { "callerAddressLibraryId": 408683, "callerRva": "0x00D3CBE0", "rva": "0x00D3CDE9", "expectedBytes": [232, 146, 108, 48, 1] },
+      { "callerAddressLibraryId": 1075087, "callerRva": "0x00D38700", "rva": "0x00D389B6", "expectedBytes": [232, 197, 176, 48, 1] }
+    ]
+  },
   "experimentalArmorUiObserver": {
     "status": "unvalidated",
     "scope": "power-armor-encoded-peak-composition",
@@ -15,6 +36,91 @@
     "lifetime": "native-caller-registry-read-lock; passed-renderer-fields-only; no-root-dereference",
     "thread": "observed-current-thread; synchronous-scope; context-type-unverified",
     "authorityGap": "Pinned CommonLibF4 has Renderer layout but no named mapping for these two screen-submission calls or their callee.",
+    "hudRendererIdentity": {
+      "status": "static-reviewed-native-unvalidated",
+      "comparison": "non-null-native-pooled-entry-pointer",
+      "authorityGap": "Pinned CommonLibF4 has the pooled-string layout but no named mappings for the canonical HUD key and getter or the native HUD registration and key lifetime contract.",
+      "keyStorageAddressLibraryId": 1008555,
+      "keyStorageRva": "0x06577910",
+      "keyStorageSection": ".data",
+      "keyGetterAddressLibraryId": 1111569,
+      "keyGetterRva": "0x0204B490",
+      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 124, 196, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 102, 196, 82, 4],
+      "modelConstructorRva": "0x00A02DF0",
+      "modelSetupRva": "0x00A030A0",
+      "modelDestructorRva": "0x00A02F50",
+      "lifetime": "Game-owned canonical BSFixedString global; lazy initialization precedes named HUD renderer creation; key survives HUD model recreation and releases only at process shutdown. Native submission callers retain the renderer registry read lock; compare invocation-local pooled entries without retaining or acquiring them.",
+      "semantics": "HUDScreenModel constructs and stores this key, creates the uniquely named renderer, attaches its screen root and sets postAA. The observer still requires the actual renderer root and postAA flags at the shared composition boundary.",
+      "evidenceQualification": "Static review of a retained loaded 1.10.163 image; not pristine-text parity or current-artifact in-game validation."
+    },
+    "flatRendererIdentity": {
+      "status": "static-reviewed-native-unvalidated",
+      "comparison": "non-null-native-pooled-entry-pointer",
+      "authorityGap": "Pinned CommonLibF4 has FlatScreenModel layout, singleton and vtable mappings but no named mappings for its canonical renderer key and getter or the native registration and key lifetime contract.",
+      "keyStorageAddressLibraryId": 1540821,
+      "keyStorageRva": "0x065778B0",
+      "keyStorageSection": ".data",
+      "keyGetterAddressLibraryId": 607213,
+      "keyGetterRva": "0x0204B2B0",
+      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 252, 197, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 230, 197, 82, 4],
+      "modelConstructorRva": "0x00A01D00",
+      "modelSetupRva": "0x00A01FB0",
+      "modelDestructorRva": "0x00A01E60",
+      "lifetime": "Game-owned canonical BSFixedString global; lazy initialization precedes named Flat renderer creation; key survives model recreation and releases only at process shutdown. Native submission callers retain the renderer registry read lock; compare invocation-local pooled entries without retaining or acquiring them.",
+      "semantics": "FlatScreenModel stores this key in customRendererName, creates its uniquely named renderer, attaches its screen root and sets postAA. Model destruction releases its renderer and model key independently of the canonical global. The observer still publishes the actual renderer root and postAA flags for boundary qualification.",
+      "evidenceQualification": "Static review of a retained loaded 1.10.163 image; not pristine-text parity or current-artifact in-game validation."
+    },
+    "armorRendererIdentity": {
+      "status": "static-reviewed-native-unvalidated",
+      "comparison": "non-null-native-pooled-entry-pointer",
+      "authorityGap": "Pinned CommonLibF4 owns PowerArmorGeometry and Renderer layouts but has no named mappings for the canonical armor renderer key and getter or their native registration and key lifetime contract.",
+      "keyStorageAddressLibraryId": 853048,
+      "keyStorageRva": "0x05ADB9F0",
+      "keyStorageSection": ".data",
+      "keyGetterAddressLibraryId": 160459,
+      "keyGetterRva": "0x0127D8E0",
+      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 12, 225, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 246, 224, 133, 4],
+      "modelConstructorRva": "0x01279EA0",
+      "modelSetupRva": "0x0127B640",
+      "modelDestructorRva": "0x0127A000",
+      "lifetime": "Game-owned canonical BSFixedString global; lazy initialization precedes named armor renderer creation; key survives geometry and renderer recreation and releases only at process shutdown RVA 0x02BF1B40. Native submission callers retain the renderer registry read lock; compare invocation-local pooled entries without retaining or acquiring them.",
+      "semantics": "PowerArmorGeometry creates the uniquely named PowerArmorRenderer at depth 6, attaches paDashDials through SetScreenAttachedRoot, sets postAA and HUDGlass postFX, and disables deferral. PowerArmorHUDMenu separately copies the same canonical key into its customRendererName. The observer still publishes the actual renderer root and postAA flags. Armor and rain have equal depth with no stable relative order contract.",
+      "evidenceQualification": "Static review of a retained loaded 1.10.163 image and exact Address Library mappings; not pristine-text parity or current-artifact in-game validation."
+    },
+    "rainRendererIdentity": {
+      "status": "static-reviewed-native-unvalidated",
+      "comparison": "non-null-native-pooled-entry-pointer",
+      "authorityGap": "Pinned CommonLibF4 owns PowerArmorGeometry and Renderer layouts but has no named mappings for the canonical rain renderer key and getter or their native registration and key lifetime contract.",
+      "keyStorageAddressLibraryId": 1291816,
+      "keyStorageRva": "0x05ADBA00",
+      "keyStorageSection": ".data",
+      "keyGetterAddressLibraryId": 1210792,
+      "keyGetterRva": "0x0127D940",
+      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 188, 224, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 166, 224, 133, 4],
+      "modelConstructorRva": "0x01279EA0",
+      "modelSetupRva": "0x0127AE00",
+      "modelDestructorRva": "0x0127A000",
+      "lifetime": "Game-owned canonical BSFixedString global; lazy initialization precedes named rain renderer creation; key survives geometry and renderer recreation and releases only at process shutdown RVA 0x02BF1B00. Native submission callers retain the renderer registry read lock; compare invocation-local pooled entries without retaining or acquiring them.",
+      "semantics": "PowerArmorGeometry creates the uniquely named HUDRainRenderer at depth 6, attaches pipboyPAGlass through SetScreenAttachedRoot and sets postAA without deferral or postFX. It disables render-target and main/offscreen-depth clears. The observer still publishes the actual renderer root and postAA flags. Rain and armor have equal depth with no stable relative order contract.",
+      "evidenceQualification": "Static review of a retained loaded 1.10.163 image and exact Address Library mappings; not pristine-text parity or current-artifact in-game validation."
+    },
+    "workshopRendererIdentity": {
+      "status": "static-reviewed-native-unvalidated",
+      "comparison": "non-null-native-pooled-entry-pointer",
+      "authorityGap": "Pinned CommonLibF4 owns the native renderer and pooled-string layouts but has no named mappings for the canonical Workshop renderer key and its eager initializer or their registration and lifetime contract.",
+      "keyStorageAddressLibraryId": 795819,
+      "keyStorageRva": "0x05A69168",
+      "keyStorageSection": ".data",
+      "keyInitializerAddressLibraryId": 1434874,
+      "keyInitializerRva": "0x02A8E510",
+      "keyInitializerExpectedBytes": [72, 131, 236, 40, 72, 141, 21, 253, 173, 41, 0, 72, 141, 13, 70, 172, 253, 2, 232, 25, 56, 11, 255, 72, 141, 13, 210, 61, 20, 0, 72, 131, 196, 40, 233, 149, 134, 234, 255],
+      "keyDestructorRva": "0x02BD2300",
+      "rendererSetupRva": "0x00BF7630",
+      "menuDestructorRva": "0x00BEF1E0",
+      "lifetime": "Game-owned canonical BSFixedString global initialized eagerly before named Workshop renderer creation; the initializer registers a dedicated process-shutdown destructor. Workshop menu destruction disables and releases the named renderer independently of this global. Native submission callers retain the renderer registry read lock; compare invocation-local pooled entries without retaining or acquiring them.",
+      "semantics": "Native Workshop geometry creates WorkshopMenu3D at depth 1, attaches its screen root and sets postAA and full premultiplied alpha. The observer still requires the actual root and postAA flags and native presentation target argument zero. Observed workshop submission precedes HUD and Flat in both tutorial states, so shared composition begins before its first public-image draw.",
+      "evidenceQualification": "Static review of a retained loaded 1.10.163 image and exact Address Library mappings, correlated with complete workshop submission traces. Not pristine-text parity or current-artifact in-game color validation."
+    },
     "target": {
       "addressLibraryId": 495082,
       "rva": "0x00AE8780",
@@ -82,33 +188,7 @@
     "target": {
       "addressLibraryId": 1388477,
       "rva": "0x028C8B30",
-      "expectedBytes": [
-        72,
-        137,
-        92,
-        36,
-        16,
-        72,
-        137,
-        108,
-        36,
-        24,
-        86,
-        87,
-        65,
-        84,
-        65,
-        86,
-        65,
-        87,
-        72,
-        129,
-        236,
-        160,
-        0,
-        0,
-        0
-      ]
+      "expectedBytes": [72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0]
     }
   },
   "imageSpaceObserver": {
@@ -117,6 +197,12 @@
     "authorityGap": "Pinned CommonLibF4 exposes ImageSpace records and LUT data but omits the weather accumulation, room overwrite and manager transfer call mappings.",
     "lifetime": "Immutable game-data catalog owns record identities and normalized native LUT paths; invocation-local collection and fixed synchronized publication own all copied values.",
     "thread": "Producer, transfer and Gamma callbacks may use different threads. Scoped writer counts and revisions reject overlapping or stale publications; payload copies use one try-lock attempt. Room mutation spans the blend call through its LUT setter.",
+    "weatherGrade": {
+      "sunlightColorIndex": 4,
+      "glareColorIndex": 15,
+      "rgbByteShifts": [0, 8, 16],
+      "loadedColorSemantics": "NAM0 clears the full color array before copying eight-slot data or expanding legacy four-slot data with bytewise neighboring-slot means. DALC legacy data similarly expands to eight initialized slots. Loaded black is valid; serialized leaf absence is not a runtime missing-value marker."
+    },
     "globals": {
       "lut": {
         "addressLibraryId": 635754,
@@ -363,21 +449,20 @@
           1
         ]
       }
-    ],
-    "weatherGrade": {
-      "sunlightColorIndex": 4,
-      "glareColorIndex": 15,
-      "rgbByteShifts": [
-        0,
-        8,
-        16
-      ],
-      "loadedColorSemantics": "NAM0 clears the full color array before copying eight-slot data or expanding legacy four-slot data with bytewise neighboring-slot means. DALC legacy data similarly expands to eight initialized slots. Loaded black is valid; serialized leaf absence is not a runtime missing-value marker."
-    }
+    ]
   },
   "shaderSetId": "fo4-1.10.163-uninitialized",
   "semanticStages": [],
   "shaders": [
+    {
+      "name": "native-scene-composite",
+      "stage": "pixel",
+      "dxbcHash": "f97c127c-d49c4526-1a87d341-2a3edc35",
+      "signal": "linear-bt709-relative",
+      "draw": { "kind": "indexed", "indexCount": 3 },
+      "target": { "format": "R16G16B16A16_FLOAT", "extent": "presentation" },
+      "role": "initialize-depth-tested-scene-target"
+    },
     {
       "name": "late-game-ui-composite",
       "stage": "pixel",
@@ -405,6 +490,16 @@
   "resourceRules": [],
   "commonlibObservation": {
     "status": "runtime-validated",
+    "uiInteractionProfile": {
+      "status": "static-reviewed-native-unvalidated",
+      "event": "RE::MenuModeChangeEvent",
+      "semantics": "enteringMenuMode reports UI::menuMode crossing zero; only menus with kPausesGame contribute, not every kModal menu",
+      "notificationRvas": ["0x02042A2C", "0x020430DB", "0x0204422F"],
+      "cursorMenuConstructorRva": "0x0126AB10",
+      "cursorMenuFlags": "0x02800800",
+      "evidenceQualification": "Static review of retained loaded 1.10.163 text; not pristine-text parity or current-artifact in-game validation. Cursor registration and CursorMenu construction do not contribute a pausing-menu count in the inspected paths.",
+      "coverageLimit": "Nonpausing modal interfaces and external overlays require a separate qualified interaction seam. Initial unknown state rejects new ownership until the first authoritative event."
+    },
     "relocationSource": {
       "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
       "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
@@ -423,11 +518,6 @@
             "include/RE/I/ImageSpaceLUTData.h",
             "include/RE/N/NiTArray.h"
           ]
-        },
-        "xeditFieldAliases": {
-          "repository": "https://github.com/TES5Edit/TES5Edit.git",
-          "commit": "ca51ca1b67c2e84965c56d9163cec2acf20d6722",
-          "path": "wbDefinitionsFO4.pas"
         }
       },
       "managerSize": 440,
@@ -462,348 +552,92 @@
       },
       "topLevelEffectCount": 72,
       "effects": [
-        {
-          "index": 0,
-          "symbol": "EFFECT_WORLD_CAMERA"
-        },
-        {
-          "index": 1,
-          "symbol": "EFFECT_TEMPORAL_AA_PRE_HDR"
-        },
-        {
-          "index": 2,
-          "symbol": "EFFECT_SUNBEAMS"
-        },
-        {
-          "index": 3,
-          "symbol": "EFFECT_HDR"
-        },
-        {
-          "index": 4,
-          "symbol": "EFFECT_HDR_CS"
-        },
-        {
-          "index": 5,
-          "symbol": "EFFECT_REFRACTION"
-        },
-        {
-          "index": 6,
-          "symbol": "EFFECT_DEPTH_OF_FIELD"
-        },
-        {
-          "index": 7,
-          "symbol": "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN"
-        },
-        {
-          "index": 8,
-          "symbol": "EFFECT_RADIAL_BLUR"
-        },
-        {
-          "index": 9,
-          "symbol": "EFFECT_FULLSCREEN_BLUR"
-        },
-        {
-          "index": 10,
-          "symbol": "EFFECT_MOTIONBLUR"
-        },
-        {
-          "index": 11,
-          "symbol": "EFFECT_GETHIT"
-        },
-        {
-          "index": 12,
-          "symbol": "EFFECT_VATS_TARGET"
-        },
-        {
-          "index": 13,
-          "symbol": "EFFECT_FULLSCREEN_COLOR"
-        },
-        {
-          "index": 14,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT"
-        },
-        {
-          "index": 15,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_LUT"
-        },
-        {
-          "index": 16,
-          "symbol": "EFFECT_SHADER_GAMMA_CORRECT_RESIZE"
-        },
-        {
-          "index": 17,
-          "symbol": "EFFECT_SHADER_FXAA"
-        },
-        {
-          "index": 18,
-          "symbol": "EFFECT_TEMPORAL_AA"
-        },
-        {
-          "index": 19,
-          "symbol": "EFFECT_TEMPORAL_OLD_AA"
-        },
-        {
-          "index": 20,
-          "symbol": "EFFECT_BOKEH_DEPTH_OF_FIELD"
-        },
-        {
-          "index": 21,
-          "symbol": "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION"
-        },
-        {
-          "index": 22,
-          "symbol": "EFFECT_MAP"
-        },
-        {
-          "index": 23,
-          "symbol": "EFFECT_BLUR3"
-        },
-        {
-          "index": 24,
-          "symbol": "EFFECT_BLUR5"
-        },
-        {
-          "index": 25,
-          "symbol": "EFFECT_BLUR7"
-        },
-        {
-          "index": 26,
-          "symbol": "EFFECT_BLUR9"
-        },
-        {
-          "index": 27,
-          "symbol": "EFFECT_BLUR11"
-        },
-        {
-          "index": 28,
-          "symbol": "EFFECT_BLUR13"
-        },
-        {
-          "index": 29,
-          "symbol": "EFFECT_BLUR15"
-        },
-        {
-          "index": 30,
-          "symbol": "EFFECT_NONHDR_BLUR3"
-        },
-        {
-          "index": 31,
-          "symbol": "EFFECT_NONHDR_BLUR5"
-        },
-        {
-          "index": 32,
-          "symbol": "EFFECT_NONHDR_BLUR7"
-        },
-        {
-          "index": 33,
-          "symbol": "EFFECT_NONHDR_BLUR9"
-        },
-        {
-          "index": 34,
-          "symbol": "EFFECT_NONHDR_BLUR11"
-        },
-        {
-          "index": 35,
-          "symbol": "EFFECT_NONHDR_BLUR13"
-        },
-        {
-          "index": 36,
-          "symbol": "EFFECT_NONHDR_BLUR15"
-        },
-        {
-          "index": 37,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR3"
-        },
-        {
-          "index": 38,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR5"
-        },
-        {
-          "index": 39,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR7"
-        },
-        {
-          "index": 40,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR9"
-        },
-        {
-          "index": 41,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR11"
-        },
-        {
-          "index": 42,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR13"
-        },
-        {
-          "index": 43,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR15"
-        },
-        {
-          "index": 44,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS"
-        },
-        {
-          "index": 45,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS"
-        },
-        {
-          "index": 46,
-          "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS"
-        },
-        {
-          "index": 47,
-          "symbol": "EFFECT_BLUR3_480x270CS"
-        },
-        {
-          "index": 48,
-          "symbol": "EFFECT_BLUR5_480x270CS"
-        },
-        {
-          "index": 49,
-          "symbol": "EFFECT_BLUR7_480x270CS"
-        },
-        {
-          "index": 50,
-          "symbol": "EFFECT_BLUR9_480x270CS"
-        },
-        {
-          "index": 51,
-          "symbol": "EFFECT_BLUR11_480x270CS"
-        },
-        {
-          "index": 52,
-          "symbol": "EFFECT_BLUR13_480x270CS"
-        },
-        {
-          "index": 53,
-          "symbol": "EFFECT_BLUR15_480x270CS"
-        },
-        {
-          "index": 54,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR3_480x270CS"
-        },
-        {
-          "index": 55,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR5_480x270CS"
-        },
-        {
-          "index": 56,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR7_480x270CS"
-        },
-        {
-          "index": 57,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR9_480x270CS"
-        },
-        {
-          "index": 58,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR11_480x270CS"
-        },
-        {
-          "index": 59,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR13_480x270CS"
-        },
-        {
-          "index": 60,
-          "symbol": "EFFECT_BRIGHTPASS_BLUR15_480x270CS"
-        },
-        {
-          "index": 61,
-          "symbol": "EFFECT_WATER_DISPLACEMENT"
-        },
-        {
-          "index": 62,
-          "symbol": "EFFECT_NOISE"
-        },
-        {
-          "index": 63,
-          "symbol": "EFFECT_RAINSPLASH"
-        },
-        {
-          "index": 64,
-          "symbol": "EFFECT_VLS_LIGHT"
-        },
-        {
-          "index": 65,
-          "symbol": "EFFECT_VLS"
-        },
-        {
-          "index": 66,
-          "symbol": "EFFECT_PIPBOY_SCREEN"
-        },
-        {
-          "index": 67,
-          "symbol": "EFFECT_HUD_GLASS"
-        },
-        {
-          "index": 68,
-          "symbol": "EFFECT_MOD_MENU"
-        },
-        {
-          "index": 69,
-          "symbol": "EFFECT_AO"
-        },
-        {
-          "index": 70,
-          "symbol": "EFFECT_SAO"
-        },
-        {
-          "index": 71,
-          "symbol": "EFFECT_SAO_CS"
-        }
+        { "index": 0, "symbol": "EFFECT_WORLD_CAMERA" },
+        { "index": 1, "symbol": "EFFECT_TEMPORAL_AA_PRE_HDR" },
+        { "index": 2, "symbol": "EFFECT_SUNBEAMS" },
+        { "index": 3, "symbol": "EFFECT_HDR" },
+        { "index": 4, "symbol": "EFFECT_HDR_CS" },
+        { "index": 5, "symbol": "EFFECT_REFRACTION" },
+        { "index": 6, "symbol": "EFFECT_DEPTH_OF_FIELD" },
+        { "index": 7, "symbol": "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN" },
+        { "index": 8, "symbol": "EFFECT_RADIAL_BLUR" },
+        { "index": 9, "symbol": "EFFECT_FULLSCREEN_BLUR" },
+        { "index": 10, "symbol": "EFFECT_MOTIONBLUR" },
+        { "index": 11, "symbol": "EFFECT_GETHIT" },
+        { "index": 12, "symbol": "EFFECT_VATS_TARGET" },
+        { "index": 13, "symbol": "EFFECT_FULLSCREEN_COLOR" },
+        { "index": 14, "symbol": "EFFECT_SHADER_GAMMA_CORRECT" },
+        { "index": 15, "symbol": "EFFECT_SHADER_GAMMA_CORRECT_LUT" },
+        { "index": 16, "symbol": "EFFECT_SHADER_GAMMA_CORRECT_RESIZE" },
+        { "index": 17, "symbol": "EFFECT_SHADER_FXAA" },
+        { "index": 18, "symbol": "EFFECT_TEMPORAL_AA" },
+        { "index": 19, "symbol": "EFFECT_TEMPORAL_OLD_AA" },
+        { "index": 20, "symbol": "EFFECT_BOKEH_DEPTH_OF_FIELD" },
+        { "index": 21, "symbol": "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION" },
+        { "index": 22, "symbol": "EFFECT_MAP" },
+        { "index": 23, "symbol": "EFFECT_BLUR3" },
+        { "index": 24, "symbol": "EFFECT_BLUR5" },
+        { "index": 25, "symbol": "EFFECT_BLUR7" },
+        { "index": 26, "symbol": "EFFECT_BLUR9" },
+        { "index": 27, "symbol": "EFFECT_BLUR11" },
+        { "index": 28, "symbol": "EFFECT_BLUR13" },
+        { "index": 29, "symbol": "EFFECT_BLUR15" },
+        { "index": 30, "symbol": "EFFECT_NONHDR_BLUR3" },
+        { "index": 31, "symbol": "EFFECT_NONHDR_BLUR5" },
+        { "index": 32, "symbol": "EFFECT_NONHDR_BLUR7" },
+        { "index": 33, "symbol": "EFFECT_NONHDR_BLUR9" },
+        { "index": 34, "symbol": "EFFECT_NONHDR_BLUR11" },
+        { "index": 35, "symbol": "EFFECT_NONHDR_BLUR13" },
+        { "index": 36, "symbol": "EFFECT_NONHDR_BLUR15" },
+        { "index": 37, "symbol": "EFFECT_BRIGHTPASS_BLUR3" },
+        { "index": 38, "symbol": "EFFECT_BRIGHTPASS_BLUR5" },
+        { "index": 39, "symbol": "EFFECT_BRIGHTPASS_BLUR7" },
+        { "index": 40, "symbol": "EFFECT_BRIGHTPASS_BLUR9" },
+        { "index": 41, "symbol": "EFFECT_BRIGHTPASS_BLUR11" },
+        { "index": 42, "symbol": "EFFECT_BRIGHTPASS_BLUR13" },
+        { "index": 43, "symbol": "EFFECT_BRIGHTPASS_BLUR15" },
+        { "index": 44, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS" },
+        { "index": 45, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS" },
+        { "index": 46, "symbol": "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS" },
+        { "index": 47, "symbol": "EFFECT_BLUR3_480x270CS" },
+        { "index": 48, "symbol": "EFFECT_BLUR5_480x270CS" },
+        { "index": 49, "symbol": "EFFECT_BLUR7_480x270CS" },
+        { "index": 50, "symbol": "EFFECT_BLUR9_480x270CS" },
+        { "index": 51, "symbol": "EFFECT_BLUR11_480x270CS" },
+        { "index": 52, "symbol": "EFFECT_BLUR13_480x270CS" },
+        { "index": 53, "symbol": "EFFECT_BLUR15_480x270CS" },
+        { "index": 54, "symbol": "EFFECT_BRIGHTPASS_BLUR3_480x270CS" },
+        { "index": 55, "symbol": "EFFECT_BRIGHTPASS_BLUR5_480x270CS" },
+        { "index": 56, "symbol": "EFFECT_BRIGHTPASS_BLUR7_480x270CS" },
+        { "index": 57, "symbol": "EFFECT_BRIGHTPASS_BLUR9_480x270CS" },
+        { "index": 58, "symbol": "EFFECT_BRIGHTPASS_BLUR11_480x270CS" },
+        { "index": 59, "symbol": "EFFECT_BRIGHTPASS_BLUR13_480x270CS" },
+        { "index": 60, "symbol": "EFFECT_BRIGHTPASS_BLUR15_480x270CS" },
+        { "index": 61, "symbol": "EFFECT_WATER_DISPLACEMENT" },
+        { "index": 62, "symbol": "EFFECT_NOISE" },
+        { "index": 63, "symbol": "EFFECT_RAINSPLASH" },
+        { "index": 64, "symbol": "EFFECT_VLS_LIGHT" },
+        { "index": 65, "symbol": "EFFECT_VLS" },
+        { "index": 66, "symbol": "EFFECT_PIPBOY_SCREEN" },
+        { "index": 67, "symbol": "EFFECT_HUD_GLASS" },
+        { "index": 68, "symbol": "EFFECT_MOD_MENU" },
+        { "index": 69, "symbol": "EFFECT_AO" },
+        { "index": 70, "symbol": "EFFECT_SAO" },
+        { "index": 71, "symbol": "EFFECT_SAO_CS" }
       ],
       "activeData": [
-        {
-          "field": "eyeAdaptSpeed",
-          "offset": 128
-        },
-        {
-          "field": "bloomBlurRadius",
-          "offset": 132,
-          "xeditAlias": "Tonemap E"
-        },
-        {
-          "field": "bloomThreshold",
-          "offset": 136
-        },
-        {
-          "field": "bloomScale",
-          "offset": 140
-        },
-        {
-          "field": "receiveBloomThreshold",
-          "offset": 144,
-          "xeditAlias": "Auto Exposure Max"
-        },
-        {
-          "field": "white",
-          "offset": 148,
-          "xeditAlias": "Auto Exposure Min"
-        },
-        {
-          "field": "sunlightScale",
-          "offset": 152
-        },
-        {
-          "field": "skyScale",
-          "offset": 156
-        },
-        {
-          "field": "eyeAdaptStrength",
-          "offset": 160,
-          "xeditAlias": "Middle Gray"
-        },
-        {
-          "field": "cinematicSaturation",
-          "offset": 164
-        },
-        {
-          "field": "cinematicBrightness",
-          "offset": 168
-        },
-        {
-          "field": "cinematicContrast",
-          "offset": 172
-        }
+        { "field": "eyeAdaptSpeed", "offset": 128 },
+        { "field": "bloomBlurRadius", "offset": 132, "xeditAlias": "Tonemap E" },
+        { "field": "bloomThreshold", "offset": 136 },
+        { "field": "bloomScale", "offset": 140 },
+        { "field": "receiveBloomThreshold", "offset": 144, "xeditAlias": "Auto Exposure Max" },
+        { "field": "white", "offset": 148, "xeditAlias": "Auto Exposure Min" },
+        { "field": "sunlightScale", "offset": 152 },
+        { "field": "skyScale", "offset": 156 },
+        { "field": "eyeAdaptStrength", "offset": 160, "xeditAlias": "Middle Gray" },
+        { "field": "cinematicSaturation", "offset": 164 },
+        { "field": "cinematicBrightness", "offset": 168 },
+        { "field": "cinematicContrast", "offset": 172 }
       ]
     },
     "relocations": [

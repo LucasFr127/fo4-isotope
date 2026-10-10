@@ -49,6 +49,90 @@
     }
   },
   "properties": {
+    "experimentalScreenUiObserver": {
+      "type": "object",
+      "required": [
+        "status",
+        "scope",
+        "abi",
+        "authorityGap",
+        "evidenceQualification",
+        "lifetime",
+        "thread",
+        "completion",
+        "target",
+        "calls"
+      ],
+      "properties": {
+        "status": {
+          "const": "unvalidated"
+        },
+        "scope": {
+          "const": "screen-space-ui-encoded-entry"
+        },
+        "abi": {
+          "const": "void(UI*)"
+        },
+        "authorityGap": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidenceQualification": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifetime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thread": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "object",
+          "required": [
+            "addressLibraryId",
+            "rva",
+            "expectedBytes"
+          ],
+          "properties": {
+            "addressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rva": {
+              "type": "string",
+              "pattern": "^0x[0-9A-Fa-f]{8}$"
+            },
+            "expectedBytes": {
+              "type": "array",
+              "minItems": 32,
+              "maxItems": 32,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "calls": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/properties/experimentalArmorUiObserver/properties/calls/items"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "imageSpaceObserver": {
       "type": "object",
       "required": [
@@ -57,10 +141,10 @@
         "authorityGap",
         "lifetime",
         "thread",
+        "weatherGrade",
         "globals",
         "targets",
-        "calls",
-        "weatherGrade"
+        "calls"
       ],
       "properties": {
         "status": {
@@ -80,6 +164,35 @@
         "thread": {
           "type": "string",
           "minLength": 1
+        },
+        "weatherGrade": {
+          "type": "object",
+          "required": [
+            "sunlightColorIndex",
+            "glareColorIndex",
+            "rgbByteShifts",
+            "loadedColorSemantics"
+          ],
+          "properties": {
+            "sunlightColorIndex": {
+              "const": 4
+            },
+            "glareColorIndex": {
+              "const": 15
+            },
+            "rgbByteShifts": {
+              "const": [
+                0,
+                8,
+                16
+              ]
+            },
+            "loadedColorSemantics": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         },
         "globals": {
           "type": "object",
@@ -189,35 +302,6 @@
             },
             "additionalProperties": false
           }
-        },
-        "weatherGrade": {
-          "type": "object",
-          "required": [
-            "sunlightColorIndex",
-            "glareColorIndex",
-            "rgbByteShifts",
-            "loadedColorSemantics"
-          ],
-          "properties": {
-            "sunlightColorIndex": {
-              "const": 4
-            },
-            "glareColorIndex": {
-              "const": 15
-            },
-            "rgbByteShifts": {
-              "const": [
-                0,
-                8,
-                16
-              ]
-            },
-            "loadedColorSemantics": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -299,6 +383,11 @@
         "lifetime",
         "thread",
         "authorityGap",
+        "hudRendererIdentity",
+        "flatRendererIdentity",
+        "armorRendererIdentity",
+        "rainRendererIdentity",
+        "workshopRendererIdentity",
         "target",
         "calls"
       ],
@@ -323,6 +412,187 @@
         "authorityGap": {
           "type": "string",
           "minLength": 1
+        },
+        "hudRendererIdentity": {
+          "type": "object",
+          "required": [
+            "status",
+            "comparison",
+            "authorityGap",
+            "keyStorageAddressLibraryId",
+            "keyStorageRva",
+            "keyStorageSection",
+            "keyGetterAddressLibraryId",
+            "keyGetterRva",
+            "keyGetterExpectedBytes",
+            "modelConstructorRva",
+            "modelSetupRva",
+            "modelDestructorRva",
+            "lifetime",
+            "semantics",
+            "evidenceQualification"
+          ],
+          "properties": {
+            "status": {
+              "const": "static-reviewed-native-unvalidated"
+            },
+            "comparison": {
+              "const": "non-null-native-pooled-entry-pointer"
+            },
+            "authorityGap": {
+              "type": "string",
+              "minLength": 1
+            },
+            "keyStorageAddressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "keyStorageRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "keyStorageSection": {
+              "const": ".data"
+            },
+            "keyGetterAddressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "keyGetterRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "keyGetterExpectedBytes": {
+              "type": "array",
+              "minItems": 26,
+              "maxItems": 26,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            },
+            "modelConstructorRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "modelSetupRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "modelDestructorRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "lifetime": {
+              "type": "string",
+              "minLength": 1
+            },
+            "semantics": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceQualification": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "flatRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/hudRendererIdentity"
+        },
+        "armorRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/hudRendererIdentity"
+        },
+        "rainRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/hudRendererIdentity"
+        },
+        "workshopRendererIdentity": {
+          "type": "object",
+          "required": [
+            "status",
+            "comparison",
+            "authorityGap",
+            "keyStorageAddressLibraryId",
+            "keyStorageRva",
+            "keyStorageSection",
+            "keyInitializerAddressLibraryId",
+            "keyInitializerRva",
+            "keyInitializerExpectedBytes",
+            "keyDestructorRva",
+            "rendererSetupRva",
+            "menuDestructorRva",
+            "lifetime",
+            "semantics",
+            "evidenceQualification"
+          ],
+          "properties": {
+            "status": {
+              "const": "static-reviewed-native-unvalidated"
+            },
+            "comparison": {
+              "const": "non-null-native-pooled-entry-pointer"
+            },
+            "authorityGap": {
+              "type": "string",
+              "minLength": 1
+            },
+            "keyStorageAddressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "keyStorageRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "keyStorageSection": {
+              "const": ".data"
+            },
+            "keyInitializerAddressLibraryId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "keyInitializerRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "keyInitializerExpectedBytes": {
+              "type": "array",
+              "minItems": 39,
+              "maxItems": 39,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            },
+            "keyDestructorRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "rendererSetupRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "menuDestructorRva": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{8}$"
+            },
+            "lifetime": {
+              "type": "string",
+              "minLength": 1
+            },
+            "semantics": {
+              "type": "string",
+              "minLength": 1
+            },
+            "evidenceQualification": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         },
         "target": {
           "type": "object",
@@ -527,6 +797,57 @@
             "runtime-validated"
           ]
         },
+        "uiInteractionProfile": {
+          "type": "object",
+          "required": [
+            "status",
+            "event",
+            "semantics",
+            "notificationRvas",
+            "cursorMenuConstructorRva",
+            "cursorMenuFlags",
+            "evidenceQualification",
+            "coverageLimit"
+          ],
+          "properties": {
+            "status": {
+              "const": "static-reviewed-native-unvalidated"
+            },
+            "event": {
+              "const": "RE::MenuModeChangeEvent"
+            },
+            "semantics": {
+              "type": "string",
+              "minLength": 1
+            },
+            "notificationRvas": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^0x[0-9A-Fa-f]{8}$"
+              }
+            },
+            "cursorMenuConstructorRva": {
+              "type": "string",
+              "pattern": "^0x[0-9A-Fa-f]{8}$"
+            },
+            "cursorMenuFlags": {
+              "type": "string",
+              "pattern": "^0x[0-9A-Fa-f]{8}$"
+            },
+            "evidenceQualification": {
+              "type": "string",
+              "minLength": 1
+            },
+            "coverageLimit": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
         "relocationSource": {
           "type": "object",
           "required": [
@@ -710,8 +1031,7 @@
             "sources": {
               "type": "object",
               "required": [
-                "commonlib",
-                "xeditFieldAliases"
+                "commonlib"
               ],
               "properties": {
                 "commonlib": {
@@ -737,26 +1057,6 @@
                         "include/RE/I/ImageSpaceLUTData.h",
                         "include/RE/N/NiTArray.h"
                       ]
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "xeditFieldAliases": {
-                  "type": "object",
-                  "required": [
-                    "repository",
-                    "commit",
-                    "path"
-                  ],
-                  "properties": {
-                    "repository": {
-                      "const": "https://github.com/TES5Edit/TES5Edit.git"
-                    },
-                    "commit": {
-                      "const": "ca51ca1b67c2e84965c56d9163cec2acf20d6722"
-                    },
-                    "path": {
-                      "const": "wbDefinitionsFO4.pas"
                     }
                   },
                   "additionalProperties": false

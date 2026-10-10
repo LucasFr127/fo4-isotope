@@ -14,6 +14,7 @@
 
 #include "HookRecords.hpp"
 #include "../FrameTrace.hpp"
+#include "../SharedUiFrame.hpp"
 #include "ContextHooks.hpp"
 #include "SwapChainHooks.hpp"
 #include "../DisplayDiscovery.hpp"
@@ -26,6 +27,7 @@
 #include "../ShaderRegistry.hpp"
 #include "../resources/HdrResourcePolicy.hpp"
 #include "../resources/PresentationResources.hpp"
+#include "../d3d11/PresentationSwapChain.hpp"
 
 #include <wrl/client.h>
 #include <Windows.h>
@@ -376,6 +378,27 @@ template <std::size_t Count>
     return true;
 }
 
+[[nodiscard]] bool PrepareSharedUiContextHooks(ContextRecord* record, void** current) noexcept
+{
+    if (g_configuration.productionRequested)
+    {
+        const std::array patches{
+            VtablePatch{kContextDispatch, reinterpret_cast<void*>(&HookDispatch)},
+            VtablePatch{kContextDispatchIndirect, reinterpret_cast<void*>(&HookDispatchIndirect)},
+            VtablePatch{kContextClearUnorderedAccessViewUint, reinterpret_cast<void*>(&HookClearUnorderedAccessViewUint)},
+            VtablePatch{kContextClearUnorderedAccessViewFloat, reinterpret_cast<void*>(&HookClearUnorderedAccessViewFloat)}};
+        if (!ValidateShadowPredecessors(current, patches)) return false;
+        for (const auto& patch : patches) record->shadow[patch.index] = patch.replacement;
+    }
+    record->nextDispatch = reinterpret_cast<Dispatch>(current[kContextDispatch]);
+    record->nextDispatchIndirect = reinterpret_cast<DispatchIndirect>(current[kContextDispatchIndirect]);
+    record->nextClearUnorderedAccessViewUint =
+        reinterpret_cast<ClearUnorderedAccessViewUint>(current[kContextClearUnorderedAccessViewUint]);
+    record->nextClearUnorderedAccessViewFloat =
+        reinterpret_cast<ClearUnorderedAccessViewFloat>(current[kContextClearUnorderedAccessViewFloat]);
+    return true;
+}
+
 [[nodiscard]] bool PrepareContextRecord(ContextRecord* record,
     void** current, std::size_t slots) noexcept
 {
@@ -403,7 +426,7 @@ template <std::size_t Count>
             std::span<void* const>(current, slots),
             std::span<void*>(record->shadow.data(), slots), patches))
         return false;
-    if (FrameTraceRequested())
+    if (FrameTraceRequested() || g_configuration.productionRequested)
     {
         const std::array mutationPatches{
             VtablePatch{kContextCopySubresourceRegion, reinterpret_cast<void*>(&HookCopySubresourceRegion)},
@@ -412,6 +435,7 @@ template <std::size_t Count>
         if (!ValidateShadowPredecessors(current, mutationPatches)) return false;
         for (const auto& patch : mutationPatches) record->shadow[patch.index] = patch.replacement;
     }
+    if (!PrepareSharedUiContextHooks(record, current)) return false;
     record->originalVtable = current;
     record->nextRelease =
         reinterpret_cast<ContextRelease>(current[kRelease]);
@@ -505,6 +529,7 @@ template <std::size_t Count>
     if (slots == 0) return false;
     if (!PrepareSwapChainRecord(record, current, slots)) return false;
     record->developerHdrDescriptor = hdrDescriptor;
+    record->applicationFp16Facade = false;
     record->ownsRendererClaim = ownsRendererClaim;
     return PublishObjectShadow(swapChain, *record, current);
 }
@@ -556,9 +581,16 @@ struct HdrCandidateValidation
     ComPtr<ID3D11RenderTargetView> outputRtv;
     ComPtr<IDXGISwapChain3> chain3;
 
+    [[nodiscard]] bool SupportsRenderTarget(ID3D11Device* device) noexcept
+    {
+        UINT support{};
+        return SUCCEEDED(device->CheckFormatSupport(DXGI_FORMAT_R10G10B10A2_UNORM, &support)) &&
+            (support & D3D11_FORMAT_SUPPORT_RENDER_TARGET) != 0;
+    }
+
     [[nodiscard]] bool AcquireOutput(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
     {
-        return SUCCEEDED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) &&
+        return SupportsRenderTarget(device) && SUCCEEDED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) &&
             SUCCEEDED(device->CreateRenderTargetView(backBuffer.Get(), nullptr, &outputRtv));
     }
 
@@ -633,8 +665,18 @@ struct InstalledRendererObjects
     bool context{};
     bool chain{};
     bool proxy{};
-    [[nodiscard]] bool Complete() const noexcept { return device && context && chain && proxy; }
+    bool facade{};
+    [[nodiscard]] bool Complete() const noexcept { return device && context && chain && proxy && facade; }
 };
+
+void RetireApplicationPresentationBuffer(IDXGISwapChain* swapChain) noexcept
+{
+    if (swapChain == nullptr) return;
+    if (swapChain != g_presentation.applicationFacadeChain) return;
+    // Release only owned references before the facade flushes its retired texture.
+    ResetResources(true);
+    g_referenceHealthy = false;
+}
 
 class RendererCreationTransaction
 {
@@ -720,6 +762,7 @@ private:    void ReleaseFailedCreationClaim()
         }
         hdrDescriptor_ = true;
         g_referenceHealthy.store(true, std::memory_order_release);
+        g_productionHealthy.store(true, std::memory_order_release);
         PublishActiveDisplay(CurrentDisplayCapabilities().description.Monitor, 1);
     }
 
@@ -757,6 +800,8 @@ private:    void ReleaseFailedCreationClaim()
         if (g_rendererDevice.activeDevice == nullptr || !HasCreatedObject(request_.device)) return;
         if (g_rendererDevice.activeDevice == *request_.device) return;
         ShutdownSettingsWindowBackend();
+        if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
+        g_presentation.applicationFacadeChain = nullptr;
         ResetResources();
         ResetShaderRegistry();
     }
@@ -769,9 +814,24 @@ private:    void ReleaseFailedCreationClaim()
             InstallContextShadow(*request_.context);
         installed.chain = installed.context && HasCreatedObject(request_.swapChain) &&
             InstallSwapChainShadow(*request_.swapChain, hdrDescriptor_, owner_);
-        installed.proxy = installed.chain && (!hdrDescriptor_ ||
-            EnsureWideGamutResources(*request_.swapChain, *request_.device, *request_.context));
+        installed.proxy = installed.chain && CreateHdrResources();
+        installed.facade = installed.proxy && CreateApplicationFacade();
         return installed;
+    }
+
+    [[nodiscard]] bool CreateHdrResources()
+    {
+        return !hdrDescriptor_ ||
+            EnsureWideGamutResources(*request_.swapChain, *request_.device, *request_.context);
+    }
+
+    [[nodiscard]] bool CreateApplicationFacade()
+    {
+        if (!g_configuration.productionRequested || !hdrDescriptor_) return true;
+        if (!InitializeSharedUiSdr(*request_.context)) return false;
+        return SUCCEEDED(CreatePresentationSwapChain({*request_.swapChain,
+            g_presentation.presentationProxy.Get(), *request_.description,
+            AcquireApplicationPresentationBuffer, RetireApplicationPresentationBuffer}, &facade_));
     }
 
     void PublishInstallation()
@@ -782,6 +842,14 @@ private:    void ReleaseFailedCreationClaim()
         (void)(*request_.context)->QueryInterface(IID_PPV_ARGS(&g_rendererDevice.activeContext1));
         ++g_deviceGeneration;
         if (SettingsWindowBackendReady()) (void)TryActivateGraphicsSettingsInputOnCurrentThread();
+        if (facade_)
+        {
+            auto* nativeChain = *request_.swapChain;
+            g_presentation.applicationFacadeChain = nativeChain;
+            FindSwapChain(nativeChain)->applicationFp16Facade = true;
+            *request_.swapChain = facade_.Detach();
+            nativeChain->Release();
+        }
     }
 
     static void ReportInstallationFailure(InstalledRendererObjects installed)
@@ -794,13 +862,17 @@ private:    void ReleaseFailedCreationClaim()
         else if (!installed.context) RecordFailure(GraphicsObservationFailure::contextShadowFailed);
         else if (!installed.chain) RecordFailure(GraphicsObservationFailure::swapChainShadowFailed);
         else if (!installed.proxy) RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
+        else if (!installed.facade) RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
     }
 
     void RollBackInstallation(InstalledRendererObjects installed)
     {
+        facade_.Reset();
+        g_presentation.applicationFacadeChain = nullptr;
         if (installed.chain) RollBackShadow(*request_.swapChain, FindSwapChain(*request_.swapChain));
         if (installed.context) RollBackShadow(*request_.context, FindContext(*request_.context));
         if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
+        ShutdownSettingsWindowBackend();
         ResetResources();
         ResetReplacementShaders();
         g_referenceHealthy = false;
@@ -823,6 +895,7 @@ private:    void ReleaseFailedCreationClaim()
     bool owner_{};
     bool attemptHdr_{};
     bool hdrDescriptor_{};
+    ComPtr<IDXGISwapChain> facade_;
     HRESULT result_{E_FAIL};
 };
 
@@ -888,7 +961,8 @@ ULONG STDMETHODCALLTYPE HookDeviceRelease(ID3D11Device* device) noexcept
 
 bool ScenePromotionEligible(const D3D11_TEXTURE2D_DESC& desc) noexcept
 {
-    return HdrPathRequested() && g_referenceHealthy && desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
+    return HdrPathRequested() && g_referenceHealthy && g_productionHealthy &&
+        desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
         desc.Width != 0 && desc.Height != 0 && g_presentation.width != 0 && g_presentation.height != 0;
 }
 [[nodiscard]] bool ShouldPromote(const D3D11_TEXTURE2D_DESC& desc) noexcept
@@ -937,9 +1011,9 @@ bool PresentationViewCandidate(ID3D11Resource* resource, ID3D11RenderTargetView*
             return true;
         }
     }
-    g_referenceHealthy = false;
     RecordFailure(GraphicsObservationFailure::registryExhausted);
-    return false;
+    // Exact backbuffer identity remains usable without a cached view slot.
+    return true;
 }
 
 bool UninitializedScenePromotion(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,

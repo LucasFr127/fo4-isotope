@@ -119,6 +119,15 @@ template <std::size_t Count>
     return ContainsLateGameUiShader(g_lateGameUiBackdropShaders, shader);
 }
 
+[[nodiscard]] bool IsNativeSceneCompositeShader(ID3D11PixelShader* shader) noexcept
+{
+    BOOL role{};
+    UINT size = sizeof(role);
+    return shader != nullptr &&
+        SUCCEEDED(shader->GetPrivateData(kNativeSceneCompositeShaderRole, &size, &role)) &&
+        size == sizeof(role) && role == TRUE;
+}
+
 bool ContainsRegisteredShader(ID3D11PixelShader* shader) noexcept
 {
     for (auto& entry : g_shaders)
@@ -226,12 +235,16 @@ void CreatedShaderIdentity::Observe(const void* bytecode, std::size_t length, bo
     if (bytecode == nullptr || length == 0) return;
     lateGameUiComposite = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::composite);
     lateGameUiBackdrop = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::backdrop);
+#if defined(FO4HDR_RUNTIME_1_10_163)
+    nativeSceneComposite = MatchesDxbcHash(
+        bytecode, length, generated::kNativeSceneCompositeDxbcHash);
+#endif
     const auto crc32 = ComputeRenoDxShaderCrc32(
         std::span<const std::byte>(static_cast<const std::byte*>(bytecode), length));
     descriptor = FindRenoDxFallout4Shader(crc32);
-    diagnosticCrc = developerMode ? crc32 : 0;
     if (developerMode)
     {
+        diagnosticCrc = crc32;
         pipboyRole = IdentifyPipboyScreenShader(crc32, length);
         if (PipboyHashMismatch(pipboyRole, bytecode, length))
             pipboyRole = PipboyScreenShader::unknown;
@@ -250,12 +263,20 @@ void CreatedShaderIdentity::AttachPipboyRole(HRESULT result, ID3D11PixelShader**
         (void)(*shader)->SetPrivateData(kPipboyScreenShaderRole, sizeof(pipboyRole), &pipboyRole);
 }
 
+void CreatedShaderIdentity::AttachNativeSceneRole(ID3D11PixelShader* shader) const
+{
+    if (!nativeSceneComposite) return;
+    constexpr BOOL role = TRUE;
+    (void)shader->SetPrivateData(kNativeSceneCompositeShaderRole, sizeof(role), &role);
+}
+
 void CreatedShaderIdentity::Register(HRESULT result, ID3D11PixelShader** shader) const
 {
     if (!CreatedSuccessfully(result, shader)) return;
     if (diagnosticCrc != 0)
         (void)(*shader)->SetPrivateData(kFrameTraceShaderCrc, sizeof(diagnosticCrc), &diagnosticCrc);
     AttachPipboyRole(result, shader);
+    AttachNativeSceneRole(*shader);
     if (descriptor != nullptr)
         RegisterShader(*shader, descriptor->pass);
     if (lateGameUiComposite)

@@ -240,13 +240,6 @@ function Assert-Fo4HdrRuntimeSourceAuthorities {
     if (-not (Test-Fo4HdrRuntimeAuthority $imageSpaceSources.commonlib $expectedAuthority)) {
         throw "The runtime image-space profile is not bound to pinned Dear CommonLibF4."
     }
-    $expectedAuthority = [ordered]@{
-        repository = "https://github.com/TES5Edit/TES5Edit.git"
-        commit = "ca51ca1b67c2e84965c56d9163cec2acf20d6722"
-    }
-    if (-not (Test-Fo4HdrRuntimeAuthority $imageSpaceSources.xeditFieldAliases $expectedAuthority)) {
-        throw "The runtime xEdit aliases are not bound to their reviewed source."
-    }
 }
 
 function Add-Fo4HdrRegisteredPackageArchives {

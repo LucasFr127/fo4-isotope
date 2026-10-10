@@ -18,6 +18,9 @@
 #include "../RendererLifetime.hpp"
 #include "../LiveSettings.hpp"
 #include "../PresentFrame.hpp"
+#include "../SharedUiFrame.hpp"
+#include "../hooks/ContextHooks.hpp"
+#include <cmath>
 #include "../GraphicsDiagnostics.hpp"
 #include "../LutProfileBindings.hpp"
 #include "../DisplayDiscovery.hpp"
@@ -183,24 +186,30 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
 
 } // namespace
 
+PresentationResult PresentationMapFailure(HRESULT) noexcept
+{
+    return PresentationResult::failed;
+}
+
 // The caller retains borrowed state until the direct backbuffer write completes.
-[[nodiscard]] bool DrawPresentation(
+[[nodiscard]] PresentationResult DrawPresentation(
     ID3D11DeviceContext* context,
     ID3D11ShaderResourceView* scene,
     const CompositionConstants& compositionConstants) noexcept
 {
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (FAILED(context->Map(g_presentation.constants.Get(), 0,
-            D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
-        return false;
+    const auto status = context->Map(g_presentation.constants.Get(), 0,
+        D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    if (FAILED(status)) return PresentationMapFailure(status);
     std::memcpy(mapped.pData, &compositionConstants, sizeof(compositionConstants));
     context->Unmap(g_presentation.constants.Get(), 0);
 
     // Failure must leave the real buffer untouched under its old interpretation.
-    if (!SetColorSpace(compositionConstants.mode != 0U)) return false;
+    const bool hdr = compositionConstants.mode != 0U &&
+        compositionConstants.mode != 4U && compositionConstants.mode != 5U;
+    if (!SetColorSpace(hdr)) return PresentationResult::failed;
     ID3D11ShaderResourceView* inputs[]{
-        scene, g_uiTransport.gameUiBackdropSrv.Get(),
-        g_uiTransport.gameUiSrv.Get(), g_uiTransport.uiSrv.Get()};
+        scene, nullptr, nullptr, g_uiTransport.uiSrv.Get()};
     ID3D11RenderTargetView* output = g_presentation.presentationBackBufferRtv.Get();
     ID3D11Buffer* constants = g_presentation.constants.Get();
     context->PSSetShaderResources(0, 4, inputs);
@@ -219,21 +228,39 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
     context->RSSetViewports(1, &viewport);
     context->OMSetDepthStencilState(g_presentation.presentDepth.Get(), 0);
     context->OMSetBlendState(g_presentation.presentBlend.Get(), nullptr, UINT(-1));
-    ScopedFrameTraceOwnedCall owned;
     context->Draw(3, 0);
-    return true;
+    return PresentationResult::rendered;
+}
+
+std::uint32_t FrameMode(LinearColorDomain domain) noexcept
+{
+    if (domain == LinearColorDomain::linearBt709Relative) return 1U;
+    if (SettingsCalibrationMode() != 0U) return SettingsCalibrationMode();
+    return 3U;
+}
+
+std::uint32_t SourceEncoding(LinearColorDomain domain) noexcept
+{
+    if (domain == LinearColorDomain::vanillaSdrCodes ||
+        domain == LinearColorDomain::encodedGamma22Bt709UiRelative) return 2U;
+    return domain == LinearColorDomain::encodedSrgbBt709UiRelative ? 1U : 0U;
+}
+
+ID3D11ShaderResourceView* ReferenceSource(LinearColorDomain domain) noexcept
+{
+    return domain == LinearColorDomain::vanillaSdrCodes ?
+        g_presentation.presentationProxySrv.Get() : g_scene.currentScene.Get();
 }
 
 CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
     bool settingsOverlayPresent) noexcept
 {
-    const auto wideGamutScene =
-        requiredDomain == LinearColorDomain::linearBt2020UiRelative;
-    return {
+    const auto vanillaSdr = requiredDomain == LinearColorDomain::vanillaSdrCodes;
+    const auto encoding = SourceEncoding(requiredDomain);
+    CompositionConstants result{
         .width = g_presentation.width,
         .height = g_presentation.height,
-        .mode = wideGamutScene && SettingsCalibrationMode() != 0U ?
-            SettingsCalibrationMode() : (wideGamutScene ? 3U : 1U),
+        .mode = FrameMode(requiredDomain),
         .uiPaperWhiteNits = static_cast<float>(
             g_configuration.productionRequested ?
                 g_activeSettings.uiPaperWhiteNits :
@@ -242,16 +269,35 @@ CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
             static_cast<float>(kSceneReferenceWhiteNits),
         .displayPeakNits =
             static_cast<float>(g_activeSettings.displayPeakNits),
-        .gameUiBackdropCaptured =
-            static_cast<std::uint32_t>(g_uiTransport.gameUiBackdropCapturedThisFrame),
-        .gameUiCaptured = static_cast<std::uint32_t>(g_uiTransport.gameUiCapturedThisFrame),
         .settingsOverlayPresent = static_cast<std::uint32_t>(settingsOverlayPresent),
+        .sharedUiEncoded = encoding,
     };
+    if (encoding != 0U)
+    {
+        result.uiPaperWhiteNits = SharedUiPaperWhite();
+    }
+    return result;
 }
 
 bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
 {
+    if (requiredDomain == LinearColorDomain::vanillaSdrCodes)
+        return SharedUiStartupSdr() && g_presentation.presentationProxySrv != nullptr;
     return g_scene.currentScene != nullptr && g_scene.currentSceneDomain == requiredDomain;
+}
+
+LinearColorDomain ReferenceSceneDomain() noexcept
+{
+    if (SharedUiFrameEncoded()) return LinearColorDomain::encodedSrgbBt709UiRelative;
+    return (g_configuration.productionRequested || g_scene.videoSceneReady) ?
+        LinearColorDomain::linearBt2020UiRelative :
+        LinearColorDomain::linearBt709Relative;
+}
+
+bool PresentationContextValid(ID3D11DeviceContext* context) noexcept
+{
+    const auto* record = FindDrawObservation(context);
+    return context && context == g_rendererDevice.activeContext && record && record->immediate;
 }
 
 ID3D11DeviceContext* PrepareGpuPerformanceSample(IDXGISwapChain* swapChain,
@@ -263,58 +309,131 @@ ID3D11DeviceContext* PrepareGpuPerformanceSample(IDXGISwapChain* swapChain,
     return context;
 }
 
-[[nodiscard]] bool RenderReferenceFrame(
+[[nodiscard]] PresentationResult RenderReferenceFrame(
     IDXGISwapChain* swapChain, ID3D11Device* device,
     ID3D11DeviceContext* context) noexcept
 {
-    const auto videoReady = g_scene.videoSceneReady;
-    const auto requiredDomain =
-        (g_configuration.productionRequested || videoReady) ?
-            LinearColorDomain::linearBt2020UiRelative :
-            LinearColorDomain::linearBt709Relative;
-    if (!EnsureResources(swapChain, device, context) ||
-        !CurrentSceneMatches(requiredDomain))
-        return false;
+    if (!PresentationContextValid(context)) return PresentationResult::blocked;
     ScopedPresentationContext ownedContext(context);
-    if (!ownedContext.Ready()) return false;
+    if (!ownedContext.Ready()) return PresentationResult::blocked;
+    const auto requiredDomain = ReferenceSceneDomain();
+    if (!CurrentSceneMatches(requiredDomain)) return PresentationResult::unavailable;
+    if (!EnsureResources(swapChain, device, context))
+    {
+        RecordProductionResourceFailure(swapChain);
+        return g_referenceHealthy ? PresentationResult::unavailable : PresentationResult::failed;
+    }
     auto* measurementContext = PrepareGpuPerformanceSample(swapChain, device, context);
     BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
-    if (!priorState.Ready()) return false;
+    if (!priorState.Ready()) return PresentationResult::blocked;
     ScopedGpuPerformanceSample gpuSample(measurementContext);
     const auto settingsOverlayPresent = DrawDeveloperUi(context);
     const auto compositionConstants = ReferenceComposition(requiredDomain, settingsOverlayPresent);
-    return DrawPresentation(context, g_scene.currentScene.Get(),
-        compositionConstants);
+    return DrawPresentation(context, ReferenceSource(requiredDomain), compositionConstants);
 }
 
-[[nodiscard]] bool RenderSdrPresentationProxy(
-    IDXGISwapChain* swapChain, ID3D11Device* device,
-    ID3D11DeviceContext* context) noexcept
+bool PublicPresentationDomainAvailable(LinearColorDomain domain) noexcept
 {
-    if (g_presentation.presentationProxySrv == nullptr ||
-        !EnsureResources(swapChain, device, context))
-        return false;
+    constexpr std::array domains{LinearColorDomain::linearBt709Relative,
+        LinearColorDomain::linearBt2020UiRelative, LinearColorDomain::encodedSrgbBt709UiRelative,
+        LinearColorDomain::encodedGamma22Bt709UiRelative, LinearColorDomain::vanillaSdrCodes};
+    return std::ranges::find(domains, domain) != domains.end();
+}
 
+bool PublicPresentationScalesValid(const SharedUiPresentation& presentation) noexcept
+{
+    return std::isfinite(presentation.white) && presentation.white > 0.0F && presentation.white <= 10000.0F &&
+        std::isfinite(presentation.armorPeakUiRelative) && presentation.armorPeakUiRelative >= 0.0F;
+}
+
+bool PublicPresentationAvailable(const SharedUiPresentation& presentation) noexcept
+{
+    return PublicPresentationDomainAvailable(presentation.domain) &&
+        PublicPresentationScalesValid(presentation) &&
+        g_presentation.presentationProxy && g_presentation.presentationProxySrv;
+}
+
+struct PublicPresentationOutput
+{
+    const SharedUiPresentation& presentation;
+    bool sdr{};
+};
+
+PresentationResult RenderPublicSharedUiOutput(IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context, PublicPresentationOutput output) noexcept
+{
+    const auto& presentation = output.presentation;
+    if (!PresentationContextValid(context)) return PresentationResult::blocked;
     ScopedPresentationContext ownedContext(context);
-    if (!ownedContext.Ready()) return false;
+    if (!ownedContext.Ready()) return PresentationResult::blocked;
+    if (!PublicPresentationAvailable(presentation)) return PresentationResult::unavailable;
+    if (!EnsurePresentationOutputResources(swapChain, device, context, !output.sdr))
+        return PresentationResult::failed;
     BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
-    if (!priorState.Ready()) return false;
+    if (!priorState.Ready()) return PresentationResult::blocked;
+    auto constants = ReferenceComposition(presentation.domain, DrawDeveloperUi(context));
+    if (output.sdr) constants.mode = presentation.domain == LinearColorDomain::linearBt709Relative ? 5U : 4U;
+    constants.uiPaperWhiteNits = presentation.white;
+    constants.sceneReferenceWhiteNits = presentation.white;
+    constants.assumedContent = static_cast<std::uint32_t>(presentation.assumed);
+    constants.armorPeakUiRelative = presentation.armorPeakUiRelative;
+    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(), constants);
+}
 
-    const CompositionConstants compositionConstants{
+PresentationResult RenderPublicSharedUiFrame(IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context, const SharedUiPresentation& presentation) noexcept
+{
+    return RenderPublicSharedUiOutput(swapChain, device, context, {presentation});
+}
+
+PresentationResult RenderPublicSharedUiSdrFrame(IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context, const SharedUiPresentation& presentation) noexcept
+{
+    return RenderPublicSharedUiOutput(swapChain, device, context, {presentation, true});
+}
+
+CompositionConstants SdrComposition(const SharedUiPresentation* presentation) noexcept
+{
+    const bool hdr = presentation && presentation->white > 0.0F;
+    return {
         .width = g_presentation.width,
         .height = g_presentation.height,
-        .mode = 0U,
-        .uiPaperWhiteNits = 1.0F,
+        .mode = hdr ? 3U : 0U,
+        .uiPaperWhiteNits = hdr ? presentation->white : 1.0F,
         .sceneReferenceWhiteNits = kDeveloperReferenceNits,
-        .displayPeakNits = 1000.0F,
-        .gameUiBackdropCaptured =
-            static_cast<std::uint32_t>(g_uiTransport.gameUiBackdropCapturedThisFrame),
-        .gameUiCaptured = static_cast<std::uint32_t>(g_uiTransport.gameUiCapturedThisFrame),
+        .displayPeakNits = static_cast<float>(g_activeSettings.displayPeakNits),
+        .sharedUiEncoded = hdr ? 2U : 0U,
+        .assumedContent = static_cast<std::uint32_t>(hdr && presentation->assumed),
     };
-    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(),
-        compositionConstants);
+}
+
+bool StartupPresentationAvailable(const SharedUiPresentation* presentation) noexcept
+{
+    return !presentation || (PublicPresentationAvailable(*presentation) &&
+        presentation->domain == LinearColorDomain::vanillaSdrCodes);
+}
+
+[[nodiscard]] PresentationResult RenderSdrPresentationProxy(
+    IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context, const SharedUiPresentation* presentation) noexcept
+{
+    if (!PresentationContextValid(context)) return PresentationResult::blocked;
+    ScopedPresentationContext ownedContext(context);
+    if (!ownedContext.Ready()) return PresentationResult::blocked;
+    if (g_presentation.presentationProxySrv == nullptr) return PresentationResult::unavailable;
+    if (!StartupPresentationAvailable(presentation))
+        return PresentationResult::unavailable;
+    if (!EnsurePresentationOutputResources(swapChain, device, context, presentation != nullptr))
+        return PresentationResult::failed;
+
+    BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
+        g_presentation.presentationBackBuffer.Get());
+    if (!priorState.Ready()) return PresentationResult::blocked;
+    auto constants = SdrComposition(presentation);
+    constants.settingsOverlayPresent = static_cast<std::uint32_t>(DrawDeveloperUi(context));
+    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(), constants);
 }
 
 bool PresentationContextAvailable(IDXGISwapChain* swapChain, ID3D11Device* device,
@@ -324,26 +443,27 @@ bool PresentationContextAvailable(IDXGISwapChain* swapChain, ID3D11Device* devic
     return std::ranges::find(required, nullptr) == required.end();
 }
 
-[[nodiscard]] bool RenderBlackSdrFailureFrame(
+[[nodiscard]] bool RenderBlackPresentationFrame(
     IDXGISwapChain* swapChain,
     ID3D11Device* device,
-    ID3D11DeviceContext* context,
-    bool sdrColorSpaceEstablished) noexcept
+    ID3D11DeviceContext* context) noexcept
 {
     if (!PresentationContextAvailable(swapChain, device, context))
         return false;
     ComPtr<ID3D11Texture2D> backBuffer;
-    ComPtr<ID3D11RenderTargetView> target;
-    if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer))) ||
-        FAILED(device->CreateRenderTargetView(
-            backBuffer.Get(), nullptr, &target)))
-        return false;
+    ComPtr<ID3D11RenderTargetView> target = g_presentation.presentationBackBufferRtv;
+    if (!target)
+    {
+        if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) return false;
+        if (FAILED(device->CreateRenderTargetView(backBuffer.Get(), nullptr, &target))) return false;
+    }
     BorrowedComputeState priorState(context, g_rendererDevice.activeContext1.Get(),
         backBuffer.Get());
     constexpr float black[4]{0.0F, 0.0F, 0.0F, 1.0F};
     // Zero is black under either transfer function, even if the transition fails.
+    const ScopedFrameTraceOwnedCall ownedClear;
     context->ClearRenderTargetView(target.Get(), black);
-    return sdrColorSpaceEstablished || SetColorSpace(false);
+    return true;
 }
 
 

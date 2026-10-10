@@ -6,6 +6,7 @@
 #include "RenoDxShaderIdentity.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include <d3d11.h>
+#include <wrl/client.h>
 #include <cstdint>
 
 namespace fo4hdr {
@@ -22,6 +23,8 @@ struct DrawObservation
     bool currentPassKnown{};
     bool currentReplacementActive{};
     ID3D11PixelShader* expectedBoundShader{};
+    // Retain the native binding only while substituted so production can disable between draws.
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> nativePixelShader;
     PipelinePassRequirement currentRequirement{PipelinePassRequirement::untracked};
 };
 using RenderTargetSetter = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, UINT, ID3D11RenderTargetView* const*, ID3D11DepthStencilView*);

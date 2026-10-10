@@ -72,7 +72,7 @@ try {
         $null = Invoke-GitChecked $root @(
             "config",
             "user.email",
-            "tests@fallout4hdr.invalid"
+            "tests@fo4isotope.invalid"
         )
     }
 

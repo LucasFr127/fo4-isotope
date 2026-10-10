@@ -21,20 +21,23 @@ namespace fo4hdr {
 
 inline constexpr GUID kPipboyScreenShaderRole{0x626617e9, 0x64b7, 0x4725,
     {0xaa, 0x26, 0x94, 0xf4, 0x62, 0x95, 0x13, 0x72}};
+inline constexpr GUID kNativeSceneCompositeShaderRole{0x42fd9fa0, 0x72b4, 0x4693,
+    {0x86, 0x17, 0x3d, 0xb2, 0xb6, 0x5e, 0x90, 0x0a}};
+inline constexpr GUID kFrameTraceShaderCrc{0xa9074e87, 0xf4b9, 0x4398,
+    {0x9a, 0xb4, 0xa0, 0x42, 0x7a, 0xcb, 0x7f, 0x56}};
 [[nodiscard]] const RenoDxShaderDescriptor* FindShaderDescriptor(RenoDxShaderPass pass) noexcept;
 [[nodiscard]] const RenoDxShaderDescriptor* FindShader(ID3D11PixelShader* shader) noexcept;
 [[nodiscard]] bool IsLateGameUiShader(ID3D11PixelShader* shader) noexcept;
 [[nodiscard]] bool IsLateGameUiBackdropShader(ID3D11PixelShader* shader) noexcept;
+[[nodiscard]] bool IsNativeSceneCompositeShader(ID3D11PixelShader* shader) noexcept;
 void ResetShaderRegistry() noexcept;
-
-inline constexpr GUID kFrameTraceShaderCrc{0xa9074e87, 0xf4b9, 0x4398,
-    {0x9a, 0xb4, 0xa0, 0x42, 0x7a, 0xcb, 0x7f, 0x56}};
 
 struct CreatedShaderIdentity
 {
     const RenoDxShaderDescriptor* descriptor{};
     bool lateGameUiComposite{};
     bool lateGameUiBackdrop{};
+    bool nativeSceneComposite{};
     PipboyScreenShader pipboyRole{};
     std::uint32_t diagnosticCrc{};
 
@@ -46,6 +49,7 @@ private:
     static bool CreatedSuccessfully(HRESULT result, ID3D11PixelShader** shader);
     void RecordKnownShader(std::uint32_t crc32) const;
     void AttachPipboyRole(HRESULT result, ID3D11PixelShader** shader) const;
+    void AttachNativeSceneRole(ID3D11PixelShader* shader) const;
 };
 
 }  // namespace fo4hdr

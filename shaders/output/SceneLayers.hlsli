@@ -6,13 +6,12 @@
 #define FO4HDR_SCENE_LAYERS
 
 #include "DisplayMath.hlsli"
+#include "SharedUiTransfer.hlsli"
 #ifdef FO4HDR_LAYER_ORACLES
 #include "../tonemap/Gt7.hlsli"
 #endif
 
 Texture2D<float4> FrameSource : register(t0);
-Texture2D<float4> CapturedMatte : register(t1);
-Texture2D<float4> CapturedHud : register(t2);
 Texture2D<float4> SettingsSurface : register(t3);
 
 cbuffer FrameMapping : register(b0)
@@ -22,10 +21,12 @@ cbuffer FrameMapping : register(b0)
     float MenuWhite;
     float ReferenceWhite;
     float PeakWhite;
-    uint HasMatte;
-    uint HasHud;
+    uint Reserved0;
+    uint Reserved1;
     uint HasSettings;
-    uint3 Reserved;
+    uint SharedUiEncoded;
+    uint AssumedContent;
+    float ArmorPeakUiRelative;
 };
 
 // IEC sRGB inverse transfer. The armor interval has a separate signed gamma contract.
@@ -35,16 +36,11 @@ float3 DecodeAuthoredCodes(float3 code)
         pow(max((code + 0.055f) / 1.055f, 0.0f), 2.4f);
 }
 
-float3 BlendAuthoredLayer(float3 behind, float4 layer, float white, bool matte)
+float3 BlendAuthoredLayer(float3 behind, float4 layer, float white)
 {
     const float coverage = saturate(layer.a);
-    if (matte && coverage <= 1.0e-6f) return behind;
-    // The Fallout matte is already a completed code-domain contribution. HUD
-    // and ImGui instead require decoding straight color before premultiplication.
     float3 contribution = 0.0f;
-    if (matte)
-        contribution = DecodeAuthoredCodes(max(layer.rgb, 0.0f));
-    else if (coverage > 1.0e-6f)
+    if (coverage > 1.0e-6f)
         contribution = DecodeAuthoredCodes(max(layer.rgb, 0.0f) / coverage) * coverage;
     return Fo4HdrExpandPrimaries(contribution * white) + behind * (1.0f - coverage);
 }
@@ -56,8 +52,21 @@ float3 EvaluateFrameLayers(uint2 pixel)
     const uint2 sourceSize = max(uint2(sourceWidth, sourceHeight), 1u);
     const uint2 sourcePixel = min(pixel * sourceSize / max(FrameSize, 1u), sourceSize - 1u);
     float3 light = FrameSource.Load(int3(sourcePixel, 0)).rgb;
-    const bool pattern = FrameMode >= 10u && FrameMode <= 13u;
-    const bool absolute = FrameMode == 3u || FrameMode == 7u ||
+    if (FrameMode == 4u || FrameMode == 5u) light = Fo4HdrBoundSdrSource(light);
+    if (SharedUiEncoded == 1u)
+        light = Fo4HdrExpandPrimaries(Fo4HdrDecodeSignedSrgb(light));
+    else if (SharedUiEncoded == 2u)
+    {
+        const float3 decoded = asfloat((asuint(pow(abs(light), 2.2f)) & 0x7fffffffu) |
+            (asuint(light) & 0x80000000u));
+        light = Fo4HdrExpandPrimaries(decoded);
+        if (ArmorPeakUiRelative > 0.0f)
+        {
+            const float maximum = max(max(light.r, light.g), light.b);
+            light *= ArmorPeakUiRelative / max(ArmorPeakUiRelative, maximum);
+        }
+    }
+    const bool absolute = (FrameMode >= 3u && FrameMode <= 5u) || FrameMode == 7u ||
         (FrameMode >= 10u && FrameMode <= 14u);
 
     switch (FrameMode)
@@ -69,7 +78,11 @@ float3 EvaluateFrameLayers(uint2 pixel)
         light = Fo4HdrExpandPrimaries((16.0f * pixel.x / max(1.0f, float(FrameSize.x) - 1.0f)).xxx);
         break;
     case 3u:
+    case 4u:
         light *= MenuWhite;
+        break;
+    case 5u:
+        light = Fo4HdrExpandPrimaries(light) * MenuWhite;
         break;
 #ifdef FO4HDR_LAYER_ORACLES
     case 7u:
@@ -118,27 +131,17 @@ float3 EvaluateFrameLayers(uint2 pixel)
 
     if (FrameMode == 0u)
     {
-        if (HasMatte != 0u)
+        [branch] if (HasSettings != 0u)
         {
-            const float4 layer = CapturedMatte.Load(int3(pixel, 0));
-            const float coverage = saturate(layer.a);
-            if (coverage > 1.0e-6f) light = layer.rgb + light * (1.0f - coverage);
-        }
-        if (HasHud != 0u)
-        {
-            const float4 layer = CapturedHud.Load(int3(pixel, 0));
+            const float4 layer = SettingsSurface.Load(int3(pixel, 0));
             light = layer.rgb + light * (1.0f - saturate(layer.a));
         }
     }
     else
     {
         const float white = absolute ? MenuWhite : 1.0f;
-        if (!pattern && HasMatte != 0u)
-            light = BlendAuthoredLayer(light, CapturedMatte.Load(int3(pixel, 0)), white, true);
-        if (!pattern && HasHud != 0u)
-            light = BlendAuthoredLayer(light, CapturedHud.Load(int3(pixel, 0)), white, false);
         [branch] if (HasSettings != 0u)
-            light = BlendAuthoredLayer(light, SettingsSurface.Load(int3(pixel, 0)), white, false);
+            light = BlendAuthoredLayer(light, SettingsSurface.Load(int3(pixel, 0)), white);
     }
     // A shared exit avoids FXC's uninitialized-result warning when this is inlined.
     return light;

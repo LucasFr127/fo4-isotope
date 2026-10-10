@@ -35,6 +35,7 @@
 #include "DrawObservation.hpp"
 #include <FO4Isotope/output/NativeLutObservation.hpp>
 #include "PresentFrame.hpp"
+#include "SharedUiFrame.hpp"
 
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include <FO4Isotope/tonemap/OperatorLut.hpp>
@@ -47,6 +48,7 @@ PipelineHeartbeat g_heartbeat;
 HdrRendererLifecycle g_lifecycle;
 std::uint64_t g_frame{1};
 std::atomic<bool> g_referenceHealthy{true};
+std::atomic<bool> g_productionHealthy{true};
 std::atomic<bool> g_gameplayReadyApplied{};
 std::atomic<bool> g_rendererCreationClaimed{};
 [[nodiscard]] std::uint64_t PublishLifecycleGeneration() noexcept
@@ -70,8 +72,7 @@ std::atomic<bool> g_rendererCreationClaimed{};
         .replacementShaderSet = ReplacementProgramsReady(),
         .presentationProxySet = PresentationProxyReady(),
         .compositionSet = PresentationCompositionReady(),
-        .uiSet = DeveloperUiResourcesReady() && GameUiBackdropResourcesReady() &&
-            GameUiResourcesReady(),
+        .uiSet = DeveloperUiResourcesReady(),
         .outputSet = PresentationOutputReady()
     };
 }
@@ -86,6 +87,7 @@ void ResetSceneTracking() noexcept
     g_lutInspectorValidatedSlots = 0;
     StopPipboyScreenObservation("Stopped: scene or resource retirement");
     CloseArmorEncodedCompositionForLifecycle();
+    ResetSharedUiContent();
     // Loading/focus/resource retirement ends the session; retained TLS tokens
     // cannot be accepted after the request generation changes.
     ResetArmorUiScope();
@@ -110,7 +112,7 @@ void UnbindPresentationProxy() noexcept
 }
 
 
-void ResetResources(bool retainColorControl) noexcept
+void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noexcept
 {
     RetireFrameTrace();
     g_nativeReferenceStatus = "Waiting for a color grading draw.";
@@ -121,13 +123,14 @@ void ResetResources(bool retainColorControl) noexcept
     RestoreHeldImageComparison();
     UnbindPresentationProxy();
     ResetSceneTracking();
+    ResetSharedUiResources(retainPresentationBuffer);
     ResetDeveloperExposureResources();
     g_presentation.presentationRedirectedThisFrame = false;
     ResetArmorCompositionResources();
     // Retire the real output UAV before the transport images and proxy.
     RetirePresentationOutput();
     ResetUiTransportResources();
-    ResetPresentationResources(retainColorControl);
+    ResetPresentationResources(retainColorControl, retainPresentationBuffer);
 }
 
 [[nodiscard]] bool EnsureResources(
@@ -136,10 +139,11 @@ void ResetResources(bool retainColorControl) noexcept
     if (PresentationResourcesReady()) {
         // Prepare the optional armor conversion outside the Draw path.
         EnsureArmorEncodedResources(device, context);
-        return true;
+        return EnsureSharedUiResources(device);
     }
     const auto creation = CreatePresentationResources(swapChain, device, context);
-    if (creation == PresentationResourceCreation::compositionFailed) ResetResources();
+    if (creation == PresentationResourceCreation::compositionFailed)
+        ResetResources(false, ApplicationPresentationFacadeActive());
     if (creation != PresentationResourceCreation::ready) return false;
     EnsureArmorEncodedResources(device, context);
     EnsureSettingsWindowBackend(g_configuration.productionRequested || g_configuration.showDeveloperOverlay,
@@ -150,7 +154,7 @@ void ResetResources(bool retainColorControl) noexcept
         g_evidence.colorDomainGeneration.store(
             g_presentation.colorDomainGeneration, std::memory_order_release);
     }
-    return true;
+    return EnsureSharedUiResources(device);
 }
 
 [[nodiscard]] bool EnsureWideGamutResources(
@@ -167,6 +171,15 @@ bool DisplayRebuildFailed(IDXGISwapChain* swapChain, int hdrState) noexcept
 {
     return hdrState == 1 && HdrPathRequested() && g_rendererDevice.activeDevice != nullptr &&
         !EnsureWideGamutResources(swapChain, g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
+}
+
+void RecordProductionResourceFailure(IDXGISwapChain* swapChain) noexcept
+{
+    g_productionHealthy = false;
+    if (!EnsurePresentationOutputResources(swapChain, g_rendererDevice.activeDevice,
+            g_rendererDevice.activeContext, true))
+        g_referenceHealthy = false;
+    RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
 }
 
 void RebuildChangedDisplay(IDXGISwapChain* swapChain, int hdrState) noexcept
@@ -699,7 +712,9 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
     g_configuration = configuration;
     SetArmorUiBoundaryCallback([](const ArmorUiScopeToken& scope, bool entering) noexcept {
         TraceNativeBoundary(scope, entering);
+        if (entering) SharedUiBoundary(scope, true);
         ArmorEncodedBoundary(scope, entering);
+        if (!entering) SharedUiBoundary(scope, false);
     });
     SetArmorUiObservationEnabled(InitializeFrameTrace(
         configuration.developerMode && configuration.traceRenderPipeline));

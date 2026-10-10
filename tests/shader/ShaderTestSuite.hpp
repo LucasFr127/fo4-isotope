@@ -19,10 +19,12 @@ void VerifyFrameTrace(Device& device);
 void VerifyPresentationSwapChain(Device& device);
 
 void VerifySharedUiComposition(Device& device);
+void VerifySharedUiContext(Device& device);
 
 void VerifyPresentationResize(Device& device);
 
 void VerifyDirectPresentation(Device& device);
+void VerifyPublicPresentationOutput(Device& device);
 
 void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay = false);
 
@@ -46,7 +48,7 @@ void VerifyPresentationContext(Device& device);
 
 void VerifyPresentationState(Device& device);
 
-void VerifySeparatedUiProductionPath(Device& device, TestedToneMapper toneMapper);
+void VerifyUiRelativeTemporalTransport(TestedToneMapper toneMapper);
 
 void VerifyShippingPixelShaders(Device& device);
 

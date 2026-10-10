@@ -17,6 +17,13 @@
 namespace {
 namespace detail = fo4hdr::game::direct_call_patch;
 using ScreenSubmit = void (*)(RE::Interface3D::Renderer*, std::uint32_t);
+using ScreenUiSubmit = void (*)(RE::UI*);
+template<class Submit>
+struct ObserverState
+{
+    std::atomic<bool> attempted{}, installed{};
+    std::atomic<Submit> next{};
+};
 struct TrampolineInterface
 {
     std::uint32_t version{}, padding{};
@@ -28,8 +35,13 @@ static_assert(offsetof(TrampolineInterface, branch) == 8);
 static_assert(offsetof(RE::Interface3D::Renderer, name) == 0x208);
 static_assert(offsetof(RE::Interface3D::Renderer, postAA) == 0x53);
 static_assert(offsetof(RE::Interface3D::Renderer, screenAttachedElementRoot) == 0x80);
-std::atomic<bool> g_attempted{}, g_installed{};
-std::atomic<ScreenSubmit> g_next{};
+static_assert(sizeof(RE::BSFixedString) == sizeof(void*));
+ObserverState<ScreenSubmit> g_armorObserver;
+ObserverState<ScreenUiSubmit> g_screenObserver;
+#if defined(FO4HDR_RUNTIME_1_10_163)
+// Written once before installation's release; ObserveScope acquires before reading.
+bool g_flatKeyReady{}, g_armorKeyReady{}, g_rainKeyReady{}, g_workshopKeyReady{};
+#endif
 
 bool Read(const void* source, void* destination, std::size_t size) noexcept
 {
@@ -61,6 +73,13 @@ bool ExecutableProtection(DWORD flags) noexcept
         protection == PAGE_EXECUTE_WRITECOPY;
 }
 
+bool ReadableDataProtection(DWORD flags) noexcept
+{
+    const auto protection = flags & 0xFF;
+    return protection == PAGE_READONLY || protection == PAGE_READWRITE ||
+        protection == PAGE_WRITECOPY;
+}
+
 bool Executable(const void* address, std::size_t size, const void* module = nullptr) noexcept
 {
     MEMORY_BASIC_INFORMATION info{};
@@ -71,13 +90,11 @@ bool Executable(const void* address, std::size_t size, const void* module = null
 
 bool MatchesBytes(std::uintptr_t address, std::span<const std::uint8_t> expected) noexcept
 {
-    std::array<std::uint8_t, 32> actual{};
-    return expected.size() <= actual.size() && Read(reinterpret_cast<void*>(address),
-        actual.data(), expected.size()) && std::equal(expected.begin(), expected.end(), actual.begin());
+    return fo4hdr::game::detail::MatchesNativeCode(address, expected, Read);
 }
 
 // Startup-only mutation. Each patch is contained in one memory region/page,
-// and the F4SE load stage precedes use of the two native rendering callers.
+// and the F4SE load stage precedes use of the native rendering callers.
 bool WriteBytes(std::uintptr_t address, std::span<const std::uint8_t> bytes,
     DWORD originalProtection) noexcept
 {
@@ -111,18 +128,35 @@ struct RendererObservation
 {
     fo4hdr::ArmorUiOwner owner{fo4hdr::ArmorUiOwner::other};
     bool postAa{}, hasRoot{};
+    std::array<char, 32> rendererName{};
 };
 
-bool IsArmorName(const char* name) noexcept
+#if defined(FO4HDR_RUNTIME_1_10_163)
+bool IsRendererName(const RE::BSFixedString& name, std::uintptr_t keyRva, bool ready) noexcept
 {
-    constexpr char armor[] = "PowerArmorRenderer";
-    bool armorMatch = true;
-    for (std::size_t i = 0; i < sizeof(armor); ++i) {
-        const auto value = name[i];
-        armorMatch = armorMatch && value == armor[i];
-        if (value == '\0') break;
-    }
-    return armorMatch;
+    if (!ready) return false;
+    const auto base = reinterpret_cast<std::uintptr_t>(::GetModuleHandleW(nullptr));
+    const auto& key = *reinterpret_cast<const RE::BSFixedString*>(base + keyRva);
+    return fo4hdr::game::detail::SameNativeRendererKey(name, key);
+}
+#endif
+
+fo4hdr::ArmorUiOwner RendererOwner(const RE::BSFixedString& name) noexcept
+{
+#if defined(FO4HDR_RUNTIME_1_10_163)
+    if (IsRendererName(name, fo4hdr::generated::kHudUiKeyStorageRva, true)) return fo4hdr::ArmorUiOwner::hud;
+    if (IsRendererName(name, fo4hdr::generated::kFlatUiKeyStorageRva, g_flatKeyReady))
+        return fo4hdr::ArmorUiOwner::flatMenu;
+    if (IsRendererName(name, fo4hdr::generated::kArmorUiKeyStorageRva, g_armorKeyReady))
+        return fo4hdr::ArmorUiOwner::powerArmor;
+    if (IsRendererName(name, fo4hdr::generated::kRainUiKeyStorageRva, g_rainKeyReady))
+        return fo4hdr::ArmorUiOwner::powerArmorRain;
+    if (IsRendererName(name, fo4hdr::generated::kWorkshopUiKeyStorageRva, g_workshopKeyReady))
+        return fo4hdr::ArmorUiOwner::workshop;
+#else
+    (void)name;
+#endif
+    return fo4hdr::ArmorUiOwner::other;
 }
 
 // No registry lookup/lock recursion, NiPointer copy, root dereference, or
@@ -132,19 +166,23 @@ bool Observe(RE::Interface3D::Renderer* renderer, RendererObservation& result) n
 {
     __try {
         if (!renderer) return false;
-        const auto* name = renderer->name.c_str();
-        const auto armorMatch = IsArmorName(name);
-        result.owner = armorMatch ? fo4hdr::ArmorUiOwner::powerArmor :
-            fo4hdr::ArmorUiOwner::other;
+        result.owner = RendererOwner(renderer->name);
+        if (fo4hdr::ArmorUiObservationEnabled()) {
+            const auto* name = renderer->name.c_str();
+            for (std::size_t i = 0; i + 1 < result.rendererName.size(); ++i) {
+                result.rendererName[i] = name[i];
+                if (name[i] == '\0') break;
+            }
+        }
         result.postAa = renderer->postAA;
         result.hasRoot = renderer->screenAttachedElementRoot.get() != nullptr;
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-bool ObserveScope() noexcept
+bool ObserveScope(const std::atomic<bool>& installed) noexcept
 {
-    return g_installed.load(std::memory_order_acquire) &&
+    return installed.load(std::memory_order_acquire) &&
         (fo4hdr::ArmorUiScopeEnabled() || fo4hdr::CurrentArmorUiScope().serial != 0);
 }
 void SubmitObserved(RE::Interface3D::Renderer* renderer, std::uint32_t argument, ScreenSubmit next)
@@ -153,37 +191,85 @@ void SubmitObserved(RE::Interface3D::Renderer* renderer, std::uint32_t argument,
     if (!Observe(renderer, observation)) observation = {};
     fo4hdr::ArmorUiScope scope({.owner = observation.owner,
         .threadId = ::GetCurrentThreadId(), .targetArgument = argument,
-        .postAa = observation.postAa, .hasRoot = observation.hasRoot});
+        .postAa = observation.postAa, .hasRoot = observation.hasRoot,
+        .rendererName = observation.rendererName});
     next(renderer, argument);
 }
 
 void ScreenSubmitHook(RE::Interface3D::Renderer* renderer, std::uint32_t argument) noexcept
 {
-    const auto next = g_next.load(std::memory_order_acquire);
+    const auto next = g_armorObserver.next.load(std::memory_order_acquire);
     // Fail closed if forwarding publication is unavailable or corrupt; never recurse.
     if (!next || next == &ScreenSubmitHook) return;
     try {
-        if (ObserveScope()) {
+        if (ObserveScope(g_armorObserver.installed)) {
             SubmitObserved(renderer, argument, next);
         } else {
             next(renderer, argument);
         }
     } catch (...) {
-        g_installed.store(false, std::memory_order_release);
+        g_armorObserver.installed.store(false, std::memory_order_release);
+    }
+}
+
+void ScreenUiSubmitHook(RE::UI* ui) noexcept
+{
+    const auto next = g_screenObserver.next.load(std::memory_order_acquire);
+    if (!next || next == &ScreenUiSubmitHook) return;
+    try {
+        if (ObserveScope(g_screenObserver.installed)) {
+            // Entry marks the native screen-space phase; queued work can outlive this call.
+            fo4hdr::ArmorUiScope scope({.owner = fo4hdr::ArmorUiOwner::screenSpace,
+                .threadId = ::GetCurrentThreadId()});
+            next(ui);
+        } else {
+            next(ui);
+        }
+    } catch (...) {
+        g_screenObserver.installed.store(false, std::memory_order_release);
     }
 }
 #if defined(FO4HDR_RUNTIME_1_10_163)
 using namespace fo4hdr::generated;
-class ArmorInstallation
+template<std::size_t N>
+struct BoundaryIdentity
 {
+    std::uintptr_t targetRva{};
+    std::uint64_t targetId{};
+    std::span<const std::uint8_t> targetBytes;
+    std::array<std::uintptr_t, N> callerRvas{};
+    std::array<std::uint64_t, N> callerIds{};
+    std::array<std::uintptr_t, N> callRvas{};
+    std::array<detail::CallBytes, N> callBytes{};
+    bool rendererKeys{};
+};
+constexpr BoundaryIdentity<2> kArmorBoundary{kArmorUiTargetRva, kArmorUiTargetId,
+    kArmorUiTargetBytes, kArmorUiCallerRvas, kArmorUiCallerIds,
+    kArmorUiCallRvas, kArmorUiCallBytes, true};
+constexpr BoundaryIdentity<4> kScreenBoundary{kScreenUiTargetRva, kScreenUiTargetId,
+    kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds,
+    kScreenUiCallRvas, kScreenUiCallBytes};
+struct RendererKeyIdentity
+{
+    std::uint64_t storageId{};
+    std::uintptr_t storageRva{};
+    std::uint64_t codeId{};
+    std::uintptr_t codeRva{};
+    std::span<const std::uint8_t> codeBytes;
+};
+template<std::size_t N, class Submit>
+class ObserverInstallation
+{
+    const BoundaryIdentity<N>& identity_;
+    ObserverState<Submit>& state_;
     REX::FModule module_{REX::FModule::GetExecutingModule()};
     std::uintptr_t base_{module_.GetBaseAddress()};
     REX::FModuleSection text_{};
     REL::Offset2ID mappings_;
     TrampolineInterface allocator_{};
-    std::array<detail::Site, 2> sites_{};
-    std::uintptr_t target_{base_ + kArmorUiTargetRva};
-    std::uintptr_t hook_{reinterpret_cast<std::uintptr_t>(&ScreenSubmitHook)};
+    std::array<detail::Site, N> sites_{};
+    std::uintptr_t target_{};
+    std::uintptr_t hook_{};
 
     bool Code(std::uintptr_t address, std::size_t size) const
     {
@@ -198,8 +284,40 @@ class ArmorInstallation
     }
     bool Target() const
     {
-        return Mapping(kArmorUiTargetId, kArmorUiTargetRva) && target_ != hook_ &&
-            Code(target_, kArmorUiTargetBytes.size()) && MatchesBytes(target_, kArmorUiTargetBytes);
+        return Mapping(identity_.targetId, identity_.targetRva) && target_ != hook_ &&
+            Code(target_, identity_.targetBytes.size()) && MatchesBytes(target_, identity_.targetBytes);
+    }
+    bool KeyStorage(std::uintptr_t rva) const
+    {
+        const auto data = module_.GetSection(".data");
+        const auto address = base_ + rva;
+        MEMORY_BASIC_INFORMATION info{};
+        const void* entry{};
+        if (!ContainsBytes(data.GetAddress(), data.GetSize(), address, sizeof(RE::BSFixedString)))
+            return false;
+        if (!Region(reinterpret_cast<void*>(address), sizeof(RE::BSFixedString), info)) return false;
+        // A lazy key may still be null at installation; submission requires a non-null entry.
+        return BelongsToModule(info, reinterpret_cast<void*>(base_)) &&
+            ReadableDataProtection(info.Protect) &&
+            Read(reinterpret_cast<void*>(address), &entry, sizeof(entry));
+    }
+    bool RendererKey(const RendererKeyIdentity& key) const
+    {
+        return Mapping(key.storageId, key.storageRva) &&
+            Mapping(key.codeId, key.codeRva) && KeyStorage(key.storageRva) &&
+            Code(base_ + key.codeRva, key.codeBytes.size()) &&
+            MatchesBytes(base_ + key.codeRva, key.codeBytes);
+    }
+    bool HudKey() const
+    {
+        return RendererKey({kHudUiKeyStorageId, kHudUiKeyStorageRva,
+            kHudUiKeyGetterId, kHudUiKeyGetterRva, kHudUiKeyGetterBytes});
+    }
+    bool OptionalKey(const RendererKeyIdentity& key) const noexcept
+    {
+        try {
+            return RendererKey(key);
+        } catch (...) { return false; }
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
     {
@@ -208,15 +326,15 @@ class ArmorInstallation
     }
     bool PrepareSite(std::size_t i)
     {
-        const auto address = base_ + kArmorUiCallRvas[i];
+        const auto address = base_ + identity_.callRvas[i];
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = Mapping(kArmorUiCallerIds[i], kArmorUiCallerRvas[i]) &&
-            Code(base_ + kArmorUiCallerRvas[i], 1) && Code(address, 5) &&
-            MatchesBytes(address, kArmorUiCallBytes[i]) &&
-            detail::CallTarget(address, kArmorUiCallBytes[i]) == target_ &&
+        const bool valid = Mapping(identity_.callerIds[i], identity_.callerRvas[i]) &&
+            Code(base_ + identity_.callerRvas[i], 1) && Code(address, 5) &&
+            MatchesBytes(address, identity_.callBytes[i]) &&
+            detail::CallTarget(address, identity_.callBytes[i]) == target_ &&
             Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites_[i] = {address, kArmorUiCallBytes[i], {}, info.Protect};
+        sites_[i] = {address, identity_.callBytes[i], {}, info.Protect};
         return true;
     }
     bool PrepareRelay(detail::Site& site, std::uint32_t handle)
@@ -235,7 +353,7 @@ class ArmorInstallation
         for (std::size_t i = 0; i < sites_.size(); ++i)
             if (!PrepareSite(i)) return false;
         // Relays belong to F4SE's process-lifetime pool, including every failure
-        // path. Publish valid forwarding before a CALL can reach either relay.
+        // path. Publish valid forwarding before a CALL can reach a relay.
         return PrepareRelays(handle);
     }
     bool PrepareRelays(std::uint32_t handle)
@@ -246,14 +364,31 @@ class ArmorInstallation
     }
     bool Publish()
     {
-        if (!MatchesBytes(target_, kArmorUiTargetBytes)) return false;
-        g_next.store(reinterpret_cast<ScreenSubmit>(target_), std::memory_order_release);
+        if (!MatchesBytes(target_, identity_.targetBytes)) return false;
+        state_.next.store(reinterpret_cast<Submit>(target_), std::memory_order_release);
         PatchBackend backend;
         if (!detail::InstallPair(sites_, backend)) return false;
-        g_installed.store(true, std::memory_order_release);
+        state_.installed.store(true, std::memory_order_release);
+        return true;
+    }
+    bool RendererKeys()
+    {
+        if (!HudKey()) return false;
+        g_flatKeyReady = OptionalKey({kFlatUiKeyStorageId, kFlatUiKeyStorageRva,
+            kFlatUiKeyGetterId, kFlatUiKeyGetterRva, kFlatUiKeyGetterBytes});
+        g_armorKeyReady = OptionalKey({kArmorUiKeyStorageId, kArmorUiKeyStorageRva,
+            kArmorUiKeyGetterId, kArmorUiKeyGetterRva, kArmorUiKeyGetterBytes});
+        g_rainKeyReady = OptionalKey({kRainUiKeyStorageId, kRainUiKeyStorageRva,
+            kRainUiKeyGetterId, kRainUiKeyGetterRva, kRainUiKeyGetterBytes});
+        g_workshopKeyReady = OptionalKey({kWorkshopUiKeyStorageId, kWorkshopUiKeyStorageRva,
+            kWorkshopUiKeyInitializerId, kWorkshopUiKeyInitializerRva, kWorkshopUiKeyInitializerBytes});
         return true;
     }
 public:
+    ObserverInstallation(const BoundaryIdentity<N>& identity, ObserverState<Submit>& state, Submit hook) :
+        identity_(identity), state_(state), target_(base_ + identity.targetRva),
+        hook_(reinterpret_cast<std::uintptr_t>(hook)) {}
+
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
         if (!base_ || module_.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
@@ -262,8 +397,8 @@ public:
         // container permits recoverable verification without a second parser.
         mappings_.load_v2();
         if (!Target() || !Allocator(allocatorInterface, handle)) return false;
-        if (!PrepareSites(handle)) return false;
-        return Publish();
+        if (identity_.rendererKeys && !RendererKeys()) return false;
+        return PrepareSites(handle) && Publish();
     }
 };
 #endif
@@ -273,14 +408,31 @@ namespace fo4hdr::game {
 bool InitializeArmorUiObserver(bool requested, const void* trampolineInterface,
     std::uint32_t pluginHandle) noexcept
 {
-    if (g_attempted.exchange(true, std::memory_order_acq_rel))
-        return g_installed.load(std::memory_order_acquire);
+    if (g_armorObserver.attempted.exchange(true, std::memory_order_acq_rel))
+        return g_armorObserver.installed.load(std::memory_order_acquire);
     if (!requested) return false;
 #if !defined(FO4HDR_RUNTIME_1_10_163)
     return false;
 #else
     try {
-        ArmorInstallation installation;
+        ObserverInstallation installation(kArmorBoundary, g_armorObserver,
+            static_cast<ScreenSubmit>(&ScreenSubmitHook));
+        return installation.Install(trampolineInterface, pluginHandle);
+    } catch (...) { return false; }
+#endif
+}
+bool InitializeScreenUiObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept
+{
+    if (g_screenObserver.attempted.exchange(true, std::memory_order_acq_rel))
+        return g_screenObserver.installed.load(std::memory_order_acquire);
+    if (!requested) return false;
+#if !defined(FO4HDR_RUNTIME_1_10_163)
+    return false;
+#else
+    try {
+        ObserverInstallation installation(kScreenBoundary, g_screenObserver,
+            static_cast<ScreenUiSubmit>(&ScreenUiSubmitHook));
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
 #endif

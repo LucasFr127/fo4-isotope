@@ -14,10 +14,11 @@
 
 #include "DeviceHooks.hpp"
 #include "HookRecords.hpp"
-#include "../FrameTrace.hpp"
 #include "../DisplayDiscovery.hpp"
 #include "../GraphicsDiagnostics.hpp"
+#include "../FrameTrace.hpp"
 #include "../LiveSettings.hpp"
+#include "../PresentFrame.hpp"
 #include "../RendererLifetime.hpp"
 #include "../ShaderRegistry.hpp"
 #include "../passes/ArmorCompositionPass.hpp"
@@ -26,9 +27,12 @@
 #include "../resources/PresentationResources.hpp"
 #include "../resources/ReplacementShaders.hpp"
 #include "../resources/SceneResources.hpp"
+#include "../SharedUiFrame.hpp"
 
 #include <wrl/client.h>
+#include <algorithm>
 #include <array>
+#include <utility>
 
 namespace fo4hdr {
 
@@ -68,6 +72,8 @@ ULONG STDMETHODCALLTYPE HookContextRelease(
         const auto remaining = InvokeCapturedNext(record->nextRelease, context);
         if (remaining == 0)
         {
+            record->nativePixelShader.Reset();
+            RetireFrameTrace();
             (void)record->identity.Retire(context, generation);
             if (g_pipboyWatchedContext.load(std::memory_order_acquire) == generation)
                 g_pipboyRetiredContext.store(generation, std::memory_order_release);
@@ -79,18 +85,24 @@ ULONG STDMETHODCALLTYPE HookContextRelease(
 void ObserveQueryBegin(
     ContextQuerySafety& queries, ID3D11Asynchronous* asynchronous)
 {
-    ComPtr<ID3D11Query> query;
-    if (asynchronous == nullptr ||
-        FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&query))))
+    if (asynchronous == nullptr)
     {
         queries.unknown = true;
+        return;
+    }
+    ComPtr<ID3D11Query> query;
+    if (FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&query))))
+    {
+        ComPtr<ID3D11Counter> counter;
+        if (FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&counter)))) queries.unknown = true;
         return;
     }
     D3D11_QUERY_DESC description{};
     query->GetDesc(&description);
     if (IsComputeSensitiveQuery(description.Query))
         queries.Begin(asynchronous);
-    else if (description.Query != D3D11_QUERY_TIMESTAMP_DISJOINT)
+    else if (!IsProfilingQuery(description.Query) &&
+        !IsStreamOutputQuery(description.Query))
         queries.unknown = true;
 }
 
@@ -134,13 +146,34 @@ void STDMETHODCALLTYPE HookEnd(
     }
 }
 
+void ResetCommandListObservation(DrawObservation& observation, bool retained) noexcept
+{
+    if (retained) return;
+    // FALSE or a failed replay cannot retain pre-list shader/target observations.
+    observation.currentPrimaryRtv = nullptr;
+    observation.currentSecondaryRtv = nullptr;
+    observation.currentSinglePresentationTarget = false;
+    observation.currentPass = {};
+    observation.currentPassKnown = false;
+    observation.currentReplacementActive = false;
+    observation.expectedBoundShader = nullptr;
+    observation.nativePixelShader.Reset();
+    observation.currentRequirement = PipelinePassRequirement::untracked;
+}
+
+void ObserveCopyResources(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, ID3D11Resource* source) noexcept;
+
 void STDMETHODCALLTYPE HookExecuteCommandList(
     ID3D11DeviceContext* context, ID3D11CommandList* commands,
     BOOL restoreState) noexcept
 {
     auto* record = FindContext(context);
     if (record == nullptr || record->nextExecuteCommandList == nullptr) return;
-    TraceFrameCommandList(context, *record, commands, restoreState);
+    // Opaque replay loses quality proof; restore armor before exposing its temporary codes.
+    ObserveCopyResources(context, g_presentation.presentationProxy.Get(), nullptr);
+    if (context != ownedPresentationContext)
+        TraceFrameCommandList(context, *record, commands, restoreState);
     // FinishCommandList closes deferred query scopes. Executing a finished
     // list therefore does not introduce an unbounded unknown immediate scope.
     // Block re-entrant compute only while next executes; preserve our immediate
@@ -159,19 +192,7 @@ void STDMETHODCALLTYPE HookExecuteCommandList(
         RecordAbiException();
     }
     if (entered) record->computeQueries.LeaveCommandList();
-    if (!restoreState || !completed)
-    {
-        // FALSE resets the API pipeline to defaults; do not retain cached
-        // pre-list shader/target observations as though they were still bound.
-        record->currentPrimaryRtv = nullptr;
-        record->currentSecondaryRtv = nullptr;
-        record->currentSinglePresentationTarget = false;
-        record->currentPass = {};
-        record->currentPassKnown = false;
-        record->currentReplacementActive = false;
-        record->expectedBoundShader = nullptr;
-        record->currentRequirement = PipelinePassRequirement::untracked;
-    }
+    ResetCommandListObservation(*record, restoreState && completed);
 }
 
 bool ArmorScopeOnPresentThread(ID3D11DeviceContext* context) noexcept
@@ -180,7 +201,7 @@ bool ArmorScopeOnPresentThread(ID3D11DeviceContext* context) noexcept
         GetCurrentThreadId() == g_observedPresentThread.load(std::memory_order_acquire);
 }
 
-void CloseArmorForSceneShader(ID3D11DeviceContext* context)
+void CloseConflictingArmorScope(ID3D11DeviceContext* context)
 {
     if (ArmorScopeOnPresentThread(context))
     {
@@ -188,37 +209,39 @@ void CloseArmorForSceneShader(ID3D11DeviceContext* context)
         outer.serial = g_armor.armorEncodedScope;
         ArmorEncodedBoundary(outer, false);
         g_armor.armorEncodedFailed = true;
-        g_armor.armorEncodedStatus = "Disabled: scene shader inside armor scope";
+        if (g_referenceHealthy)
+            g_armor.armorEncodedStatus = "Rejected frame: conflicting operation inside armor scope";
     }
 }
 
 bool PixelReplacementEligible()
 {
+    if (SharedUiFrameEncoded()) return false;
     return !g_armor.armorEncodedActive && HdrPathRequested() &&
-        g_referenceHealthy && g_gameplayReadyApplied.load(std::memory_order_acquire) &&
+        g_referenceHealthy && g_productionHealthy &&
+        g_gameplayReadyApplied.load(std::memory_order_acquire) &&
         ReferenceDisplayStillEligible();
 }
 
 void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
     DrawObservation& record, ID3D11PixelShader*& selectedShader)
 {
-    if (const auto* descriptor = FindShader(shader))
-    {
-        CloseArmorForSceneShader(context);
-        record.currentPass = descriptor->pass;
-        record.currentPassKnown = true;
-        record.currentRequirement = descriptor->requirement;
-        if (PixelReplacementEligible())
-        {
-            if (auto* replacement = FindReplacement(descriptor->pass))
-                selectedShader = replacement;
-        }
-    }
-    else
+    const auto* descriptor = FindShader(shader);
+    if (!descriptor)
     {
         record.currentPassKnown = false;
         record.currentRequirement =
             PipelinePassRequirement::untracked;
+        return;
+    }
+    CloseConflictingArmorScope(context);
+    record.currentPass = descriptor->pass;
+    record.currentPassKnown = true;
+    record.currentRequirement = descriptor->requirement;
+    if (PixelReplacementEligible())
+    {
+        if (auto* replacement = FindReplacement(descriptor->pass))
+            selectedShader = replacement;
     }
 }
 
@@ -236,16 +259,22 @@ void STDMETHODCALLTYPE HookPsSetShader(
     auto* selectedShader = shader;
     try
     {
-        SelectPixelShader(context, shader, *record, selectedShader);
+        ApplyGraphicsLifecycleBeforeDraw(context);
+        record->currentPassKnown = false;
+        record->currentRequirement = PipelinePassRequirement::untracked;
+        if (classCount == 0) SelectPixelShader(context, shader, *record, selectedShader);
         record->currentReplacementActive = selectedShader != shader;
         record->expectedBoundShader = selectedShader;
+        record->nativePixelShader = record->currentReplacementActive ? shader : nullptr;
     }
     catch (...)
     {
         record->currentPassKnown = false;
         record->currentReplacementActive = false;
         record->expectedBoundShader = nullptr;
+        record->nativePixelShader.Reset();
         record->currentRequirement = PipelinePassRequirement::untracked;
+        selectedShader = shader;
         RecordAbiException();
     }
     InvokeCapturedNext(record->nextPsSetShader, context, selectedShader,
@@ -258,6 +287,21 @@ bool HasExpectedShaderBinding(ID3D11DeviceContext* context, const DrawObservatio
         record.expectedBoundShader != nullptr;
 }
 
+bool RestoreNativePixelShader(ID3D11DeviceContext* context, DrawObservation& record) noexcept
+{
+    if (!record.nativePixelShader || !HasOriginalPixelShaderSetter(context)) return false;
+    const auto native = std::move(record.nativePixelShader);
+    BindOriginalPixelShader(context, native.Get());
+    ComPtr<ID3D11PixelShader> actual;
+    context->PSGetShader(&actual, nullptr, nullptr);
+    record.currentReplacementActive = false;
+    record.expectedBoundShader = actual.Get();
+    if (actual.Get() == native.Get()) return true;
+    record.currentPassKnown = false;
+    record.currentRequirement = PipelinePassRequirement::untracked;
+    return false;
+}
+
 [[nodiscard]] bool ValidateExpectedShaderBinding(
     ID3D11DeviceContext* context,
     DrawObservation& record) noexcept
@@ -266,30 +310,33 @@ bool HasExpectedShaderBinding(ID3D11DeviceContext* context, const DrawObservatio
         return true;
     ComPtr<ID3D11PixelShader> actual;
     context->PSGetShader(&actual, nullptr, nullptr);
-    if (actual.Get() == record.expectedBoundShader) return true;
+    if (actual.Get() == record.expectedBoundShader)
+        return g_productionHealthy || RestoreNativePixelShader(context, record);
 
     // A downstream owner changed a shader after FO4Isotope selected its
-    // replacement. Required-pass collisions disable this generation; an
+    // replacement. Required-pass collisions disable production for this generation; an
     // optional collision disables only scene continuation for this draw.
     if (DecideUnknownShaderOutcome(record.currentRequirement) ==
         UnknownShaderOutcome::disableHdrGeneration)
     {
-        g_referenceHealthy = false;
+        g_productionHealthy = false;
         RecordFailure(GraphicsObservationFailure::requiredHeartbeatMissing);
     }
     record.currentPassKnown = false;
     record.currentReplacementActive = false;
     record.expectedBoundShader = actual.Get();
+    record.nativePixelShader.Reset();
     return false;
 }
 
 bool CanRedirectPresentation(ID3D11RenderTargetView* view) noexcept
 {
-    return view != nullptr && HdrPathRequested() && g_referenceHealthy &&
-        g_gameplayReadyApplied.load(std::memory_order_acquire) &&
-        g_scene.currentScene != nullptr && g_presentation.presentationProxyRtv &&
-        g_presentation.presentationBackBuffer &&
-        g_scene.currentSceneDomain != LinearColorDomain::unknown;
+    const std::array ready{view != nullptr, HdrPathRequested(), g_referenceHealthy.load(),
+        g_productionHealthy.load(), g_gameplayReadyApplied.load(std::memory_order_acquire),
+        g_scene.currentScene != nullptr, g_presentation.presentationProxyRtv != nullptr,
+        g_presentation.presentationBackBuffer != nullptr,
+        g_scene.currentSceneDomain != LinearColorDomain::unknown};
+    return std::ranges::all_of(ready, [](bool value) { return value; });
 }
 
 bool AcceptPresentationDomain() noexcept
@@ -299,18 +346,17 @@ bool AcceptPresentationDomain() noexcept
     {
         g_evidence.colorDomainMismatchCount.fetch_add(1, std::memory_order_relaxed);
         RecordFailure(GraphicsObservationFailure::colorDomainMismatch);
-        g_referenceHealthy = false;
         return false;
     }
     return true;
 }
 
-ID3D11RenderTargetView* PublishPresentationRedirect() noexcept
+ID3D11RenderTargetView* PublishPresentationRedirect(ID3D11RenderTargetView* view) noexcept
 {
     g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
     g_presentation.presentationRedirectedThisFrame = true;
     g_evidence.presentationRedirectCount.fetch_add(1, std::memory_order_relaxed);
-    return g_presentation.presentationProxyRtv.Get();
+    return view;
 }
 
 [[nodiscard]] ID3D11RenderTargetView* RedirectPresentationView(
@@ -318,13 +364,12 @@ ID3D11RenderTargetView* PublishPresentationRedirect() noexcept
 {
     if (!CanRedirectPresentation(view)) return view;
 
-    for (const auto* known : g_presentation.presentationViews)
+    const bool exactProxy = IsPresentationProxyTarget(view);
+    if (exactProxy || std::ranges::find(g_presentation.presentationViews, view) !=
+            g_presentation.presentationViews.end())
     {
-        if (known == view)
-        {
-            if (!AcceptPresentationDomain()) return view;
-            return PublishPresentationRedirect();
-        }
+        if (!AcceptPresentationDomain()) return view;
+        return PublishPresentationRedirect(exactProxy ? view : g_presentation.presentationProxyRtv.Get());
     }
 
     // Existing game RTVs survive a display-generation reset even when the
@@ -336,7 +381,7 @@ ID3D11RenderTargetView* PublishPresentationRedirect() noexcept
     ComPtr<ID3D11Resource> resource;
     view->GetResource(&resource);
     if (!RememberPresentationView(resource.Get(), view)) return view;
-    return PublishPresentationRedirect();
+    return PublishPresentationRedirect(g_presentation.presentationProxyRtv.Get());
 }
 
 using RenderTargetArray = std::array<ID3D11RenderTargetView*,
@@ -354,11 +399,9 @@ bool RedirectRenderTargetArray(UINT count, ID3D11RenderTargetView* const* views,
     return changed;
 }
 
-bool IsSinglePresentationTarget(UINT count, ID3D11RenderTargetView* const* views,
-    const RenderTargetArray& redirected) noexcept
+bool IsSinglePresentationTarget(UINT count, const RenderTargetArray& redirected) noexcept
 {
-    return count == 1 && redirected[0] != views[0] &&
-        redirected[0] == g_presentation.presentationProxyRtv.Get();
+    return count == 1 && IsPresentationProxyTarget(redirected[0]);
 }
 
 ID3D11RenderTargetView* RenderTargetAt(UINT count,
@@ -379,7 +422,7 @@ ID3D11RenderTargetView* RenderTargetAt(UINT count,
         if (RedirectRenderTargetArray(count, views, redirected))
             selected = redirected.data();
         record.currentSinglePresentationTarget =
-            IsSinglePresentationTarget(count, views, redirected);
+            IsSinglePresentationTarget(count, redirected);
     }
     record.currentPrimaryRtv = RenderTargetAt(count, selected, 0);
     record.currentSecondaryRtv = RenderTargetAt(count, selected, 1);
@@ -449,7 +492,7 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(
 }
 
 template <auto NextMember, class... Arguments>
-void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad, FrameTraceKind kind,
+void ForwardDrawCall(ID3D11DeviceContext* context, FrameTraceKind kind,
     Arguments... arguments) noexcept
 {
     auto* record = FindContext(context);
@@ -466,26 +509,27 @@ void ForwardDrawCall(ID3D11DeviceContext* context, bool exactIndexedQuad, FrameT
     };
     const DrawInvocation invocation{
         [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw};
-    ExecuteObservedDraw(*record, context, exactIndexedQuad, invocation);
+    ExecuteObservedDraw(*record, context, invocation);
 }
 
 void STDMETHODCALLTYPE HookDraw(
     ID3D11DeviceContext* context, UINT vertexCount, UINT startVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDraw>(context, false, FrameTraceKind::draw, vertexCount, startVertex);
+    ForwardDrawCall<&ContextRecord::nextDraw>(context, FrameTraceKind::draw, vertexCount, startVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexed(
     ID3D11DeviceContext* context, UINT indexCount, UINT startIndex, INT baseVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context, indexCount == 6, FrameTraceKind::drawIndexed, indexCount, startIndex, baseVertex);
+    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context,
+        FrameTraceKind::drawIndexed, indexCount, startIndex, baseVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexedInstanced(
     ID3D11DeviceContext* context, UINT indices, UINT instances,
     UINT startIndex, INT baseVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, false, FrameTraceKind::drawIndexedInstanced,
+    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, FrameTraceKind::drawIndexedInstanced,
         indices, instances, startIndex, baseVertex, startInstance);
 }
 
@@ -493,8 +537,15 @@ void STDMETHODCALLTYPE HookDrawInstanced(
     ID3D11DeviceContext* context, UINT vertices, UINT instances,
     UINT startVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, false, FrameTraceKind::drawInstanced,
+    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, FrameTraceKind::drawInstanced,
         vertices, instances, startVertex, startInstance);
+}
+
+void ObserveCopyResources(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, ID3D11Resource* source) noexcept
+{
+    if (!ObserveGameContext(context)) return;
+    if (ObserveSharedUiCopy(destination, source)) CloseConflictingArmorScope(context);
 }
 
 void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
@@ -502,7 +553,9 @@ void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
 {
     auto* record = FindContext(context);
     if (!record || !record->nextCopyResource) return;
-    TraceFrameCopy(context, *record, {FrameTraceKind::copy, destination, source});
+    ObserveCopyResources(context, destination, source);
+    if (context != ownedPresentationContext)
+        TraceFrameCopy(context, *record, {FrameTraceKind::copy, destination, source});
     try { InvokeCapturedNext(record->nextCopyResource, context, destination, source); }
     catch (...) { RecordAbiException(); }
 }
@@ -513,7 +566,8 @@ void STDMETHODCALLTYPE HookCopySubresourceRegion(ID3D11DeviceContext* context,
 {
     auto* record = FindContext(context);
     if (!record || !record->nextCopySubresourceRegion) return;
-    if (FrameTraceRequested())
+    ObserveCopyResources(context, destination, source);
+    if (context != ownedPresentationContext && FrameTraceRequested())
     {
         FrameTraceArguments args{destinationSubresource, x, y, z, sourceSubresource, box ? 1U : 0U};
         if (box) { args[6] = box->left; args[7] = box->top; args[8] = box->front;
@@ -532,9 +586,80 @@ void STDMETHODCALLTYPE HookClearRenderTargetView(ID3D11DeviceContext* context,
 {
     auto* record = FindContext(context);
     if (!record || !record->nextClearRenderTargetView) return;
-    TraceFrameClear(context, *record, target, color);
+    if (ObserveGameContext(context)) ObserveSharedUiClear(target);
+    if (context != ownedPresentationContext) TraceFrameClear(context, *record, target, color);
     try { InvokeCapturedNext(record->nextClearRenderTargetView, context, target, color); }
     catch (...) { RecordAbiException(); }
+}
+
+void ObserveUnorderedAccessWrite(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target) noexcept
+{
+    if (!target) return;
+    if (!ObserveGameContext(context) || !ApplicationPresentationFacadeActive()) return;
+    ComPtr<ID3D11Resource> resource;
+    target->GetResource(&resource);
+    ObserveCopyResources(context, resource.Get(), nullptr);
+}
+
+void ObserveComputeWrites(ID3D11DeviceContext* context) noexcept
+{
+    if (!ObserveGameContext(context) || !ApplicationPresentationFacadeActive()) return;
+    ComPtr<ID3D11Device> device;
+    context->GetDevice(&device);
+    const UINT count = device->GetFeatureLevel() >= D3D_FEATURE_LEVEL_11_1 ?
+        D3D11_1_UAV_SLOT_COUNT : D3D11_PS_CS_UAV_REGISTER_COUNT;
+    std::array<ID3D11UnorderedAccessView*, D3D11_1_UAV_SLOT_COUNT> targets{};
+    context->CSGetUnorderedAccessViews(0, count, targets.data());
+    for (auto* target : targets)
+    {
+        ObserveUnorderedAccessWrite(context, target);
+        if (target) target->Release();
+    }
+}
+
+template <auto NextMember, class... Arguments>
+void ForwardComputeCall(ID3D11DeviceContext* context, Arguments... arguments) noexcept
+{
+    auto* record = FindContext(context);
+    if (!record || !(record->*NextMember)) return;
+    ObserveComputeWrites(context);
+    try { InvokeCapturedNext(record->*NextMember, context, arguments...); }
+    catch (...) { RecordAbiException(); }
+}
+
+void STDMETHODCALLTYPE HookDispatch(ID3D11DeviceContext* context, UINT x, UINT y, UINT z) noexcept
+{
+    ForwardComputeCall<&ContextRecord::nextDispatch>(context, x, y, z);
+}
+
+void STDMETHODCALLTYPE HookDispatchIndirect(ID3D11DeviceContext* context,
+    ID3D11Buffer* arguments, UINT offset) noexcept
+{
+    ForwardComputeCall<&ContextRecord::nextDispatchIndirect>(context, arguments, offset);
+}
+
+template <auto NextMember, class Value>
+void ForwardUnorderedAccessClear(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target, const Value* values) noexcept
+{
+    auto* record = FindContext(context);
+    if (!record || !(record->*NextMember)) return;
+    ObserveUnorderedAccessWrite(context, target);
+    try { InvokeCapturedNext(record->*NextMember, context, target, values); }
+    catch (...) { RecordAbiException(); }
+}
+
+void STDMETHODCALLTYPE HookClearUnorderedAccessViewUint(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target, const UINT* values) noexcept
+{
+    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewUint>(context, target, values);
+}
+
+void STDMETHODCALLTYPE HookClearUnorderedAccessViewFloat(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target, const FLOAT* values) noexcept
+{
+    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewFloat>(context, target, values);
 }
 
 } // namespace fo4hdr

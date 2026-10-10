@@ -25,6 +25,7 @@ extern PipelineHeartbeat g_heartbeat;
 extern HdrRendererLifecycle g_lifecycle;
 extern std::uint64_t g_frame;
 extern std::atomic<bool> g_referenceHealthy;
+extern std::atomic<bool> g_productionHealthy;
 extern std::atomic<bool> g_gameplayReadyApplied;
 extern std::atomic<bool> g_rendererCreationClaimed;
 
@@ -33,9 +34,10 @@ void ResetSceneTracking() noexcept;
 void RetireLostDeviceGeneration() noexcept;
 void BeginPublishedHeartbeatGeneration() noexcept;
 bool DisplayGenerationChanged(IDXGISwapChain*, bool& sdrColorSpaceEstablished) noexcept;
-void ResetResources(bool retainColorControl = false) noexcept;
+void ResetResources(bool retainColorControl = false, bool retainPresentationBuffer = false) noexcept;
 bool EnsureResources(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 bool EnsureWideGamutResources(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
+void RecordProductionResourceFailure(IDXGISwapChain*) noexcept;
 WideGamutResourceReadiness CurrentWideGamutReadiness() noexcept;
 
 } // namespace fo4hdr

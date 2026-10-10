@@ -173,9 +173,13 @@ struct CompositionConstants
     std::uint32_t gameUiBackdropCaptured;
     std::uint32_t gameUiCaptured;
     std::uint32_t settingsOverlayPresent{1};
-    std::array<std::uint32_t, 3> reserved{};
+    std::uint32_t sharedUiEncoded{};
+    std::uint32_t assumedContent{};
+    float armorPeakUiRelative{};
 };
 static_assert(sizeof(CompositionConstants) == 48);
+static_assert(offsetof(CompositionConstants, sharedUiEncoded) == 36);
+static_assert(offsetof(CompositionConstants, armorPeakUiRelative) == 44);
 
 struct OutputConstants
 {

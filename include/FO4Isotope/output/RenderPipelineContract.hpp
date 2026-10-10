@@ -57,7 +57,9 @@ enum class LinearColorDomain : std::uint8_t
     unknown,
     vanillaSdrCodes,
     linearBt709Relative,
-    linearBt2020UiRelative
+    linearBt2020UiRelative,
+    encodedSrgbBt709UiRelative,
+    encodedGamma22Bt709UiRelative
 };
 
 struct WideGamutResourceReadiness
@@ -89,7 +91,8 @@ enum class SdrHandoffAction : std::uint8_t
     none,
     copyVanillaSdr,
     clearBlack,
-    clearBlackAndDisable
+    clearBlackAndDisable,
+    convertPublicImage
 };
 
 [[nodiscard]] constexpr SdrHandoffAction DecideSdrHandoff(
@@ -115,55 +118,56 @@ struct RenoDxShaderDescriptor
     PipelinePassGroup group{};
     PipelinePassRequirement requirement{};
     std::uint8_t sceneInputSlot{};
+    std::uint8_t texture2dInputMask{};
 };
 
 inline constexpr std::array<RenoDxShaderDescriptor, 15>
     kRenoDxFallout4Shaders{{
         {RenoDxShaderPass::toneMapA, 0x8024E8B5u, "tonemap-a",
          PipelinePassGroup::toneMapFamily,
-         PipelinePassRequirement::required, 1},
+         PipelinePassRequirement::required, 1, 0x0F},
         {RenoDxShaderPass::toneMapB, 0x676B8B5Du, "tonemap-b",
          PipelinePassGroup::toneMapFamily,
-         PipelinePassRequirement::required, 1},
+         PipelinePassRequirement::required, 1, 0x0F},
         {RenoDxShaderPass::toneMapNewA, 0x67685D89u, "tonemap-new-a",
          PipelinePassGroup::toneMapFamily,
-         PipelinePassRequirement::required, 0},
+         PipelinePassRequirement::required, 0, 0x0F},
         {RenoDxShaderPass::toneMapNewB, 0xFEBC673Cu, "tonemap-new-b",
          PipelinePassGroup::toneMapFamily,
-         PipelinePassRequirement::required, 0},
+         PipelinePassRequirement::required, 0, 0x0F},
         {RenoDxShaderPass::lut, 0x80802E60u, "lut",
          PipelinePassGroup::creativeGrade,
-         PipelinePassRequirement::required, 0},
+         PipelinePassRequirement::required, 0, 0x01},
         {RenoDxShaderPass::taa, 0x8CAC3BD9u, "taa",
          PipelinePassGroup::temporalAa,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x0F},
         {RenoDxShaderPass::taa2, 0x61CC29E6u, "taa-2",
          PipelinePassGroup::temporalAa,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x1F},
         {RenoDxShaderPass::fxaa, 0x4FB4DA20u, "fxaa",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x01},
         {RenoDxShaderPass::video, 0x0F2CC0D1u, "video",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x01},
         {RenoDxShaderPass::dofAuxiliary1, 0x7543CFBCu, "dof-auxiliary-1",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x01},
         {RenoDxShaderPass::dofAuxiliary2, 0x5E75012Au, "dof-auxiliary-2",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x01},
         {RenoDxShaderPass::dofAuxiliary3, 0xC7AD6297u, "dof-auxiliary-3",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x05},
         {RenoDxShaderPass::dofBlender, 0x8F009507u, "dof-blender",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x07},
         {RenoDxShaderPass::gameDof, 0x83660755u, "game-dof",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0},
+         PipelinePassRequirement::optional, 0, 0x07},
         {RenoDxShaderPass::vignette, 0xB74B05F4u, "vignette",
          PipelinePassGroup::postEffect,
-         PipelinePassRequirement::optional, 0}
+         PipelinePassRequirement::optional, 0, 0x03}
     }};
 
 [[nodiscard]] constexpr const RenoDxShaderDescriptor*
@@ -225,61 +229,9 @@ enum class TemporalSceneAction : std::uint8_t
 {
     ignoreUnqualifiedBranch,
     acceptProxy,
-    rejectMissingProxy
+    rejectMissingProxy,
+    acceptInternalScene
 };
-
-enum class LateGameUiAction : std::uint8_t
-{
-    passThrough,
-    captureSeparately
-};
-
-struct LateGameUiFrame
-{
-    bool hdrPathRequested{};
-    bool referenceHealthy{};
-    bool gameplayReady{};
-    bool productionOperatorApplied{};
-    bool qualifiedSceneSelected{};
-    bool exactSinglePresentationTarget{};
-
-    [[nodiscard]] constexpr bool Ready() const noexcept
-    {
-        return hdrPathRequested && referenceHealthy && gameplayReady &&
-            productionOperatorApplied && qualifiedSceneSelected && exactSinglePresentationTarget;
-    }
-};
-
-struct LateGameUiBackdrop
-{
-    bool allowlistedBackdropShader{};
-    bool exactIndexedQuad{};
-    bool texture2dMaskSource{};
-    bool depthDetached{};
-
-    [[nodiscard]] constexpr bool Qualified() const noexcept
-    {
-        return allowlistedBackdropShader && exactIndexedQuad && texture2dMaskSource && depthDetached;
-    }
-};
-
-[[nodiscard]] constexpr LateGameUiAction DecideLateGameUiAction(
-    const LateGameUiFrame& frame,
-    bool allowlistedUiShader,
-    bool fullResolutionSdrUiSource) noexcept
-{
-    return frame.Ready() && allowlistedUiShader && fullResolutionSdrUiSource ?
-        LateGameUiAction::captureSeparately :
-        LateGameUiAction::passThrough;
-}
-
-[[nodiscard]] constexpr LateGameUiAction DecideLateGameUiBackdropAction(
-    const LateGameUiFrame& frame, const LateGameUiBackdrop& backdrop) noexcept
-{
-    return frame.Ready() && backdrop.Qualified() ?
-        LateGameUiAction::captureSeparately :
-        LateGameUiAction::passThrough;
-}
 
 [[nodiscard]] constexpr PipelineHeartbeatAction DecidePipelineHeartbeatAction(
     const PipelineHeartbeatEvaluation& evaluation) noexcept
@@ -303,10 +255,11 @@ struct TemporalSceneEvidence
     bool consumesSelectedScene{};
     bool presentationTarget{};
     bool exactProxyReady{};
+    bool internalSceneReady{};
 
-    [[nodiscard]] constexpr bool Qualified() const noexcept
+    [[nodiscard]] constexpr bool InputQualified() const noexcept
     {
-        return qualifiedSceneSelected && consumesSelectedScene && presentationTarget;
+        return qualifiedSceneSelected && consumesSelectedScene;
     }
 };
 
@@ -314,14 +267,16 @@ struct TemporalSceneEvidence
     const PipelineHeartbeatEvaluation& evaluation,
     const TemporalSceneEvidence& evidence) noexcept
 {
-    if (!evaluation.ready ||
-        evaluation.outcome != PipelineHeartbeatEvaluation::Outcome::ready)
+    if (DecidePipelineHeartbeatAction(evaluation) != PipelineHeartbeatAction::renderHdr)
     {
         return TemporalSceneAction::ignoreUnqualifiedBranch;
     }
-    if (!evidence.Qualified()) return TemporalSceneAction::ignoreUnqualifiedBranch;
-    return evidence.exactProxyReady ? TemporalSceneAction::acceptProxy
-                                   : TemporalSceneAction::rejectMissingProxy;
+    if (!evidence.InputQualified()) return TemporalSceneAction::ignoreUnqualifiedBranch;
+    if (evidence.presentationTarget)
+        return evidence.exactProxyReady ? TemporalSceneAction::acceptProxy
+                                       : TemporalSceneAction::rejectMissingProxy;
+    return evidence.internalSceneReady ? TemporalSceneAction::acceptInternalScene
+                                       : TemporalSceneAction::ignoreUnqualifiedBranch;
 }
 
 class PipelineHeartbeat

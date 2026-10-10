@@ -68,10 +68,6 @@ struct AtomicEvidence
     std::atomic<std::uint64_t> referenceRenderFailureCount{};
     std::atomic<std::uint64_t> productionOperatorDrawCount{};
     std::atomic<std::uint64_t> productionFrameCount{};
-    std::atomic<std::uint64_t> nativeUiBackdropCaptureDrawCount{};
-    std::atomic<std::uint64_t> nativeUiBackdropCaptureFrameCount{};
-    std::atomic<std::uint64_t> nativeUiCaptureDrawCount{};
-    std::atomic<std::uint64_t> nativeUiCaptureFrameCount{};
     std::atomic<std::uint64_t> performanceCpuMeasuredSamples{};
     std::atomic<std::uint64_t> performanceGpuMeasuredSamples{};
     std::atomic<std::uint64_t> performanceCpuP95Nanoseconds{};

@@ -6,6 +6,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace fo4hdr {
@@ -18,16 +19,29 @@ struct CompositionConstants
     float uiPaperWhiteNits{1.0F};
     float sceneReferenceWhiteNits{kDeveloperReferenceNits};
     float displayPeakNits{1000.0F};
-    std::uint32_t gameUiBackdropCaptured{};
-    std::uint32_t gameUiCaptured{};
+    std::uint32_t reserved0{};
+    std::uint32_t reserved1{};
     std::uint32_t settingsOverlayPresent{};
-    std::array<std::uint32_t, 3> reserved{};
+    std::uint32_t sharedUiEncoded{};
+    std::uint32_t assumedContent{};
+    float armorPeakUiRelative{};
 };
 static_assert(sizeof(CompositionConstants) == 48);
+static_assert(offsetof(CompositionConstants, reserved0) == 24);
+static_assert(offsetof(CompositionConstants, reserved1) == 28);
+static_assert(offsetof(CompositionConstants, settingsOverlayPresent) == 32);
 
 
-bool RenderReferenceFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
-bool RenderSdrPresentationProxy(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
-bool RenderBlackSdrFailureFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*, bool sdrColorSpaceEstablished) noexcept;
+enum class PresentationResult { rendered, unavailable, retry, blocked, failed };
+struct SharedUiPresentation;
+
+PresentationResult RenderReferenceFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
+PresentationResult RenderSdrPresentationProxy(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*,
+    const SharedUiPresentation* hdrPresentation = nullptr) noexcept;
+PresentationResult RenderPublicSharedUiFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*,
+    const SharedUiPresentation&) noexcept;
+PresentationResult RenderPublicSharedUiSdrFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*,
+    const SharedUiPresentation&) noexcept;
+bool RenderBlackPresentationFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 
 } // namespace fo4hdr

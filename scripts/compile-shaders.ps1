@@ -138,6 +138,7 @@ $specifications = @(
     [ordered]@{ Name = "PresentFullscreenVs"; Symbol = "kPresentFullscreenVs"; Source = "shaders/output/PresentFullscreen.vs.hlsl"; Profile = "vs_5_0"; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position") }
 )
 $testSpecifications = @(
+    [ordered]@{ Name = "SharedUiSyntheticPs"; Symbol = "kSharedUiSyntheticPs"; Source = "tests/shader/shaders/SharedUiSynthetic.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB0[4]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "FullscreenStateVs"; Symbol = "kFullscreenStateVs"; Source = "tests/shader/shaders/FullscreenState.vs.hlsl"; Profile = "vs_5_0"; TestOnly = $true },
     [ordered]@{ Name = "FullscreenStatePs"; Symbol = "kFullscreenStatePs"; Source = "tests/shader/shaders/FullscreenState.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true },
     [ordered]@{ Name = "FullscreenStateGs"; Symbol = "kFullscreenStateGs"; Source = "tests/shader/shaders/FullscreenState.gs.hlsl"; Profile = "gs_5_0"; TestOnly = $true },

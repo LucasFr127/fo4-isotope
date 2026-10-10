@@ -7,6 +7,222 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
+function Assert-NativeRendererKeyRelationship {
+    param([Parameter(Mandatory)]$Identity)
+    $getter = [Convert]::ToInt64($Identity.keyGetterRva.Substring(2), 16)
+    $storage = [Convert]::ToInt64($Identity.keyStorageRva.Substring(2), 16)
+    $bytes = [byte[]]@($Identity.keyGetterExpectedBytes)
+    $lea = $bytes[19..21] -join ','
+    $addressesStorage = $getter + 26 + [BitConverter]::ToInt32($bytes, 22) -eq $storage
+    if ($Identity.keyStorageAddressLibraryId -eq $Identity.keyGetterAddressLibraryId) {
+        throw 'Native renderer key storage and getter require distinct mappings.'
+    }
+    if ($lea -ne '72,141,29') {
+        throw 'Native renderer key getter requires a RIP-relative canonical-storage instruction.'
+    }
+    if (-not $addressesStorage) {
+        throw 'Native renderer key getter does not address its canonical pooled-key storage.'
+    }
+}
+
+function Assert-WorkshopRendererKeyRelationship {
+    param([Parameter(Mandatory)]$Identity)
+    $initializer = [Convert]::ToInt64($Identity.keyInitializerRva.Substring(2), 16)
+    $storage = [Convert]::ToInt64($Identity.keyStorageRva.Substring(2), 16)
+    $bytes = [byte[]]@($Identity.keyInitializerExpectedBytes)
+    if ($Identity.keyStorageAddressLibraryId -eq $Identity.keyInitializerAddressLibraryId) {
+        throw 'Workshop renderer key storage and initializer require distinct mappings.'
+    }
+    if (($bytes[11..13] -join ',') -ne '72,141,13') {
+        throw 'Workshop renderer key initializer requires a RIP-relative canonical-storage instruction.'
+    }
+    if ($initializer + 18 + [BitConverter]::ToInt32($bytes, 14) -ne $storage) {
+        throw 'Workshop renderer key initializer does not address its canonical pooled-key storage.'
+    }
+}
+
+function Assert-JsonSchemaFile {
+    param($Check)
+    if (-not (Test-Path $check.Json)) {
+        throw "Missing JSON file: $($check.Json)"
+    }
+    if (-not (Test-Path $check.Schema)) {
+        throw "Missing JSON schema: $($check.Schema)"
+    }
+    $jsonText = Get-Content $check.Json -Raw
+    $valid = $jsonText | Test-Json -SchemaFile $check.Schema
+    if (-not $valid) {
+        throw "Schema validation failed: $($check.Json)"
+    }
+    Write-Host "Validated: $($check.Json)"
+}
+
+function Assert-MirrorValues {
+    param([string]$Runtime, $Mirrors)
+    foreach ($mirror in $mirrors.GetEnumerator()) {
+        if ($mirror.Value[0] -cne $mirror.Value[1]) {
+            throw (
+                "Runtime $runtime manifest and lock disagree on " +
+                "'$($mirror.Key)'."
+            )
+        }
+    }
+}
+
+function Assert-RuntimeMirrors {
+    param([string]$Runtime, $Manifest, $Entry, $Definition)
+    $mirrors = [ordered]@{
+        version = @([string]$manifest.runtime.version, "$runtime.0")
+        status = @([string]$manifest.runtime.status, [string]$entry.status)
+        platform = @([string]$manifest.runtime.platform, [string]$entry.platform)
+        f4seVersion = @(
+            [string]$manifest.runtime.f4seVersion,
+            [string]$entry.f4seVersion
+        )
+        exeSha256 = @(
+            [string]$manifest.runtime.exeSha256,
+            [string]$entry.exeSha256
+        )
+        addressLibraryFile = @(
+            [string]$manifest.runtime.addressLibraryFile,
+            [string]$entry.addressLibraryFile
+        )
+    }
+    Assert-MirrorValues $runtime $mirrors
+    if ($entry.f4seVersion -cne $definition.F4SEVersion -or
+        $entry.addressLibraryFile -cne $definition.AddressLibraryFile) {
+        throw "Runtime $runtime lock differs from its project definition."
+    }
+}
+
+function Assert-LockedRuntimeIdentity {
+    param([string]$Runtime, [string]$ManifestPath, $Entry, $Definition)
+    if ($entry.status -in @(
+            "runtime-pinned-unvalidated",
+            "capture-complete",
+            "release-approved"
+        )) {
+        if ($entry.platform -notin @(
+                $definition.AllowedPlatforms |
+                    ForEach-Object { $_.ToLowerInvariant() }
+            )) {
+            throw "Runtime $runtime has an unapproved platform '$($entry.platform)'."
+        }
+        if ((Get-Fo4HdrCanonicalTextSha256 $manifestPath) -cne
+            [string]$entry.runtimeManifestCanonicalSha256) {
+            throw "Runtime $runtime manifest canonical identity differs from the lock."
+        }
+    }
+}
+
+function Assert-NativeLutRuntime {
+    param([string]$Runtime, $Manifest)
+    $lutProperty = $manifest.PSObject.Properties['nativeLutObserver']
+    if ($null -ne $lutProperty -and $runtime -ne '1.10.163') {
+        throw 'The native LUT observer is scoped to runtime 1.10.163.'
+    }
+}
+
+function Test-ObserverCallRelationship {
+    param($Call, [long]$Target, [hashtable]$Seen)
+    $site = [Convert]::ToInt64($Call.rva.Substring(2), 16)
+    $caller = [Convert]::ToInt64($Call.callerRva.Substring(2), 16)
+    $bytes = [byte[]]@($Call.expectedBytes)
+    if ($bytes.Count -ne 5 -or $bytes[0] -ne 232) { return $false }
+    if ($site + 5 + [BitConverter]::ToInt32($bytes, 1) -ne $Target) { return $false }
+    return $site -gt $caller -and -not $Seen.ContainsKey($site)
+}
+
+function Assert-ImageSpaceRuntime {
+    param([string]$Runtime, $Manifest)
+    $imageSpaceProperty = $manifest.PSObject.Properties['imageSpaceObserver']
+    if ($null -eq $imageSpaceProperty) { return }
+    if ($runtime -ne '1.10.163') {
+        throw 'The ImageSpace provenance observer is scoped to runtime 1.10.163.'
+    }
+    $imageSpace = $imageSpaceProperty.Value
+    $seenCalls = @{}
+    foreach ($call in $imageSpace.calls) {
+        $target = [Convert]::ToInt64($imageSpace.targets[$call.targetIndex].rva.Substring(2), 16)
+        if (-not (Test-ObserverCallRelationship $call $target $seenCalls)) {
+            throw 'ImageSpace provenance CALL identity/target/caller relationship is invalid.'
+        }
+        $seenCalls[[Convert]::ToInt64($call.rva.Substring(2), 16)] = $true
+    }
+}
+
+function Assert-NativeUiCallSequence {
+    param($Profile)
+    $target = [Convert]::ToInt64($profile.target.rva.Substring(2), 16)
+    $seenCalls = @{}
+    for ($index = 0; $index -lt 2; ++$index) {
+        $call = $profile.calls[$index]
+        if ($call.slot -ne (24 + $index) -or
+            -not (Test-ObserverCallRelationship $call $target $seenCalls)) {
+            throw 'Native pause allocation CALL order/target/caller relationship is invalid.'
+        }
+        $seenCalls[[Convert]::ToInt64($call.rva.Substring(2), 16)] = $true
+    }
+}
+
+function Assert-NativeUiResourcesRuntime {
+    param([string]$Runtime, $Manifest)
+    $profileProperty = $Manifest.PSObject.Properties['nativeUiResources']
+    if ($null -eq $profileProperty) { return }
+    if ($Runtime -ne '1.10.163') {
+        throw 'Native pause resource allocation is scoped to runtime 1.10.163.'
+    }
+    Assert-NativeUiCallSequence $profileProperty.Value
+}
+
+function Assert-ScreenUiRuntime {
+    param([string]$Runtime, $Manifest)
+    $profileProperty = $Manifest.PSObject.Properties['experimentalScreenUiObserver']
+    if ($null -eq $profileProperty) { return }
+    if ($Runtime -ne '1.10.163') {
+        throw 'The screen-space UI entry is scoped to runtime 1.10.163.'
+    }
+    $profile = $profileProperty.Value
+    $target = [Convert]::ToInt64($profile.target.rva.Substring(2), 16)
+    $seenCalls = @{}
+    foreach ($call in $profile.calls) {
+        if (-not (Test-ObserverCallRelationship $call $target $seenCalls)) {
+            throw 'Screen-space UI CALL identity/target/caller relationship is invalid.'
+        }
+        $seenCalls[[Convert]::ToInt64($call.rva.Substring(2), 16)] = $true
+    }
+}
+
+function Assert-ArmorUiContract {
+    param([string]$Runtime, $Armor)
+    $validStatus = $armor.status -eq 'unvalidated' -and
+        $armor.scope -eq 'power-armor-encoded-peak-composition'
+    if ($runtime -ne '1.10.163' -or -not $validStatus) {
+        throw 'Armor observer runtime, status or scope is invalid.'
+    }
+}
+
+function Assert-ArmorUiRuntime {
+    param([string]$Runtime, $Manifest)
+    $armorProperty = $manifest.PSObject.Properties['experimentalArmorUiObserver']
+    if ($null -eq $armorProperty) { return }
+    $armor = $armorProperty.Value
+    Assert-ArmorUiContract $runtime $armor
+    Assert-NativeRendererKeyRelationship $armor.hudRendererIdentity
+    Assert-NativeRendererKeyRelationship $armor.flatRendererIdentity
+    Assert-NativeRendererKeyRelationship $armor.armorRendererIdentity
+    Assert-NativeRendererKeyRelationship $armor.rainRendererIdentity
+    Assert-WorkshopRendererKeyRelationship $armor.workshopRendererIdentity
+    $target = [Convert]::ToInt64($armor.target.rva.Substring(2), 16)
+    $seenCalls = @{}
+    foreach ($call in $armor.calls) {
+        if (-not (Test-ObserverCallRelationship $call $target $seenCalls)) {
+            throw 'Armor observer CALL identity/target/caller relationship is invalid.'
+        }
+        $seenCalls[[Convert]::ToInt64($call.rva.Substring(2), 16)] = $true
+    }
+}
+
 $repoRoot = if ($RepoRoot) {
     [IO.Path]::GetFullPath($RepoRoot)
 } else {
@@ -38,20 +254,7 @@ foreach ($runtime in @(
 }
 
 foreach ($check in $checks) {
-    if (-not (Test-Path $check.Json)) {
-        throw "Missing JSON file: $($check.Json)"
-    }
-    if (-not (Test-Path $check.Schema)) {
-        throw "Missing JSON schema: $($check.Schema)"
-    }
-
-    $jsonText = Get-Content $check.Json -Raw
-    $valid = $jsonText | Test-Json -SchemaFile $check.Schema
-    if (-not $valid) {
-        throw "Schema validation failed: $($check.Json)"
-    }
-
-    Write-Host "Validated: $($check.Json)"
+    Assert-JsonSchemaFile $check
 }
 
 $lock = Get-Content -LiteralPath (
@@ -67,96 +270,11 @@ foreach ($runtime in @(
         ConvertFrom-Json
     $entry = $lock.runtimes.$runtime
     $definition = Get-Fo4HdrRuntimeDefinition $runtime
-    $mirrors = [ordered]@{
-        version = @([string]$manifest.runtime.version, "$runtime.0")
-        status = @([string]$manifest.runtime.status, [string]$entry.status)
-        platform = @([string]$manifest.runtime.platform, [string]$entry.platform)
-        f4seVersion = @(
-            [string]$manifest.runtime.f4seVersion,
-            [string]$entry.f4seVersion
-        )
-        exeSha256 = @(
-            [string]$manifest.runtime.exeSha256,
-            [string]$entry.exeSha256
-        )
-        addressLibraryFile = @(
-            [string]$manifest.runtime.addressLibraryFile,
-            [string]$entry.addressLibraryFile
-        )
-    }
-    foreach ($mirror in $mirrors.GetEnumerator()) {
-        if ($mirror.Value[0] -cne $mirror.Value[1]) {
-            throw (
-                "Runtime $runtime manifest and lock disagree on " +
-                "'$($mirror.Key)'."
-            )
-        }
-    }
-    if ($entry.f4seVersion -cne $definition.F4SEVersion -or
-        $entry.addressLibraryFile -cne $definition.AddressLibraryFile) {
-        throw "Runtime $runtime lock differs from its project definition."
-    }
-    if ($entry.status -in @(
-            "runtime-pinned-unvalidated",
-            "capture-complete",
-            "release-approved"
-        )) {
-        if ($entry.platform -notin @(
-                $definition.AllowedPlatforms |
-                    ForEach-Object { $_.ToLowerInvariant() }
-            )) {
-            throw "Runtime $runtime has an unapproved platform '$($entry.platform)'."
-        }
-        if ((Get-Fo4HdrCanonicalTextSha256 $manifestPath) -cne
-            [string]$entry.runtimeManifestCanonicalSha256) {
-            throw "Runtime $runtime manifest canonical identity differs from the lock."
-        }
-    }
-    $lutProperty = $manifest.PSObject.Properties['nativeLutObserver']
-    if ($null -ne $lutProperty -and $runtime -ne '1.10.163') {
-        throw 'The native LUT observer is scoped to runtime 1.10.163.'
-    }
-    $imageSpaceProperty = $manifest.PSObject.Properties['imageSpaceObserver']
-    if ($null -ne $imageSpaceProperty) {
-        if ($runtime -ne '1.10.163') {
-            throw 'The ImageSpace provenance observer is scoped to runtime 1.10.163.'
-        }
-        $imageSpace = $imageSpaceProperty.Value
-        $seenCalls = @{}
-        foreach ($call in $imageSpace.calls) {
-            $site = [Convert]::ToInt64($call.rva.Substring(2), 16)
-            $caller = [Convert]::ToInt64($call.callerRva.Substring(2), 16)
-            $target = [Convert]::ToInt64($imageSpace.targets[$call.targetIndex].rva.Substring(2), 16)
-            $bytes = [byte[]]@($call.expectedBytes)
-            if ($bytes.Count -ne 5 -or $bytes[0] -ne 232 -or
-                $site + 5 + [BitConverter]::ToInt32($bytes, 1) -ne $target -or
-                $site -le $caller -or $seenCalls.ContainsKey($site)) {
-                throw 'ImageSpace provenance CALL identity/target/caller relationship is invalid.'
-            }
-            $seenCalls[$site] = $true
-        }
-    }
-    $armorProperty = $manifest.PSObject.Properties['experimentalArmorUiObserver']
-    $armor = if ($null -ne $armorProperty) { $armorProperty.Value } else { $null }
-    if ($null -ne $armor) {
-        if ($runtime -ne '1.10.163' -or
-            $armor.status -ne 'unvalidated' -or
-            $armor.scope -ne
-                'power-armor-encoded-peak-composition') {
-            throw 'Armor observer runtime, status or scope is invalid.'
-        }
-        $target = [Convert]::ToInt64($armor.target.rva.Substring(2), 16)
-        $seenCalls = @{}
-        foreach ($call in $armor.calls) {
-            $site = [Convert]::ToInt64($call.rva.Substring(2), 16)
-            $caller = [Convert]::ToInt64($call.callerRva.Substring(2), 16)
-            $bytes = [byte[]]@($call.expectedBytes)
-            $displacement = [BitConverter]::ToInt32($bytes, 1)
-            if ($bytes[0] -ne 232 -or $site + 5 + $displacement -ne $target -or
-                $site -le $caller -or $seenCalls.ContainsKey($site)) {
-                throw 'Armor observer CALL identity/target/caller relationship is invalid.'
-            }
-            $seenCalls[$site] = $true
-        }
-    }
+    Assert-RuntimeMirrors $runtime $manifest $entry $definition
+    Assert-LockedRuntimeIdentity $runtime $manifestPath $entry $definition
+    Assert-NativeLutRuntime $runtime $manifest
+    Assert-ImageSpaceRuntime $runtime $manifest
+    Assert-NativeUiResourcesRuntime $runtime $manifest
+    Assert-ScreenUiRuntime $runtime $manifest
+    Assert-ArmorUiRuntime $runtime $manifest
 }

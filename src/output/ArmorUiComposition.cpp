@@ -99,14 +99,21 @@ void AdvanceRequestGeneration() noexcept
 
 namespace fo4hdr {
 
+void SetArmorUiCorrectionEnabled(bool enabled) noexcept
+{
+    ChangeRequestState(kCorrectionBit, enabled);
+}
+
 void SetArmorUiObservationEnabled(bool enabled) noexcept
 {
     ChangeRequestState(kObservationBit, enabled);
 }
 
-void SetArmorUiCorrectionEnabled(bool enabled) noexcept
+bool ArmorUiObservationEnabled() noexcept
 {
-    ChangeRequestState(kCorrectionBit, enabled);
+    return RequestEnabled(
+        g_requestState.load(std::memory_order_acquire),
+        kObservationBit);
 }
 
 bool ArmorUiCorrectionEnabled() noexcept
@@ -155,7 +162,7 @@ void ArmorUiScope::MaskRejectedNestedBoundary(
 ArmorUiScope::ArmorUiScope(const ArmorUiScopeEntry& entry) noexcept
     : previous_(g_currentScope)
 {
-    const auto [owner, threadId, targetArgument, postAa, hasRoot] = entry;
+    const auto& [owner, threadId, targetArgument, postAa, hasRoot, rendererName] = entry;
     // Every attempted boundary masks its caller until destruction. This also
     // prevents a disabled nested native call from inheriting an active owner.
     g_currentScope = {};
@@ -188,7 +195,9 @@ ArmorUiScope::ArmorUiScope(const ArmorUiScopeEntry& entry) noexcept
         .depth = nestedDepth,
         .postAa = postAa,
         .hasRoot = hasRoot,
+        .rendererName = rendererName,
     };
+    g_currentScope.rendererName.back() = '\0';
     entered_ = true;
     token_ = g_currentScope;
     boundary_ = g_boundary.load(std::memory_order_acquire);

@@ -179,19 +179,9 @@ function Test-Fo4HdrImageSpaceCommonLibSource {
             -SyncWindow 0))
 }
 
-function Test-Fo4HdrImageSpaceAliasSource {
-    param($AliasSource)
-    return -not (        $aliasSource.repository -ne
-            "https://github.com/TES5Edit/TES5Edit.git" -or
-        $aliasSource.commit -ne
-            "ca51ca1b67c2e84965c56d9163cec2acf20d6722" -or
-        $aliasSource.path -ne "wbDefinitionsFO4.pas")
-}
-
 function Assert-Fo4HdrImageSpaceSourceIdentity {
     param([psobject]$Profile)
     $commonLibSource = $Profile.sources.commonlib
-    $aliasSource = $Profile.sources.xeditFieldAliases
     $expectedCommonLibPaths = @(
         "include/RE/I/ImageSpaceManager.h",
         "include/RE/I/ImageSpaceBaseData.h",
@@ -200,8 +190,7 @@ function Assert-Fo4HdrImageSpaceSourceIdentity {
         "include/RE/I/ImageSpaceLUTData.h",
         "include/RE/N/NiTArray.h"
     )
-    if (-not (Test-Fo4HdrImageSpaceCommonLibSource $commonLibSource $expectedCommonLibPaths) -or
-        -not (Test-Fo4HdrImageSpaceAliasSource $aliasSource)) {
+    if (-not (Test-Fo4HdrImageSpaceCommonLibSource $commonLibSource $expectedCommonLibPaths)) {
         throw "Image-space semantic source identity is invalid."
     }
 

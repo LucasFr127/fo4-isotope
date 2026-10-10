@@ -31,6 +31,54 @@ $manifest = Get-Content (
 $profile = $manifest.commonlibObservation.imageSpaceProfile
 $null = Assert-Fo4HdrImageSpaceProfile $profile
 
+$manifestSchema = Join-Path $repoRoot 'schemas/runtime-manifest.schema.json'
+if (-not ($manifest | ConvertTo-Json -Depth 30 | Test-Json -SchemaFile $manifestSchema)) {
+    throw 'The runtime manifest without xEdit source metadata is invalid.'
+}
+foreach ($case in @('sunlightColorIndex', 'glareColorIndex', 'rgbByteShifts')) {
+    $invalidWeather = Copy-Profile $manifest
+    if ($case -eq 'rgbByteShifts') {
+        $invalidWeather.imageSpaceObserver.weatherGrade.$case = @(16, 8, 0)
+    } else {
+        $invalidWeather.imageSpaceObserver.weatherGrade.$case = 0
+    }
+    Assert-Rejected {
+        $null = $invalidWeather | ConvertTo-Json -Depth 30 |
+            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+    } "unqualified weather color mapping: $case"
+}
+
+$retiredWeatherFields = [ordered]@{
+    chronologicalSlots = @(4, 0, 5, 1, 6, 2, 7, 3)
+    source = @{
+        repository = 'https://github.com/TES5Edit/TES5Edit.git'
+        commit = 'ca51ca1b67c2e84965c56d9163cec2acf20d6722'
+        # Preserve the former path so this fixture remains valid under the retired schema.
+        path = 'Core/wbDefinitionsFO4.pas'
+    }
+}
+foreach ($case in $retiredWeatherFields.Keys) {
+    $retiredWeather = Copy-Profile $manifest
+    $retiredWeather.imageSpaceObserver.weatherGrade |
+        Add-Member -NotePropertyName $case -NotePropertyValue $retiredWeatherFields[$case]
+    Assert-Rejected {
+        $null = $retiredWeather | ConvertTo-Json -Depth 30 |
+            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+    } "retired weather metadata: $case"
+}
+
+$retiredAliasSource = Copy-Profile $manifest
+$retiredAliasSource.commonlibObservation.imageSpaceProfile.sources |
+    Add-Member -NotePropertyName 'xeditFieldAliases' -NotePropertyValue @{
+        repository = 'https://github.com/TES5Edit/TES5Edit.git'
+        commit = 'ca51ca1b67c2e84965c56d9163cec2acf20d6722'
+        path = 'wbDefinitionsFO4.pas'
+    }
+Assert-Rejected {
+    $null = $retiredAliasSource | ConvertTo-Json -Depth 30 |
+        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+} 'retired xEdit source metadata'
+
 $wrongBoundary = Copy-Profile $profile
 $wrongBoundary.topLevelEffectCount = 71
 Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $wrongBoundary } `
@@ -117,26 +165,6 @@ $wrongLayoutSource.sources.commonlib.paths[1] =
 Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $wrongLayoutSource
 } "wrong CommonLib structural-layout source"
-
-$wrongAliasRepository = Copy-Profile $profile
-$wrongAliasRepository.sources.xeditFieldAliases.repository =
-    "https://example.invalid/xedit.git"
-Assert-Rejected {
-    $null = Assert-Fo4HdrImageSpaceProfile $wrongAliasRepository
-} "wrong xEdit alias repository"
-
-$wrongAliasPath = Copy-Profile $profile
-$wrongAliasPath.sources.xeditFieldAliases.path = "wrong.pas"
-Assert-Rejected {
-    $null = Assert-Fo4HdrImageSpaceProfile $wrongAliasPath
-} "wrong xEdit alias source path"
-
-$wrongAliasCommit = Copy-Profile $profile
-$wrongAliasCommit.sources.xeditFieldAliases.commit =
-    "0000000000000000000000000000000000000000"
-Assert-Rejected {
-    $null = Assert-Fo4HdrImageSpaceProfile $wrongAliasCommit
-} "wrong xEdit alias source commit"
 
 $wrongManagerSize = Copy-Profile $profile
 $wrongManagerSize.managerSize = 0x1B0

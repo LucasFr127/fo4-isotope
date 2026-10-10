@@ -285,6 +285,7 @@ void VerifyDirectPresentation(Device& device)
     }
     VerifyDirectPresentationOverlay(device, {scene, layer, output, &shader});
     VerifyDirectPresentationExtremes(device, scene, output, &shader);
+    VerifyPublicPresentationOutput(device);
     CheckDebugMessages(device);
     FO4HDR_WARP_CHECK(FAILED(chain->ResizeBuffers(2, 17, 11, DXGI_FORMAT_UNKNOWN, 0)));
     if (diagnostics) diagnostics->ClearStoredMessages();

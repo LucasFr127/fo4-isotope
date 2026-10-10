@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 function Test-Fo4HdrAcesIdentityMismatch {
-    return (-not (Test-Fo4HdrIdentityFields $aces2 $expectedIdentity) -or
-        [double]$aces2.inputShaperCenter -ne 2.4 -or
-        [double]$aces2.inputShaperWidth -ne 3.0)
+    return (-not (Test-Fo4HdrIdentityFields $aces2Lmt $expectedIdentity) -or
+        [double]$aces2Lmt.inputShaperCenter -ne 2.4 -or
+        [double]$aces2Lmt.inputShaperWidth -ne 3.0)
 }
 
 function Test-Fo4HdrSmoothTetraIdentityMismatch {
@@ -41,12 +41,12 @@ function Assert-Fo4HdrLicenseTextHash {
 }
 
 function Assert-Fo4HdrAcesNotices {
-    $aces2NoticeIdentities = @(
+    $aces2LmtNoticeIdentities = @(
         "ACES 2 Contrast LMT",
         "Copyright Contributors to the ACES Project",
         "Apache-2.0"
     )
-    foreach ($identity in $aces2NoticeIdentities) {
+    foreach ($identity in $aces2LmtNoticeIdentities) {
         if (-not $noticesText.Contains($identity, [StringComparison]::Ordinal)) {
             throw "ACES 2 Contrast LMT notice is missing: $identity"
         }
@@ -66,7 +66,7 @@ function Assert-Fo4HdrAcesAuthority {
         $lock.aces2.acesOutputCommit -cne $expectedAces2Output) {
         throw "The locked Academy ACES 2 source authority changed."
     }
-    $aces2 = $lock.aces2.contrastLmt
+    $aces2Lmt = $lock.aces2.contrastLmt
     $expectedIdentity = [ordered]@{
         status = "adapted"
         sourceRepository = "https://github.com/scottdyer/aces-look.git"

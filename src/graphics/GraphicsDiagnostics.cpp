@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "GraphicsDiagnostics.hpp"
+#include "SharedUiFrame.hpp"
 #include "FrameTrace.hpp"
 #include "ShaderRegistry.hpp"
 #include "hooks/DeviceHooks.hpp"
@@ -106,10 +107,6 @@ void ReadSceneCountersSnapshot(GraphicsObservationSnapshot& snapshot) noexcept
     snapshot.referenceRenderFailureCount = g_evidence.referenceRenderFailureCount.load();
     snapshot.productionOperatorDrawCount = g_evidence.productionOperatorDrawCount.load();
     snapshot.productionFrameCount = g_evidence.productionFrameCount.load();
-    snapshot.nativeUiBackdropCaptureDrawCount = g_evidence.nativeUiBackdropCaptureDrawCount.load();
-    snapshot.nativeUiBackdropCaptureFrameCount = g_evidence.nativeUiBackdropCaptureFrameCount.load();
-    snapshot.nativeUiCaptureDrawCount = g_evidence.nativeUiCaptureDrawCount.load();
-    snapshot.nativeUiCaptureFrameCount = g_evidence.nativeUiCaptureFrameCount.load();
 }
 
 void ReadPerformanceCountersSnapshot(GraphicsObservationSnapshot& snapshot) noexcept
@@ -628,6 +625,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
     try
     {
         ReportFrameTrace(sink);
+        ReportSharedUi(sink);
         const auto graphics = fo4hdr::ReadGraphicsObservation();
         if (!ShouldReportLifecycle(graphics)) return;
         ReportRendererStatus(graphics, sink);

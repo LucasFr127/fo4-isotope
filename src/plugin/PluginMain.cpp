@@ -470,6 +470,7 @@ void ReportGameObserverStatus(bool observerActive) noexcept
 struct ObserverBoundaries
 {
     bool armorUi{};
+    bool screenUi{};
     bool nativeLut{};
     bool imageSpace{};
 };
@@ -497,6 +498,9 @@ struct ObserverBoundaries
                 (diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode &&
                     diagnosticsConfiguration.value.traceRenderPipeline),
             legacyServices.trampoline, legacyServices.pluginHandle);
+        active.screenUi = fo4hdr::game::InitializeScreenUiObserver(
+            ProductionRequested(diagnosticsConfiguration),
+            legacyServices.trampoline, legacyServices.pluginHandle);
     }
 #endif
     return active;
@@ -508,6 +512,7 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
     try
     {
         REX::INFO("armor UI composition boundary installed={}", boundaries.armorUi);
+        REX::INFO("native screen-space UI boundary installed={}", boundaries.screenUi);
         REX::INFO("native LUT observation boundary installed={}", boundaries.nativeLut);
         REX::INFO("ImageSpace provenance boundaries installed={}", boundaries.imageSpace);
         REX::INFO(

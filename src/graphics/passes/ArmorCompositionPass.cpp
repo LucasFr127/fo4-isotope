@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ArmorCompositionPass.hpp"
+#include "../SharedUiFrame.hpp"
 #include "ArmorEncodedComposition.hpp"
 #include "../resources/ArmorCompositionResources.hpp"
 #include "../resources/PresentationResources.hpp"
@@ -37,6 +38,7 @@ void ArmorEncodedBoundary(const ArmorUiScopeToken& token, bool entering) noexcep
 
 struct ArmorBoundaryObservation
 {
+    if (SharedUiFrameEncoded()) return;
     const ArmorUiScopeToken& token;
     DWORD thread;
     ID3D11DeviceContext* context;

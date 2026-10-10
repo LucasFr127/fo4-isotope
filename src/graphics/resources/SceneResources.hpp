@@ -34,8 +34,12 @@ extern SceneResources g_scene;
 struct DrawObservation;
 
 bool IsQualifiedSceneTarget(ID3D11RenderTargetView*) noexcept;
+bool IsFirstFp16RenderTarget(ID3D11RenderTargetView*) noexcept;
 bool SameResourceIdentity(ID3D11ShaderResourceView*, ID3D11ShaderResourceView*) noexcept;
+std::uintptr_t CanonicalResourceIdentity(ID3D11Resource*) noexcept;
+bool SameResourceObjects(ID3D11Resource*, ID3D11Resource*) noexcept;
 bool RenderTargetMatchesResource(ID3D11RenderTargetView*, ID3D11Resource*) noexcept;
+bool IsPresentationProxyTarget(ID3D11RenderTargetView*) noexcept;
 bool CurrentPassConsumesSelectedScene(ID3D11DeviceContext*, const DrawObservation&) noexcept;
 ID3D11ShaderResourceView* AcquireSceneView(ID3D11RenderTargetView*) noexcept;
 void ResetSceneResources() noexcept;

@@ -29,10 +29,10 @@ constexpr std::array<std::string_view, 21> kSectionNames{
     "armor-encoded-composition",
     "layer-transfer-reference",
     "calibration-patterns",
-    "separated-ui-aces2-lmt",
-    "separated-ui-agx",
+    "ui-relative-temporal-aces2",
+    "ui-relative-temporal-agx",
     "gt7-operator-ui",
-    "separated-ui-gt7",
+    "ui-relative-temporal-gt7",
     "gt7-official-reference",
 };
 
@@ -85,7 +85,7 @@ struct ShippingShaderRun
         RunSection(options.filter, "presentation-proxy", [&] {
             VerifyPresentationProxy(device);
         });
-        RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); });
+        RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); VerifySharedUiContext(device); });
         RunSection(options.filter, "direct-presentation", [&] { VerifyDirectPresentation(device); });
         RunSection(options.filter, "output-dither", [&] { VerifyOutputDitherExperiment(device); });
         RunSection(options.filter, "presentation-state", [&] {
@@ -114,18 +114,17 @@ struct ShippingShaderRun
         RunSection(options.filter, "calibration-patterns", [&] {
             VerifyCalibrationPatterns(device);
         });
-        RunSection(options.filter, "separated-ui-aces2-lmt", [&] {
-            VerifySeparatedUiProductionPath(
-                device, TestedToneMapper::aces2);
+        RunSection(options.filter, "ui-relative-temporal-aces2", [&] {
+            VerifyUiRelativeTemporalTransport(TestedToneMapper::aces2);
         });
-        RunSection(options.filter, "separated-ui-agx", [&] {
-            VerifySeparatedUiProductionPath(device, TestedToneMapper::agX);
+        RunSection(options.filter, "ui-relative-temporal-agx", [&] {
+            VerifyUiRelativeTemporalTransport(TestedToneMapper::agX);
         });
         RunSection(options.filter, "gt7-operator-ui", [&] {
             VerifyGt7OperatorAndUi(device);
         });
-        RunSection(options.filter, "separated-ui-gt7", [&] {
-            VerifySeparatedUiProductionPath(device, TestedToneMapper::gt7);
+        RunSection(options.filter, "ui-relative-temporal-gt7", [&] {
+            VerifyUiRelativeTemporalTransport(TestedToneMapper::gt7);
         });
         RunSection(options.filter, "gt7-official-reference", [&] {
             VerifyGt7OfficialReference(device);

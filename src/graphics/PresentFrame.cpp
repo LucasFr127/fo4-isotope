@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "PresentFrame.hpp"
+#include "SharedUiFrame.hpp"
 #include "RendererLifetime.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
@@ -48,7 +49,50 @@ struct PerformanceMeasurementState
     bool gpuQueriesAvailable{};
 };
 PerformanceMeasurementState g_performance;
+bool g_gameplayResourceCheckPending{};
+struct OutputRecovery
+{
+    bool used{}, pending{};
+};
+OutputRecovery g_outputRecovery;
+
+bool ApplyGraphicsLifecycle(const GraphicsLifecyclePublication& publication) noexcept
+{
+    const bool ready = publication.gameplayReady && !publication.presentationBlocked;
+    const bool reset = g_lifecycle.OnGameReset(publication.resetEpoch);
+    const bool transition = reset || ready != g_gameplayReadyApplied.load(std::memory_order_acquire);
+    g_evidence.gameplayReady.store(publication.gameplayReady, std::memory_order_release);
+    if (!transition) return false;
+
+    ResetSceneTracking();
+    if (reset)
+    {
+        g_referenceHealthy = true;
+        g_productionHealthy = true;
+        g_outputRecovery = {};
+        (void)PublishLifecycleGeneration();
+        g_evidence.gameResetEpoch.store(publication.resetEpoch, std::memory_order_release);
+        g_frame = 1;
+    }
+    if (!ready && g_lifecycle.Snapshot().state == HdrRendererState::hdr10Ready)
+        (void)g_lifecycle.PauseHdrPresentation();
+    g_gameplayReadyApplied.store(ready, std::memory_order_release);
+    g_gameplayResourceCheckPending = ready;
+    const auto generation = g_evidence.resourceGeneration.load(std::memory_order_acquire);
+    g_heartbeat.Reset(generation);
+    g_heartbeat.BeginFrame(generation, g_frame);
+    return true;
+}
 }  // namespace
+
+void ApplyGraphicsLifecycleBeforeDraw(ID3D11DeviceContext* context) noexcept
+{
+    const auto* record = FindDrawObservation(context);
+    const bool immediate = record && record->immediate;
+    if (context != g_rendererDevice.activeContext || !immediate) return;
+    // Later publications belong to Present's rejection of the already-started frame.
+    (void)ApplyGraphicsLifecycle(ReadGraphicsLifecycle());
+}
 
 [[nodiscard]] std::uint64_t MillisecondsToNanoseconds(
     double milliseconds) noexcept
@@ -333,11 +377,19 @@ struct PresentFrame
     bool presentationReady{};
     bool gameplayTransition{};
     bool videoReady{};
+    bool sdrContentReady{};
     bool sceneDomainMismatch{};
     bool temporalOutputRejected{};
     PipelineHeartbeatAction heartbeatAction{};
     bool rendered{};
     bool renderAttempted{};
+    bool outputBlocked{};
+    bool outputRetry{};
+    bool hdrFallbackRendered{};
+    bool publicRendered{};
+    std::optional<SharedUiPresentation> publicPresentation;
+    bool startupRendered{};
+    bool convertedSdrRendered{};
     bool sdrHandoffRendered{};
     bool sdrHandoffDomainInvalid{};
     HdrActivationDecision activation{};
@@ -363,8 +415,11 @@ struct PresentFrame
         return g_rendererDevice.activeDevice != nullptr && g_rendererDevice.activeContext != nullptr;
     }
 
-    bool SceneOperatorReady()
+    bool SceneCompositionReady()
     {
+        if (sdrContentReady) return true;
+        if (!g_scene.currentScene) return false;
+        if (ApplicationPresentationFacadeActive() && !SharedUiFrameReady()) return false;
         return !g_configuration.productionRequested || g_scene.productionOperatorApplied || videoReady;
     }
 
@@ -372,46 +427,9 @@ struct PresentFrame
     {
         return !displayChanged && HdrPathRequested() &&
             developerHdrDescriptor && g_referenceHealthy &&
-            heartbeatAction == PipelineHeartbeatAction::renderHdr &&
-            g_scene.currentScene != nullptr && SceneOperatorReady();
-    }
-
-    void ResetGameScene(const GraphicsLifecyclePublication& gameLifecycle)
-    {
-        ResetSceneTracking();
-        g_referenceHealthy = true;
-        const auto resetGeneration = PublishLifecycleGeneration();
-        g_evidence.gameResetEpoch.store(
-            gameLifecycle.resetEpoch, std::memory_order_release);
-        g_frame = 1;
-        g_heartbeat.Reset(resetGeneration);
-        g_heartbeat.BeginFrame(resetGeneration, g_frame);
-    }
-
-    void TransitionGameplay()
-    {
-        // Apply game-thread lifecycle changes only at Present. Both sides
-        // skip the already-drawn transition frame; semantic scene/history
-        // state is reset while unchanged DXGI resources remain reusable.
-        if (!presentationReady)
-        {
-            if (g_lifecycle.Snapshot().state ==
-                HdrRendererState::hdr10Ready)
-                (void)g_lifecycle.PauseHdrPresentation();
-        }
-        else if (TransitionResourceCreationFailed())
-        {
-            g_referenceHealthy = false;
-            RecordFailure(
-                GraphicsObservationFailure::resourceCreationFailed);
-        }
-        g_gameplayReadyApplied.store(
-            presentationReady, std::memory_order_release);
-        ResetSceneTracking();
-        const auto transitionGeneration =
-            g_evidence.resourceGeneration.load(std::memory_order_acquire);
-        g_heartbeat.Reset(transitionGeneration);
-        g_heartbeat.BeginFrame(transitionGeneration, g_frame);
+            (sdrContentReady || (g_productionHealthy &&
+                heartbeatAction == PipelineHeartbeatAction::renderHdr)) &&
+            SceneCompositionReady();
     }
 
     void RecordSceneContractRejections()
@@ -492,7 +510,8 @@ struct PresentFrame
 
     void ResetFailedPresentation(const SdrTransitionResult& transition)
     {
-        ResetResources(!transition.sdrApplied);
+        if (outputRetry) return;
+        ResetResources(!transition.sdrApplied, ApplicationPresentationFacadeActive());
         DXGI_SWAP_CHAIN_DESC description{};
         if (SUCCEEDED(swapChain->GetDesc(&description)))
         {
@@ -527,21 +546,30 @@ struct PresentFrame
         }
     }
 
+    bool CanRetryOutput() const noexcept
+    {
+        return outputRetry && !g_outputRecovery.used && g_rendererDevice.activeDevice &&
+            SUCCEEDED(g_rendererDevice.activeDevice->GetDeviceRemovedReason());
+    }
+
+    void RecordOutputFailure()
+    {
+        g_evidence.referenceRenderFailureCount.fetch_add(1, std::memory_order_relaxed);
+        if (CanRetryOutput()) g_outputRecovery = {true, true};
+        else g_referenceHealthy = false;
+        RecordFailure(GraphicsObservationFailure::referenceRenderFailed);
+    }
+
     void RecordPresentationFailure()
     {
         if (renderAttempted || !sdrHandoffRendered)
+            RecordOutputFailure();
+    }
+
+    void RecordProductionFailure()
+    {
+        if (HdrPathRequested() && heartbeatAction == PipelineHeartbeatAction::disableGeneration)
         {
-            g_evidence.referenceRenderFailureCount.fetch_add(
-                1, std::memory_order_relaxed);
-            g_referenceHealthy = false;
-            RecordFailure(
-                GraphicsObservationFailure::referenceRenderFailed);
-        }
-        else if (HdrPathRequested() &&
-                 heartbeatAction ==
-                     PipelineHeartbeatAction::disableGeneration)
-        {
-            g_referenceHealthy = false;
             RecordFailure(
                 temporalOutputRejected ?
                     GraphicsObservationFailure::temporalOutputUnavailable :
@@ -555,11 +583,14 @@ struct PresentFrame
     {
         const bool sdrApplied = !g_presentation.swapChain3 || SetColorSpace(false);
         if (!sdrApplied)
-            (void)RenderBlackSdrFailureFrame(swapChain,
-                g_rendererDevice.activeDevice, g_rendererDevice.activeContext, false);
+        {
+            (void)RenderBlackPresentationFrame(swapChain,
+                g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
+            sdrHandoffRendered = false;
+            startupRendered = false;
+        }
         const SdrTransitionResult transition{
             .hardDisable =
-                heartbeatAction == PipelineHeartbeatAction::disableGeneration ||
                 renderAttempted || sdrHandoffDomainInvalid ||
                 !sdrHandoffRendered,
             .sdrApplied = sdrApplied
@@ -582,7 +613,8 @@ struct PresentFrame
         {
             CloseArmorEncodedCompositionForLifecycle();
             g_armor.armorEncodedFailed = true;
-            g_armor.armorEncodedStatus = "Disabled: armor scope crossed Present";
+            if (g_referenceHealthy)
+                g_armor.armorEncodedStatus = "Rejected frame: armor scope crossed Present";
         }
         const auto thread = GetCurrentThreadId();
         g_observedPresentThread.store(thread, std::memory_order_release);
@@ -613,7 +645,7 @@ struct PresentFrame
         // owes that redirected frame a current backbuffer result even when the
         // new generation cannot render HDR.
         frameWasRedirected =
-            g_presentation.presentationRedirectedThisFrame;
+            g_presentation.presentationRedirectedThisFrame || ApplicationPresentationFacadeActive();
         frameProxyDomain =
             g_presentation.presentationProxyDomain;
     }
@@ -622,26 +654,25 @@ struct PresentFrame
     {
         displayChanged = DisplayGenerationChanged(
             swapChain, sdrColorSpaceEstablished);
+        if (displayChanged) g_outputRecovery = {};
         const auto gameLifecycle = ReadGraphicsLifecycle();
-        const auto gameplayReady = gameLifecycle.gameplayReady;
-        presentationReady = gameplayReady &&
+        presentationReady = gameLifecycle.gameplayReady &&
             !gameLifecycle.presentationBlocked;
-        const auto presentationReadyApplied =
-            g_gameplayReadyApplied.load(std::memory_order_acquire);
-        const auto gameReset =
-            g_lifecycle.OnGameReset(gameLifecycle.resetEpoch);
-        if (gameReset)
-        {
-            ResetGameScene(gameLifecycle);
-        }
-        gameplayTransition =
-            presentationReady != presentationReadyApplied || gameReset;
-        if (gameplayTransition)
-        {
-            TransitionGameplay();
-        }
-        g_evidence.gameplayReady.store(
-            gameplayReady, std::memory_order_release);
+        gameplayTransition = ApplyGraphicsLifecycle(gameLifecycle);
+        const bool resourceCheckFailed = g_gameplayResourceCheckPending && presentationReady &&
+            TransitionResourceCreationFailed();
+        if (resourceCheckFailed)
+            RecordProductionResourceFailure(swapChain);
+        g_gameplayResourceCheckPending = false;
+        RecoverOutput();
+    }
+
+    void RecoverOutput()
+    {
+        if (!g_outputRecovery.pending) return;
+        g_outputRecovery.pending = false;
+        if (!RecreatePresentationConstants(g_rendererDevice.activeDevice))
+            g_referenceHealthy = false;
     }
 
     bool GameplayFrameReady() const
@@ -667,6 +698,7 @@ struct PresentFrame
 
     bool HasSceneDomainMismatch()
     {
+        if (ApplicationPresentationFacadeActive() && SharedUiFrameEncoded()) return false;
         const auto requiredSceneDomain =
             (g_configuration.productionRequested || videoReady) ?
                 LinearColorDomain::linearBt2020UiRelative :
@@ -691,20 +723,29 @@ struct PresentFrame
             (temporalOutputRejected || sceneDomainMismatch) ?
             PipelineHeartbeatAction::disableGeneration :
             baseHeartbeatAction;
+        RecordProductionFailure();
         RecordSceneContractRejections();
         PublishHeartbeatEvidence(evaluation);
     }
 
     void RenderHdr()
     {
+        sdrContentReady = false;
         if (CanRenderHdr())
         {
-            renderAttempted = true;
-            rendered = HasActiveContext() &&
-                RenderReferenceFrame(swapChain,
-                    g_rendererDevice.activeDevice,
-                    g_rendererDevice.activeContext);
+            const auto result = RenderReferenceFrame(swapChain,
+                g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
+            RecordOutputResult(result);
+            rendered = result == PresentationResult::rendered;
         }
+    }
+
+    void RecordOutputResult(PresentationResult result) noexcept
+    {
+        outputBlocked = result == PresentationResult::blocked;
+        outputRetry = result == PresentationResult::retry;
+        renderAttempted = result == PresentationResult::rendered ||
+            result == PresentationResult::failed || outputRetry;
     }
 
     void RenderBlackHandoff()
@@ -720,33 +761,154 @@ struct PresentFrame
             RecordFailure(
                 GraphicsObservationFailure::colorDomainMismatch);
         }
-        sdrHandoffRendered = RenderBlackSdrFailureFrame(swapChain,
-            g_rendererDevice.activeDevice, g_rendererDevice.activeContext,
-            sdrColorSpaceEstablished);
+        sdrHandoffRendered = RenderBlackPresentationFrame(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext) &&
+            (sdrColorSpaceEstablished || SetColorSpace(false));
+    }
+
+    bool CanRenderHdrFallback()
+    {
+        const auto state = g_lifecycle.Snapshot().state;
+        const std::array ready{ApplicationPresentationFacadeActive() || frameWasRedirected, !displayChanged,
+            HdrPathRequested(), developerHdrDescriptor, g_referenceHealthy.load(),
+            !renderAttempted,
+            HasActiveContext(), g_presentation.presentationProxy != nullptr,
+            g_presentation.presentationProxySrv != nullptr,
+            g_presentation.swapChain3 != nullptr, g_presentation.colorSpaceSupported,
+            g_presentation.r10Presentation, g_presentation.flipModel,
+            g_presentation.bufferCount >= 2,
+            state == HdrRendererState::vanillaSdr || state == HdrRendererState::hdr10Ready};
+        return std::ranges::all_of(ready, [](bool value) { return value; });
+    }
+
+    bool RenderReadableHdrFallback()
+    {
+        if (outputBlocked) return false;
+        if (RenderPublicFrame()) return true;
+        if (outputBlocked) return false;
+        if (RenderStartupFrame()) return true;
+        if (outputBlocked) return false;
+        return RenderEmergencyFrame();
+    }
+
+    void RenderHdrFallback()
+    {
+        if (rendered || !CanRenderHdrFallback()) return;
+        if (RenderReadableHdrFallback()) return;
+        hdrFallbackRendered = RenderBlackPresentationFrame(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext) && SetColorSpace(true);
+        renderAttempted = !hdrFallbackRendered;
+    }
+
+    bool RenderStartupFrame()
+    {
+        const auto startup = SharedUiStartupPresentation();
+        if (!startup) return false;
+        const auto result = RenderSdrPresentationProxy(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext, &*startup);
+        RecordOutputResult(result);
+        hdrFallbackRendered = result == PresentationResult::rendered;
+        startupRendered = hdrFallbackRendered;
+        return renderAttempted;
+    }
+
+    bool RenderPublicFrame()
+    {
+        const auto presentation = SharedUiPresentationForOutput();
+        if (!presentation) return false;
+        return RenderPublicPresentation(*presentation);
+    }
+
+    bool RenderEmergencyFrame()
+    {
+        const auto presentation = SharedUiEmergencyPresentation();
+        if (!presentation) return false;
+        return RenderPublicPresentation(*presentation);
+    }
+
+    bool RenderPublicPresentation(const SharedUiPresentation& presentation)
+    {
+        const auto result = RenderPublicSharedUiFrame(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext, presentation);
+        RecordOutputResult(result);
+        publicRendered = result == PresentationResult::rendered;
+        hdrFallbackRendered = publicRendered;
+        if (publicRendered) publicPresentation = presentation;
+        return renderAttempted;
+    }
+
+    bool ConvertPublicImageToSdr()
+    {
+        const auto presentation = SharedUiEmergencyPresentation();
+        if (!presentation) return false;
+        const auto result = RenderPublicSharedUiSdrFrame(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext, *presentation);
+        RecordOutputResult(result);
+        convertedSdrRendered = result == PresentationResult::rendered;
+        if (convertedSdrRendered)
+        {
+            publicPresentation = presentation;
+            renderAttempted = false;
+        }
+        return convertedSdrRendered;
+    }
+
+    bool CopyVanillaSdr()
+    {
+        const auto result = RenderSdrPresentationProxy(swapChain,
+            g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
+        RecordOutputResult(result);
+        startupRendered = result == PresentationResult::rendered;
+        if (startupRendered) renderAttempted = false;
+        return startupRendered;
     }
 
     void RenderSdrHandoff()
     {
-        const auto sdrHandoffAction = DecideSdrHandoff(
-            rendered, frameWasRedirected, frameProxyDomain,
-            g_presentation.presentationProxySrv != nullptr);
-        const auto sdrHandoffAttempted =
-            sdrHandoffAction != SdrHandoffAction::none;
-        sdrHandoffRendered = !sdrHandoffAttempted;
+        const auto sdrHandoffAction = HandoffAction();
+        sdrHandoffRendered = sdrHandoffAction == SdrHandoffAction::none;
         sdrHandoffDomainInvalid =
             sdrHandoffAction == SdrHandoffAction::clearBlackAndDisable;
-        if (sdrHandoffAttempted && HasActiveContext())
-        {
-            if (sdrHandoffAction == SdrHandoffAction::copyVanillaSdr)
-            {
-                sdrHandoffRendered = RenderSdrPresentationProxy(swapChain,
-                    g_rendererDevice.activeDevice, g_rendererDevice.activeContext);
-            }
-            else
-            {
-                RenderBlackHandoff();
-            }
-        }
+        if (sdrHandoffRendered || !HasActiveContext()) return;
+        if (sdrHandoffAction == SdrHandoffAction::convertPublicImage)
+            sdrHandoffRendered = ConvertPublicImageToSdr();
+        else if (sdrHandoffAction == SdrHandoffAction::copyVanillaSdr)
+            sdrHandoffRendered = CopyVanillaSdr();
+        if (!sdrHandoffRendered) RenderBlackHandoff();
+    }
+
+    SdrHandoffAction LegacyHandoffAction() const noexcept
+    {
+        if (frameWasRedirected && SharedUiEmergencyPresentation())
+            return SdrHandoffAction::convertPublicImage;
+        return DecideSdrHandoff(rendered, frameWasRedirected, frameProxyDomain,
+            g_presentation.presentationProxySrv != nullptr);
+    }
+
+    SdrHandoffAction HandoffAction() const noexcept
+    {
+        if (rendered || hdrFallbackRendered) return SdrHandoffAction::none;
+        if (outputBlocked) return SdrHandoffAction::clearBlack;
+        if (renderAttempted) return SdrHandoffAction::clearBlack;
+        if (!ApplicationPresentationFacadeActive())
+            return LegacyHandoffAction();
+        if (SharedUiStartupSdr()) return SdrHandoffAction::copyVanillaSdr;
+        if (SharedUiEmergencyPresentation()) return SdrHandoffAction::convertPublicImage;
+        return SdrHandoffAction::clearBlack;
+    }
+
+    bool ProductionColorReady() const noexcept
+    {
+        if (sdrContentReady) return g_configuration.productionRequested;
+        const bool contentReady = g_scene.productionOperatorApplied || videoReady;
+        return g_configuration.productionRequested && contentReady &&
+            g_replacements.operatorConstants.Get() != nullptr;
+    }
+
+    bool ActivationQualityRejected() const noexcept
+    {
+        return activation.reason == HdrActivationReason::productionToneMapperUnavailable ||
+            activation.reason == HdrActivationReason::signalContractNotReady;
     }
 
     void ValidateActivation()
@@ -763,8 +925,8 @@ struct PresentFrame
             {
                 .runtimeAuthorized = true,
                 .signalContractReady =
-                    heartbeatAction == PipelineHeartbeatAction::renderHdr,
-                .fp16WorkingImage = g_scene.currentScene != nullptr,
+                    sdrContentReady || heartbeatAction == PipelineHeartbeatAction::renderHdr,
+                .fp16WorkingImage = sdrContentReady || g_scene.currentScene != nullptr,
                 .r10g10b10a2Presentation =
                     g_presentation.r10Presentation &&
                     g_presentation.presentationBackBufferRtv.Get() != nullptr,
@@ -775,20 +937,54 @@ struct PresentFrame
                 .pqBt2020Applied =
                     g_evidence.hdrColorSpaceActive.load(),
                 .resourcesReady = rendered,
-                .productionToneMapperReady =
-                    g_configuration.productionRequested &&
-                    (g_scene.productionOperatorApplied || videoReady) &&
-                    g_replacements.operatorConstants.Get() != nullptr
+                .productionToneMapperReady = ProductionColorReady()
             });
         rendered = rendered && activation.hdrActive &&
             (activation.production == g_configuration.productionRequested);
+        if (!rendered && ActivationQualityRejected())
+            renderAttempted = false;
+    }
+
+    void PublishHdrFallback()
+    {
+        // Valid HDR10 transport does not establish a qualified scene or production frame.
+        (void)g_lifecycle.PauseHdrPresentation();
+        g_evidence.hdrFrameCount.fetch_add(1, std::memory_order_relaxed);
+        g_evidence.hdrChainActive.store(false, std::memory_order_release);
+        g_evidence.productionActive.store(false, std::memory_order_release);
+        g_evidence.presentationPaused.store(
+            g_lifecycle.Snapshot().resourcesPublished, std::memory_order_release);
+    }
+
+    bool ReadableOutputRendered() const noexcept
+    {
+        return rendered || publicRendered || startupRendered || convertedSdrRendered;
+    }
+
+    bool RecoveredOutputFailure() const noexcept
+    {
+        return g_outputRecovery.used && g_evidence.failure.load() ==
+            static_cast<std::uint32_t>(GraphicsObservationFailure::referenceRenderFailed);
+    }
+
+    void CompleteOutputRecovery()
+    {
+        if (!ReadableOutputRendered()) return;
+        if (RecoveredOutputFailure())
+            RecordFailure(GraphicsObservationFailure::none);
+        g_outputRecovery = {};
     }
 
     void PublishResult()
     {
+        CompleteOutputRecovery();
         if (rendered)
         {
             PublishHdr();
+        }
+        else if (hdrFallbackRendered)
+        {
+            PublishHdrFallback();
         }
         else
         {
@@ -807,12 +1003,6 @@ struct PresentFrame
         if (measureCpuPerformance &&
             PerformanceSampleEligible())
             CompleteCpuPerformanceSample(cpuPerformanceStarted);
-        if (g_uiTransport.gameUiCapturedThisFrame)
-            g_evidence.nativeUiCaptureFrameCount.fetch_add(
-                1, std::memory_order_relaxed);
-        if (g_uiTransport.gameUiBackdropCapturedThisFrame)
-            g_evidence.nativeUiBackdropCaptureFrameCount.fetch_add(
-                1, std::memory_order_relaxed);
     }
 
     void AdvanceFrame()
@@ -828,7 +1018,6 @@ struct PresentFrame
         g_scene.videoSceneReady = false;
         g_scene.productionOperatorApplied = false;
         g_presentation.presentationRedirectedThisFrame = false;
-        ResetUiTransportCaptureState();
         ++g_frame;
         g_lutInspectorFrame = 0;
         g_lutInspectorValidatedSlots = 0;
@@ -844,15 +1033,20 @@ struct PresentFrame
         ApplyLifecycle();
         EvaluateHeartbeat();
         RenderHdr();
-        RenderSdrHandoff();
         ValidateActivation();
+        RenderHdrFallback();
+        RenderSdrHandoff();
         PublishResult();
+        if (rendered) PublishSharedUiPresentation();
+        TraceSharedUiOutput({rendered, rendered || hdrFallbackRendered || sdrHandoffRendered,
+            startupRendered, publicRendered}, publicPresentation ? &*publicPresentation : nullptr);
         CompleteFrameMeasurements();
         return rendered;
     }
 
     void Complete(bool commitSettings)
     {
+        CompleteSharedUiFrame(rendered);
         if (commitSettings)
         {
             CommitLiveSettingsAtEndPresent(

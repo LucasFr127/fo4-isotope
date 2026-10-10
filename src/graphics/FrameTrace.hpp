@@ -16,7 +16,7 @@ enum class FrameTraceKind : std::uint8_t
 {
     draw, drawIndexed, drawInstanced, drawIndexedInstanced,
     copy, copyRegion, clear, commandList,
-    nativeEnter, nativeExit, nativePresent, nextPresent, presentResult
+    nativeEnter, nativeExit, nativePresent, nextPresent, presentResult, sharedUiPresentation
 };
 
 using FrameTraceArguments = std::array<std::uint32_t, 12>;
@@ -34,6 +34,24 @@ struct FrameTracePresentArguments
     UINT interval{};
     UINT flags{};
     HRESULT result{S_OK};
+};
+
+enum class FrameTraceSharedUiDecision : std::uint32_t
+{
+    hdr, startupSdr, black, hdrSdrContent, hdrPublicContent
+};
+
+struct FrameTraceSharedUiSnapshot
+{
+    std::uint64_t contentRevision{}, generation{}, contextGeneration{}, frame{};
+    float frozenWhite{};
+    bool seeded{}, closed{}, nativeWritten{}, rejected{}, outputWritten{}, assumed{};
+    std::uint32_t rejection{};
+    FrameTraceSharedUiDecision decision{FrameTraceSharedUiDecision::black};
+    ID3D11DeviceContext* context{};
+    ID3D11ShaderResourceView* selectedScene{};
+    ID3D11Resource* publicBuffer{};
+    ID3D11Resource* outputBuffer{};
 };
 
 class ScopedFrameTraceOwnedCall
@@ -67,6 +85,7 @@ void TraceFrameCommandList(ID3D11DeviceContext* context, const DrawObservation& 
 void TraceNativeBoundary(const ArmorUiScopeToken& scope, bool entering) noexcept;
 void TraceFramePresent(IDXGISwapChain* chain, FrameTraceKind kind,
     const FrameTracePresentArguments& arguments) noexcept;
+void TraceSharedUiPresentation(const FrameTraceSharedUiSnapshot&) noexcept;
 void PollFrameTraceHotkey(IDXGISwapChain* chain) noexcept;
 
 } // namespace fo4hdr

@@ -15,6 +15,7 @@ inline constexpr std::size_t kMaximumPresentationViews = 8;
 
 struct PresentationResources
 {
+    IDXGISwapChain* applicationFacadeChain{};
     Microsoft::WRL::ComPtr<IDXGISwapChain3> swapChain3;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> presentationBackBuffer;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationBackBufferRtv;
@@ -36,6 +37,7 @@ struct PresentationResources
     std::uint32_t width{};
     std::uint32_t height{};
     bool colorSpaceSupported{};
+    bool sdrColorSpaceSupported{};
     bool r10Presentation{};
     bool flipModel{};
     std::uint32_t bufferCount{};
@@ -50,6 +52,11 @@ bool SetColorSpace(bool hdr) noexcept;
 bool HdrFlipDescriptorSupported(const DXGI_SWAP_CHAIN_DESC&) noexcept;
 bool PresentationResourcesReady() noexcept;
 bool CreatePresentationProxy(IDXGISwapChain*, ID3D11Device*) noexcept;
+bool RecreatePresentationConstants(ID3D11Device*) noexcept;
+bool EnsurePresentationOutputResources(IDXGISwapChain*, ID3D11Device*,
+    ID3D11DeviceContext*, bool hdr) noexcept;
+bool ApplicationPresentationFacadeActive() noexcept;
+HRESULT AcquireApplicationPresentationBuffer(IDXGISwapChain*, ID3D11Texture2D**) noexcept;
 enum class PresentationResourceCreation
 {
     ready,
@@ -58,7 +65,7 @@ enum class PresentationResourceCreation
 };
 PresentationResourceCreation CreatePresentationResources(
     IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
-void ResetPresentationResources(bool retainColorControl) noexcept;
+void ResetPresentationResources(bool retainColorControl, bool retainPresentationBuffer = false) noexcept;
 void RetirePresentationOutput() noexcept;
 
 struct UiTransportResources
@@ -66,24 +73,11 @@ struct UiTransportResources
     Microsoft::WRL::ComPtr<ID3D11Texture2D> ui;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> uiSrv;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> uiRtv;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> gameUiBackdrop;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> gameUiBackdropSrv;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> gameUiBackdropRtv;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> gameUi;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> gameUiSrv;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> gameUiRtv;
-    Microsoft::WRL::ComPtr<ID3D11BlendState> gameUiBlend;
-    bool gameUiBackdropCapturedThisFrame{};
-    bool gameUiCapturedThisFrame{};
 };
 extern UiTransportResources g_uiTransport;
 
 bool DeveloperUiResourcesReady() noexcept;
-bool GameUiBackdropResourcesReady() noexcept;
-bool GameUiResourcesReady() noexcept;
-bool UiCaptureResourcesReady() noexcept;
 bool CreateTextureViews(ID3D11Device*, std::uint32_t width, std::uint32_t height) noexcept;
 void ResetUiTransportResources() noexcept;
-void ResetUiTransportCaptureState() noexcept;
 
 } // namespace fo4hdr

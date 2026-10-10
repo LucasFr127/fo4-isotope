@@ -12,6 +12,27 @@ function Assert-Rejected {
     throw "Runtime pinning policy accepted a forbidden case: $Case"
 }
 
+function Assert-ManifestProfileRejected {
+    param([string]$Fixture, [string]$Profile, [string]$Case, [scriptblock]$Mutate)
+    $manifestPath = Join-Path $Fixture 'runtime\1.10.163\manifest.json'
+    $sourcePath = Join-Path $repoRoot 'runtime\1.10.163\manifest.json'
+    $identityManifest = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json
+    $selectedProfile = $identityManifest
+    foreach ($part in $Profile.Split('.')) { $selectedProfile = $selectedProfile.$part }
+    & $Mutate $selectedProfile
+    Write-Fo4HdrCanonicalUtf8Text -Path $manifestPath `
+        -Text (($identityManifest | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
+    $lockPath = Join-Path $Fixture 'versions.lock.json'
+    $identityLock = Get-Content (Join-Path $repoRoot 'versions.lock.json') -Raw | ConvertFrom-Json
+    $identityLock.runtimes.'1.10.163'.runtimeManifestCanonicalSha256 =
+        Get-Fo4HdrCanonicalTextSha256 $manifestPath
+    Write-Fo4HdrCanonicalUtf8Text -Path $lockPath `
+        -Text (($identityLock | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
+    Assert-Rejected { & $validator -RepoRoot $Fixture } $Case
+    Copy-Item -LiteralPath $sourcePath -Destination $manifestPath -Force
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'versions.lock.json') -Destination $lockPath -Force
+}
+
 Assert-Fo4HdrExactRuntimeFileVersion -Runtime "1.10.163" -FileVersion "1.10.163.0"
 Assert-Rejected {
     Assert-Fo4HdrExactRuntimeFileVersion `
@@ -102,6 +123,63 @@ try {
     }
     $validator = Join-Path $repoRoot "scripts\validate-manifests.ps1"
     & $validator -RepoRoot $fixture
+
+    foreach ($profile in @('hudRendererIdentity', 'flatRendererIdentity',
+            'armorRendererIdentity', 'rainRendererIdentity')) {
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile promoted status" {
+            param($key) $key.status = 'runtime-validated'
+        }
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile missing storage mapping" {
+            param($key) $key.PSObject.Properties.Remove('keyStorageAddressLibraryId')
+        }
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile executable storage" {
+            param($key) $key.keyStorageSection = '.text'
+        }
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile incomplete fingerprint" {
+            param($key) $key.keyGetterExpectedBytes = @($key.keyGetterExpectedBytes[0..24])
+        }
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile addresses another key" {
+            param($key) $key.keyGetterExpectedBytes[22] = $key.keyGetterExpectedBytes[22] -bxor 1
+        }
+        Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile reuses one mapping" {
+            param($key) $key.keyGetterAddressLibraryId = $key.keyStorageAddressLibraryId
+        }
+    }
+
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop promoted status' {
+        param($key) $key.status = 'runtime-validated'
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop missing storage mapping' {
+        param($key) $key.PSObject.Properties.Remove('keyStorageAddressLibraryId')
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop executable storage' {
+        param($key) $key.keyStorageSection = '.text'
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop incomplete fingerprint' {
+        param($key) $key.keyInitializerExpectedBytes = @($key.keyInitializerExpectedBytes[0..37])
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop addresses another key' {
+        param($key) $key.keyInitializerExpectedBytes[14] = $key.keyInitializerExpectedBytes[14] -bxor 1
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop reuses one mapping' {
+        param($key) $key.keyInitializerAddressLibraryId = $key.keyStorageAddressLibraryId
+    }
+
+    Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI ABI changed' {
+        param($profile) $profile.abi = 'void(UI*,uint32_t)'
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI missing mapping' {
+        param($profile) $profile.calls[3].PSObject.Properties.Remove('callerAddressLibraryId')
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI wrong CALL target' {
+        param($profile) $profile.calls[0].expectedBytes[1] = 161
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI duplicate CALL' {
+        param($profile) $profile.calls[3].rva = $profile.calls[0].rva
+    }
+    Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI incomplete fingerprint' {
+        param($profile) $profile.target.expectedBytes = @($profile.target.expectedBytes[0..30])
+    }
 
     $fixtureLock = Join-Path $fixture "versions.lock.json"
     $invalidLock = Get-Content -LiteralPath $fixtureLock -Raw |

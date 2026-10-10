@@ -44,6 +44,22 @@ void STDMETHODCALLTYPE HookExecuteCommandList(
     ID3D11DeviceContext* context, ID3D11CommandList* commands,
     BOOL restoreState) noexcept;
 
+void STDMETHODCALLTYPE HookCopySubresourceRegion(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, UINT destinationSubresource, UINT x, UINT y, UINT z,
+    ID3D11Resource* source, UINT sourceSubresource, const D3D11_BOX* box) noexcept;
+void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
+    ID3D11Resource* destination, ID3D11Resource* source) noexcept;
+void STDMETHODCALLTYPE HookClearRenderTargetView(ID3D11DeviceContext* context,
+    ID3D11RenderTargetView* target, const FLOAT* color) noexcept;
+void STDMETHODCALLTYPE HookDispatch(ID3D11DeviceContext* context,
+    UINT x, UINT y, UINT z) noexcept;
+void STDMETHODCALLTYPE HookDispatchIndirect(ID3D11DeviceContext* context,
+    ID3D11Buffer* arguments, UINT offset) noexcept;
+void STDMETHODCALLTYPE HookClearUnorderedAccessViewUint(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target, const UINT* values) noexcept;
+void STDMETHODCALLTYPE HookClearUnorderedAccessViewFloat(ID3D11DeviceContext* context,
+    ID3D11UnorderedAccessView* target, const FLOAT* values) noexcept;
+
 void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(
     ID3D11DeviceContext* context, UINT rtvCount,
     ID3D11RenderTargetView* const* rtvs,
@@ -73,14 +89,6 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(
     ID3D11DeviceContext* context, UINT count,
     ID3D11RenderTargetView* const* views,
     ID3D11DepthStencilView* depth) noexcept;
-
-void STDMETHODCALLTYPE HookCopySubresourceRegion(ID3D11DeviceContext* context,
-    ID3D11Resource* destination, UINT destinationSubresource, UINT x, UINT y, UINT z,
-    ID3D11Resource* source, UINT sourceSubresource, const D3D11_BOX* box) noexcept;
-void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
-    ID3D11Resource* destination, ID3D11Resource* source) noexcept;
-void STDMETHODCALLTYPE HookClearRenderTargetView(ID3D11DeviceContext* context,
-    ID3D11RenderTargetView* target, const FLOAT* color) noexcept;
 
 bool ValidateExpectedShaderBinding(ID3D11DeviceContext*, DrawObservation&) noexcept;
 

@@ -12,6 +12,6 @@ struct DrawInvocation
     void* arguments;
     void operator()() const { invoke(arguments); }
 };
-void ExecuteObservedDraw(DrawObservation&, ID3D11DeviceContext*, bool exactIndexedQuad, const DrawInvocation&) noexcept;
+void ExecuteObservedDraw(DrawObservation&, ID3D11DeviceContext*, const DrawInvocation&) noexcept;
 
 } // namespace fo4hdr

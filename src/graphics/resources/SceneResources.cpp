@@ -16,6 +16,10 @@
 #include "../DrawObservation.hpp"
 #include "../ShaderRegistry.hpp"
 #include "../GraphicsDiagnostics.hpp"
+#include "../RendererLifetime.hpp"
+#include "../LiveSettings.hpp"
+#include "../FrameTrace.hpp"
+#include <algorithm>
 
 namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
@@ -62,8 +66,16 @@ bool SceneTargetAvailable(ID3D11RenderTargetView* rtv) noexcept
     return QualifiedSceneDescription(description);
 }
 
+std::uintptr_t CanonicalResourceIdentity(ID3D11Resource* resource) noexcept
+{
+    Microsoft::WRL::ComPtr<IUnknown> identity;
+    if (!resource || FAILED(resource->QueryInterface(IID_PPV_ARGS(&identity)))) return 0;
+    return reinterpret_cast<std::uintptr_t>(identity.Get());
+}
+
 bool SameResourceObjects(ID3D11Resource* left, ID3D11Resource* right) noexcept
 {
+    if (!left || !right) return false;
     ComPtr<IUnknown> leftIdentity;
     ComPtr<IUnknown> rightIdentity;
     return SUCCEEDED(left->QueryInterface(IID_PPV_ARGS(&leftIdentity))) &&
@@ -92,6 +104,22 @@ bool SameResourceObjects(ID3D11Resource* left, ID3D11Resource* right) noexcept
     view->GetResource(&actual);
     if (!actual) return false;
     return SameResourceObjects(actual.Get(), expected);
+}
+
+bool IsFirstFp16RenderTarget(ID3D11RenderTargetView* view) noexcept
+{
+    if (view == nullptr) return false;
+    D3D11_RENDER_TARGET_VIEW_DESC description{};
+    view->GetDesc(&description);
+    return description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
+        description.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D &&
+        description.Texture2D.MipSlice == 0;
+}
+
+[[nodiscard]] bool IsPresentationProxyTarget(ID3D11RenderTargetView* view) noexcept
+{
+    return IsFirstFp16RenderTarget(view) &&
+        RenderTargetMatchesResource(view, g_presentation.presentationProxy.Get());
 }
 
 [[nodiscard]] bool CurrentPassConsumesSelectedScene(
@@ -156,8 +184,8 @@ bool CreateSceneView(ID3D11Texture2D* texture, ComPtr<ID3D11Device>& device,
     ID3D11RenderTargetView* rtv) noexcept
 {
     if (rtv == nullptr) return nullptr;
-    if (rtv == g_presentation.presentationProxyRtv.Get())
-        return g_presentation.presentationProxySrv.Get();
+    if (RenderTargetMatchesResource(rtv, g_presentation.presentationProxy.Get()))
+        return IsFirstFp16RenderTarget(rtv) ? g_presentation.presentationProxySrv.Get() : nullptr;
 
     ComPtr<ID3D11Resource> resource;
     rtv->GetResource(&resource);
@@ -176,8 +204,6 @@ bool CreateSceneView(ID3D11Texture2D* texture, ComPtr<ID3D11Device>& device,
         return nullptr;
     return StoreSceneView(resourceIdentity, srv);
 }
-
-
 void ResetSceneResources() noexcept
 {
     g_scene.currentScene.Reset();

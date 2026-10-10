@@ -224,7 +224,7 @@ function Test-LayoutChecks {
     Assert-LayoutRejects { Assert-LayoutInclude 'tests/unit/tonemap/Gt7Tests.cpp' '../../../third_party/gt7/upstream/other.cpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'tests/unit/tonemap/OtherTests.cpp' '../../../third_party/gt7/upstream/gt7_tone_mapping.cpp' $paths }
     Assert-LayoutRejects { Add-LayoutPath $paths 'SRC/config/Private.hpp' }
-    Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'fallout4hdr/config/Settings.hpp' $paths }
+    Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'fo4isotope/config/Settings.hpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'Settings.cpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'Template.inl' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'include/FO4Isotope/config/Settings.hpp' '../../../src/config/Private.hpp' $paths }

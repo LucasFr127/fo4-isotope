@@ -648,46 +648,6 @@ void TestOrderedHeartbeat()
         PipelineHeartbeatEvaluation::Outcome::ready);
 }
 
-void TestLateGameUiCapturePolicy()
-{
-    FO4HDR_CHECK(DecideLateGameUiAction({true, true, true, true, true, true}, true, true) ==
-        LateGameUiAction::captureSeparately);
-
-    constexpr std::array<std::array<bool, 8>, 8> rejected{{
-        {{false, true, true, true, true, true, true, true}},
-        {{true, false, true, true, true, true, true, true}},
-        {{true, true, false, true, true, true, true, true}},
-        {{true, true, true, false, true, true, true, true}},
-        {{true, true, true, true, false, true, true, true}},
-        {{true, true, true, true, true, false, true, true}},
-        {{true, true, true, true, true, true, false, true}},
-        {{true, true, true, true, true, true, true, false}},
-    }};
-    for (const auto& value : rejected) {
-        FO4HDR_CHECK(DecideLateGameUiAction({value[0], value[1], value[2], value[3], value[4], value[5]}, value[6], value[7]) ==
-            LateGameUiAction::passThrough);
-    }
-
-    FO4HDR_CHECK(DecideLateGameUiBackdropAction({true, true, true, true, true, true}, {true, true, true, true}) ==
-        LateGameUiAction::captureSeparately);
-    constexpr std::array<std::array<bool, 10>, 10> backdropRejected{{
-        {{false, true, true, true, true, true, true, true, true, true}},
-        {{true, false, true, true, true, true, true, true, true, true}},
-        {{true, true, false, true, true, true, true, true, true, true}},
-        {{true, true, true, false, true, true, true, true, true, true}},
-        {{true, true, true, true, false, true, true, true, true, true}},
-        {{true, true, true, true, true, false, true, true, true, true}},
-        {{true, true, true, true, true, true, false, true, true, true}},
-        {{true, true, true, true, true, true, true, false, true, true}},
-        {{true, true, true, true, true, true, true, true, false, true}},
-        {{true, true, true, true, true, true, true, true, true, false}},
-    }};
-    for (const auto& value : backdropRejected) {
-        FO4HDR_CHECK(DecideLateGameUiBackdropAction({value[0], value[1], value[2], value[3], value[4], value[5]}, {value[6], value[7], value[8], value[9]}) ==
-            LateGameUiAction::passThrough);
-    }
-}
-
 void TestRendererPauseAndSdr(HdrRendererLifecycle& lifecycle)
 {
     FO4HDR_CHECK(lifecycle.BindDeviceAndSwapChain());
@@ -953,7 +913,6 @@ void RunHdrCoreTests()
     TestActivationPolicy();
     TestActivationCapabilityRequirements();
     TestOrderedHeartbeat();
-    TestLateGameUiCapturePolicy();
     TestRendererLifecycleStress();
     TestGraphicsLifecyclePublication();
     TestDeveloperConfiguration();

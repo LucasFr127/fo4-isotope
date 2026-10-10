@@ -22,6 +22,28 @@ $manifestPath =
     Join-Path $repoRoot "runtime\$Runtime\manifest.json"
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 
+$sceneComposites = @($manifest.shaders | Where-Object {
+    [string]$_.name -eq "native-scene-composite"
+})
+if ($sceneComposites.Count -ne 1) {
+    throw "Runtime manifest must contain one native-scene-composite shader."
+}
+$sceneComposite = $sceneComposites[0]
+$sceneCompositeHash = [string]$sceneComposite.dxbcHash
+if ($sceneComposite.stage -ne "pixel" -or
+    $sceneComposite.signal -ne "linear-bt709-relative" -or
+    $sceneComposite.draw.kind -ne "indexed" -or
+    $sceneComposite.draw.indexCount -ne 3 -or
+    $sceneComposite.target.format -ne "R16G16B16A16_FLOAT" -or
+    $sceneComposite.target.extent -ne "presentation" -or
+    $sceneComposite.role -ne "initialize-depth-tested-scene-target" -or
+    $sceneCompositeHash -notmatch '^[0-9a-f]{8}(-[0-9a-f]{8}){3}$') {
+    throw "The native scene composite shader fact is incomplete or malformed."
+}
+$sceneCompositeHashWords = @($sceneCompositeHash.Split("-") | ForEach-Object {
+    "0x$($_)u"
+})
+
 $lateGameUiShaders = @($manifest.shaders | Where-Object {
     [string]$_.name -eq "late-game-ui-composite"
 })
@@ -236,6 +258,68 @@ foreach ($call in $armor.calls) {
     $armorLines += "    {{ $($call.expectedBytes -join ', ') }},"
 }
 $armorLines += '}};'
+$rendererKeys = [ordered]@{
+    Hud = $armor.hudRendererIdentity
+    Flat = $armor.flatRendererIdentity
+    Armor = $armor.armorRendererIdentity
+    Rain = $armor.rainRendererIdentity
+}
+foreach ($key in $rendererKeys.GetEnumerator()) {
+    $identity = $key.Value
+    if ($identity.status -ne 'static-reviewed-native-unvalidated' -or
+        $identity.comparison -ne 'non-null-native-pooled-entry-pointer' -or
+        $identity.keyStorageSection -ne '.data' -or
+        @($identity.keyGetterExpectedBytes).Count -ne 26) {
+        throw "The native $($key.Key) pooled-key identity contract is incomplete."
+    }
+    $prefix = "k$($key.Key)UiKey"
+    $armorLines += @(
+        "inline constexpr std::uintptr_t $($prefix)StorageRva = $($identity.keyStorageRva);",
+        "inline constexpr std::uint64_t $($prefix)StorageId = $($identity.keyStorageAddressLibraryId);",
+        "inline constexpr std::uintptr_t $($prefix)GetterRva = $($identity.keyGetterRva);",
+        "inline constexpr std::uint64_t $($prefix)GetterId = $($identity.keyGetterAddressLibraryId);",
+        "inline constexpr std::array<std::uint8_t, 26> $($prefix)GetterBytes{{ $($identity.keyGetterExpectedBytes -join ', ') }};"
+    )
+}
+
+$workshop = $armor.workshopRendererIdentity
+if ($workshop.status -ne 'static-reviewed-native-unvalidated' -or
+    $workshop.comparison -ne 'non-null-native-pooled-entry-pointer' -or
+    $workshop.keyStorageSection -ne '.data' -or
+    @($workshop.keyInitializerExpectedBytes).Count -ne 39) {
+    throw 'The native Workshop pooled-key initializer contract is incomplete.'
+}
+$armorLines += @(
+    "inline constexpr std::uintptr_t kWorkshopUiKeyStorageRva = $($workshop.keyStorageRva);",
+    "inline constexpr std::uint64_t kWorkshopUiKeyStorageId = $($workshop.keyStorageAddressLibraryId);",
+    "inline constexpr std::uintptr_t kWorkshopUiKeyInitializerRva = $($workshop.keyInitializerRva);",
+    "inline constexpr std::uint64_t kWorkshopUiKeyInitializerId = $($workshop.keyInitializerAddressLibraryId);",
+    "inline constexpr std::array<std::uint8_t, 39> kWorkshopUiKeyInitializerBytes{{ $($workshop.keyInitializerExpectedBytes -join ', ') }};"
+)
+
+$screenUi = $manifest.experimentalScreenUiObserver
+if ($screenUi.status -ne 'unvalidated' -or
+    $screenUi.scope -ne 'screen-space-ui-encoded-entry' -or
+    $screenUi.abi -ne 'void(UI*)' -or @($screenUi.calls).Count -ne 4 -or
+    @($screenUi.target.expectedBytes).Count -ne 32) {
+    throw 'The screen-space UI entry contract is incomplete.'
+}
+$screenUiLines = @(
+    "inline constexpr std::uintptr_t kScreenUiTargetRva = $($screenUi.target.rva);",
+    "inline constexpr std::uint64_t kScreenUiTargetId = $($screenUi.target.addressLibraryId);",
+    "inline constexpr std::array<std::uint8_t, 32> kScreenUiTargetBytes{{ $($screenUi.target.expectedBytes -join ', ') }};",
+    "inline constexpr std::array<std::uintptr_t, 4> kScreenUiCallerRvas{{ $($screenUi.calls.callerRva -join ', ') }};",
+    "inline constexpr std::array<std::uint64_t, 4> kScreenUiCallerIds{{ $($screenUi.calls.callerAddressLibraryId -join ', ') }};",
+    "inline constexpr std::array<std::uintptr_t, 4> kScreenUiCallRvas{{ $($screenUi.calls.rva -join ', ') }};",
+    'inline constexpr std::array<std::array<std::uint8_t, 5>, 4> kScreenUiCallBytes{{'
+)
+foreach ($call in $screenUi.calls) {
+    if (@($call.expectedBytes).Count -ne 5 -or $call.expectedBytes[0] -ne 232) {
+        throw 'The screen-space UI entry requires four exact direct CALL fingerprints.'
+    }
+    $screenUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
+}
+$screenUiLines += '}};'
 
 $lut = $manifest.nativeLutObserver
 if ($lut.status -ne 'unvalidated' -or
@@ -321,6 +405,7 @@ $lines = @(
     "",
     "namespace fo4hdr::generated {",
     ($armorLines -join "`n"),
+    ($screenUiLines -join "`n"),
     ($lutLines -join "`n"),
     ($imageSpaceLines -join "`n"),
     ($weatherGradeLines -join "`n"),
@@ -336,6 +421,9 @@ $lines = @(
     "inline constexpr std::string_view kAddressLibrarySha256 = `"$($entry.addressLibrarySha256)`";",
     "inline constexpr std::string_view kManifestSha256 = `"$manifestHash`";",
     "inline constexpr std::string_view kCommonLibCommit = `"$($lock.commonlib.commit)`";",
+    "inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{",
+    "    $($sceneCompositeHashWords -join ', ')",
+    "}};",
     "inline constexpr std::array<std::uint32_t, 4> kLateGameUiCompositeDxbcHash{{",
     "    $($lateGameUiHashWords -join ', ')",
     "}};",
@@ -392,7 +480,6 @@ $lines = @(
     "inline constexpr std::size_t kImageSpaceLutTextureOffset = $($imageSpaceLayout.lut.textureOffset);",
     "inline constexpr std::uint16_t kImageSpaceTopLevelEffectCount = $($imageSpaceProfile.topLevelEffectCount);",
     "inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = `"$($imageSpaceProfile.sources.commonlib.commit)`";",
-    "inline constexpr std::string_view kImageSpaceXEditAliasSourceCommit = `"$($imageSpaceProfile.sources.xeditFieldAliases.commit)`";",
     "inline constexpr std::string_view kImageSpaceEffectTableSha256 = `"$effectTableHash`";",
     "inline constexpr std::array<ImageSpaceEffectSemantic, kImageSpaceTopLevelEffectCount>",
     "    kImageSpaceEffectSemantics{{"

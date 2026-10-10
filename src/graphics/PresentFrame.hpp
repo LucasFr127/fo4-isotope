@@ -7,6 +7,7 @@
 
 namespace fo4hdr {
 
+void ApplyGraphicsLifecycleBeforeDraw(ID3D11DeviceContext* context) noexcept;
 [[nodiscard]] bool PreparePresentFrame(IDXGISwapChain*, bool developerHdrDescriptor);
 void CompletePresentFrame(bool rendered, bool commitSettings);
 

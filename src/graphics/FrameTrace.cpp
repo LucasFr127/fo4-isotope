@@ -204,6 +204,22 @@ void DescribeBackbuffer(IDXGISwapChain* chain, TraceResource& result) noexcept
         DescribeResource(backbuffer.Get(), result);
 }
 
+FrameTraceArguments SharedUiArguments(const FrameTraceSharedUiSnapshot& snapshot) noexcept
+{
+    const std::array states{snapshot.seeded, snapshot.closed, snapshot.nativeWritten,
+        snapshot.rejected, snapshot.outputWritten, snapshot.assumed};
+    std::uint32_t flags{};
+    for (std::size_t index = 0; index < states.size(); ++index)
+        flags |= static_cast<std::uint32_t>(states[index]) << index;
+    return {static_cast<std::uint32_t>(snapshot.decision), snapshot.rejection, flags,
+        std::bit_cast<std::uint32_t>(snapshot.frozenWhite),
+        static_cast<std::uint32_t>(snapshot.contentRevision),
+        static_cast<std::uint32_t>(snapshot.contentRevision >> 32),
+        static_cast<std::uint32_t>(snapshot.generation),
+        static_cast<std::uint32_t>(snapshot.generation >> 32),
+        static_cast<std::uint32_t>(snapshot.frame), static_cast<std::uint32_t>(snapshot.frame >> 32)};
+}
+
 void AdvanceTraceFrame(FrameTraceKind kind, UINT flags) noexcept
 {
     if (kind != FrameTraceKind::presentResult) return;
@@ -329,6 +345,18 @@ void TraceFramePresent(IDXGISwapChain* chain, FrameTraceKind kind,
         event.arguments = {arguments.interval, arguments.flags, static_cast<std::uint32_t>(arguments.result)};
         if (kind == FrameTraceKind::nativePresent) DescribeBackbuffer(chain, event.resources[0]);
         AdvanceTraceFrame(kind, arguments.flags);
+    });
+}
+
+void TraceSharedUiPresentation(const FrameTraceSharedUiSnapshot& snapshot) noexcept
+{
+    RecordEvent(FrameTraceKind::sharedUiPresentation, [&](TraceEvent& event) noexcept {
+        event.context = reinterpret_cast<std::uintptr_t>(snapshot.context);
+        event.contextGeneration = snapshot.contextGeneration;
+        event.arguments = SharedUiArguments(snapshot);
+        DescribeInput(snapshot.selectedScene, event.resources[0]);
+        DescribeResource(snapshot.publicBuffer, event.resources[1]);
+        DescribeResource(snapshot.outputBuffer, event.resources[2]);
     });
 }
 
