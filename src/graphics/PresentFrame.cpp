@@ -2,6 +2,7 @@
 
 #include "PresentFrame.hpp"
 #include "SharedUiFrame.hpp"
+#include "SharedSdrFrame.hpp"
 #include "RendererLifetime.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
@@ -91,6 +92,7 @@ void ApplyGraphicsLifecycleBeforeDraw(ID3D11DeviceContext* context) noexcept
     const bool immediate = record && record->immediate;
     if (context != g_rendererDevice.activeContext || !immediate) return;
     // Later publications belong to Present's rejection of the already-started frame.
+    if (SharedSdrFrameHasNativeWriter(context)) return;
     (void)ApplyGraphicsLifecycle(ReadGraphicsLifecycle());
 }
 
@@ -612,7 +614,7 @@ struct PresentFrame
         if (g_armor.armorEncodedActive)
         {
             CloseArmorEncodedCompositionForLifecycle();
-            g_armor.armorEncodedFailed = true;
+            if (!g_armor.armorEncodedSharedSrgb) g_armor.armorEncodedFailed = true;
             if (g_referenceHealthy)
                 g_armor.armorEncodedStatus = "Rejected frame: armor scope crossed Present";
         }
@@ -730,7 +732,7 @@ struct PresentFrame
 
     void RenderHdr()
     {
-        sdrContentReady = false;
+        sdrContentReady = !gameplayTransition && SharedSdrFrameReady();
         if (CanRenderHdr())
         {
             const auto result = RenderReferenceFrame(swapChain,

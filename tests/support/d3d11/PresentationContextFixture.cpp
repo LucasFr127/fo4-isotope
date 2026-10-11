@@ -99,6 +99,9 @@ void PresentationContextFixture::InstallHooks()
     FO4HDR_WARP_CHECK(*reinterpret_cast<void***>(device.context.Get()) == record->shadow.data());
     if (!g_configuration.productionRequested)
     {
+        for (const auto slot : {kContextDispatch, kContextDispatchIndirect,
+                 kContextClearUnorderedAccessViewUint, kContextClearUnorderedAccessViewFloat})
+            FO4HDR_WARP_CHECK(record->shadow[slot] == record->originalVtable[slot]);
         if (!FrameTraceRequested())
         {
             for (const auto slot : {kContextCopyResource, kContextCopySubresourceRegion,
@@ -126,6 +129,7 @@ void PresentationContextFixture::InstallHooks()
 SharedPresentationContextFixture::SharedPresentationContextFixture(Device& value) : PresentationContextFixture(value)
 {
     ResetSharedUiResources();
+    SetSharedUiPauseResourcesReady(false);
     static const auto shipped = LoadPluginConfiguration(std::filesystem::path{"config/FO4Isotope.ini"});
     FO4HDR_WARP_CHECK(shipped.valid);
     FO4HDR_WARP_CHECK(shipped.value.productionRequested && !shipped.value.developerMode);
@@ -167,6 +171,7 @@ SharedPresentationContextFixture::~SharedPresentationContextFixture()
 {
     SetArmorUiBoundaryCallback(nullptr);
     SetArmorUiCorrectionEnabled(savedCorrection);
+    SetSharedUiPauseResourcesReady(savedPauseResources);
     ResetSharedUiResources();
     PublishGraphicsLifecycle(savedGame.gameplayReady, false);
     PublishGraphicsPresentationBlocked(savedGame.presentationBlocked);

@@ -28,6 +28,7 @@
 #include "../resources/ReplacementShaders.hpp"
 #include "../resources/SceneResources.hpp"
 #include "../SharedUiFrame.hpp"
+#include "../SharedSdrFrame.hpp"
 
 #include <wrl/client.h>
 #include <algorithm>
@@ -208,7 +209,7 @@ void CloseConflictingArmorScope(ID3D11DeviceContext* context)
         ArmorUiScopeToken outer{};
         outer.serial = g_armor.armorEncodedScope;
         ArmorEncodedBoundary(outer, false);
-        g_armor.armorEncodedFailed = true;
+        if (!g_armor.armorEncodedSharedSrgb) g_armor.armorEncodedFailed = true;
         if (g_referenceHealthy)
             g_armor.armorEncodedStatus = "Rejected frame: conflicting operation inside armor scope";
     }
@@ -234,7 +235,7 @@ void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
             PipelinePassRequirement::untracked;
         return;
     }
-    CloseConflictingArmorScope(context);
+    if (!g_armor.armorEncodedSharedSrgb) CloseConflictingArmorScope(context);
     record.currentPass = descriptor->pass;
     record.currentPassKnown = true;
     record.currentRequirement = descriptor->requirement;

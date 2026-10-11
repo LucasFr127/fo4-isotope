@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace fo4hdr::tests::gpu {
@@ -24,14 +25,16 @@ namespace {
 // forward to D3D without running a renderer target-observation callback.
 UINT g_armorEncodedSetterCalls{};
 ID3D11RenderTargetView* g_armorEncodedExpectedRtv{};
+ID3D11DepthStencilView* g_armorEncodedExpectedDepth{};
 void STDMETHODCALLTYPE ArmorEncodedNextSetterSpy(ID3D11DeviceContext* context,
     UINT targetCount, ID3D11RenderTargetView* const* targets,
     ID3D11DepthStencilView* depth)
 {
-    FO4HDR_WARP_CHECK(depth==nullptr);
     if (g_armorEncodedSetterCalls==0) {
+        FO4HDR_WARP_CHECK(depth==nullptr);
         FO4HDR_WARP_CHECK(targetCount==0 && targets==nullptr);
     } else {
+        FO4HDR_WARP_CHECK(depth==g_armorEncodedExpectedDepth);
         FO4HDR_WARP_CHECK(g_armorEncodedSetterCalls==1);
         FO4HDR_WARP_CHECK(targetCount==D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT && targets!=nullptr);
         if (targets && targetCount==D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT) {
@@ -72,6 +75,7 @@ void VerifyOccupiedArmorUav(ID3D11DeviceContext& context,
 struct ArmorEncodedExpectedState
 {
     ID3D11RenderTargetView* rtv;
+    ID3D11DepthStencilView* depth;
     ID3D11ShaderResourceView* srv;
     ID3D11Buffer* buffer;
     UINT first;
@@ -84,8 +88,10 @@ void CheckArmorEncodedState(ID3D11DeviceContext& context,
     ID3D11DeviceContext1& context1, const ArmorEncodedExpectedState& expected)
 {
     ComPtr<ID3D11RenderTargetView> actualRtv;
-    context.OMGetRenderTargets(1,&actualRtv,nullptr);
+    ComPtr<ID3D11DepthStencilView> actualDepth;
+    context.OMGetRenderTargets(1,&actualRtv,&actualDepth);
     FO4HDR_WARP_CHECK(actualRtv.Get()==expected.rtv);
+    FO4HDR_WARP_CHECK(actualDepth.Get()==expected.depth);
     const auto checkSrv=[&](auto getter) {
         ComPtr<ID3D11ShaderResourceView> actual;
         (context.*getter)(127,1,&actual);
@@ -110,6 +116,23 @@ void CheckArmorEncodedState(ID3D11DeviceContext& context,
     FO4HDR_WARP_CHECK(actualPredicate.Get()==expected.predicate && actualValue==TRUE);
 }
 
+ComPtr<ID3D11DepthStencilView> CreateArmorDepth(ID3D11Device& gpu)
+{
+    D3D11_TEXTURE2D_DESC depthDescription{};
+    depthDescription.Width=13;
+    depthDescription.Height=3;
+    depthDescription.MipLevels=1;
+    depthDescription.ArraySize=1;
+    depthDescription.Format=DXGI_FORMAT_D32_FLOAT;
+    depthDescription.SampleDesc.Count=1;
+    depthDescription.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+    ComPtr<ID3D11Texture2D> depthTexture;
+    ComPtr<ID3D11DepthStencilView> depth;
+    CheckHresult(gpu.CreateTexture2D(&depthDescription,nullptr,&depthTexture),"Create armor depth texture");
+    CheckHresult(gpu.CreateDepthStencilView(depthTexture.Get(),nullptr,&depth),"Create armor depth view");
+    return depth;
+}
+
 void VerifyArmorEncodedState(Device& device, ID3D11ComputeShader* shader,
     ID3D11Buffer* constants, Texture& target)
 {
@@ -119,6 +142,7 @@ void VerifyArmorEncodedState(Device& device, ID3D11ComputeShader* shader,
     CheckHresult(device.context.As(&context1),"Query armor fixture context1");
     auto other=CreateSizedTexture(gpu, {13,3,DXGI_FORMAT_R16G16B16A16_FLOAT,
         D3D11_BIND_RENDER_TARGET|D3D11_BIND_UNORDERED_ACCESS});
+    const auto depth=CreateArmorDepth(gpu);
     const auto ranged=CreateConstantBuffer(gpu,std::array<float,128>{});
     UINT first=16, count=16;
     auto* rangedBinding=ranged.Get();
@@ -132,7 +156,7 @@ void VerifyArmorEncodedState(Device& device, ID3D11ComputeShader* shader,
         constexpr float initial[4]{4,4,4,.5F};
         context.ClearRenderTargetView(target.rtv.Get(),initial);
         auto* rtv=aliasRtv ? target.rtv.Get() : other.rtv.Get();
-        context.OMSetRenderTargets(1,&rtv,nullptr);
+        context.OMSetRenderTargets(1,&rtv,depth.Get());
         // The SRV case binds the target at slot 127 in all six stages;
         // the RTV case binds it as the output target with those SRVs unbound.
         auto* srv=aliasRtv ? nullptr : target.srv.Get();
@@ -145,10 +169,11 @@ void VerifyArmorEncodedState(Device& device, ID3D11ComputeShader* shader,
         context.CSSetShader(shader,nullptr,0);
         context1->CSSetConstantBuffers1(13,1,&rangedBinding,&first,&count);
         context.SetPredication(predicate.Get(),TRUE);
-        const ArmorEncodedExpectedState expected{rtv, srv, ranged.Get(),
+        const ArmorEncodedExpectedState expected{rtv, depth.Get(), srv, ranged.Get(),
             first, count, shader, predicate.Get()};
         g_armorEncodedSetterCalls=0;
         g_armorEncodedExpectedRtv=rtv;
+        g_armorEncodedExpectedDepth=depth.Get();
         FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),{shader,target.uav.Get(),constants,13,3},&ArmorEncodedNextSetterSpy));
         FO4HDR_WARP_CHECK(g_armorEncodedSetterCalls==2);
         CheckArmorEncodedState(context, *context1.Get(), expected);
@@ -171,6 +196,7 @@ void VerifyArmorEncodedState(Device& device, ID3D11ComputeShader* shader,
     });
     context.ClearState();
     g_armorEncodedExpectedRtv=nullptr;
+    g_armorEncodedExpectedDepth=nullptr;
 }
 
 }  // namespace
@@ -207,6 +233,22 @@ ArmorRgb ArmorOracleTransform(ArmorRgb value, bool encode)
         channel = std::copysign(std::pow(std::abs(channel), encode ? 1.0/2.2 : 2.2), channel);
     if (!encode) value = ArmorOracleGamut(value, false);
     return value;
+}
+
+double ArmorOracleSrgb(double value, bool encode)
+{
+    const auto magnitude=std::abs(value);
+    const auto result=encode ? (magnitude<=.0031308 ? magnitude*12.92 :
+        1.055*std::pow(magnitude,1.0/2.4)-.055) :
+        (magnitude<=.04045 ? magnitude/12.92 : std::pow((magnitude+.055)/1.055,2.4));
+    return std::copysign(result,value);
+}
+
+ArmorRgb ArmorOracleSharedCode(const ArmorRgb& linear)
+{
+    auto code=ArmorOracleGamut(linear,true);
+    for (auto& channel:code) channel=ArmorOracleSrgb(channel,true);
+    return code;
 }
 
 struct ArmorEncodedFixture
@@ -446,24 +488,192 @@ struct ArmorEncodedFixture
             dispatch(true);
             const auto before=read();
             const auto sourceBuffer=CreateConstantBuffer(gpu,sources[s]);
-            D3D11_BLEND_DESC desc{};
-            auto& blend=desc.RenderTarget[0];
-            blend.BlendEnable=TRUE;
-            blend.SrcBlend=mode==1 ? D3D11_BLEND_ONE : D3D11_BLEND_SRC_ALPHA;
-            blend.DestBlend=mode==0 ? D3D11_BLEND_INV_SRC_ALPHA : D3D11_BLEND_ONE;
-            blend.BlendOp=D3D11_BLEND_OP_ADD;
-            blend.SrcBlendAlpha=D3D11_BLEND_ONE;
-            blend.DestBlendAlpha=D3D11_BLEND_ZERO;
-            blend.BlendOpAlpha=D3D11_BLEND_OP_ADD;
-            blend.RenderTargetWriteMask=7; // Native RGB-only leaves scene alpha alone.
-            ComPtr<ID3D11BlendState> blendState;
-            CheckHresult(gpu.CreateBlendState(&desc,&blendState),"Create native encoded blend");
+            const auto blendState=CreateNativeBlend(mode);
             DrawEncoded(sourceBuffer.Get(), blendState.Get());
             const auto blended=read();
             dispatch(false);
             const auto decoded=read();
             CheckBlend({mode, s, sources[s]}, {before, blended, decoded});
         }
+    }
+
+    ComPtr<ID3D11BlendState> CreateNativeBlend(UINT mode)
+    {
+        D3D11_BLEND_DESC desc{};
+        auto& blend=desc.RenderTarget[0];
+        blend.BlendEnable=TRUE;
+        blend.SrcBlend=mode==1 ? D3D11_BLEND_ONE : D3D11_BLEND_SRC_ALPHA;
+        blend.DestBlend=mode==0 ? D3D11_BLEND_INV_SRC_ALPHA : D3D11_BLEND_ONE;
+        blend.BlendOp=D3D11_BLEND_OP_ADD;
+        blend.SrcBlendAlpha=D3D11_BLEND_ONE;
+        blend.DestBlendAlpha=D3D11_BLEND_ZERO;
+        blend.BlendOpAlpha=D3D11_BLEND_OP_ADD;
+        blend.RenderTargetWriteMask=7; // Native RGB-only leaves scene alpha alone.
+        ComPtr<ID3D11BlendState> state;
+        CheckHresult(gpu.CreateBlendState(&desc,&state),"Create native encoded blend");
+        return state;
+    }
+
+    static void CheckSharedEntry(const Pixels& input, const Pixels& encoded)
+    {
+        for (std::size_t i=0;i<input.size();++i) {
+            for (std::size_t c=0;c<3;++c) {
+                const auto linear=ArmorOracleSrgb(input[i][c],false);
+                const auto expected=std::copysign(std::pow(std::abs(linear),1.0/2.2),linear);
+                FO4HDR_WARP_CHECK(std::abs(encoded[i][c]-expected)<.0015*std::max(1.0,std::abs(expected)));
+            }
+            FO4HDR_WARP_CHECK(encoded[i][3]==input[i][3]);
+        }
+    }
+
+    static void CheckSharedExit(const Pixels& native, const Pixels& output, float peak)
+    {
+        for (std::size_t i=0;i<output.size();++i) {
+            const auto linear=LimitedArmorLight(native[i],peak);
+            const auto expected=ArmorOracleSharedCode(linear);
+            ArmorRgb decoded{};
+            for (std::size_t c=0;c<3;++c) {
+                FO4HDR_WARP_CHECK(std::isfinite(output[i][c]));
+                FO4HDR_WARP_CHECK(std::abs(output[i][c]-expected[c])<.002*std::max(1.0,std::abs(expected[c])));
+                decoded[c]=ArmorOracleSrgb(output[i][c],false);
+            }
+            decoded=ArmorOracleGamut(decoded,false);
+            for (std::size_t c=0;c<3;++c) {
+                FO4HDR_WARP_CHECK(std::abs(decoded[c]-linear[c])<.006*std::max(1.0,std::abs(linear[c])));
+                FO4HDR_WARP_CHECK(decoded[c]<=peak+.006*peak);
+                FO4HDR_WARP_CHECK(std::abs(decoded[c]*linear[0]-decoded[0]*linear[c])<
+                    .012*std::max(1.0,std::abs(linear[c]*linear[0])));
+            }
+            FO4HDR_WARP_CHECK(output[i][3]==native[i][3]);
+        }
+    }
+
+    static ArmorRgb LimitedArmorLight(const Pixel& code, float peak)
+    {
+        auto linear=ArmorOracleTransform({code[0],code[1],code[2]},false);
+        const auto scale=peak/std::max(double(peak),std::max({linear[0],linear[1],linear[2]}));
+        for (auto& channel:linear) channel*=scale;
+        return linear;
+    }
+
+    Pixels SharedBridgeInput()
+    {
+        constexpr std::array<Pixel,13> codes{{{0,0,0,.375F},{.0001F,-.0001F,.001F,.625F},
+            {.04044F,.04045F,.04046F,.125F},{-.04044F,-.04045F,-.04046F,.875F},
+            {-.5F,.25F,2,.375F},{4,.5F,.125F,.625F},{1,1,1,.375F},
+            {.5F,.25F,.125F,.875F},{-2,-1,-.25F,.375F},{.001F,.002F,.003F,.125F},
+            {2,3,4,.625F},{.18F,.18F,.18F,.375F},{.9F,-.2F,.4F,.875F}}};
+        Pixels input{};
+        for (std::size_t i=0;i<input.size();++i)
+            for (std::size_t c=0;c<4;++c) input[i][c]=quantize(codes[i%codes.size()][c]);
+        return input;
+    }
+
+    Pixels LegacyBridgeInput()
+    {
+        auto legacyInput=SharedBridgeInput();
+        for (auto& pixel:legacyInput) {
+            ArmorRgb linear{};
+            for (std::size_t c=0;c<3;++c) linear[c]=ArmorOracleSrgb(pixel[c],false);
+            linear=ArmorOracleGamut(linear,false);
+            for (std::size_t c=0;c<3;++c) pixel[c]=quantize(linear[c]);
+        }
+        return legacyInput;
+    }
+
+    struct SharedBridgeResult
+    {
+        const Pixels& native;
+        const Pixels& output;
+        float peak;
+    };
+
+    static ArmorRgb SharedStoreError(const Pixel& code)
+    {
+        ArmorRgb error{};
+        for (std::size_t c=0;c<3;++c) {
+            const auto step=Binary16LargestAdjacentStep(std::abs(code[c]));
+            const auto center=ArmorOracleSrgb(code[c],false);
+            error[c]=std::max(std::abs(ArmorOracleSrgb(code[c]+step,false)-center),
+                std::abs(ArmorOracleSrgb(code[c]-step,false)-center));
+        }
+        return ArmorOracleGamut(error,false);
+    }
+
+    static void CheckSharedLegacyLight(const SharedBridgeResult& shared,
+        const Pixels& legacy, const Pixels& legacyNative)
+    {
+        for (std::size_t i=0;i<legacy.size();++i) {
+            const auto sharedLight=LimitedArmorLight(shared.native[i],shared.peak);
+            const auto legacyLight=LimitedArmorLight(legacyNative[i],shared.peak);
+            const auto sharedError=SharedStoreError(shared.output[i]);
+            ArmorRgb decoded{};
+            for (std::size_t c=0;c<3;++c) decoded[c]=ArmorOracleSrgb(shared.output[i][c],false);
+            decoded=ArmorOracleGamut(decoded,false);
+            for (std::size_t c=0;c<3;++c) {
+                const auto nativeDelta=sharedLight[c]-legacyLight[c];
+                const auto legacyError=Binary16LargestAdjacentStep(std::abs(legacy[i][c]));
+                const auto floatError=16*std::numeric_limits<float>::epsilon()*
+                    std::max({1.0,std::abs(sharedLight[c]),std::abs(legacyLight[c])});
+                // Compare light before nonlinear encoding; an extra FP16 wide-gamut
+                // store can shift near-black sRGB codes through matrix cancellation.
+                FO4HDR_WARP_CHECK(std::abs(decoded[c]-legacy[i][c]-nativeDelta)<=
+                    sharedError[c]+legacyError+floatError);
+            }
+            FO4HDR_WARP_CHECK(shared.output[i][3]==legacy[i][3]);
+        }
+    }
+
+    void CheckSharedLegacyParity(const SharedBridgeResult& shared, ID3D11Buffer* source,
+        ID3D11BlendState* blend, ID3D11Buffer* legacyPeak)
+    {
+        upload(LegacyBridgeInput());
+        dispatch(true);
+        DrawEncoded(source,blend);
+        const auto legacyNative=read();
+        FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
+            {shader.Get(),target.uav.Get(),legacyPeak,width,height}));
+        const auto legacy=read();
+        CheckSharedLegacyLight(shared,legacy,legacyNative);
+    }
+
+    void VerifySharedBridge()
+    {
+        const auto input=SharedBridgeInput();
+        const auto entry=CreateConstantBuffer(gpu,PeakConstants{1,0,{1,0}});
+        for (float peak:{430.0F/203.0F,10.0F}) {
+            const auto exit=CreateConstantBuffer(gpu,PeakConstants{0,peak,{1,0}});
+            const auto legacyPeak=CreateConstantBuffer(gpu,PeakConstants{0,peak,{0,0}});
+            VerifySharedRoundtrip(entry.Get(),exit.Get(),peak);
+            for (UINT mode=0;mode<3;++mode) {
+                const auto blend=CreateNativeBlend(mode);
+                const auto source=CreateConstantBuffer(gpu,Pixel{needle[0],needle[1],needle[2],.5F});
+                upload(input);
+                FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
+                    {shader.Get(),target.uav.Get(),entry.Get(),width,height}));
+                CheckSharedEntry(input,read());
+                DrawEncoded(source.Get(),blend.Get());
+                const auto native=read();
+                FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
+                    {shader.Get(),target.uav.Get(),exit.Get(),width,height}));
+                const auto output=read();
+                CheckSharedExit(native,output,peak);
+                CheckSharedLegacyParity({native,output,peak},source.Get(),blend.Get(),legacyPeak.Get());
+            }
+        }
+    }
+
+    void VerifySharedRoundtrip(ID3D11Buffer* entry, ID3D11Buffer* exit, float peak)
+    {
+        const auto input=SharedBridgeInput();
+        upload(input);
+        FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
+            {shader.Get(),target.uav.Get(),entry,width,height}));
+        const auto encoded=read();
+        CheckSharedEntry(input,encoded);
+        FO4HDR_WARP_CHECK(DispatchArmorEncodedComposition(&context,context1.Get(),
+            {shader.Get(),target.uav.Get(),exit,width,height}));
+        CheckSharedExit(encoded,read(),peak);
     }
 
     struct NeedleCase
@@ -640,6 +850,7 @@ struct ArmorEncodedFixture
         PrepareDraw();
         VerifyBlends();
         VerifyNeedle();
+        VerifySharedBridge();
         VerifyExtremes();
         context.ClearState();
         VerifyArmorEncodedState(device,shader.Get(),encodeBuffer.Get(),target);

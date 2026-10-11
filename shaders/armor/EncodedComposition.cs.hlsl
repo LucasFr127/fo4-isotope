@@ -8,13 +8,15 @@
 // The forward primary conversion uses the standards-derived display math.
 // See THIRD_PARTY_NOTICES.md for the retained MIT permission text.
 #include "../output/DisplayMath.hlsli"
+#include "../output/SharedUiTransfer.hlsli"
 
 RWTexture2D<float4> Composition : register(u0);
 cbuffer EncodedCompositionParameters : register(b13)
 {
     uint Encode;
     float PeakUiRelative;
-    uint2 Reserved;
+    uint SharedSrgb;
+    uint Reserved;
 };
 
 // Product of RenoDX XYZ_TO_BT709_MAT and BT2020_TO_XYZ_MAT.
@@ -46,9 +48,12 @@ void main(uint3 id : SV_DispatchThreadID)
     Composition.GetDimensions(width, height);
     if (id.x >= width || id.y >= height) return;
     float4 value = Composition[id.xy];
-    float3 transformed = Encode != 0
-        ? SignedGamma(mul(kArmorBt2020ToBt709, value.rgb), 1.0f / 2.2f)
-        : Fo4HdrExpandPrimaries(SignedGamma(value.rgb, 2.2f));
+    float3 transformed;
+    if (Encode != 0)
+        transformed = SignedGamma(SharedSrgb != 0 ? Fo4HdrDecodeSignedSrgb(value.rgb) :
+            mul(kArmorBt2020ToBt709, value.rgb), 1.0f / 2.2f);
+    else
+        transformed = Fo4HdrExpandPrimaries(SignedGamma(value.rgb, 2.2f));
     if (Encode == 0 && PeakUiRelative > 0.0f)
     {
         // Native additive materials can emit codes well above one. RenoDX
@@ -59,6 +64,8 @@ void main(uint3 id : SV_DispatchThreadID)
         const float maximum = max(max(transformed.r, transformed.g), transformed.b);
         transformed *= PeakUiRelative / max(PeakUiRelative, maximum);
     }
+    if (Encode == 0 && SharedSrgb != 0)
+        transformed = Fo4HdrSceneToSharedUi(transformed, 1.0f, 1.0f);
     value.rgb = float3(ContainStorage(transformed.r),
         ContainStorage(transformed.g), ContainStorage(transformed.b));
     Composition[id.xy] = value;

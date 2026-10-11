@@ -133,11 +133,12 @@ $specifications = @(
     [ordered]@{ Name = "TemporalAa2"; Symbol = "kTemporalAa2"; Source = "shaders/fallout4/TemporalAa2.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB2[6]", "dcl_constantbuffer CB13[1]", "dcl_sampler s0", "dcl_sampler s1", "dcl_sampler s2", "dcl_sampler s3", "dcl_sampler s4", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture2d (float,float,float,float) t1", "dcl_resource_texture2d (float,float,float,float) t2", "dcl_resource_texture2d (float,float,float,float) t3", "dcl_resource_texture2d (float,float,float,float) t4", "dcl_output o0.xyzw", "dcl_output o1.xyzw") },
     [ordered]@{ Name = "Fxaa"; Symbol = "kFxaa"; Source = "shaders/fallout4/Fxaa.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB2[1]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "Video"; Symbol = "kVideo"; Source = "shaders/fallout4/Video.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB13[2]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
-    [ordered]@{ Name = "PresentPixelsPs"; Symbol = "kPresentPixelsPs"; Source = "shaders/output/PresentPixels.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[3]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture2d (float,float,float,float) t1", "dcl_resource_texture2d (float,float,float,float) t2", "dcl_resource_texture2d (float,float,float,float) t3", "dcl_output o0.xyzw") },
+    [ordered]@{ Name = "PresentPixelsPs"; Symbol = "kPresentPixelsPs"; Source = "shaders/output/PresentPixels.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[3]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture2d (float,float,float,float) t3", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "SharedUiSeedPs"; Symbol = "kSharedUiSeedPs"; Source = "shaders/output/SharedUiSeed.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[1]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentFullscreenVs"; Symbol = "kPresentFullscreenVs"; Source = "shaders/output/PresentFullscreen.vs.hlsl"; Profile = "vs_5_0"; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position") }
 )
 $testSpecifications = @(
+    [ordered]@{ Name = "SharedUiTemporalPs"; Symbol = "kSharedUiTemporalPs"; Source = "tests/shader/shaders/SharedUiSynthetic.ps.hlsl"; EntryPoint = "mainTemporal"; Profile = "ps_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_output o0.xyzw", "dcl_output o1.xyzw") },
     [ordered]@{ Name = "SharedUiSyntheticPs"; Symbol = "kSharedUiSyntheticPs"; Source = "tests/shader/shaders/SharedUiSynthetic.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB0[4]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "FullscreenStateVs"; Symbol = "kFullscreenStateVs"; Source = "tests/shader/shaders/FullscreenState.vs.hlsl"; Profile = "vs_5_0"; TestOnly = $true },
     [ordered]@{ Name = "FullscreenStatePs"; Symbol = "kFullscreenStatePs"; Source = "tests/shader/shaders/FullscreenState.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true },
@@ -276,8 +277,9 @@ function Invoke-ShaderCompilation {
 
     $temporaryCso = Join-Path $temporaryRoot (
         $specification.Name + ".cso")
+    $entryPoint = if ($specification.Contains("EntryPoint")) { $specification.EntryPoint } else { "main" }
     $arguments = @(
-        "/nologo", "/T", $specification.Profile, "/E", "main",
+        "/nologo", "/T", $specification.Profile, "/E", $entryPoint,
         "/WX", "/Ges", "/O3", "/Zpc", "/Qstrip_debug",
         "/Fo", $temporaryCso, $sourcePath
     )
@@ -303,11 +305,12 @@ function Invoke-ShaderCompilation {
 
 function Get-ShaderManifestEntry {
     param([psobject]$Item, [switch]$TestOnly)
+    $entryPoint = if ($Item.Specification.Contains("EntryPoint")) { $Item.Specification.EntryPoint } else { "main" }
     $entry = [ordered]@{
         name = $Item.Specification.Name
         symbol = $Item.Specification.Symbol
         source = $Item.Specification.Source
-        entryPoint = "main"
+        entryPoint = $entryPoint
         profile = $Item.Specification.Profile
     }
     if (-not $TestOnly) { $entry.defines = @() }

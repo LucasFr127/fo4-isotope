@@ -2,6 +2,7 @@
 
 #include "SharedUiFrame.hpp"
 #include "SharedUiContent.hpp"
+#include "SharedSdrFrame.hpp"
 #include "RendererLifetime.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
@@ -28,12 +29,12 @@ enum class SharedUiRejection : std::uint32_t
 };
 
 SharedUiComposition g_seed;
-SharedUiResourceReadiness g_pauseResources;
 SharedUiContent g_content;
 bool g_seedReady{};
 std::atomic<float> g_startupSdrWhite{};
 std::atomic<std::uint64_t> g_startupSdrRevision{}, g_startupSdrUncertainty{};
 static_assert(std::atomic<float>::is_always_lock_free);
+SharedUiResourceReadiness g_pauseResources;
 std::atomic<std::uint64_t> g_seeds{}, g_presented{}, g_rejected{};
 std::atomic<SharedUiRejection> g_rejection{};
 SharedUiRejection g_frameRejection{};
@@ -155,12 +156,16 @@ bool UncompositedSceneReady() noexcept
 
 bool SupportedOwner(const ArmorUiScopeToken& token) noexcept
 {
-    return token.owner == ArmorUiOwner::hud;
+    return token.owner == ArmorUiOwner::hud ||
+        token.owner == ArmorUiOwner::powerArmor || token.owner == ArmorUiOwner::powerArmorRain ||
+        ((token.owner == ArmorUiOwner::flatMenu || token.owner == ArmorUiOwner::workshop) &&
+            token.targetArgument == 0);
 }
 
 bool NativeScopeReady(const ArmorUiScopeToken& token) noexcept
 {
-    const bool ownerReady = SupportedOwner(token) && token.postAa && token.hasRoot;
+    const bool ownerReady = token.owner == ArmorUiOwner::screenSpace ||
+        (SupportedOwner(token) && token.postAa && token.hasRoot);
     return ownerReady && token.depth == 1 && token.threadId == GetCurrentThreadId() &&
         token.requestGeneration == ArmorUiScopeGeneration();
 }
@@ -299,7 +304,7 @@ void ObserveNativeWrite() noexcept
 
 bool ForeignArmorScope() noexcept
 {
-    return g_armor.armorEncodedActive &&
+    return g_armor.armorEncodedActive && g_armor.armorEncodedSharedSrgb &&
         CurrentArmorUiScope().serial != g_armor.armorEncodedScope;
 }
 
@@ -554,6 +559,7 @@ void ResetSharedUiContent() noexcept
     g_sceneIdentity.store(0, std::memory_order_release);
     g_temporalIdentity.store(0, std::memory_order_release);
     g_foreignMutation.store(false, std::memory_order_release);
+    ResetSharedSdrFrame();
     g_content = {};
     g_frameRejection = SharedUiRejection::none;
 }
@@ -570,13 +576,7 @@ bool InitializeSharedUiSdr(ID3D11DeviceContext* context) noexcept
     ScopedPresentationContext owned(context);
     auto cleared = InvalidateSharedUiPresentation();
     cleared.contextGeneration = record->generation;
-    Microsoft::WRL::ComPtr<ID3D11Predicate> predicate;
-    BOOL predicateValue{};
-    context->GetPredication(&predicate, &predicateValue);
-    context->SetPredication(nullptr, FALSE);
-    constexpr float black[4]{0, 0, 0, 1};
-    context->ClearRenderTargetView(g_presentation.presentationProxyRtv.Get(), black);
-    context->SetPredication(predicate.Get(), predicateValue);
+    ClearWholePublicBuffer(context);
     PublishSharedUiPublicImage({LinearColorDomain::vanillaSdrCodes, white, true}, cleared);
     StoreStartupDeclaration(white, cleared);
     return SharedUiStartupPaperWhite() > 0.0F;
@@ -673,6 +673,7 @@ bool ObserveSharedUiDraw(const DrawObservation& observation) noexcept
 bool ObserveSharedUiCopy(ID3D11Resource* destination, ID3D11Resource* source) noexcept
 {
     if (!ApplicationPresentationFacadeActive()) return false;
+    ObserveSharedSdrCopy(destination);
     const bool publicDestination = ObservePublicMutation(destination, false);
     if (!ObserveMutationThread(destination, publicDestination)) return false;
     RejectProtectedMutation(destination, publicDestination);
@@ -683,6 +684,7 @@ bool ObserveSharedUiCopy(ID3D11Resource* destination, ID3D11Resource* source) no
 void ObserveSharedUiClear(ID3D11RenderTargetView* target) noexcept
 {
     if (!ApplicationPresentationFacadeActive()) return;
+    ObserveSharedSdrClear(target);
     Microsoft::WRL::ComPtr<ID3D11Resource> resource;
     if (target) target->GetResource(&resource);
     const bool publicDestination = ObservePublicMutation(resource.Get(), true);
@@ -714,22 +716,26 @@ float SharedUiStartupPaperWhite() noexcept
     return ReadStartupDeclaration().white;
 }
 
-
-
-
-
-
-
-
+void RefreshSharedUiStartupWhite(SharedUiWriteEvidence cleared) noexcept
+{
+    const auto white = SharedSdrPaperWhite();
+    if (white > 0.0F)
+    {
+        PublishSharedUiPublicImage({LinearColorDomain::vanillaSdrCodes, white, true}, cleared);
+        StoreStartupDeclaration(white, cleared);
+    }
+}
 
 void SetSharedUiPauseResourcesReady(bool ready) noexcept
 {
     g_pauseResources.SetReady(ready);
 }
+
 void DisableSharedUiPauseResources() noexcept
 {
     g_pauseResources.Disable();
 }
+
 bool SharedUiPauseResourcesReady() noexcept
 {
     return g_pauseResources.Ready();
@@ -765,7 +771,28 @@ void RejectSharedUiFrame() noexcept
     Reject(SharedUiRejection::nativeScope);
 }
 
-
+bool ScaleSharedSdrVideo(ID3D11DeviceContext* context, float videoWhite, float uiWhite) noexcept
+{
+    if (videoWhite == uiWhite) return true;
+    const auto startup = ReadStartupDeclaration();
+    if (startup.white <= 0.0F) return false;
+    ScopedPresentationContext owned(context);
+    if (!owned.Ready()) return false;
+    auto write = CaptureSharedUiWrite(false, videoWhite);
+    write.revision = startup.write.revision;
+    write.uncertainty = startup.write.uncertainty;
+    write.assumed = startup.write.assumed;
+    if (g_seedReady && g_seed.Seed(context, g_rendererDevice.activeContext1.Get(),
+        {g_presentation.presentationProxySrv.Get(), g_presentation.presentationProxyRtv.Get(),
+            {videoWhite, uiWhite}, SharedUiSeedMode::scaleVanillaSdr}))
+    {
+        const auto completed = CompleteSharedUiWrite(write);
+        PublishSharedUiPublicImage({LinearColorDomain::vanillaSdrCodes, uiWhite, true}, completed);
+        StoreStartupDeclaration(uiWhite, completed);
+        return true;
+    }
+    return false;
+}
 
 void TracePublicCompletion(const SharedUiPresentation* output) noexcept
 {
@@ -792,6 +819,7 @@ void TraceSharedUiOutput(SharedUiOutput output, const SharedUiPresentation* pres
         TracePublicCompletion(presentation);
         return;
     }
+    if (TraceSharedSdrOutput(output.rendered, output.written, output.startup)) return;
     if (!output.rendered && g_frameRejection == SharedUiRejection::none)
         g_frameRejection = SharedUiRejection::incomplete;
     const auto decision = output.rendered ? FrameTraceSharedUiDecision::hdr :
@@ -802,6 +830,7 @@ void TraceSharedUiOutput(SharedUiOutput output, const SharedUiPresentation* pres
 void CompleteSharedUiFrame(bool rendered) noexcept
 {
     if (!ApplicationPresentationFacadeActive()) return;
+    CompleteSharedSdrFrame(rendered);
     if (rendered) g_presented.fetch_add(1, std::memory_order_relaxed);
     else
     {
@@ -820,6 +849,7 @@ void ReportSharedUi(GraphicsDiagnosticSink sink)
 {
     if (!g_configuration.developerMode) return;
     if (!g_configuration.productionRequested || !sink) return;
+    ReportSharedSdr(sink);
     constexpr std::array names{"none", "native-scope", "scene", "context", "duplicate-seed",
         "seed-failure", "later-scene", "incomplete", "mutation"};
     sink(std::format("shared-ui seeds={} presented={} rejected={} last_rejection={} pause_blur_ready={}",

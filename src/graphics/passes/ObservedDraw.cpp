@@ -35,6 +35,7 @@
 #include <cstring>
 #include <string_view>
 #include "../SharedUiFrame.hpp"
+#include "../SharedSdrFrame.hpp"
 
 namespace fo4hdr {
 namespace {
@@ -765,7 +766,7 @@ void CloseConflictingArmorDraw(const DrawObservation& record, bool sharedUiRejec
         ArmorUiScopeToken outer{};
         outer.serial = g_armor.armorEncodedScope;
         ArmorEncodedBoundary(outer, false);
-        g_armor.armorEncodedFailed = true;
+        if (!g_armor.armorEncodedSharedSrgb) g_armor.armorEncodedFailed = true;
         if (g_referenceHealthy)
             g_armor.armorEncodedStatus = "Rejected frame: conflicting draw inside armor scope";
     }
@@ -785,6 +786,7 @@ void RecordProductionDraw(const ScopedProductionBindings& operatorBindings) noex
 void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
 {
     ObservePipboyScreenDraw(context, record);
+    ObserveSharedSdrDraw(context, record);
 }
 
 void ExecuteObservedDraw(
@@ -798,6 +800,7 @@ void ExecuteObservedDraw(
         return;
     }
     const bool expectedShader = ValidateExpectedShaderBinding(context, record);
+    ObserveSharedSdrDrawEntry(context);
     const bool sharedUiRejected = ObserveSharedUiDraw(record);
     if (g_armor.armorEncodedActive)
     {

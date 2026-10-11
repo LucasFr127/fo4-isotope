@@ -20,6 +20,7 @@ void VerifyPresentationSwapChain(Device& device);
 
 void VerifySharedUiComposition(Device& device);
 void VerifySharedUiContext(Device& device);
+void VerifySharedSdrFrame(Device& device);
 
 void VerifyPresentationResize(Device& device);
 

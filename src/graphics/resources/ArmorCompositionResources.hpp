@@ -15,7 +15,8 @@ struct ArmorEncodedConstants
 {
     std::uint32_t encode{};
     float peakUiRelative{1.0F};
-    std::array<std::uint32_t, 2> reserved{};
+    std::uint32_t sharedSrgb{};
+    std::uint32_t reserved{};
 };
 static_assert(sizeof(ArmorEncodedConstants) == 16);
 
@@ -25,10 +26,13 @@ struct ArmorCompositionResources
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> armorEncodedShader;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, 2> armorEncodedConstants;
     float armorEncodedPeakUiRelative{};
+    float armorEncodedWhite{};
+    std::uintptr_t armorEncodedResource{};
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> armorEncodedContext1;
     bool armorEncodedAttempted{};
     bool armorEncodedActive{};
     bool armorEncodedFailed{};
+    bool armorEncodedSharedSrgb{};
     std::uint64_t armorEncodedScope{}, armorEncodedGeneration{}, armorEncodedFrame{};
     std::uint64_t armorEncodedContextGeneration{};
     std::uint32_t armorEncodedThread{};

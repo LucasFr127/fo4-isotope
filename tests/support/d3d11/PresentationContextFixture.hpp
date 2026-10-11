@@ -14,6 +14,7 @@
 #include "RendererLifetime.hpp"
 #include "PresentFrame.hpp"
 #include "SharedUiFrame.hpp"
+#include "SharedSdrFrame.hpp"
 #include "ShaderRegistry.hpp"
 #include "DisplayDiscovery.hpp"
 #include "GraphicsDiagnostics.hpp"
@@ -81,6 +82,7 @@ struct SharedPresentationContextFixture : PresentationContextFixture
     int savedHdrState{ActiveDisplayHdrState()};
     std::uint64_t savedFrame{g_frame};
     bool savedCorrection{ArmorUiCorrectionEnabled()};
+    bool savedPauseResources{SharedUiPauseResourcesReady()};
     ContextAtomicRestore<std::uint64_t, 3> generations{std::array{
         &g_evidence.resourceGeneration, &g_evidence.colorDomainGeneration, &g_evidence.gameResetEpoch}};
     ContextAtomicRestore<DWORD, 3> threads{std::array{&g_observedPresentThread,

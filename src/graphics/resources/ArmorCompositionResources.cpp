@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ArmorCompositionResources.hpp"
+#include "../LiveSettings.hpp"
 #include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <utility>
 
@@ -18,9 +19,10 @@ ArmorCompositionResources g_armor;
         UINT cpuAccess;
         ArmorEncodedConstants values;
     };
-    constexpr std::array<BufferConfiguration, 2> configurations{{
-        {D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE, {0, 1.0F, {}}},
-        {D3D11_USAGE_IMMUTABLE, 0, {1, 0.0F, {}}}
+    const auto sharedSrgb = static_cast<std::uint32_t>(g_configuration.productionRequested);
+    const std::array<BufferConfiguration, 2> configurations{{
+        {D3D11_USAGE_DYNAMIC, D3D11_CPU_ACCESS_WRITE, {0, 1.0F, sharedSrgb, 0}},
+        {D3D11_USAGE_IMMUTABLE, 0, {1, 0.0F, sharedSrgb, 0}}
     }};
     D3D11_BUFFER_DESC description{};
     description.ByteWidth = sizeof(ArmorEncodedConstants);
@@ -51,6 +53,7 @@ void EnsureArmorEncodedResources(ID3D11Device* device, ID3D11DeviceContext* cont
     g_armor.armorEncodedShader = std::move(shader);
     g_armor.armorEncodedContext1 = std::move(context1);
     g_armor.armorEncodedConstants = std::move(buffers);
+    g_armor.armorEncodedSharedSrgb = g_configuration.productionRequested;
 }
 
 void ResetArmorCompositionResources() noexcept
@@ -58,10 +61,13 @@ void ResetArmorCompositionResources() noexcept
     g_armor.armorEncodedShader.Reset();
     for (auto& buffer : g_armor.armorEncodedConstants) buffer.Reset();
     g_armor.armorEncodedPeakUiRelative = 0.0F;
+    g_armor.armorEncodedWhite = 0.0F;
+    g_armor.armorEncodedResource = 0;
     g_armor.armorEncodedContext1.Reset();
     g_armor.armorEncodedAttempted = false;
     g_armor.armorEncodedActive = false;
     g_armor.armorEncodedFailed = false;
+    g_armor.armorEncodedSharedSrgb = false;
     g_armor.armorEncodedStatus = "Waiting for qualified post-AA proxy";
 }
 

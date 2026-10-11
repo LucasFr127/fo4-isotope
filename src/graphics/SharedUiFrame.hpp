@@ -57,12 +57,14 @@ bool SharedUiStartupSdr() noexcept;
 bool SharedUiStartupAssumed() noexcept;
 std::optional<SharedUiPresentation> SharedUiStartupPresentation() noexcept;
 float SharedUiStartupPaperWhite() noexcept;
+void RefreshSharedUiStartupWhite(SharedUiWriteEvidence cleared) noexcept;
 bool SharedUiPauseResourcesReady() noexcept;
 bool SharedUiFrameReady() noexcept;
 bool SharedUiFrameEncoded() noexcept;
 bool SharedUiScopeActive(const ArmorUiScopeToken& token) noexcept;
 void RejectSharedUiFrame() noexcept;
 float SharedUiPaperWhite() noexcept;
+bool ScaleSharedSdrVideo(ID3D11DeviceContext* context, float videoWhite, float uiWhite) noexcept;
 void TraceSharedUiOutput(SharedUiOutput output,
     const SharedUiPresentation* presentation = nullptr) noexcept;
 void CompleteSharedUiFrame(bool rendered) noexcept;

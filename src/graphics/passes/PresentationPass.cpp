@@ -19,8 +19,7 @@
 #include "../LiveSettings.hpp"
 #include "../PresentFrame.hpp"
 #include "../SharedUiFrame.hpp"
-#include "../hooks/ContextHooks.hpp"
-#include <cmath>
+#include "../SharedSdrFrame.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LutProfileBindings.hpp"
 #include "../DisplayDiscovery.hpp"
@@ -35,6 +34,7 @@
 #include "../hooks/ContextHooks.hpp"
 #include "FO4Isotope/ui/SettingsWindow.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace fo4hdr {
@@ -274,7 +274,7 @@ CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
     };
     if (encoding != 0U)
     {
-        result.uiPaperWhiteNits = SharedUiPaperWhite();
+        result.uiPaperWhiteNits = vanillaSdr ? SharedSdrPaperWhite() : SharedUiPaperWhite();
     }
     return result;
 }
@@ -282,12 +282,13 @@ CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
 bool CurrentSceneMatches(LinearColorDomain requiredDomain) noexcept
 {
     if (requiredDomain == LinearColorDomain::vanillaSdrCodes)
-        return SharedUiStartupSdr() && g_presentation.presentationProxySrv != nullptr;
+        return SharedSdrFrameReady() && g_presentation.presentationProxySrv != nullptr;
     return g_scene.currentScene != nullptr && g_scene.currentSceneDomain == requiredDomain;
 }
 
 LinearColorDomain ReferenceSceneDomain() noexcept
 {
+    if (SharedSdrFrameReady()) return LinearColorDomain::vanillaSdrCodes;
     if (SharedUiFrameEncoded()) return LinearColorDomain::encodedSrgbBt709UiRelative;
     return (g_configuration.productionRequested || g_scene.videoSceneReady) ?
         LinearColorDomain::linearBt2020UiRelative :
