@@ -41,9 +41,9 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!IsSelectiveColorEffective(shipped.value.selectiveColor));
     FO4HDR_CHECK(
         shipped.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.vanillaGradeLuminancePercent == 100.0);
-    FO4HDR_CHECK(shipped.value.vanillaGradeColorPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(shipped.value.vanillaGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(shipped.value.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.toggleKey ==
         HdrSettingsHotkey{});
     FO4HDR_CHECK(shipped.value.interfaceSettings.scale == 1.25);
@@ -136,9 +136,9 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.tint == 0.0);
     FO4HDR_CHECK(
         parsed.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 100.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 100.0);
-    FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey ==
         kDefaultSettingsToggleVirtualKey);
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers ==

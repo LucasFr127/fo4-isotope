@@ -199,10 +199,10 @@ struct HdrSettings
     SelectiveColorSettings selectiveColor{};
     ColorGradingMethod colorGradingMethod{ColorGradingMethod::radial};
     double vanillaColorGradingStrengthPercent{100.0};
-    double vanillaGradeLuminancePercent{100.0};
-    double vanillaGradeColorPercent{100.0};
+    double vanillaGradeLuminancePercent{67.0};
+    double vanillaGradeColorPercent{67.0};
     WeatherGradeResponseSettings weatherGradeResponse{};
-    double bloomStrengthPercent{100.0};
+    double bloomStrengthPercent{50.0};
     bool operator==(const HdrSettings&) const = default;
 };
 

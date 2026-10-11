@@ -41,9 +41,9 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ToeStrength == 1.28);
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ShoulderStart == 0.444);
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ColorBlend == 0.6);
-    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 100.0);
-    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 100.0);
-    FO4HDR_CHECK(defaults.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
 void TestSettingsEquality()
@@ -157,9 +157,9 @@ void TestDefaultSettingsMath()
     FO4HDR_CHECK(derived.shadowsEv == 0.0);
     FO4HDR_CHECK(derived.saturationScale == 1.0);
     FO4HDR_CHECK(derived.vanillaColorGradingBlend == 1.0);
-    FO4HDR_CHECK(test::Approx(derived.vanillaGradeLuminanceRemoval, 0.0, 1.0e-15));
-    FO4HDR_CHECK(test::Approx(derived.vanillaGradeColorRemoval, 0.0, 1.0e-15));
-    FO4HDR_CHECK(derived.bloomMultiplier == 1.0);
+    FO4HDR_CHECK(test::Approx(derived.vanillaGradeLuminanceRemoval, 0.33, 1.0e-15));
+    FO4HDR_CHECK(test::Approx(derived.vanillaGradeColorRemoval, 0.33, 1.0e-15));
+    FO4HDR_CHECK(derived.bloomMultiplier == 0.5);
     constexpr std::array<double, 9> identity{
         1.0, 0.0, 0.0,
         0.0, 1.0, 0.0,
