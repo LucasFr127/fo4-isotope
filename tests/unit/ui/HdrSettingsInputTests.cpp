@@ -59,17 +59,40 @@ void TestHdrShortcutInput()
     FO4HDR_CHECK(!filter.Suppress(WM_SYSCHAR, 'h', scan, {false, false}));
 }
 
+unsigned g_shortcutForwardedMessages{};
+unsigned g_foreignForwardedMessages{};
+WNDPROC g_foreignWindowProcedure{};
+
 LRESULT CALLBACK ShortcutTestWindow(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
     constexpr std::array messages{WM_CHAR, WM_SYSCHAR, WM_UNICHAR,
         WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
     if (std::ranges::find(messages, message) != messages.end())
+    {
+        ++g_shortcutForwardedMessages;
         return 42;
+    }
     return DefWindowProcW(window, message, wParam, lParam);
+}
+
+LRESULT CALLBACK ForeignShortcutTestWindow(
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    ++g_foreignForwardedMessages;
+    return CallWindowProcW(g_foreignWindowProcedure, window, message, wParam, lParam);
+}
+
+void InstallForeignShortcutWindow(HWND window)
+{
+    g_foreignWindowProcedure = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+        window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(ForeignShortcutTestWindow)));
+    FO4HDR_CHECK(g_foreignWindowProcedure != nullptr);
 }
 
 unsigned g_shortcutOpenRequests{};
 unsigned g_shortcutCloseRequests{};
+std::uint32_t g_shortcutRequestWindowThread{};
+std::uint32_t g_shortcutRequestExecutionThread{};
 
 [[nodiscard]] std::uint32_t ShortcutTestModifiers() noexcept
 {
@@ -82,8 +105,11 @@ unsigned g_shortcutCloseRequests{};
             8U : 0U);
 }
 
-bool RecordShortcutInteraction(bool open) noexcept
+bool RecordShortcutInteraction(bool open, std::uint32_t windowThreadId) noexcept
 {
+    g_shortcutRequestWindowThread = windowThreadId;
+    g_shortcutRequestExecutionThread = GetCurrentThreadId();
+    if (windowThreadId == 0 || windowThreadId != g_shortcutRequestExecutionThread) return false;
     ++(open ? g_shortcutOpenRequests : g_shortcutCloseRequests);
     return true;
 }
@@ -112,9 +138,15 @@ struct ShortcutTestScope
         SetHdrSettingsHotkey({});
         g_shortcutOpenRequests = 0;
         g_shortcutCloseRequests = 0;
+        g_shortcutRequestWindowThread = 0;
+        g_shortcutRequestExecutionThread = 0;
         if (keyboardSaved)
             FO4HDR_CHECK(SetKeyboardState(savedKeys.data()));
         if (window != nullptr) FO4HDR_CHECK(DestroyWindow(window));
+        ResetHdrSettingsNativeMenuState();
+        g_shortcutForwardedMessages = 0;
+        g_foreignForwardedMessages = 0;
+        g_foreignWindowProcedure = nullptr;
         if (classRegistered)
             FO4HDR_CHECK(UnregisterClassW(className, instance));
     }
@@ -213,6 +245,127 @@ void TestFunctionKeyShortcut(HWND window)
     FO4HDR_CHECK(!ConsumeHdrSettingsToggle());
 }
 
+void TestUnownedShortcutForwarding(HWND window)
+{
+    if (!ConfigureShortcutModifiers(false)) return;
+    SetHdrSettingsHotkey({'J', 0U});
+    SetHdrSettingsInputCapture(true, false, false);
+    const auto forwarded = g_shortcutForwardedMessages;
+    constexpr LPARAM scan = 0x4FU << 16U;
+    for (const auto message : {WM_KEYDOWN, WM_KEYUP,
+             WM_SYSKEYDOWN, WM_SYSKEYUP})
+        FO4HDR_CHECK(SendMessageW(window, message, VK_END, scan) == 42);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, VK_END, scan | (1LL << 30U)) == 42);
+    FO4HDR_CHECK(g_shortcutForwardedMessages == forwarded + 5);
+    SetHdrSettingsInputCapture(true, true, true);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, VK_END, scan) == 0);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, VK_END, scan | (1LL << 30U)) == 0);
+    SetHdrSettingsInputCapture(true, false, false);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYUP, VK_END, scan) == 0);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, VK_END, scan) == 42);
+    SetHdrSettingsInputCapture(true, true, true);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYUP, VK_END, scan) == 42);
+    FO4HDR_CHECK(SendMessageW(window, WM_CHAR, 'x', scan) == 0);
+    FO4HDR_CHECK(SendMessageW(window, WM_SYSCHAR, 'x', scan) == 42);
+}
+
+void TestNativeMenuInteraction(HWND window)
+{
+    RegisterHdrSettingsInteractionRequestHandler(&RecordShortcutInteraction);
+    ResetHdrSettingsNativeMenuState();
+    const auto staleGeneration = HdrSettingsNativeMenuGeneration();
+    FO4HDR_CHECK(ReadHdrSettingsNativeMenuState() == HdrSettingsNativeMenuState::unknown);
+    FO4HDR_CHECK(ConsumeHdrSettingsFocusLoss());
+    FO4HDR_CHECK(RequestHdrSettingsInteraction(true));
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    FO4HDR_CHECK(RequestHdrSettingsInteraction(false));
+    ResetHdrSettingsNativeMenuState();
+    PublishHdrSettingsNativeMenuState(staleGeneration, false);
+    FO4HDR_CHECK(ReadHdrSettingsNativeMenuState() == HdrSettingsNativeMenuState::unknown);
+    const auto generation = HdrSettingsNativeMenuGeneration();
+    PublishHdrSettingsNativeMenuState(generation, true);
+    FO4HDR_CHECK(ReadHdrSettingsNativeMenuState() == HdrSettingsNativeMenuState::active);
+    FO4HDR_CHECK(ConsumeHdrSettingsFocusLoss());
+    FO4HDR_CHECK(RequestHdrSettingsInteraction(true));
+    PublishHdrSettingsNativeMenuState(generation, false);
+    FO4HDR_CHECK(ReadHdrSettingsNativeMenuState() == HdrSettingsNativeMenuState::inactive);
+    const auto closeRequests = g_shortcutCloseRequests;
+    SetHdrSettingsInputCapture(true, true, true);
+    PublishHdrSettingsNativeMenuState(generation, true);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    FO4HDR_CHECK(g_shortcutCloseRequests == closeRequests);
+    MSG message{};
+    while (PeekMessageW(&message, window, 0, 0, PM_REMOVE))
+        DispatchMessageW(&message);
+    FO4HDR_CHECK(g_shortcutCloseRequests == closeRequests);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    FO4HDR_CHECK(!ConsumeHdrSettingsFocusLoss());
+    PublishHdrSettingsNativeMenuState(generation, false);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    FO4HDR_CHECK(RequestHdrSettingsInteraction(false));
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::inactive);
+}
+
+void TestHdrSubclassReactivation(HWND window)
+{
+    const auto head = GetWindowLongPtrW(window, GWLP_WNDPROC);
+    ShutdownHdrSettingsInput();
+    FO4HDR_CHECK(!HdrSettingsInputInstalled());
+    FO4HDR_CHECK(GetWindowLongPtrW(window, GWLP_WNDPROC) == head);
+    SetHdrSettingsHotkey({'J', 0U});
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, 'J', 0) == 42);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYUP, 'J', 0) == 42);
+    FO4HDR_CHECK(InitializeHdrSettingsInput(window));
+    FO4HDR_CHECK(InitializeHdrSettingsInput(window));
+    FO4HDR_CHECK(GetWindowLongPtrW(window, GWLP_WNDPROC) == head);
+    const auto forwarded = g_shortcutForwardedMessages;
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYDOWN, 'J', 0) == 0);
+    FO4HDR_CHECK(SendMessageW(window, WM_KEYUP, 'J', 0) == 0);
+    FO4HDR_CHECK(g_shortcutForwardedMessages == forwarded);
+    bool wrongThreadAccepted{};
+    {
+        std::jthread wrongThread([&] { wrongThreadAccepted = InitializeHdrSettingsInput(window); });
+    }
+    FO4HDR_CHECK(!wrongThreadAccepted);
+    FO4HDR_CHECK(HdrSettingsInputInstalled());
+}
+
+void TestWrongThreadFirstInitialization(HWND window)
+{
+    bool wrongThreadAccepted{};
+    {
+        std::jthread wrongThread([&] { wrongThreadAccepted = InitializeHdrSettingsInput(window); });
+    }
+    FO4HDR_CHECK(!wrongThreadAccepted);
+    FO4HDR_CHECK(!HdrSettingsInputInstalled());
+    FO4HDR_CHECK(InitializeHdrSettingsInput(window));
+    FO4HDR_CHECK(HdrSettingsInputInstalled());
+}
+
+void TestPostedShortcutInteraction(HWND window)
+{
+    RegisterHdrSettingsInteractionRequestHandler(&RecordShortcutInteraction);
+    const auto openRequests = g_shortcutOpenRequests;
+    bool posted{};
+    {
+        std::jthread requester([&] { posted = RequestHdrSettingsInteraction(true); });
+    }
+    FO4HDR_CHECK(posted);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::opening);
+    FO4HDR_CHECK(g_shortcutOpenRequests == openRequests);
+    MSG message{};
+    while (PeekMessageW(&message, window, 0, 0, PM_REMOVE))
+        DispatchMessageW(&message);
+    FO4HDR_CHECK(g_shortcutOpenRequests == openRequests + 1);
+    FO4HDR_CHECK(g_shortcutRequestWindowThread == GetCurrentThreadId());
+    FO4HDR_CHECK(g_shortcutRequestExecutionThread == GetCurrentThreadId());
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    FO4HDR_CHECK(RequestHdrSettingsInteraction(false));
+    FO4HDR_CHECK(g_shortcutRequestWindowThread == GetCurrentThreadId());
+    FO4HDR_CHECK(g_shortcutRequestExecutionThread == GetCurrentThreadId());
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::inactive);
+}
+
 void RunHdrShortcutWindowProcedureTest()
 {
     const auto instance = GetModuleHandleW(nullptr);
@@ -233,12 +386,33 @@ void RunHdrShortcutWindowProcedureTest()
     scope.keyboardSaved = GetKeyboardState(scope.savedKeys.data()) != FALSE;
     FO4HDR_CHECK(scope.keyboardSaved);
     if (!scope.keyboardSaved) return;
-    FO4HDR_CHECK(InitializeHdrSettingsInput(window));
+    PublishHdrSettingsNativeMenuState(HdrSettingsNativeMenuGeneration(), false);
+    InstallForeignShortcutWindow(window);
+    TestWrongThreadFirstInitialization(window);
     if (!HdrSettingsInputInstalled()) return;
     for (bool alt : {false, true})
         if (!TestShortcutChord(window, alt)) return;
 
     TestFunctionKeyShortcut(window);
+    TestUnownedShortcutForwarding(window);
+    TestNativeMenuInteraction(window);
+    TestHdrSubclassReactivation(window);
+    TestPostedShortcutInteraction(window);
+    FO4HDR_CHECK(g_foreignForwardedMessages != 0);
+    FO4HDR_CHECK(DestroyWindow(window));
+    scope.window = nullptr;
+    FO4HDR_CHECK(!HdrSettingsInputInstalled());
+    FO4HDR_CHECK(!RequestHdrSettingsInteraction(true));
+    const auto replacement = CreateWindowExW(0, windowClass.lpszClassName, L"", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, nullptr);
+    FO4HDR_CHECK(replacement != nullptr);
+    if (!replacement) return;
+    scope.window = replacement;
+    TestWrongThreadFirstInitialization(replacement);
+    InstallForeignShortcutWindow(replacement);
+    TestUnownedShortcutForwarding(replacement);
+    TestHdrSubclassReactivation(replacement);
+    TestPostedShortcutInteraction(replacement);
 }
 
 void TestHdrShortcutWindowProcedure()

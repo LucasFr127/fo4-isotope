@@ -233,7 +233,7 @@ target("fo4hdr-renderer")
     add_includedirs("include", { public = true })
     add_includedirs(path.join(os.projectdir(), "build", "generated"))
     add_packages("imgui")
-    add_syslinks("d3d11", "dxgi", "dxguid", "user32", { public = true })
+    add_syslinks("d3d11", "dxgi", "dxguid", "user32", "comctl32", { public = true })
 
     if (get_config("fo4hdr_runtime") or "1.10.163") == "1.10.163" then
         add_defines("FO4HDR_RUNTIME_1_10_163=1")
@@ -296,7 +296,7 @@ if has_config("fo4hdr_build_tests") then
             "tests/support/reference/SelectiveColorSourceOracle.cpp")
         add_files("tests/shader/ShaderTestOptions.cpp")
         add_files("src/game/ImageSpaceState.cpp")
-        add_syslinks("bcrypt", "d3d11", "user32")
+        add_syslinks("bcrypt", "d3d11", "user32", "comctl32")
         add_packages("imgui")
         add_files("src/ui/HdrSettingsInput.cpp")
         add_files("src/ui/ToneMapperPanel.cpp", "src/ui/ToneMapperRecommendations.cpp",

@@ -16,7 +16,8 @@
 
 namespace fo4hdr {
 
-using HdrSettingsInteractionRequestHandler = bool (*)(bool open) noexcept;
+using HdrSettingsInteractionRequestHandler = bool (*)(
+    bool open, std::uint32_t windowThreadId) noexcept;
 
 enum class HdrSettingsInteractionState : std::uint8_t
 {
@@ -27,6 +28,20 @@ enum class HdrSettingsInteractionState : std::uint8_t
     closing,
     failed
 };
+
+// Native pausing-menu observation is independent of settings activation.
+// Source invalidation rejects publication from its retired generation.
+enum class HdrSettingsNativeMenuState : std::uint8_t
+{
+    unknown,
+    inactive,
+    active
+};
+
+[[nodiscard]] HdrSettingsNativeMenuState ReadHdrSettingsNativeMenuState() noexcept;
+[[nodiscard]] std::uint32_t HdrSettingsNativeMenuGeneration() noexcept;
+void ResetHdrSettingsNativeMenuState() noexcept;
+void PublishHdrSettingsNativeMenuState(std::uint32_t generation, bool active) noexcept;
 
 // Plain-data bridge between the graphics-owned interface and the game adapter.
 // The Win32 input boundary invokes the handler only from the verified owner of
@@ -125,7 +140,7 @@ private:
 };
 
 // The window procedure handles hotkeys and HWND-affine settings interaction,
-// filters captured input, and queues bounded, trivially-copyable messages
+// preserves unowned key gestures, and queues bounded, trivially-copyable messages
 // for ImGui to consume on the render thread.
 [[nodiscard]] bool InitializeHdrSettingsInput(
     HWND window) noexcept;

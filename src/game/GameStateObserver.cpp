@@ -209,6 +209,8 @@ namespace {
 
 static_assert(std::is_base_of_v<
               RE::BSTEventSource<RE::MenuOpenCloseEvent>, RE::UI>);
+static_assert(std::is_base_of_v<
+              RE::BSTEventSource<RE::MenuModeChangeEvent>, RE::UI>);
 
 fo4hdr::GameSnapshotStore g_snapshotStore;
 
@@ -244,7 +246,6 @@ std::atomic<std::uint64_t> g_observationRequestGeneration{};
 std::atomic<std::uint32_t> g_collectorThread{};
 std::atomic<bool> g_collectorFailed{};
 std::atomic<bool> g_uiCallbackFailed{};
-std::atomic<std::uint32_t> g_settingsInteractionWindowThread{};
 std::atomic<fo4hdr::game::LifecycleDiagnosticsCallback>
     g_lifecycleDiagnostics{};
 std::atomic_flag g_collectionActive = ATOMIC_FLAG_INIT;
@@ -499,6 +500,20 @@ public:
 
 MenuEventSink g_menuEventSink;
 
+class MenuModeEventSink final : public RE::BSTEventSink<RE::MenuModeChangeEvent>
+{
+public:
+    RE::BSEventNotifyControl ProcessEvent(const RE::MenuModeChangeEvent& event,
+        RE::BSTEventSource<RE::MenuModeChangeEvent>*) noexcept override
+    {
+        const auto generation = fo4hdr::HdrSettingsNativeMenuGeneration();
+        fo4hdr::PublishHdrSettingsNativeMenuState(generation, event.enteringMenuMode);
+        return RE::BSEventNotifyControl::kContinue;
+    }
+};
+
+MenuModeEventSink g_menuModeEventSink;
+
 void PublishUiRegistration()
 {
     g_snapshotStore.Update(
@@ -539,8 +554,7 @@ void PublishUiRegistration()
     bool installed = false;
     try
     {
-        // Only the stable MenuOpenCloseEvent base is used. CommonLib owns the
-        // singleton, lock, and allocator mappings required by RegisterSink.
+        // Validate the stable event bases without depending on runtime-specific UI tails.
         auto* ui = ValidateCommonLibObject(
             RE::UI::GetSingleton(),
             0x70,
@@ -556,8 +570,19 @@ void PublishUiRegistration()
                 "relocation-or-object-invalid");
             return UiRegistrationAttempt::Unavailable;
         }
+        auto* menuModeSource = ValidateCommonLibObject(
+            ui->GetEventSource<RE::MenuModeChangeEvent>(),
+            sizeof(RE::BSTEventSource<RE::MenuModeChangeEvent>),
+            "RE::UI::MenuModeChangeEvent");
+        if (menuModeSource == nullptr)
+        {
+            g_uiRegistrationState.store(
+                UiRegistrationState::Unregistered, std::memory_order_release);
+            return UiRegistrationAttempt::Unavailable;
+        }
         ui->GetEventSource<RE::MenuOpenCloseEvent>()->RegisterSink(
             &g_menuEventSink);
+        menuModeSource->RegisterSink(&g_menuModeEventSink);
         installed = true;
         g_uiRegistrationState.store(
             UiRegistrationState::Registered,
@@ -866,11 +891,11 @@ private:
     ObservationRequest request_;
 };
 
-[[nodiscard]] bool ApplySettingsInteractionOnWindowThread(bool open) noexcept
+[[nodiscard]] bool ApplySettingsInteractionOnWindowThread(
+    bool open, std::uint32_t windowThreadId) noexcept
 {
-    const auto expectedThread = g_settingsInteractionWindowThread.load(std::memory_order_acquire);
     const auto collectorThread = g_collectorThread.load(std::memory_order_acquire);
-    return fo4hdr::game::ApplyGameInputInteraction(open, expectedThread, collectorThread);
+    return fo4hdr::game::ApplyGameInputInteraction(open, windowThreadId, collectorThread);
 }
 bool TaskInterfaceAvailable(const LegacyTaskInterfaceView* task) noexcept
 {
@@ -972,11 +997,6 @@ void ActivateSettingsInput(std::string_view name)
 {
     const auto activation =
         fo4hdr::TryActivateGraphicsSettingsInputOnCurrentThread();
-    if (activation.active && activation.windowThreadId != 0)
-    {
-        g_settingsInteractionWindowThread.store(
-            activation.windowThreadId, std::memory_order_release);
-    }
     REX::INFO(
         "m14 settings_input event={} ready={} active={} "
         "current_thread={} window_thread={}",
