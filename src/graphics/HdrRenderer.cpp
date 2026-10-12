@@ -121,7 +121,6 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
     // A held comparison is transient UI state. Restore its unsaved Image
     // draft before retiring the device generation so it cannot become the
     // state applied after HDR/resource recovery.
-    RestoreHeldImageComparison();
     UnbindPresentationProxy();
     ResetSceneTracking();
     ResetSharedUiResources(retainPresentationBuffer);

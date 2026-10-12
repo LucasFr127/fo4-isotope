@@ -104,10 +104,8 @@ void ShutdownSettingsWindowBackend() noexcept;
 [[nodiscard]] bool DrawSettingsWindow(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept;
 [[nodiscard]] bool SetSettingsWindowOpen(bool open) noexcept;
 [[nodiscard]] bool SettingsWindowOpen() noexcept;
-[[nodiscard]] std::uint32_t SettingsCalibrationMode() noexcept;
 [[nodiscard]] const HdrSettings& ReadSettingsDraft() noexcept;
 [[nodiscard]] bool SettingsCommitRequested() noexcept;
 [[nodiscard]] bool ConsumeSettingsCommitRequest() noexcept;
-void RestoreHeldImageComparison() noexcept;
 
 } // namespace fo4hdr

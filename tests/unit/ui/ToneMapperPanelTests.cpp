@@ -2,10 +2,13 @@
 
 #include "../UnitTestSuite.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/ui/SettingsWindow.hpp"
 #include "ToneMapperPanel.hpp"
 #include "ToneMapperRecommendations.hpp"
 #include "TestHarness.hpp"
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -29,6 +32,31 @@ void TestToneMapperRecommendationStatus()
         .starts_with("Recommended range unavailable"));
     FO4HDR_CHECK(std::string_view{ToneMapperRecommendationStatus(
         std::numeric_limits<double>::quiet_NaN(), range)}.starts_with("Control value is invalid"));
+}
+
+void CheckColorSettingsTabs(HdrSettings& settings)
+{
+    SettingsWindowView view{};
+    view.activeSettings = settings;
+    view.display.known = true;
+    constexpr std::wstring_view displayName{L"A long HDR display name with 100% brightness"};
+    std::copy(displayName.begin(), displayName.end(), view.display.friendlyName.begin());
+    view.display.peakNits = 430.0F;
+    view.display.fullFrameNits = std::numeric_limits<float>::quiet_NaN();
+    view.display.sdrWhiteNits = 180.0F;
+    bool commitRequested{};
+    if (ImGui::BeginTabBar("Recommendation smoke tabs"))
+    {
+        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        auto* tabs = ImGui::GetCurrentTabBar();
+        constexpr std::array names{"Output", "Effects", "Image", "Selective Color"};
+        FO4HDR_CHECK(tabs->Tabs.Size == static_cast<int>(names.size()));
+        for (int index = 0; index < tabs->Tabs.Size; ++index)
+            FO4HDR_CHECK(std::string_view{ImGui::TabBarGetTabName(tabs, &tabs->Tabs[index])} ==
+                names[static_cast<std::size_t>(index)]);
+        ImGui::EndTabBar();
+    }
+    FO4HDR_CHECK(!commitRequested);
 }
 
 void TestToneMapperRecommendationFloatEndpoints()
@@ -157,6 +185,7 @@ void TestToneMapperPanelSmoke()
             FO4HDR_CHECK(!DrawToneMapperPanel(settings));
             FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size >
                 verticesBefore);
+            CheckColorSettingsTabs(settings);
         }
         ImGui::End();
         ImGui::Render();

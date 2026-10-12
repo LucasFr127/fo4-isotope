@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace fo4hdr {
 
@@ -215,6 +216,63 @@ struct ColorSettingsTabs
             commitRequested = true;
     }
 
+    void DrawDetectedPeakAction() noexcept
+    {
+        if (std::isfinite(view.display.peakNits) && view.display.peakNits > 0.0F)
+        {
+            if (ImGui::Button("Use Reported Peak"))
+            {
+                settings.displayPeakNits = std::clamp(
+                    std::round(static_cast<double>(view.display.peakNits)), 400.0, 2000.0);
+                commitRequested = true;
+            }
+            ImGui::SetItemTooltip("Set Display Peak Brightness to the reported peak, within the supported range.");
+        }
+    }
+
+    void DrawDetectedWhiteAction() noexcept
+    {
+        if (std::isfinite(view.display.sdrWhiteNits) && view.display.sdrWhiteNits > 0.0F)
+        {
+            if (ImGui::Button("Use OS SDR White"))
+            {
+                settings.uiPaperWhiteNits = std::clamp(
+                    static_cast<double>(view.display.sdrWhiteNits), 100.0, 300.0);
+                commitRequested = true;
+            }
+            ImGui::SetItemTooltip("Set Menu & HUD White to the OS SDR white level, within the supported range.");
+        }
+    }
+
+    void DrawDetectedDisplay() noexcept
+    {
+        if (!ImGui::CollapsingHeader("Display Detection", ImGuiTreeNodeFlags_DefaultOpen)) return;
+        if (!view.display.known)
+        {
+            ImGui::TextWrapped("Display information is unavailable. Set brightness manually below.");
+            return;
+        }
+        std::array<char, 256> displayName{};
+        const auto* name = view.display.friendlyName[0] != L'\0' ?
+            view.display.friendlyName.data() : view.display.deviceName.data();
+        (void)WideCharToMultiByte(CP_UTF8, 0, name, -1,
+            displayName.data(), static_cast<int>(displayName.size()), nullptr, nullptr);
+        ImGui::TextWrapped("Display: %s", displayName[0] != '\0' ? displayName.data() : "Unknown");
+        for (const auto& [label, nits] : std::array{
+                 std::pair{"Reported peak", view.display.peakNits},
+                 std::pair{"Reported full-frame", view.display.fullFrameNits},
+                 std::pair{"OS SDR white", view.display.sdrWhiteNits}})
+        {
+            if (std::isfinite(nits) && nits > 0.0F)
+                ImGui::Text("%s: %.0f nits", label, nits);
+            else
+                ImGui::Text("%s: not reported", label);
+        }
+        ImGui::TextWrapped("Reported values are starting points. Adjust brightness below for your display.");
+        DrawDetectedPeakAction();
+        DrawDetectedWhiteAction();
+    }
+
     void DrawSelectiveRegion(std::size_t index, SelectiveColorRegionSettings& region,
         const SelectiveColorRegionSettings& baseline, bool& changed) noexcept
     {
@@ -316,8 +374,8 @@ struct ColorSettingsTabs
         if (ImGui::BeginTabItem("Output"))
         {
             ImGui::BeginChild("Output-content", ImVec2(0.0F, -footerHeight));
-            ImGui::TextWrapped("Set display brightness, then choose the tone mapper and its look. "
-                "Use Calibration to verify brightness with test patterns.");
+            ImGui::TextWrapped("Set display brightness, then choose the tone mapper and its look.");
+            DrawDetectedDisplay();
             ImGui::SeparatorText("Display Brightness");
             DrawOutputPeak();
             DrawOutputWhite();
@@ -461,8 +519,8 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
 {
     ColorSettingsTabs panel{settings, commitRequested, view, footerHeight};
     panel.DrawOutputSettingsTab();
-    panel.DrawImageSettingsTab();
     panel.DrawEffectsSettingsTab();
+    panel.DrawImageSettingsTab();
     panel.DrawSelectiveColorSettingsTab();
 }
 

@@ -38,7 +38,6 @@ void RunAgxTests();
 void RunGt7Tests();
 void RunOperatorLutTests();
 void RunToneMappingTests();
-void RunDisplayCalibrationTests();
 void RunLutProfilesPanelTests();
 void TestSettingsDefaultsAndMath();
 void TestSettingsValidation();

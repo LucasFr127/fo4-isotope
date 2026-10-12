@@ -93,10 +93,10 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(resetParametersReloaded.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(
-        resetParametersReloaded.value.vanillaGradeLuminancePercent == 100.0);
+        resetParametersReloaded.value.vanillaGradeLuminancePercent == 67.0);
     FO4HDR_CHECK(
-        resetParametersReloaded.value.vanillaGradeColorPercent == 100.0);
-    FO4HDR_CHECK(resetParametersReloaded.value.bloomStrengthPercent == 100.0);
+        resetParametersReloaded.value.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(resetParametersReloaded.value.bloomStrengthPercent == 50.0);
 }
 
 void CheckRewrittenEffects(const std::string& rewritten)
@@ -567,10 +567,88 @@ void TestPersistedDisplayProfiles(PersistenceFixture& fixture)
     TestInvalidDisplayProfiles(path, validProfileText);
 }
 
+SettingsPersistenceSnapshot WaitSettingsAutosave()
+{
+    for (unsigned attempt = 0; attempt < 2000; ++attempt)
+    {
+        const auto result = ReadSettingsPersistenceSnapshot();
+        if (result.state != SettingsPersistenceState::saving) return result;
+        Sleep(1);
+    }
+    return ReadSettingsPersistenceSnapshot();
+}
+
+void TestSettingsAutosaveDebounce(PersistenceFixture& fixture)
+{
+    SettingsAutosave autosave;
+    autosave.Initialize(fixture.settings, fixture.interfaceSettings);
+    auto settings = fixture.settings;
+    auto interfaceSettings = fixture.interfaceSettings;
+    interfaceSettings.windowX = 321.0;
+    interfaceSettings.windowY = 234.0;
+    FO4HDR_CHECK(!autosave.Dirty(settings, interfaceSettings));
+    const auto generation = ReadSettingsPersistenceSnapshot().generation;
+    settings.exposureEv = 1.25;
+    autosave.Update(settings, interfaceSettings, {100, true, true});
+    FO4HDR_CHECK(autosave.Dirty(settings, interfaceSettings));
+    autosave.Update(settings, interfaceSettings, {599, true, true});
+    FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == generation);
+    interfaceSettings.scale = 1.75;
+    autosave.Update(settings, interfaceSettings, {600, true, true});
+    autosave.Update(settings, interfaceSettings, {1099, true, true});
+    FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == generation);
+    autosave.Update(settings, interfaceSettings, {1100, false, false});
+    FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == generation);
+    autosave.Update(settings, interfaceSettings, {1101, true, false});
+    FO4HDR_CHECK(!autosave.RequestFailed());
+    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    settings.exposureEv = 1.5;
+    autosave.Update(settings, interfaceSettings, {1102, false, false});
+    FO4HDR_CHECK(autosave.Dirty(settings, interfaceSettings));
+    const auto reloaded = LoadPluginConfiguration(fixture.path);
+    FO4HDR_CHECK(reloaded.valid);
+    FO4HDR_CHECK(reloaded.value.exposureEv == 1.25);
+    FO4HDR_CHECK(reloaded.value.interfaceSettings.scale == 1.75);
+    autosave.Update(settings, interfaceSettings, {1103, true, false});
+    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    autosave.Update(settings, interfaceSettings, {1104, true, false});
+    FO4HDR_CHECK(!autosave.Dirty(settings, interfaceSettings));
+    FO4HDR_CHECK(LoadPluginConfiguration(fixture.path).value.exposureEv == 1.5);
+}
+
+void TestSettingsAutosaveRetry(PersistenceFixture& fixture)
+{
+    const auto startup = LoadPluginConfiguration(fixture.path);
+    FO4HDR_CHECK(startup.valid);
+    auto settings = fixture.settings;
+    settings.exposureEv = startup.value.exposureEv;
+    const auto interfaceSettings = startup.value.interfaceSettings;
+    SettingsAutosave autosave;
+    autosave.Initialize(settings, interfaceSettings);
+    const auto locked = CreateFileW(fixture.path.c_str(), GENERIC_READ,
+        0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    FO4HDR_CHECK(locked != INVALID_HANDLE_VALUE);
+    if (locked == INVALID_HANDLE_VALUE) return;
+    autosave.Update(fixture.settings, fixture.interfaceSettings, {2000, true, false});
+    const auto failed = WaitSettingsAutosave();
+    CloseHandle(locked);
+    FO4HDR_CHECK(failed.state == SettingsPersistenceState::failed);
+    FO4HDR_CHECK(autosave.Dirty(fixture.settings, fixture.interfaceSettings));
+    autosave.Update(fixture.settings, fixture.interfaceSettings, {3999, true, false});
+    FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == failed.generation);
+    autosave.Update(fixture.settings, fixture.interfaceSettings, {4000, true, false});
+    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    autosave.Update(fixture.settings, fixture.interfaceSettings, {4001, true, false});
+    FO4HDR_CHECK(!autosave.Dirty(fixture.settings, fixture.interfaceSettings));
+    FO4HDR_CHECK(LoadPluginConfiguration(fixture.path).value.exposureEv == fixture.settings.exposureEv);
+}
+
 void TestSettingsPersistenceSave()
 {
     auto fixture = CreatePersistenceFixture();
     TestPersistedMainSettings(fixture);
+    TestSettingsAutosaveDebounce(fixture);
+    TestSettingsAutosaveRetry(fixture);
     TestPersistedWindowPosition(fixture);
     TestPersistedDisplayProfiles(fixture);
     const auto& root = fixture.root;

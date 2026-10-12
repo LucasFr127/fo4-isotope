@@ -235,7 +235,6 @@ PresentationResult PresentationMapFailure(HRESULT) noexcept
 std::uint32_t FrameMode(LinearColorDomain domain) noexcept
 {
     if (domain == LinearColorDomain::linearBt709Relative) return 1U;
-    if (SettingsCalibrationMode() != 0U) return SettingsCalibrationMode();
     return 3U;
 }
 

@@ -1022,6 +1022,12 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
         ValidateHdrInterfaceSettings(interfaceSettings) == HdrInterfaceSettingsValidationError::none;
 }
 
+bool SameInterfaceControls(const HdrInterfaceSettings& left,
+    const HdrInterfaceSettings& right) noexcept
+{
+    return left.scale == right.scale && left.windowWidth == right.windowWidth &&
+        left.windowHeight == right.windowHeight && left.toggleKey == right.toggleKey;
+}
 }  // namespace
 
 std::string RewriteHdrWindowPositionIni(
@@ -1206,6 +1212,63 @@ std::uint64_t RequestDisplayCalibrationLoad(
         g_requestLock.clear(std::memory_order_release);
     }
     return 0;
+}
+
+void SettingsAutosave::Initialize(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept
+{
+    persistedSettings_ = observedSettings_ = settings;
+    persistedInterface_ = observedInterface_ = interfaceSettings;
+    changedAt_ = retryAt_ = requestGeneration_ = 0;
+    requestFailed_ = false;
+}
+
+bool SettingsAutosave::Dirty(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings) const noexcept
+{
+    return settings != persistedSettings_ ||
+        !SameInterfaceControls(interfaceSettings, persistedInterface_);
+}
+
+void SettingsAutosave::Acknowledge(const SettingsPersistenceSnapshot& persistence) noexcept
+{
+    if (requestGeneration_ == 0 || persistence.generation != requestGeneration_) return;
+    if (persistence.state != SettingsPersistenceState::saved) return;
+    persistedSettings_ = requestedSettings_;
+    persistedInterface_ = requestedInterface_;
+    requestGeneration_ = retryAt_ = 0;
+    requestFailed_ = false;
+}
+
+bool SettingsAutosave::Ready(const SettingsPersistenceSnapshot& persistence,
+    const SettingsAutosaveFrame& frame) const noexcept
+{
+    if (!frame.rendererReady || frame.now < retryAt_) return false;
+    if (frame.windowOpen && frame.now - changedAt_ < 500U) return false;
+    return persistence.state != SettingsPersistenceState::saving &&
+        persistence.state != SettingsPersistenceState::unavailable;
+}
+
+void SettingsAutosave::Update(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings, const SettingsAutosaveFrame& frame) noexcept
+{
+    const auto persistence = ReadSettingsPersistenceSnapshot();
+    Acknowledge(persistence);
+    if (settings != observedSettings_ || !SameInterfaceControls(interfaceSettings, observedInterface_))
+    {
+        observedSettings_ = settings;
+        observedInterface_ = interfaceSettings;
+        changedAt_ = frame.now;
+    }
+    if (!Dirty(settings, interfaceSettings) || !Ready(persistence, frame)) return;
+
+    const auto generation = RequestHdrSettingsSave(settings, interfaceSettings);
+    retryAt_ = frame.now + 2000U;
+    requestFailed_ = generation == 0;
+    if (generation == 0) return;
+    requestedSettings_ = settings;
+    requestedInterface_ = interfaceSettings;
+    requestGeneration_ = generation;
 }
 
 }  // namespace fo4hdr

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "FO4Isotope/ui/SettingsWindow.hpp"
-#include "DisplayCalibrationPanel.hpp"
 #include "ToneMapperPanel.hpp"
 #include "SettingsPanelSlider.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
@@ -20,11 +19,12 @@ using detail::DrawRestoreDefaultButton;
 using detail::DrawSettingsControlLabel;
 using detail::DrawSettingsSlider;
 using detail::SettingsSliderRange;
+constexpr const char* kPositionSaveError = "Window position could not be saved. Move the window to retry.";
 
 struct SettingsWindowState {
-    HdrSettings persistedSettings{};
+    HdrSettings sessionSettings{};
     HdrSettings uiDraft{};
-    HdrInterfaceSettings persistedInterfaceSettings{};
+    HdrInterfaceSettings sessionInterfaceSettings{};
     HdrInterfaceSettings uiInterfaceDraft{};
     ImGuiStyle baseImGuiStyle{};
     bool uiCommitRequested{};
@@ -37,27 +37,7 @@ struct SettingsWindowState {
     bool interfaceWindowPositionPending{true};
     bool windowPositionSavePending{};
     std::uint64_t windowPositionChangedAt{};
-    bool compareHeld{};
-    HdrSettings compareRestore{};
-    HdrSettings saveRequestedSettings{};
-    HdrInterfaceSettings saveRequestedInterfaceSettings{};
-    std::uint64_t saveRequestGeneration{};
-    std::uint64_t saveAcknowledgedGeneration{};
-    std::uint64_t calibrationRequestGeneration{};
-    std::uint64_t calibrationAcknowledgedGeneration{};
-    std::array<wchar_t, 128> calibrationRequestIdentity{};
-    HdrSettings calibrationRequestDraft{};
-    const char* calibrationStatus{};
-    std::uint32_t calibrationMode{};
-
-};
-
-struct SettingsTabsFrame
-{
-    float footerHeight;
-    const SettingsPersistenceSnapshot& persistence;
-    bool calibrationForThisDisplay;
-    HdrSettingsInteractionState interactionState;
+    SettingsAutosave autosave;
 };
 
 void DrawExposureLockDiagnostic(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
@@ -202,9 +182,7 @@ struct SettingsTabs {
     const SettingsWindowActions& actions;
     float footerHeight;
     const SettingsPersistenceSnapshot& persistence;
-    bool calibrationForThisDisplay;
     HdrSettingsInteractionState interactionState;
-    bool& hideSettingsForCalibration;
 
     void DrawInterfaceShortcut() noexcept
     {
@@ -320,54 +298,11 @@ struct SettingsTabs {
         ImGui::SetItemTooltip("Center the settings window on the current display.");
     }
 
-    DisplayCalibrationView MakeDisplayCalibrationView(const std::array<char, 256>& displayName) noexcept
-    {
-        const auto profileBusy =
-            persistence.displayCalibrationState == SettingsPersistenceState::loading ||
-            persistence.displayCalibrationState == SettingsPersistenceState::saving;
-        return DisplayCalibrationView{
-                .displayNameUtf8 = displayName.data(),
-                .reportedPeakNits = view.display.peakNits,
-                .reportedFullFrameNits = view.display.fullFrameNits,
-                .osSdrWhiteNits = view.display.sdrWhiteNits,
-                .identityAvailable = view.display.known &&
-                    view.display.monitorDevicePath[0] != L'\0' &&
-                    persistence.displayCalibrationState != SettingsPersistenceState::unavailable,
-                .profileBusy = profileBusy,
-                .saveReady = !view.lutPending && view.activeSettings == state.uiDraft,
-                .status = calibrationForThisDisplay ? state.calibrationStatus :
-                    nullptr};
-    }
-
-    void RequestCalibrationProfile(const DisplayCalibrationActions& actions) noexcept
-    {
-        if (actions.load || actions.save)
-        {
-            const std::wstring_view identity{view.display.monitorDevicePath.data()};
-            const auto requested = actions.load ? RequestDisplayCalibrationLoad(identity) :
-                RequestDisplayCalibrationSave(identity, view.activeSettings);
-            if (requested != 0)
-            {
-                state.calibrationRequestGeneration = requested;
-                state.calibrationRequestIdentity = view.display.monitorDevicePath;
-                state.calibrationRequestDraft = state.uiDraft;
-                state.calibrationStatus = actions.load ? "Loading display calibration..." :
-                    "Saving display calibration...";
-            }
-            else
-            {
-                state.calibrationRequestIdentity = view.display.monitorDevicePath;
-                state.calibrationStatus = "Calibration request could not be queued. Try again.";
-            }
-        }
-    }
-
     void Draw() noexcept
     {
         if (!ImGui::BeginTabBar("FO4IsotopeTabs",
                 ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) return;
         DrawColorSettingsTabs(state.uiDraft, state.uiCommitRequested, view, footerHeight);
-        DrawCalibrationSettingsTab();
         DrawInterfaceSettingsTab();
         DrawDiagnosticsSettingsTab();
         ImGui::EndTabBar();
@@ -380,34 +315,12 @@ struct SettingsTabs {
             ImGui::BeginChild("Interface-content", ImVec2(0.0F, -footerHeight));
             ImGui::TextWrapped(
                 "Adjust the settings window and its shortcut. Drag an edge to resize. "
-                "Save stores scale, size and shortcut. "
-                "Window position saves automatically.");
+                "Changes save automatically.");
             ImGui::SeparatorText("Shortcut");
             DrawInterfaceShortcut();
             ImGui::SeparatorText("Window");
             DrawInterfaceScale();
             DrawInterfaceWindowSize();
-            ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-    }
-
-    void DrawCalibrationSettingsTab() noexcept
-    {
-        if (ImGui::BeginTabItem("Calibration"))
-        {
-            ImGui::BeginChild("Calibration-content", ImVec2(0.0F, -footerHeight));
-            std::array<char, 256> displayName{};
-            const auto* name = view.display.friendlyName[0] != L'\0' ?
-                view.display.friendlyName.data() :
-                view.display.deviceName.data();
-            (void)WideCharToMultiByte(CP_UTF8, 0, name, -1,
-                displayName.data(), static_cast<int>(displayName.size()), nullptr, nullptr);
-            const auto actions = DrawDisplayCalibrationPanel(state.uiDraft, state.calibrationMode,
-                MakeDisplayCalibrationView(displayName));
-            state.uiCommitRequested = state.uiCommitRequested || actions.changed;
-            hideSettingsForCalibration = actions.hideOverlay;
-            RequestCalibrationProfile(actions);
             ImGui::EndChild();
             ImGui::EndTabItem();
         }
@@ -442,15 +355,6 @@ struct SettingsTabs {
     }
 
 };
-bool DrawSettingsTabs(SettingsWindowState& state, SettingsWindowView& view,
-    const SettingsWindowActions& actions, const SettingsTabsFrame& frame) noexcept
-{
-    bool hideSettingsForCalibration{};
-    SettingsTabs{state, view, actions, frame.footerHeight, frame.persistence,
-        frame.calibrationForThisDisplay, frame.interactionState, hideSettingsForCalibration}.Draw();
-    return hideSettingsForCalibration;
-}
-
 SettingsWindowState g_state;
 bool g_open{};
 bool g_backendReady{};
@@ -460,38 +364,6 @@ std::atomic<bool> g_inputReady{};
 SettingsWindowView* g_view{};
 const SettingsWindowActions* g_actions{};
 
-[[nodiscard]] bool SameHdrInterfaceSettings(
-    const HdrInterfaceSettings& left,
-    const HdrInterfaceSettings& right) noexcept
-{
-    return left.scale == right.scale &&
-        left.windowWidth == right.windowWidth &&
-        left.windowHeight == right.windowHeight &&
-        left.toggleKey == right.toggleKey;
-}
-
-void RestoreImageComparison() noexcept
-{
-    if (!g_state.compareHeld) return;
-    g_state.uiDraft.colorGradingMethod = g_state.compareRestore.colorGradingMethod;
-    g_state.uiDraft.exposureEv = g_state.compareRestore.exposureEv;
-    g_state.uiDraft.contrast = g_state.compareRestore.contrast;
-    g_state.uiDraft.highlights = g_state.compareRestore.highlights;
-    g_state.uiDraft.shadows = g_state.compareRestore.shadows;
-    g_state.uiDraft.blacks = g_state.compareRestore.blacks;
-    g_state.uiDraft.saturationPercent = g_state.compareRestore.saturationPercent;
-    g_state.uiDraft.temperature = g_state.compareRestore.temperature;
-    g_state.uiDraft.tint = g_state.compareRestore.tint;
-    g_state.uiDraft.selectiveColor = g_state.compareRestore.selectiveColor;
-    g_state.uiDraft.vanillaGradeLuminancePercent =
-        g_state.compareRestore.vanillaGradeLuminancePercent;
-    g_state.uiDraft.vanillaGradeColorPercent =
-        g_state.compareRestore.vanillaGradeColorPercent;
-    g_state.uiDraft.weatherGradeResponse = g_state.compareRestore.weatherGradeResponse;
-    g_state.uiCommitRequested = true;
-    g_state.compareHeld = false;
-}
-
 void QueueWindowPositionSave(bool force) noexcept
 {
     if (!g_state.windowPositionSavePending) return;
@@ -499,6 +371,21 @@ void QueueWindowPositionSave(bool force) noexcept
     if (RequestHdrWindowPositionSave(
             g_state.uiInterfaceDraft.windowX, g_state.uiInterfaceDraft.windowY))
         g_state.windowPositionSavePending = false;
+}
+
+void ApplySettingsWindowOpen(bool open) noexcept
+{
+    if (open)
+    {
+        g_state.sessionSettings = g_state.uiDraft;
+        g_state.sessionInterfaceSettings = g_state.uiInterfaceDraft;
+    }
+    else
+    {
+        CancelHdrSettingsHotkeyCapture();
+        QueueWindowPositionSave(true);
+    }
+    g_open = open;
 }
 
 [[nodiscard]] bool ChangeSettingsWindowOpen(bool open) noexcept
@@ -524,97 +411,8 @@ void QueueWindowPositionSave(bool force) noexcept
     g_state.settingsInteractionError = false;
     if (!applied) return true;
     if (g_open == open) return true;
-    g_open = open;
-    if (!open)
-    {
-        CancelHdrSettingsHotkeyCapture();
-        QueueWindowPositionSave(true);
-        RestoreImageComparison();
-        g_state.calibrationMode = 0;
-    }
+    ApplySettingsWindowOpen(open);
     return true;
-}
-
-bool CalibrationResultReady(const SettingsPersistenceSnapshot& persistence) noexcept
-{
-    return g_state.calibrationRequestGeneration != 0 &&
-        persistence.displayCalibrationGeneration == g_state.calibrationRequestGeneration &&
-        persistence.displayCalibrationGeneration != g_state.calibrationAcknowledgedGeneration &&
-        persistence.displayCalibrationState != SettingsPersistenceState::loading &&
-        persistence.displayCalibrationState != SettingsPersistenceState::saving;
-}
-
-bool CalibrationDraftChanged() noexcept
-{
-    return g_state.uiDraft.displayPeakNits != g_state.calibrationRequestDraft.displayPeakNits ||
-        g_state.uiDraft.uiPaperWhiteNits != g_state.calibrationRequestDraft.uiPaperWhiteNits ||
-        g_state.uiDraft.videoWhiteNits != g_state.calibrationRequestDraft.videoWhiteNits;
-}
-
-void ApplyCalibrationResult(const SettingsPersistenceSnapshot& persistence) noexcept
-{
-    if (CalibrationDraftChanged())
-    {
-        g_state.calibrationStatus = "Load finished; newer brightness edits were kept. Load again to apply.";
-        return;
-    }
-    g_state.uiDraft.displayPeakNits = persistence.displayCalibration.displayPeakNits;
-    g_state.uiDraft.uiPaperWhiteNits = persistence.displayCalibration.uiPaperWhiteNits;
-    g_state.uiDraft.videoWhiteNits = persistence.displayCalibration.videoWhiteNits;
-    g_state.uiCommitRequested = true;
-    g_state.calibrationStatus = "Display calibration loaded; image and interface settings are unchanged.";
-}
-
-void UpdateCalibrationStatus(const SettingsPersistenceSnapshot& persistence) noexcept
-{
-    switch (persistence.displayCalibrationState)
-    {
-    case SettingsPersistenceState::loaded:
-        ApplyCalibrationResult(persistence);
-        break;
-    case SettingsPersistenceState::saved:
-        g_state.calibrationStatus = "Calibration saved for this display.";
-        break;
-    case SettingsPersistenceState::missing:
-        g_state.calibrationStatus = "No calibration saved for this display yet.";
-        break;
-    case SettingsPersistenceState::failed:
-        g_state.calibrationStatus = "Calibration could not be read or saved. Live values are unchanged.";
-        break;
-    default: break;
-    }
-}
-
-void AcknowledgeCalibrationProfile(const SettingsPersistenceSnapshot& persistence,
-    bool calibrationForThisDisplay) noexcept
-{
-    if (!CalibrationResultReady(persistence)) return;
-    g_state.calibrationAcknowledgedGeneration = persistence.displayCalibrationGeneration;
-    if (calibrationForThisDisplay && persistence.displayCalibration.monitorDevicePath ==
-            g_state.calibrationRequestIdentity)
-        UpdateCalibrationStatus(persistence);
-    else
-        g_state.calibrationStatus = "Profile request finished after the display changed. Load again to apply.";
-}
-
-bool SettingsSaveResultReady(const SettingsPersistenceSnapshot& persistence) noexcept
-{
-    return persistence.state == SettingsPersistenceState::saved &&
-        persistence.generation == g_state.saveRequestGeneration &&
-        persistence.generation != g_state.saveAcknowledgedGeneration;
-}
-
-void AcknowledgeSavedSettings(const SettingsPersistenceSnapshot& persistence) noexcept
-{
-    if (SettingsSaveResultReady(persistence))
-    {
-        g_state.persistedSettings = g_state.saveRequestedSettings;
-        g_state.persistedInterfaceSettings =
-            g_state.saveRequestedInterfaceSettings;
-        g_state.saveAcknowledgedGeneration = persistence.generation;
-        g_state.persistenceRequestError = false;
-    }
-
 }
 
 HdrSettingsInteractionState UpdateSettingsWindowInteraction() noexcept
@@ -795,55 +593,12 @@ void UpdateSettingsWindowSize(float interfaceScale) noexcept
 
 }
 
-void BeginSavedImageComparison() noexcept
-{
-    g_state.compareRestore = g_state.uiDraft;
-    g_state.uiDraft.colorGradingMethod = g_state.persistedSettings.colorGradingMethod;
-    g_state.uiDraft.exposureEv = g_state.persistedSettings.exposureEv;
-    g_state.uiDraft.contrast = g_state.persistedSettings.contrast;
-    g_state.uiDraft.highlights = g_state.persistedSettings.highlights;
-    g_state.uiDraft.shadows = g_state.persistedSettings.shadows;
-    g_state.uiDraft.blacks = g_state.persistedSettings.blacks;
-    g_state.uiDraft.saturationPercent =
-        g_state.persistedSettings.saturationPercent;
-    g_state.uiDraft.temperature = g_state.persistedSettings.temperature;
-    g_state.uiDraft.tint = g_state.persistedSettings.tint;
-    g_state.uiDraft.selectiveColor =
-        g_state.persistedSettings.selectiveColor;
-    g_state.uiDraft.vanillaGradeLuminancePercent =
-        g_state.persistedSettings.vanillaGradeLuminancePercent;
-    g_state.uiDraft.vanillaGradeColorPercent =
-        g_state.persistedSettings.vanillaGradeColorPercent;
-    g_state.uiDraft.weatherGradeResponse = g_state.persistedSettings.weatherGradeResponse;
-    g_state.uiCommitRequested = true;
-}
-
-void DrawSettingsComparison() noexcept
-{
-    ImGui::Separator();
-    ImGui::Button("Hold to Compare");
-    const auto held = ImGui::IsItemActive();
-    if (held && !g_state.compareHeld)
-    {
-        BeginSavedImageComparison();
-    }
-    else if (!held && g_state.compareHeld)
-    {
-        RestoreImageComparison();
-    }
-    g_state.compareHeld = held;
-    ImGui::SetItemTooltip(
-        "Hold to preview saved Image, Selective Color, grading method and grade response settings.\n"
-        "Release to restore current edits.");
-
-}
-
 void RevertSettingsDraft() noexcept
 {
-    g_state.uiDraft = g_state.persistedSettings;
+    g_state.uiDraft = g_state.sessionSettings;
     const auto positionX = g_state.uiInterfaceDraft.windowX;
     const auto positionY = g_state.uiInterfaceDraft.windowY;
-    g_state.uiInterfaceDraft = g_state.persistedInterfaceSettings;
+    g_state.uiInterfaceDraft = g_state.sessionInterfaceSettings;
     g_state.uiInterfaceDraft.windowX = positionX;
     g_state.uiInterfaceDraft.windowY = positionY;
     CancelHdrSettingsHotkeyCapture();
@@ -866,19 +621,15 @@ void DrawSettingsRestoreActions(bool narrowFooter) noexcept
     {
         RevertSettingsDraft();
     }
-    ImGui::SetItemTooltip("Restore saved HDR and interface settings.");
-    ImGui::SameLine();
+    ImGui::SetItemTooltip("Restore HDR and interface settings from when this window opened. Changes save automatically.");
 
 }
 
-bool SettingsReadyToSave(const SettingsPersistenceSnapshot& persistence) noexcept
+void UpdateSettingsAutosave() noexcept
 {
-    return !g_view->lutPending &&
-        g_view->activeSettings == g_state.uiDraft &&
-        ValidateHdrInterfaceSettings(g_state.uiInterfaceDraft) ==
-            HdrInterfaceSettingsValidationError::none &&
-        persistence.state != SettingsPersistenceState::saving &&
-        persistence.state != SettingsPersistenceState::unavailable;
+    g_state.autosave.Update(g_state.uiDraft, g_state.uiInterfaceDraft,
+        {GetTickCount64(), !g_view->lutPending && g_view->activeSettings == g_state.uiDraft, g_open});
+    g_state.persistenceRequestError = g_state.autosave.RequestFailed();
 }
 
 struct SettingsWindowContents
@@ -886,24 +637,23 @@ struct SettingsWindowContents
     float interfaceScale;
     const SettingsPersistenceSnapshot& persistence;
     HdrSettingsInteractionState interactionState;
-    bool calibrationForThisDisplay;
     bool dirty{};
 
     const char* SettingsSummaryStatus() noexcept
     {
         return g_view->liveSettingsError ||
                 g_state.settingsInteractionError ||
-                g_state.persistenceRequestError ||
-                persistence.state == SettingsPersistenceState::failed ?
-            "Error" : g_view->lutPending ? "Preparing" : dirty ? "Unsaved" :
+                SaveFailed() ?
+            "Error" : g_view->lutPending ? "Preparing" : dirty ? "Save pending" :
             "Applied";
     }
 
     void DrawSettingsSummary() noexcept
     {
         const auto* settingsStatus = SettingsSummaryStatus();
-        ImGui::TextWrapped("%s HDR10 | %.0f-nit peak | %s",
+        ImGui::TextWrapped("%s | HDR10 %s | %.0f-nit peak | %s",
             SettingsOperatorDisplayName(g_view->activeSettings.productionAlgorithm),
+            g_view->hdrActive ? "active" : "inactive",
             g_view->activeSettings.displayPeakNits,
             settingsStatus);
         if (g_view->developerMode && g_view->exposureActive)
@@ -912,74 +662,60 @@ struct SettingsWindowContents
     
     }
 
-    bool SettingsSaveConfirmed() noexcept
+    bool SaveFailed() const noexcept
     {
-        return persistence.state == SettingsPersistenceState::saved &&
-            persistence.generation == g_state.saveAcknowledgedGeneration && !dirty;
+        return persistence.state == SettingsPersistenceState::failed ||
+            persistence.state == SettingsPersistenceState::unavailable ||
+            g_state.persistenceRequestError;
+    }
+
+    const char* SaveStatusText() const noexcept
+    {
+        if (persistence.state == SettingsPersistenceState::saving)
+            return "Saving settings...";
+        if (persistence.state == SettingsPersistenceState::unavailable)
+            return "Automatic saving is unavailable. Current changes will not survive a restart.";
+        if (SaveFailed()) return "Automatic save failed. Retrying; current settings remain active.";
+        return "Changes save automatically";
     }
 
     void DrawSettingsSaveStatus() noexcept
     {
-        if (persistence.state == SettingsPersistenceState::saving)
-            ImGui::TextDisabled("Saving settings...");
-        else if (persistence.state == SettingsPersistenceState::failed)
-            ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F),
-                "Save failed. Live values are unchanged.");
-        else if (SettingsSaveConfirmed())
-            ImGui::TextDisabled("Saved to FO4Isotope.ini");
+        ImGui::PushTextWrapPos();
+        if (SaveFailed())
+            ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F), "%s", SaveStatusText());
+        else
+            ImGui::TextDisabled("%s", SaveStatusText());
         if (persistence.positionState == SettingsPersistenceState::failed)
-            ImGui::TextWrapped("Window position could not be saved. Move the window to retry.");
+            ImGui::TextWrapped("%s", kPositionSaveError);
+        ImGui::PopTextWrapPos();
     }
 
-    void DrawSettingsSave() noexcept
+    void Draw() noexcept
     {
-        const bool saveReady = SettingsReadyToSave(persistence);
-        ImGui::BeginDisabled(!saveReady);
-        if (ImGui::Button("Save"))
-        {
-            g_state.saveRequestedSettings = g_view->activeSettings;
-            g_state.saveRequestedInterfaceSettings = g_state.uiInterfaceDraft;
-            g_state.saveRequestGeneration =
-                RequestHdrSettingsSave(g_state.saveRequestedSettings,
-                    g_state.saveRequestedInterfaceSettings);
-            g_state.persistenceRequestError = g_state.saveRequestGeneration == 0;
-        }
-        ImGui::EndDisabled();
-        ImGui::SetItemTooltip("Save current HDR and interface settings.");
-        DrawSettingsSaveStatus();
-    
-    }
-
-    bool Draw() noexcept
-    {
-        bool hideSettingsForCalibration{};
         UpdateSettingsWindowSize(interfaceScale);
-        dirty =
-            g_view->activeSettings != g_state.persistedSettings ||
-            g_state.uiDraft != g_state.persistedSettings ||
-            !SameHdrInterfaceSettings(
-                g_state.uiInterfaceDraft, g_state.persistedInterfaceSettings);
+        dirty = g_state.autosave.Dirty(g_state.uiDraft, g_state.uiInterfaceDraft);
         DrawSettingsSummary();
-        const auto narrowFooter = ImGui::GetContentRegionAvail().x < ImGui::GetFontSize() * 27.0F;
-        const auto footerHeight = ImGui::GetFrameHeightWithSpacing() * (narrowFooter ? 5.0F : 4.0F);
-        hideSettingsForCalibration = DrawSettingsTabs(g_state, *g_view, *g_actions, {footerHeight, persistence, calibrationForThisDisplay, interactionState});
-        DrawSettingsComparison();
+        const auto width = ImGui::GetContentRegionAvail().x;
+        const auto narrowFooter = width < ImGui::GetFontSize() * 27.0F;
+        auto footerHeight = ImGui::GetFrameHeightWithSpacing() * (narrowFooter ? 2.0F : 1.0F) +
+            ImGui::CalcTextSize(SaveStatusText(), nullptr, false, width).y +
+            ImGui::GetStyle().ItemSpacing.y * 2.0F;
+        if (persistence.positionState == SettingsPersistenceState::failed)
+            footerHeight += ImGui::CalcTextSize(kPositionSaveError, nullptr, false, width).y +
+                ImGui::GetStyle().ItemSpacing.y;
+        SettingsTabs{g_state, *g_view, *g_actions, footerHeight, persistence, interactionState}.Draw();
         DrawSettingsRestoreActions(narrowFooter);
-        DrawSettingsSave();
-        return hideSettingsForCalibration;
+        DrawSettingsSaveStatus();
     }
 };
 
 [[nodiscard]] bool DrawWindow() noexcept
 {
     if (!g_backendReady) return false;
-    bool hideSettingsForCalibration{};
-    const auto persistence = ReadSettingsPersistenceSnapshot();
-    const bool calibrationForThisDisplay =
-        g_state.calibrationRequestIdentity == g_view->display.monitorDevicePath;
-    AcknowledgeCalibrationProfile(persistence, calibrationForThisDisplay);
-    AcknowledgeSavedSettings(persistence);
     const auto interactionState = UpdateSettingsWindowInteraction();
+    UpdateSettingsAutosave();
+    const auto persistence = ReadSettingsPersistenceSnapshot();
     if (!g_open) return DrawClosedSettingsOverlay();
 
     ImGuiIO& io = ImGui::GetIO();
@@ -993,17 +729,17 @@ struct SettingsWindowContents
     const auto showContents = ImGui::Begin("FO4Isotope", &open, flags);
     UpdateSettingsWindowPosition(viewport);
     if (showContents)
-        hideSettingsForCalibration = SettingsWindowContents{interfaceScale, persistence,
-            interactionState, calibrationForThisDisplay}.Draw();
+        SettingsWindowContents{interfaceScale, persistence, interactionState}.Draw();
     ImGui::End();
     if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) QueueWindowPositionSave(false);
     if (!open) (void)ChangeSettingsWindowOpen(false);
+    UpdateSettingsAutosave();
     open = g_open;
     io.MouseDrawCursor = open;
     ImGui::Render();
     SetHdrSettingsInputCapture(open, io.WantCaptureKeyboard, io.WantCaptureMouse);
 
-    return !hideSettingsForCalibration;
+    return true;
 }
 
 } // namespace
@@ -1011,9 +747,9 @@ struct SettingsWindowContents
 void InitializeSettingsWindow(const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
-    g_state.persistedSettings = settings;
+    g_state.sessionSettings = settings;
     g_state.uiDraft = settings;
-    g_state.persistedInterfaceSettings = interfaceSettings;
+    g_state.sessionInterfaceSettings = interfaceSettings;
     g_state.uiInterfaceDraft = interfaceSettings;
     SetHdrSettingsHotkey(interfaceSettings.toggleKey);
     g_state.persistenceRequestError = false;
@@ -1022,14 +758,7 @@ void InitializeSettingsWindow(const HdrSettings& settings,
     g_state.interfaceWindowCenterPending = false;
     g_state.interfaceWindowPositionPending = true;
     g_state.windowPositionSavePending = false;
-    g_state.compareHeld = false;
-    g_state.saveRequestGeneration = 0;
-    g_state.saveAcknowledgedGeneration = 0;
-    g_state.calibrationRequestGeneration = 0;
-    g_state.calibrationAcknowledgedGeneration = 0;
-    g_state.calibrationRequestIdentity = {};
-    g_state.calibrationRequestDraft = {};
-    g_state.calibrationStatus = nullptr;
+    g_state.autosave.Initialize(settings, interfaceSettings);
 }
 
 void EnsureSettingsWindowBackend(bool requested, HWND window,
@@ -1077,7 +806,6 @@ void ShutdownSettingsWindowBackend() noexcept
     g_backendReady = false;
     g_open = false;
     g_state.settingsWindowDesiredOpen = false;
-    g_state.calibrationMode = 0;
     g_state.settingsInteractionError = false;
 }
 
@@ -1110,10 +838,8 @@ bool DrawSettingsWindow(SettingsWindowView& view,
 
 bool SetSettingsWindowOpen(bool open) noexcept { return ChangeSettingsWindowOpen(open); }
 bool SettingsWindowOpen() noexcept { return g_open; }
-std::uint32_t SettingsCalibrationMode() noexcept { return g_state.calibrationMode; }
 const HdrSettings& ReadSettingsDraft() noexcept { return g_state.uiDraft; }
 bool SettingsCommitRequested() noexcept { return g_state.uiCommitRequested; }
 bool ConsumeSettingsCommitRequest() noexcept { return std::exchange(g_state.uiCommitRequested, false); }
-void RestoreHeldImageComparison() noexcept { RestoreImageComparison(); }
 
 } // namespace fo4hdr

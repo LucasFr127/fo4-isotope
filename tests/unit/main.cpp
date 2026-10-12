@@ -52,7 +52,6 @@ constexpr Section kSections[]{
     {"armor-ui-composition", fo4hdr::tests::RunArmorUiCompositionTests},
     {"native-ui-resources", fo4hdr::tests::RunNativeUiResourcesTests},
     {"armor-ui-observer-hook", fo4hdr::tests::RunDirectCallPatchTests},
-    {"display-calibration", fo4hdr::tests::RunDisplayCalibrationTests},
     {"hooks", fo4hdr::tests::RunHookTests},
     {"pipeline-contract", fo4hdr::tests::RunPipelineContractTests},
     {"hdr-core", fo4hdr::tests::RunHdrCoreTests},
