@@ -769,12 +769,8 @@ bool VerifyCollectorThread(const ObservationRequest& request)
     const auto requestGeneration = request.generation;
     const auto sourceThread = request.sourceThread;
     const auto executeThread = REX::W32::GetCurrentThreadId();
-    std::uint32_t expected{};
-    if (!g_collectorThread.compare_exchange_strong(
-            expected,
-            executeThread,
-            std::memory_order_acq_rel) &&
-        expected != executeThread)
+    const auto readsEngine = fo4hdr::GameObservationReadsEngine(event, request.observe);
+    if (!fo4hdr::TryClaimGameObservationThread(g_collectorThread, executeThread, readsEngine))
     {
         REX::WARN(
             "m2 collector request={} source_thread={} "
@@ -782,18 +778,20 @@ bool VerifyCollectorThread(const ObservationRequest& request)
             requestGeneration,
             sourceThread,
             executeThread,
-            expected);
+            g_collectorThread.load(std::memory_order_acquire));
         ReportCollectorFailure("collector-thread-drift");
         return false;
     }
 
     REX::INFO(
         "m2 collector request={} event={} source_thread={} "
-        "execute_thread={} stable=true",
+        "execute_thread={} engine_read={} collector_thread={} accepted=true",
         requestGeneration,
         LifecycleName(event),
         sourceThread,
-        executeThread);
+        executeThread,
+        readsEngine,
+        g_collectorThread.load(std::memory_order_acquire));
     return true;
 }
 

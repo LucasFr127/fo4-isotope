@@ -624,6 +624,35 @@ void RunMenuContextAndOverflowEvidenceTests()
     CheckMenuCutoff();
 }
 
+void CheckCollectorThreadOwnership()
+{
+    using Event = fo4hdr::GameLifecycleEvent;
+    std::atomic<std::uint32_t> owner{};
+    const auto accept = [&](Event event, std::uint32_t current) {
+        const bool observe = fo4hdr::ShouldCollectGameSnapshotAtLifecycle(event, true);
+        return fo4hdr::TryClaimGameObservationThread(owner, current,
+            fo4hdr::GameObservationReadsEngine(event, observe));
+    };
+    FO4HDR_CHECK(accept(Event::PreLoadGame, 202));
+    FO4HDR_CHECK(accept(Event::PreSaveGame, 202));
+    FO4HDR_CHECK(owner.load() == 0);
+    FO4HDR_CHECK(!accept(Event::GameDataReady, 0));
+    FO4HDR_CHECK(owner.load() == 0);
+    FO4HDR_CHECK(accept(Event::GameDataReady, 101));
+    FO4HDR_CHECK(owner.load() == 101);
+    FO4HDR_CHECK(accept(Event::PostLoadGame, 101));
+    FO4HDR_CHECK(accept(Event::PreSaveGame, 202));
+    FO4HDR_CHECK(accept(Event::PostSaveGame, 202));
+    FO4HDR_CHECK(accept(Event::MenuChanged, 202));
+    FO4HDR_CHECK(owner.load() == 101);
+    FO4HDR_CHECK(accept(Event::NewGame, 101));
+    FO4HDR_CHECK(!accept(Event::PostLoadGame, 202));
+    FO4HDR_CHECK(!accept(Event::GameDataReady, 202));
+    FO4HDR_CHECK(!fo4hdr::TryClaimGameObservationThread(owner, 202,
+        fo4hdr::GameObservationReadsEngine(Event::MenuChanged, true)));
+    FO4HDR_CHECK(owner.load() == 101);
+}
+
 void RunGameObservationPolicyTests()
 {
     using Event = fo4hdr::GameLifecycleEvent;
@@ -648,7 +677,6 @@ void RunGameObservationPolicyTests()
         {
             const auto expected =
                 (event == Event::PostLoadGame && succeeded) ||
-                event == Event::PreSaveGame ||
                 event == Event::NewGame;
             FO4HDR_CHECK(
                 fo4hdr::ShouldCollectGameSnapshotAtLifecycle(
@@ -656,6 +684,7 @@ void RunGameObservationPolicyTests()
                     succeeded) == expected);
         }
     }
+    CheckCollectorThreadOwnership();
 }
 
 void CheckWitnessedMenuTransitions()

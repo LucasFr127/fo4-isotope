@@ -2,6 +2,7 @@
 #pragma once
 
 #include "FO4Isotope/game/GameHdrSnapshot.hpp"
+#include <atomic>
 #include <functional>
 #include <mutex>
 #include <type_traits>
@@ -140,8 +141,24 @@ namespace fo4hdr {
 {
     return
         (event == GameLifecycleEvent::PostLoadGame && succeeded) ||
-        event == GameLifecycleEvent::NewGame ||
-        event == GameLifecycleEvent::PreSaveGame;
+        event == GameLifecycleEvent::NewGame;
+}
+
+[[nodiscard]] constexpr bool GameObservationReadsEngine(
+    GameLifecycleEvent event, bool observe) noexcept
+{
+    return observe || event == GameLifecycleEvent::GameDataReady;
+}
+
+[[nodiscard]] inline bool TryClaimGameObservationThread(
+    std::atomic<std::uint32_t>& owner, std::uint32_t current, bool readsEngine) noexcept
+{
+    // Serialized plain-data drains neither claim nor migrate the engine-reading thread.
+    if (!readsEngine) return true;
+    if (current == 0) return false;
+    std::uint32_t expected{};
+    return owner.compare_exchange_strong(expected, current, std::memory_order_acq_rel) ||
+        expected == current;
 }
 
 }  // namespace fo4hdr
