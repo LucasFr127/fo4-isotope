@@ -71,7 +71,11 @@ private:
 [[nodiscard]] bool FrameTraceRequested() noexcept;
 // The owned Present thread starts captures; stopped captures report outside graphics callbacks.
 [[nodiscard]] bool BeginFrameTrace() noexcept;
+[[nodiscard]] bool ArmFrameTrace() noexcept;
+void CancelFrameTrace() noexcept;
 void RetireFrameTrace() noexcept;
+// Unregister temporary sinks and drain pending work before destroying their state.
+[[nodiscard]] bool FrameTraceAutoReportPending() noexcept;
 void ReportFrameTrace(GraphicsDiagnosticSink sink);
 
 void TraceFrameDraw(ID3D11DeviceContext* context, const DrawObservation& observation,
@@ -85,7 +89,9 @@ void TraceFrameCommandList(ID3D11DeviceContext* context, const DrawObservation& 
 void TraceNativeBoundary(const ArmorUiScopeToken& scope, bool entering) noexcept;
 void TraceFramePresent(IDXGISwapChain* chain, FrameTraceKind kind,
     const FrameTracePresentArguments& arguments) noexcept;
-void TraceSharedUiPresentation(const FrameTraceSharedUiSnapshot&) noexcept;
+// Call once per lower Present before retiring content; borrowed resources are described, never retained.
+void TraceSharedUiPresentation(const FrameTraceSharedUiSnapshot& snapshot) noexcept;
+void ProcessFrameTraceHotkey(bool down, bool arm) noexcept;
 void PollFrameTraceHotkey(IDXGISwapChain* chain) noexcept;
 
 } // namespace fo4hdr

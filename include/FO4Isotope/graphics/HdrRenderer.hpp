@@ -138,10 +138,13 @@ void DisableSharedUiPauseResources() noexcept;
 [[nodiscard]] GraphicsSettingsInputActivation
 TryActivateGraphicsSettingsInputOnCurrentThread() noexcept;
 [[nodiscard]] GraphicsObservationSnapshot ReadGraphicsObservation() noexcept;
+using GraphicsDiagnosticSink = void (*)(std::string_view message);
 // Called from the existing lifecycle callback, never the presenting hot path.
 // The sink consumes each message synchronously; no view is retained.
-using GraphicsDiagnosticSink = void (*)(std::string_view message);
 void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept;
+// Developer trace reporting retains this callback for worker-thread use.
+// Its code and state must outlive registration and any pending report.
+void SetFrameTraceAutoReportSink(GraphicsDiagnosticSink sink) noexcept;
 [[nodiscard]] const char* GraphicsObservationFailureName(
     GraphicsObservationFailure failure) noexcept;
 

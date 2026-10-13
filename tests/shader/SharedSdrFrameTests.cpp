@@ -300,7 +300,7 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
         g_evidence.hdrColorSpaceActive = true;
         constexpr float sdr[4]{0.25F, 0.25F, 0.25F, 1};
         device.context->ClearRenderTargetView(proxy.rtv.Get(), sdr);
-        FO4HDR_WARP_CHECK(InitializeFrameTrace(true) && BeginFrameTrace());
+        FO4HDR_WARP_CHECK(InitializeFrameTrace(true) && ArmFrameTrace());
         FO4HDR_WARP_CHECK(!PreparePresentFrame(chain.Get(), true));
         CheckOutputCode(QuantizeR10Unorm(EncodeSt2084Pq(std::pow(0.25, 2.2) * 203)));
         FO4HDR_WARP_CHECK(g_presentation.colorSpaceState == 1 && g_evidence.hdrColorSpaceActive.load());
@@ -314,13 +314,13 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
         TraceFramePresent(chain.Get(), FrameTraceKind::presentResult, {});
         TraceFramePresent(chain.Get(), FrameTraceKind::presentResult, {});
         g_startupOutputTrace.clear();
-        RetireFrameTrace();
         ReportFrameTrace(&CaptureStartupOutputTrace);
         const auto white = std::to_string(std::bit_cast<std::uint32_t>(203.0F));
         // Startup output still carries the incomplete-scene rejection (7).
         FO4HDR_WARP_CHECK(g_startupOutputTrace.find("args=1/7/16/" + white + "/") != std::string::npos);
         FO4HDR_WARP_CHECK(g_startupOutputTrace.find("args=2/7/16/") != std::string::npos);
         CompletePresentFrame(false, false);
+        CancelFrameTrace();
         ReportFrameTrace(&CaptureStartupOutputTrace);
         (void)InitializeFrameTrace(requested);
     }

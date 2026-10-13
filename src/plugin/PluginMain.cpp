@@ -573,6 +573,7 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
     const auto graphicsActive = fo4hdr::InitializeGraphicsObservation(
         diagnosticsConfiguration.valid ? diagnosticsConfiguration.value :
             fo4hdr::PluginConfiguration{});
+    if (graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
     const auto boundaries = InitializeObserverBoundaries(observerActive, graphicsActive,
         diagnosticsConfiguration, legacyServices);
     ReportInitializedRenderer(boundaries, diagnosticsConfiguration, graphicsActive);
