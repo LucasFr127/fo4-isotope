@@ -45,6 +45,7 @@ void VerifyOutputDitherExperiment(Device& device);
 
 void VerifyPresentationState(Device& device);
 void VerifyPresentationContext(Device& device);
+void VerifyNativeSceneInitialization(Device& device);
 void VerifySharedUiContext(Device& device);
 void VerifySharedUiFallback(Device& device);
 void VerifySharedSdrFrame(Device& device);

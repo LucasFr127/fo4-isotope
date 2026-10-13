@@ -22,6 +22,9 @@ inline constexpr std::size_t kMaximumSceneViews = 8;
 struct SceneResources
 {
     std::array<SceneView, kMaximumSceneViews> sceneViews{};
+    std::array<Microsoft::WRL::ComPtr<IUnknown>, kMaximumSceneViews> initializedTargets{};
+    std::uint64_t initializationFrame{};
+    std::uint64_t initializationGeneration{};
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> currentScene;
     LinearColorDomain currentSceneDomain{LinearColorDomain::unknown};
     std::size_t sceneViewCursor{};
@@ -42,6 +45,8 @@ bool RenderTargetMatchesResource(ID3D11RenderTargetView*, ID3D11Resource*) noexc
 bool IsPresentationProxyTarget(ID3D11RenderTargetView*) noexcept;
 bool CurrentPassConsumesSelectedScene(ID3D11DeviceContext*, const DrawObservation&) noexcept;
 ID3D11ShaderResourceView* AcquireSceneView(ID3D11RenderTargetView*) noexcept;
+void InitializeNativeSceneTarget(ID3D11DeviceContext*, const DrawObservation&) noexcept;
+void ResetSceneTargetInitialization() noexcept;
 void ResetSceneResources() noexcept;
 
 } // namespace fo4hdr

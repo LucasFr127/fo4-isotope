@@ -204,8 +204,177 @@ bool CreateSceneView(ID3D11Texture2D* texture, ComPtr<ID3D11Device>& device,
         return nullptr;
     return StoreSceneView(resourceIdentity, srv);
 }
+bool NativeSceneDrawStateMatches(ID3D11DeviceContext* context) noexcept
+{
+    ComPtr<ID3D11Predicate> predicate;
+    BOOL predicateValue{};
+    context->GetPredication(&predicate, &predicateValue);
+    if (predicate) return false;
+    ComPtr<ID3D11BlendState> blend;
+    FLOAT factors[4]{};
+    UINT sampleMask{};
+    context->OMGetBlendState(&blend, factors, &sampleMask);
+    if ((sampleMask & 1U) == 0) return false;
+    if (blend)
+    {
+        D3D11_BLEND_DESC description{};
+        blend->GetDesc(&description);
+        constexpr UINT rgb = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN |
+            D3D11_COLOR_WRITE_ENABLE_BLUE;
+        const std::array rejected{description.AlphaToCoverageEnable != FALSE,
+            description.RenderTarget[0].BlendEnable != FALSE,
+            (description.RenderTarget[0].RenderTargetWriteMask & rgb) != rgb};
+        if (std::ranges::any_of(rejected, [](bool value) { return value; }))
+            return false;
+    }
+    ComPtr<ID3D11DepthStencilState> depth;
+    UINT stencilReference{};
+    context->OMGetDepthStencilState(&depth, &stencilReference);
+    if (!depth) return false;
+    D3D11_DEPTH_STENCIL_DESC description{};
+    depth->GetDesc(&description);
+    const std::array matches{description.DepthEnable != FALSE,
+        description.DepthWriteMask == D3D11_DEPTH_WRITE_MASK_ZERO,
+        description.DepthFunc == D3D11_COMPARISON_GREATER, description.StencilEnable == FALSE};
+    return std::ranges::all_of(matches, [](bool value) { return value; });
+}
+
+bool FullSceneViewport(const D3D11_VIEWPORT& viewport) noexcept
+{
+    const std::array matches{viewport.TopLeftX == 0, viewport.TopLeftY == 0,
+        viewport.Width == static_cast<float>(g_presentation.width),
+        viewport.Height == static_cast<float>(g_presentation.height),
+        viewport.MinDepth >= 0, viewport.MinDepth < 1, viewport.MaxDepth == 1};
+    return std::ranges::all_of(matches, [](bool value) { return value; });
+}
+
+bool FullSceneScissor(const D3D11_RECT& scissor) noexcept
+{
+    const std::array matches{scissor.left == 0, scissor.top == 0,
+        scissor.right == static_cast<LONG>(g_presentation.width),
+        scissor.bottom == static_cast<LONG>(g_presentation.height)};
+    return std::ranges::all_of(matches, [](bool value) { return value; });
+}
+
+bool NativeSceneViewportMatches(ID3D11DeviceContext* context) noexcept
+{
+    UINT count = 1;
+    D3D11_PRIMITIVE_TOPOLOGY topology{};
+    context->IAGetPrimitiveTopology(&topology);
+    if (topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) return false;
+    D3D11_VIEWPORT viewport{};
+    context->RSGetViewports(&count, &viewport);
+    if (count != 1 || !FullSceneViewport(viewport)) return false;
+    ComPtr<ID3D11RasterizerState> rasterizer;
+    context->RSGetState(&rasterizer);
+    if (!rasterizer) return true;
+    D3D11_RASTERIZER_DESC description{};
+    rasterizer->GetDesc(&description);
+    const std::array coverage{description.FillMode == D3D11_FILL_SOLID,
+        description.DepthBias == 0, description.SlopeScaledDepthBias == 0};
+    if (!std::ranges::all_of(coverage, [](bool value) { return value; })) return false;
+    if (!description.ScissorEnable) return true;
+    D3D11_RECT scissor{};
+    context->RSGetScissorRects(&count, &scissor);
+    return count == 1 && FullSceneScissor(scissor);
+}
+
+bool NativeSceneTargetLayout(const D3D11_TEXTURE2D_DESC& description) noexcept
+{
+    const std::array matches{SceneTextureLayoutMatches(description), description.MipLevels == 1,
+        description.Width == g_presentation.width, description.Height == g_presentation.height};
+    return std::ranges::all_of(matches, [](bool value) { return value; });
+}
+
+ComPtr<ID3D11RenderTargetView> NativeSceneTarget(ID3D11DeviceContext* context) noexcept
+{
+    std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> views{};
+    ComPtr<ID3D11DepthStencilView> depth;
+    context->OMGetRenderTargets(static_cast<UINT>(views.size()), views.data(), &depth);
+    ComPtr<ID3D11RenderTargetView> target;
+    target.Attach(views[0]);
+    bool otherTarget{};
+    for (std::size_t index = 1; index < views.size(); ++index)
+    {
+        otherTarget |= views[index] != nullptr;
+        if (views[index]) views[index]->Release();
+    }
+    const std::array rejected{!depth, otherTarget, !IsFirstFp16RenderTarget(target.Get()),
+        IsPresentationProxyTarget(target.Get()),
+        RenderTargetMatchesResource(target.Get(), g_presentation.presentationBackBuffer.Get())};
+    if (std::ranges::any_of(rejected, [](bool value) { return value; }))
+        return nullptr;
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    target->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&texture))) return nullptr;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    if (!NativeSceneTargetLayout(description)) return nullptr;
+    return target;
+}
+
+void ResetSceneTargetInitialization() noexcept
+{
+    for (auto& target : g_scene.initializedTargets) target.Reset();
+    g_scene.initializationFrame = 0;
+    g_scene.initializationGeneration = 0;
+}
+
+bool NativeSceneContextReady(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    const std::array ready{context != nullptr, record.immediate,
+        context == g_rendererDevice.activeContext,
+        FindDrawObservation(context) == &record,
+        GetCurrentThreadId() == g_observedPresentThread.load(std::memory_order_acquire),
+        record.computeQueries.CanDispatch(), record.expectedBoundShader != nullptr};
+    return std::ranges::all_of(ready, [](bool value) { return value; });
+}
+
+ComPtr<ID3D11RenderTargetView> QualifiedNativeSceneTarget(
+    ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    if (!NativeSceneContextReady(context, record)) return nullptr;
+    ComPtr<ID3D11PixelShader> actual;
+    context->PSGetShader(&actual, nullptr, nullptr);
+    if (actual.Get() != record.expectedBoundShader || !IsNativeSceneCompositeShader(actual.Get()))
+        return nullptr;
+    const std::array ready{
+        NativeSceneDrawStateMatches(context), NativeSceneViewportMatches(context)};
+    if (!std::ranges::all_of(ready, [](bool value) { return value; })) return nullptr;
+    return NativeSceneTarget(context);
+}
+
+void InitializeNativeSceneTarget(
+    ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    const auto target = QualifiedNativeSceneTarget(context, record);
+    if (!target) return;
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<IUnknown> identity;
+    target->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&identity))) return;
+    const auto generation = g_evidence.resourceGeneration.load(std::memory_order_acquire);
+    if (g_scene.initializationFrame != g_frame || g_scene.initializationGeneration != generation)
+        ResetSceneTargetInitialization();
+    g_scene.initializationFrame = g_frame;
+    g_scene.initializationGeneration = generation;
+    auto& targets = g_scene.initializedTargets;
+    if (std::ranges::any_of(targets,
+            [&](const auto& entry) { return entry.Get() == identity.Get(); }))
+        return;
+    const auto empty = std::ranges::find_if(targets, [](const auto& entry) { return !entry; });
+    if (empty == targets.end()) return;
+    // Depth-rejected pixels retain old contents that bloom spreads into a bright square.
+    constexpr FLOAT black[4]{0, 0, 0, 1};
+    const ScopedFrameTraceOwnedCall ownedClear;
+    context->ClearRenderTargetView(target.Get(), black);
+    *empty = std::move(identity);
+}
+
 void ResetSceneResources() noexcept
 {
+    ResetSceneTargetInitialization();
     g_scene.currentScene.Reset();
     g_scene.currentSceneDomain = LinearColorDomain::unknown;
     g_presentation.presentationProxyDomain = LinearColorDomain::unknown;

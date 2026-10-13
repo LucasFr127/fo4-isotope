@@ -1009,6 +1009,7 @@ struct PresentFrame
 
     void AdvanceFrame()
     {
+        ResetSceneTargetInitialization();
         g_scene.currentScene.Reset();
         g_scene.currentSceneDomain = LinearColorDomain::unknown;
         g_presentation.presentationProxyDomain = LinearColorDomain::unknown;

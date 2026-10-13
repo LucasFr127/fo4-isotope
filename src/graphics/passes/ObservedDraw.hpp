@@ -10,6 +10,7 @@ struct DrawInvocation
 {
     void (*invoke)(void*);
     void* arguments;
+    bool indexedTriangle{};
     void operator()() const { invoke(arguments); }
 };
 void ExecuteObservedDraw(DrawObservation&, ID3D11DeviceContext*, const DrawInvocation&) noexcept;

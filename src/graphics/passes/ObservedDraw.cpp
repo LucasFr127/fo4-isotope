@@ -255,7 +255,11 @@ using Microsoft::WRL::ComPtr;
         g_gameplayReadyApplied.load(std::memory_order_acquire);
 }
 
-
+void PrepareNativeSceneDraw(ID3D11DeviceContext* context, const DrawObservation& record,
+    bool indexedTriangle) noexcept
+{
+    if (indexedTriangle && HdrFrameReadyForDraw()) InitializeNativeSceneTarget(context, record);
+}
 
 class ScopedExposureCaptureState
 {
@@ -815,6 +819,7 @@ void ExecuteObservedDraw(
         ObserveCompletedNativeDraw(context, record);
         return;
     }
+    PrepareNativeSceneDraw(context, record, draw.indexedTriangle);
     bool productionOperatorApplied{};
     SharedUiWriteEvidence write;
     {

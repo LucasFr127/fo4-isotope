@@ -508,8 +508,10 @@ void ForwardDrawCall(ID3D11DeviceContext* context, FrameTraceKind kind,
         TraceFrameDraw(context, *record, kind, {static_cast<std::uint32_t>(arguments)...});
         InvokeCapturedNext(next, context, arguments...);
     };
+    const FrameTraceArguments args{static_cast<std::uint32_t>(arguments)...};
     const DrawInvocation invocation{
-        [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw};
+        [](void* callable) { (*static_cast<decltype(draw)*>(callable))(); }, &draw,
+        kind == FrameTraceKind::drawIndexed && args[0] == 3 && args[1] == 0 && args[2] == 0};
     ExecuteObservedDraw(*record, context, invocation);
 }
 

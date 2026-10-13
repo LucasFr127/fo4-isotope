@@ -964,6 +964,7 @@ void CheckOutputRecovery(Device& device)
 void VerifyPresentationContext(Device& device)
 {
     auto native = CreateNativeContextDevice(device);
+    VerifyNativeSceneInitialization(native);
     {
         ObservedSceneFixture fixture(native);
         fixture.CheckTemporalInputs(RenoDxShaderPass::taa);
