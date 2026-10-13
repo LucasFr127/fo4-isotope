@@ -177,7 +177,7 @@ void RefreshSettingsView(SettingsWindowView& view) noexcept
 
 bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
 {
-    if (!SettingsWindowBackendReady()) return false;
+    if (!DeveloperUiResourcesReady() || !SettingsWindowBackendReady()) return false;
     auto view = UiSettingsSnapshot();
     const SettingsWindowActions actions{
         SettingsFocusLost, RequestExposure, RequestPipboyObservation, RefreshSettingsView};
@@ -186,9 +186,12 @@ bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
 
 } // namespace
 
-PresentationResult PresentationMapFailure(HRESULT) noexcept
+PresentationResult PresentationMapFailure(HRESULT status) noexcept
 {
-    return PresentationResult::failed;
+    constexpr std::array deviceFailures{DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
+        DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DRIVER_INTERNAL_ERROR};
+    return std::ranges::find(deviceFailures, status) != deviceFailures.end() ?
+        PresentationResult::failed : PresentationResult::retry;
 }
 
 // The caller retains borrowed state until the direct backbuffer write completes.

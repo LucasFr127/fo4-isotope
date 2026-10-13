@@ -561,6 +561,8 @@ void VerifyPresentationState(Device& device)
     VerifyFullscreenBindingVariants(device, destination, graphics,
         {&shader, constants.Get(), {originalInput, nullptr, nullptr, nullptr},
             destination.rtv.Get(), kWidth, kHeight});
+    VerifyPresentationContext(device);
+    VerifySharedSdrFrame(device);
 }
 
 }  // namespace fo4hdr::tests::gpu
@@ -1024,6 +1026,41 @@ void VerifyScopedPixelBindingRestoration(Device& device)
 
 namespace fo4hdr::tests::gpu {
 
+void VerifyContextQueryKinds()
+{
+    for (const auto query : {D3D11_QUERY_OCCLUSION, D3D11_QUERY_OCCLUSION_PREDICATE})
+    {
+        FO4HDR_WARP_CHECK(fo4hdr::IsComputeSensitiveQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsProfilingQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsStreamOutputQuery(query));
+    }
+    for (const auto query : {D3D11_QUERY_SO_STATISTICS, D3D11_QUERY_SO_OVERFLOW_PREDICATE,
+             D3D11_QUERY_SO_STATISTICS_STREAM0, D3D11_QUERY_SO_STATISTICS_STREAM1,
+             D3D11_QUERY_SO_STATISTICS_STREAM2, D3D11_QUERY_SO_STATISTICS_STREAM3,
+             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM0,
+             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM1,
+             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM2,
+             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM3})
+    {
+        FO4HDR_WARP_CHECK(!fo4hdr::IsComputeSensitiveQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsProfilingQuery(query));
+        FO4HDR_WARP_CHECK(fo4hdr::IsStreamOutputQuery(query));
+    }
+    for (const auto query : {D3D11_QUERY_PIPELINE_STATISTICS, D3D11_QUERY_TIMESTAMP_DISJOINT})
+    {
+        FO4HDR_WARP_CHECK(!fo4hdr::IsComputeSensitiveQuery(query));
+        FO4HDR_WARP_CHECK(fo4hdr::IsProfilingQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsStreamOutputQuery(query));
+    }
+    for (const auto query : {D3D11_QUERY_EVENT, D3D11_QUERY_TIMESTAMP,
+             static_cast<D3D11_QUERY>(-1)})
+    {
+        FO4HDR_WARP_CHECK(!fo4hdr::IsComputeSensitiveQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsProfilingQuery(query));
+        FO4HDR_WARP_CHECK(!fo4hdr::IsStreamOutputQuery(query));
+    }
+}
+
 void VerifyContextQuerySafety()
 {
     using fo4hdr::ContextQuerySafety;
@@ -1039,9 +1076,13 @@ void VerifyContextQuerySafety()
     queries.End(&keys[1]);
     FO4HDR_WARP_CHECK(queries.CanDispatch());
     queries.Begin(&keys[0]);
+    queries.Begin(&keys[1]);
     queries.Begin(&keys[0]);
+    FO4HDR_WARP_CHECK(!queries.unknown);
     queries.End(&keys[0]);
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
+    queries.End(&keys[1]);
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
     queries = {};
     queries.Begin(nullptr);
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
@@ -1064,6 +1105,9 @@ void VerifyContextQuerySafety()
     queries.End(&keys[0]);
     FO4HDR_WARP_CHECK(queries.CanDispatch());
     queries.Begin(nullptr);  // Genuine tracking failure remains sticky.
+    queries.Begin(&keys[0]);
+    queries.Begin(&keys[0]);
+    queries.End(&keys[0]);
     FO4HDR_WARP_CHECK(queries.EnterCommandList());
     queries.LeaveCommandList();
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
@@ -1071,25 +1115,18 @@ void VerifyContextQuerySafety()
     queries.LeaveCommandList();
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
     queries = {};
+    for (std::size_t i = 0; i < ContextQuerySafety::capacity; ++i) queries.Begin(&keys[i]);
+    queries.Begin(&keys[0]);
+    FO4HDR_WARP_CHECK(!queries.unknown);
+    for (std::size_t i = 0; i < ContextQuerySafety::capacity; ++i) queries.End(&keys[i]);
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
     for (std::size_t i = 0; i < ContextQuerySafety::capacity; ++i)
         FO4HDR_WARP_CHECK(queries.EnterCommandList());
     FO4HDR_WARP_CHECK(!queries.EnterCommandList());
     for (std::size_t i = 0; i < ContextQuerySafety::capacity; ++i)
         queries.LeaveCommandList();
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
-    for (const auto query : {D3D11_QUERY_OCCLUSION,
-             D3D11_QUERY_PIPELINE_STATISTICS, D3D11_QUERY_OCCLUSION_PREDICATE,
-             D3D11_QUERY_SO_STATISTICS, D3D11_QUERY_SO_OVERFLOW_PREDICATE,
-             D3D11_QUERY_SO_STATISTICS_STREAM0, D3D11_QUERY_SO_STATISTICS_STREAM1,
-             D3D11_QUERY_SO_STATISTICS_STREAM2, D3D11_QUERY_SO_STATISTICS_STREAM3,
-             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM0,
-             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM1,
-             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM2,
-             D3D11_QUERY_SO_OVERFLOW_PREDICATE_STREAM3})
-        FO4HDR_WARP_CHECK(fo4hdr::IsComputeSensitiveQuery(query));
-    for (const auto query : {D3D11_QUERY_EVENT, D3D11_QUERY_TIMESTAMP,
-             D3D11_QUERY_TIMESTAMP_DISJOINT})
-        FO4HDR_WARP_CHECK(!fo4hdr::IsComputeSensitiveQuery(query));
+    VerifyContextQueryKinds();
 
 }
 

@@ -79,15 +79,20 @@ std::atomic<bool> g_rendererCreationClaimed{};
 
 void ResetSceneTracking() noexcept
 {
+    CloseArmorEncodedCompositionForLifecycle();
+    ResetSharedUiContent();
     ResetNativeLutObservation();
     g_lutInspectorLuts = {};
     g_lutInspectorImageSpaces = {};
     g_lutInspectorImageSpaceSlots = 0;
+    g_lutInspectorReferencingContexts = {};
+    g_lutInspectorResolved = {};
+    g_lutInspectorAutomaticSlots = 0;
+    g_lutInspectorGradingBypassed = false;
+    g_lutInspectorFallbackReasons = {};
     g_lutInspectorFrame = 0;
     g_lutInspectorValidatedSlots = 0;
     StopPipboyScreenObservation("Stopped: scene or resource retirement");
-    CloseArmorEncodedCompositionForLifecycle();
-    ResetSharedUiContent();
     // Loading/focus/resource retirement ends the session; retained TLS tokens
     // cannot be accepted after the request generation changes.
     ResetArmorUiScope();
@@ -97,6 +102,7 @@ void ResetSceneTracking() noexcept
 }
 void UnbindPresentationProxy() noexcept
 {
+    if (ApplicationPresentationFacadeActive()) return;
     if (g_rendererDevice.activeContext == nullptr) return;
     if (!g_presentation.presentationProxyRtv) return;
     auto* record = FindDrawObservation(g_rendererDevice.activeContext);
@@ -118,17 +124,14 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
     if (!retainPresentationBuffer) SetSharedUiPauseResourcesReady(false);
     g_nativeReferenceStatus = "Waiting for a color grading draw.";
     CloseArmorEncodedCompositionForLifecycle();
-    // A held comparison is transient UI state. Restore its unsaved Image
-    // draft before retiring the device generation so it cannot become the
-    // state applied after HDR/resource recovery.
     UnbindPresentationProxy();
     ResetSceneTracking();
     ResetSharedUiResources(retainPresentationBuffer);
     ResetDeveloperExposureResources();
     g_presentation.presentationRedirectedThisFrame = false;
     ResetArmorCompositionResources();
-    // Retire the real output UAV before the transport images and proxy.
-    RetirePresentationOutput();
+    // Retire the real output view before the transport images and proxy.
+    if (!retainPresentationBuffer) RetirePresentationOutput();
     ResetUiTransportResources();
     ResetPresentationResources(retainColorControl, retainPresentationBuffer);
 }
@@ -185,8 +188,7 @@ void RecordProductionResourceFailure(IDXGISwapChain* swapChain) noexcept
 void RebuildChangedDisplay(IDXGISwapChain* swapChain, int hdrState) noexcept
 {
     if (!DisplayRebuildFailed(swapChain, hdrState)) return;
-    g_referenceHealthy = false;
-    RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
+    RecordProductionResourceFailure(swapChain);
 }
 
 void BeginPublishedHeartbeatGeneration() noexcept
@@ -236,10 +238,11 @@ struct DisplayGenerationObservation
         if (g_presentation.swapChain3) sdrColorSpaceEstablished = SetColorSpace(false);
         PublishMonitor();
         g_lifecycle.OnDisplayChange();
-        ResetResources();
+        ResetResources(false, ApplicationPresentationFacadeActive());
         g_presentation.width = description.BufferDesc.Width;
         g_presentation.height = description.BufferDesc.Height;
         g_referenceHealthy = true;
+        g_productionHealthy = true;
         RebuildChangedDisplay(swapChain, hdrState);
         BeginPublishedHeartbeatGeneration();
     }
@@ -263,6 +266,8 @@ struct DisplayGenerationObservation
 void RetireLostDeviceGeneration() noexcept
 {
     ShutdownSettingsWindowBackend();
+    if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
+    g_presentation.applicationFacadeChain = nullptr;
     ResetResources();
     ResetReplacementShaders();
     ResetShaderRegistry();
@@ -277,6 +282,7 @@ void RetireLostDeviceGeneration() noexcept
     // D3D creation may make one fresh bounded HDR attempt.
     g_rendererCreationClaimed.store(false, std::memory_order_release);
     g_referenceHealthy.store(true, std::memory_order_release);
+    g_productionHealthy.store(true, std::memory_order_release);
 }
 
 
@@ -716,9 +722,9 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
         ArmorEncodedBoundary(scope, entering);
         if (!entering) SharedUiBoundary(scope, false);
     });
+    SetArmorUiCorrectionEnabled(configuration.enabled && configuration.productionRequested);
     SetArmorUiObservationEnabled(InitializeFrameTrace(
         configuration.developerMode && configuration.traceRenderPipeline));
-    SetArmorUiCorrectionEnabled(configuration.enabled && configuration.productionRequested);
     InitializeLiveSettings(configuration);
 }
 

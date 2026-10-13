@@ -99,10 +99,6 @@ struct GraphicsObservationSnapshot
     std::uint64_t referenceRenderFailureCount{};
     std::uint64_t productionOperatorDrawCount{};
     std::uint64_t productionFrameCount{};
-    std::uint64_t nativeUiBackdropCaptureDrawCount{};
-    std::uint64_t nativeUiBackdropCaptureFrameCount{};
-    std::uint64_t nativeUiCaptureDrawCount{};
-    std::uint64_t nativeUiCaptureFrameCount{};
     std::uint64_t performanceCpuMeasuredSamples{};
     std::uint64_t performanceGpuMeasuredSamples{};
     std::uint64_t performanceCpuP95Nanoseconds{};

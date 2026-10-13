@@ -8,8 +8,8 @@
 #include "FO4Isotope/config/SettingsPersistence.hpp"
 #include "../game/GameStateObserver.hpp"
 #include "../game/ArmorUiObserver.hpp"
-#include "../game/NativeUiResources.hpp"
 #include "../game/NativeLutObserver.hpp"
+#include "../game/NativeUiResources.hpp"
 #include "../game/ImageSpaceObserver.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
 
@@ -429,7 +429,7 @@ namespace
     }
     REX::INFO(
         "m6 diagnostics_configuration valid={} error={} line={} "
-        "developer_mode={} trace_render_pipeline={} measure_performance={} reference={} "
+        "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
         "overlay={} forced_failure={} enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
         "exposure_ev={} exposure_multiplier={}",
@@ -439,6 +439,7 @@ namespace
         diagnosticsConfiguration.value.developerMode,
         diagnosticsConfiguration.value.traceRenderPipeline,
         diagnosticsConfiguration.value.measurePerformance,
+        diagnosticsConfiguration.value.productionRequested,
         diagnosticsConfiguration.value.developerHdr10Reference,
         diagnosticsConfiguration.value.showDeveloperOverlay,
         diagnosticsConfiguration.value.forceHdrSwapChainFailure,
@@ -472,9 +473,9 @@ struct ObserverBoundaries
 {
     bool armorUi{};
     bool screenUi{};
-    bool pauseResources{};
     bool nativeLut{};
     bool imageSpace{};
+    bool pauseResources{};
 };
 
 [[nodiscard]] bool ProductionRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
@@ -491,6 +492,7 @@ struct ObserverBoundaries
 #if defined(FO4HDR_RUNTIME_1_10_163)
     if (observerActive && graphicsActive)
     {
+        const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
         active.nativeLut = fo4hdr::game::InitializeNativeLutObserver(
             ProductionRequested(diagnosticsConfiguration));
         active.imageSpace = fo4hdr::game::InitializeImageSpaceObserver(
@@ -501,10 +503,10 @@ struct ObserverBoundaries
                     diagnosticsConfiguration.value.traceRenderPipeline),
             legacyServices.trampoline, legacyServices.pluginHandle);
         active.pauseResources = fo4hdr::game::InitializeNativeUiResources(
-            ProductionRequested(diagnosticsConfiguration),
+            sharedUiRequested,
             legacyServices.trampoline, legacyServices.pluginHandle);
         active.screenUi = fo4hdr::game::InitializeScreenUiObserver(
-            ProductionRequested(diagnosticsConfiguration),
+            sharedUiRequested,
             legacyServices.trampoline, legacyServices.pluginHandle);
     }
 #endif
@@ -518,9 +520,9 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
     {
         REX::INFO("armor UI composition boundary installed={}", boundaries.armorUi);
         REX::INFO("native screen-space UI boundary installed={}", boundaries.screenUi);
-        REX::INFO("native pause resource allocation boundary installed={}", boundaries.pauseResources);
         REX::INFO("native LUT observation boundary installed={}", boundaries.nativeLut);
         REX::INFO("ImageSpace provenance boundaries installed={}", boundaries.imageSpace);
+        REX::INFO("native pause resource allocation boundary installed={}", boundaries.pauseResources);
         REX::INFO(
             "hdr production_active=false production_requested={} "
             "algorithm={} display_peak_nits={} "

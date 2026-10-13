@@ -134,22 +134,24 @@ struct DirectPresentationInputs
     const PresentationShaders* shader;
 };
 
-void CheckPresentationOverlayPixel(UINT actual, UINT& hidden, bool remember, bool visible)
-{
-    if (remember) { hidden = actual; return; }
-    if (!visible) { FO4HDR_WARP_CHECK(actual == hidden); return; }
-    const auto white = fo4hdr::QuantizeR10Unorm(fo4hdr::EncodeSt2084Pq(203.0));
-    for (UINT channel = 0; channel < 3; ++channel)
-        FO4HDR_WARP_CHECK(CodeDistance(
-            static_cast<std::uint16_t>((actual >> (10 * channel)) & 1023), white) <= 1);
-}
-
 struct PresentationOverlayReadback
 {
     Texture& output;
     std::array<UINT, 37 * 19>& hidden;
     bool remember, visible;
+    UINT mode;
 };
+
+void CheckPresentationOverlayPixel(UINT actual, UINT& hidden, const PresentationOverlayReadback& test)
+{
+    if (test.remember) { hidden = actual; return; }
+    if (!test.visible) { FO4HDR_WARP_CHECK(actual == hidden); return; }
+    const bool sdr = test.mode == 0 || test.mode == 4 || test.mode == 5;
+    const auto white = fo4hdr::QuantizeR10Unorm(sdr ? 1.0 : fo4hdr::EncodeSt2084Pq(203.0));
+    for (UINT channel = 0; channel < 3; ++channel)
+        FO4HDR_WARP_CHECK(CodeDistance(
+            static_cast<std::uint16_t>((actual >> (10 * channel)) & 1023), white) <= 1);
+}
 
 void ReadPresentationOverlay(Device& device, const PresentationOverlayReadback& test)
 {
@@ -161,39 +163,39 @@ void ReadPresentationOverlay(Device& device, const PresentationOverlayReadback& 
         const auto* row = reinterpret_cast<const UINT*>(
             static_cast<const std::byte*>(mapped.pData) + y * mapped.RowPitch);
         for (UINT x = 0; x < 37; ++x)
-            CheckPresentationOverlayPixel(row[x], test.hidden[y * 37 + x], test.remember, test.visible);
+            CheckPresentationOverlayPixel(row[x], test.hidden[y * 37 + x], test);
     }
     device.context->Unmap(test.output.staging.Get(), 0);
 }
 
-void VerifyDirectPresentationOverlay(Device& device, const DirectPresentationInputs& test)
+void VerifyDirectPresentationOverlay(Device& device, const DirectPresentationInputs& test, UINT mode)
 {
     const auto& [scene, layer, output, shader] = test;
     constexpr UINT width=37, height=19;
     std::array<Float4, width*height> pixels{};
     const auto hiddenConstants = CreateConstantBuffer(*device.device.Get(),
-        CompositionConstants{width,height,3,203,203,1000,0,0,0});
+        CompositionConstants{width,height,mode,203,203,1000,17,23,0});
     const auto shownConstants = CreateConstantBuffer(*device.device.Get(),
-        CompositionConstants{width,height,3,203,203,1000,0,0,1});
+        CompositionConstants{width,height,mode,203,203,1000,0,0,1});
     std::array<UINT, width * height> hiddenPixels{};
     DrawPresentation(device, { shader, hiddenConstants.Get(),
         {scene.srv.Get(),nullptr,nullptr,nullptr}, output.rtv.Get(), width, height});
-    ReadPresentationOverlay(device, {output, hiddenPixels, true, false});
+    ReadPresentationOverlay(device, {output, hiddenPixels, true, false, mode});
     pixels.fill({1,1,1,1});
     device.context->UpdateSubresource(layer.texture.Get(), 0, nullptr, pixels.data(), width*sizeof(Float4), 0);
     DrawPresentation(device, { shader, shownConstants.Get(),
         {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
-    ReadPresentationOverlay(device, {output, hiddenPixels, false, true});
+    ReadPresentationOverlay(device, {output, hiddenPixels, false, true, mode});
     // Closing the overlay must ignore retained pixels without clearing its texture.
     DrawPresentation(device, { shader, hiddenConstants.Get(),
         {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
-    ReadPresentationOverlay(device, {output, hiddenPixels, false, false});
+    ReadPresentationOverlay(device, {output, hiddenPixels, false, false, mode});
     const auto nan = std::numeric_limits<float>::quiet_NaN();
     pixels.fill({nan,nan,nan,nan});
     device.context->UpdateSubresource(layer.texture.Get(), 0, nullptr, pixels.data(), width*sizeof(Float4), 0);
     DrawPresentation(device, { shader, hiddenConstants.Get(),
-        {scene.srv.Get(),nullptr,nullptr,layer.srv.Get()}, output.rtv.Get(), width, height});
-    ReadPresentationOverlay(device, {output, hiddenPixels, false, false});
+        {scene.srv.Get(),layer.srv.Get(),layer.srv.Get(),layer.srv.Get()}, output.rtv.Get(), width, height});
+    ReadPresentationOverlay(device, {output, hiddenPixels, false, false, mode});
 }
 
 void VerifyDirectPresentationExtremes(Device& device, Texture& scene, Texture& output,
@@ -249,6 +251,7 @@ ComPtr<ID3D11InfoQueue> VerifyRejectedPresentationView(Device& device, Texture& 
 
 void VerifyDirectPresentation(Device& device)
 {
+    VerifyPresentationResize(device);
     constexpr UINT width = 37, height = 19;
     const auto shader = CreatePresentationShaders(*device.device.Get());
     const auto referenceShader = CreateShader(*device.device.Get(), fo4hdr::generated::test::kLayerEvaluationCs);
@@ -271,9 +274,9 @@ void VerifyDirectPresentation(Device& device)
     for (const UINT mode : {0U, 1U, 2U, 3U, 10U, 11U, 12U, 13U, 14U}) {
         for (const UINT layers : {0U, 1U}) {
             const auto constants = CreateConstantBuffer(*device.device.Get(),
-                CompositionConstants{width, height, mode, 203, 203, 1000, layers, layers, layers});
+                CompositionConstants{width, height, mode, 203, 203, 1000, 0, 0, layers});
             const std::array<ID3D11ShaderResourceView*, 4> inputs{scene.srv.Get(),
-                layer.srv.Get(), layer.srv.Get(), layers ? layer.srv.Get() : nullptr};
+                nullptr, nullptr, layers ? layer.srv.Get() : nullptr};
             DispatchPresentation(device, { referenceShader.Get(), constants.Get(), inputs,
                 reference.uav.Get(), width, height});
             DrawPresentation(device, { &shader, constants.Get(), inputs,
@@ -283,7 +286,8 @@ void VerifyDirectPresentation(Device& device)
             CheckHresult(chain->Present(0, 0), "Present retained RTV test");
         }
     }
-    VerifyDirectPresentationOverlay(device, {scene, layer, output, &shader});
+    for (UINT mode : {0U, 3U, 4U, 5U})
+        VerifyDirectPresentationOverlay(device, {scene, layer, output, &shader}, mode);
     VerifyDirectPresentationExtremes(device, scene, output, &shader);
     VerifyPublicPresentationOutput(device);
     CheckDebugMessages(device);
@@ -438,11 +442,11 @@ void BenchmarkDirectPresentation(Device& device, bool compareHiddenOverlay)
     auto scene = CreateSizedTexture(*device.device.Get(), { width, height,
         DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE, &data});
     const auto shader = CreatePresentationShaders(*device.device.Get());
-    const auto constants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1});
-    const auto hiddenConstants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,1,1,0});
+    const auto constants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,0,0});
+    const auto hiddenConstants = CreateConstantBuffer(*device.device.Get(), CompositionConstants{width,height,3,203,203,1000,0,0,0});
     auto overlay = CreateSizedTexture(*device.device.Get(), { width, height,
         DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET});
-    const std::array<ID3D11ShaderResourceView*,4> inputs{scene.srv.Get(),scene.srv.Get(),scene.srv.Get(),
+    const std::array<ID3D11ShaderResourceView*,4> inputs{scene.srv.Get(),nullptr,nullptr,
         compareHiddenOverlay ? overlay.srv.Get() : scene.srv.Get()};
     auto& context = *device.context.Get();
     constexpr float transparent[4]{};
@@ -881,7 +885,6 @@ struct CalibrationPass
     std::uint32_t mode;
     ID3D11ShaderResourceView* scene;
     ID3D11ShaderResourceView* imgui;
-    std::uint32_t nativeCaptured;
     const std::array<Float4, kWidth>& expected;
 };
 
@@ -890,7 +893,7 @@ struct CalibrationPatterns
     Device& device;
     static constexpr float uiWhiteNits = 200.0F;
     static constexpr float displayPeakNits = 1000.0F;
-    Texture black, gameUi, backdrop, halfWhiteImGui, composition, output;
+    Texture black, halfWhiteImGui, composition, output;
     ComPtr<ID3D11ComputeShader> composeShader, outputShader;
     ComPtr<ID3D11Buffer> outputConstants;
     fo4hdr::LinearRgb imguiPremultiplied{};
@@ -899,25 +902,13 @@ struct CalibrationPatterns
     void Initialize()
     {
         std::array<Float4, kWidth> zeroSamples{};
-        std::array<Float4, kWidth> opaqueRedSamples{};
-        std::array<Float4, kWidth> opaqueGreenSamples{};
         std::array<Float4, kWidth> halfWhiteImGuiSamples{};
-        opaqueRedSamples.fill({1.0F, 0.0F, 0.0F, 1.0F});
-        opaqueGreenSamples.fill({0.0F, 1.0F, 0.0F, 1.0F});
         halfWhiteImGuiSamples.fill({0.5F, 0.5F, 0.5F, 0.5F});
         const auto zeroPixels = MakeFp16Pixels(zeroSamples);
-        const auto opaqueRedPixels = MakeUnorm8Pixels(opaqueRedSamples);
-        const auto opaqueGreenPixels = MakeFp16Pixels(opaqueGreenSamples);
         const auto halfWhiteImGuiPixels = MakeFp16Pixels(
             halfWhiteImGuiSamples);
         D3D11_SUBRESOURCE_DATA zeroData{
             zeroPixels.data(), static_cast<UINT>(sizeof(zeroPixels)), 0};
-        D3D11_SUBRESOURCE_DATA gameUiData{
-            opaqueRedPixels.data(),
-            static_cast<UINT>(sizeof(opaqueRedPixels)), 0};
-        D3D11_SUBRESOURCE_DATA backdropData{
-            opaqueGreenPixels.data(),
-            static_cast<UINT>(sizeof(opaqueGreenPixels)), 0};
         D3D11_SUBRESOURCE_DATA imguiData{
             halfWhiteImGuiPixels.data(),
             static_cast<UINT>(sizeof(halfWhiteImGuiPixels)), 0};
@@ -925,12 +916,6 @@ struct CalibrationPatterns
         black = CreateTexture(*device.device.Get(),
             DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE,
             &zeroData);
-        gameUi = CreateTexture(*device.device.Get(),
-            DXGI_FORMAT_R8G8B8A8_UNORM, D3D11_BIND_SHADER_RESOURCE,
-            &gameUiData);
-        backdrop = CreateTexture(*device.device.Get(),
-            DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE,
-            &backdropData);
         halfWhiteImGui = CreateTexture(*device.device.Get(),
             DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_BIND_SHADER_RESOURCE,
             &imguiData);
@@ -1003,13 +988,13 @@ struct CalibrationPatterns
     }
     void VerifyPass(CalibrationPass pass)
     {
-        const auto& [mode, scene, imgui, nativeCaptured, expected] = pass;
+        const auto& [mode, scene, imgui, expected] = pass;
         const auto constants = CreateConstantBuffer(*device.device.Get(),
             CompositionConstants{kWidth, kHeight, mode, uiWhiteNits,
                 kReferenceWhiteNits, displayPeakNits,
-                nativeCaptured, nativeCaptured});
+                0U, 0U});
         std::array<ID3D11ShaderResourceView*, 4> inputs{
-            scene, backdrop.srv.Get(), gameUi.srv.Get(), imgui};
+            scene, nullptr, nullptr, imgui};
         Dispatch(*device.context.Get(), { composeShader.Get(), constants.Get(),
             inputs.data(), static_cast<UINT>(inputs.size()),
             composition.uav.Get()});
@@ -1055,7 +1040,7 @@ struct CalibrationPatterns
             (peakRamp.back().red -
                 static_cast<float>(imguiPremultiplied.red)) * 2.0F -
             displayPeakNits * 1.125F) <= 0.001F);
-        VerifyPass({10U, black.srv.Get(), halfWhiteImGui.srv.Get(), 1U,
+        VerifyPass({10U, black.srv.Get(), halfWhiteImGui.srv.Get(),
             peakRamp});
 
     }
@@ -1069,7 +1054,7 @@ struct CalibrationPatterns
                 ? uiWhiteNits : 0.0F;
             uiPatch[index] = AddImGui({nits, nits, nits});
         }
-        VerifyPass({11U, black.srv.Get(), halfWhiteImGui.srv.Get(), 1U,
+        VerifyPass({11U, black.srv.Get(), halfWhiteImGui.srv.Get(),
             uiPatch});
 
     }
@@ -1086,7 +1071,7 @@ struct CalibrationPatterns
             const auto nits = nearBlackLevels[levelIndex];
             nearBlack[index] = AddImGui({nits, nits, nits});
         }
-        VerifyPass({12U, black.srv.Get(), halfWhiteImGui.srv.Get(), 1U,
+        VerifyPass({12U, black.srv.Get(), halfWhiteImGui.srv.Get(),
             nearBlack});
 
     }
@@ -1109,7 +1094,7 @@ struct CalibrationPatterns
                 patch.blue * uiWhiteNits});
             gamut[index] = AddImGui(nits);
         }
-        VerifyPass({13U, black.srv.Get(), halfWhiteImGui.srv.Get(), 1U, gamut});
+        VerifyPass({13U, black.srv.Get(), halfWhiteImGui.srv.Get(), gamut});
 
     }
     void CheckContainment()
@@ -1149,7 +1134,7 @@ struct CalibrationPatterns
             containment[3].blue == 0.0F);
         FO4HDR_WARP_CHECK(containment[6].red == displayPeakNits &&
             containment[6].green == 0.0F && containment[6].blue == 0.0F);
-        VerifyPass({14U, peakScene.srv.Get(), black.srv.Get(), 0U,
+        VerifyPass({14U, peakScene.srv.Get(), black.srv.Get(),
             containment});
     }
     Float4 AddImGui(fo4hdr::LinearRgb base) const
@@ -1162,8 +1147,7 @@ struct CalibrationPatterns
     }
     void Run()
     {
-        // Full-screen calibration suppresses native UI layers while retaining
-        // the plugin ImGui layer at independently scaled UI white.
+        // Calibration retains the plugin ImGui layer at independently scaled UI white.
         imguiPremultiplied = fo4hdr::ConvertBt709ToBt2020(
             {0.5 * uiWhiteNits, 0.5 * uiWhiteNits, 0.5 * uiWhiteNits});
         CheckPeakRamp();

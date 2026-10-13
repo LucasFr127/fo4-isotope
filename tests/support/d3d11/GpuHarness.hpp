@@ -170,14 +170,17 @@ struct CompositionConstants
     float uiPaperWhiteNits;
     float sceneReferenceWhiteNits;
     float displayPeakNits;
-    std::uint32_t gameUiBackdropCaptured;
-    std::uint32_t gameUiCaptured;
+    std::uint32_t reserved0{};
+    std::uint32_t reserved1{};
     std::uint32_t settingsOverlayPresent{1};
     std::uint32_t sharedUiEncoded{};
     std::uint32_t assumedContent{};
     float armorPeakUiRelative{};
 };
 static_assert(sizeof(CompositionConstants) == 48);
+static_assert(offsetof(CompositionConstants, reserved0) == 24);
+static_assert(offsetof(CompositionConstants, reserved1) == 28);
+static_assert(offsetof(CompositionConstants, settingsOverlayPresent) == 32);
 static_assert(offsetof(CompositionConstants, sharedUiEncoded) == 36);
 static_assert(offsetof(CompositionConstants, armorPeakUiRelative) == 44);
 

@@ -9,6 +9,35 @@
 
 namespace fo4hdr::tests::gpu {
 
+struct PresentProbe
+{
+    IDXGISwapChain* chain{};
+    UINT interval{}, flags{}, calls{};
+};
+PresentProbe g_presentProbe;
+
+HRESULT STDMETHODCALLTYPE ProbePresent(IDXGISwapChain* chain, UINT interval, UINT flags)
+{
+    g_presentProbe = {chain, interval, flags, g_presentProbe.calls + 1};
+    return DXGI_STATUS_OCCLUDED;
+}
+
+void VerifyTestPresent(IDXGISwapChain* chain, SwapChainRecord& record)
+{
+    const auto next = record.nextPresent;
+    const auto frame = g_frame;
+    const auto count = g_evidence.presentCount.load();
+    record.nextPresent = &ProbePresent;
+    g_presentProbe = {};
+    constexpr auto flags = DXGI_PRESENT_TEST | DXGI_PRESENT_DO_NOT_WAIT;
+    const auto result = HookPresent(chain, 3, flags);
+    record.nextPresent = next;
+    FO4HDR_WARP_CHECK(result == DXGI_STATUS_OCCLUDED);
+    FO4HDR_WARP_CHECK(g_presentProbe.chain == chain && g_presentProbe.calls == 1);
+    FO4HDR_WARP_CHECK(g_presentProbe.interval == 3 && g_presentProbe.flags == flags);
+    FO4HDR_WARP_CHECK(g_frame == frame && g_evidence.presentCount.load() == count);
+}
+
 struct PresentationResizeHookScope
 {
     IDXGISwapChain* chain;
@@ -52,6 +81,7 @@ void VerifyPresentationResize(Device& device)
     ComPtr<IDXGISwapChain> base;
     CheckHresult(chain.As(&base), "Get base resize interface");
     PresentationResizeHookScope scope(base.Get());
+    VerifyTestPresent(base.Get(), scope.record);
     FO4HDR_WARP_CHECK(g_rendererDevice.activeDevice == nullptr);
     struct ResizeCase { UINT requested, expected; };
     for (const auto test : {ResizeCase{0, 3}, {1, 2}, {2, 2}, {3, 3}, {8, 8}, {0, 8}})

@@ -12,12 +12,10 @@
 
 namespace fo4hdr::tests::gpu {
 
-constexpr std::array<std::string_view, 21> kSectionNames{
+constexpr std::array<std::string_view, 19> kSectionNames{
     "operator-lut",
     "context-query-safety",
     "frame-trace",
-    "presentation-facade",
-    "presentation-resize",
     "presentation-proxy",
     "shared-ui-composition",
     "presentation-state",
@@ -80,18 +78,17 @@ struct ShippingShaderRun
         });
         RunSection(options.filter, "context-query-safety", VerifyContextQuerySafety);
         RunSection(options.filter, "frame-trace", [&] { VerifyFrameTrace(device); });
-        RunSection(options.filter, "presentation-facade", [&] { VerifyPresentationSwapChain(device); });
-        RunSection(options.filter, "presentation-resize", [&] { VerifyPresentationResize(device); });
         RunSection(options.filter, "presentation-proxy", [&] {
             VerifyPresentationProxy(device);
+            VerifyPresentationSwapChain(device);
         });
-        RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); VerifySharedUiContext(device); VerifySharedSdrFrame(device); });
         RunSection(options.filter, "direct-presentation", [&] { VerifyDirectPresentation(device); });
+        RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); });
         RunSection(options.filter, "output-dither", [&] { VerifyOutputDitherExperiment(device); });
         RunSection(options.filter, "presentation-state", [&] {
             VerifyPresentationState(device);
-            VerifyPresentationContext(device);
             VerifyNativeReferenceState(device);
+            VerifySharedUiFallback(device);
         });
         RunSection(options.filter, "scoped-pixel-binding-restoration", [&] {
             VerifyScopedPixelBindingRestoration(device);

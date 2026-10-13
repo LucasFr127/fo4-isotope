@@ -2,6 +2,12 @@
 
 #include "ShaderTestSuite.hpp"
 #include "d3d11/PresentationFacadeFixture.hpp"
+#include "hooks/DeviceHooks.hpp"
+#include "hooks/HookRecords.hpp"
+#include "hooks/SwapChainHooks.hpp"
+#include "resources/PresentationResources.hpp"
+#include "LiveSettings.hpp"
+#include "RendererLifetime.hpp"
 
 #include <d3d11sdklayers.h>
 #include <dxgi1_6.h>
@@ -285,6 +291,29 @@ void VerifyFacadeCreationGates(Device& device, IDXGISwapChain& nativeChain)
     CheckDebugMessages(device);
 }
 
+ComPtr<IDXGISwapChain1> CreateTearingPresentationChain(Device& device, HWND window)
+{
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    ComPtr<IDXGIFactory2> factory;
+    CheckHresult(device.device.As(&dxgi), "Get tearing DXGI device");
+    CheckHresult(dxgi->GetAdapter(&adapter), "Get tearing adapter");
+    CheckHresult(adapter->GetParent(IID_PPV_ARGS(&factory)), "Get tearing factory");
+    DXGI_SWAP_CHAIN_DESC1 description{};
+    description.Width = 16;
+    description.Height = 8;
+    description.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
+    description.SampleDesc.Count = 1;
+    description.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    description.BufferCount = 3;
+    description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+    description.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+    ComPtr<IDXGISwapChain1> chain;
+    CheckHresult(factory->CreateSwapChainForHwnd(device.device.Get(), window,
+        &description, nullptr, nullptr, &chain), "Create HFPF-like R10 tearing chain");
+    return chain;
+}
+
 void VerifyFacadeSuccessfulResize(Device& device, IDXGISwapChain& facade,
     IDXGISwapChain& nativeChain)
 {
@@ -305,10 +334,223 @@ void VerifyFacadeSuccessfulResize(Device& device, IDXGISwapChain& facade,
     CheckDebugMessages(device);
 }
 
+struct NativeFacadeFixture
+{
+    Device& device;
+    RendererDevice savedDevice{g_rendererDevice};
+    PresentationResources savedPresentation{g_presentation};
+    PluginConfiguration savedConfiguration{g_configuration};
+    HdrRendererLifecycle savedLifecycle{g_lifecycle};
+    PipelineHeartbeat savedHeartbeat{g_heartbeat};
+    bool savedHealthy{g_referenceHealthy.load()};
+    PresentationWindow window;
+    ComPtr<IDXGISwapChain1> native;
+    ComPtr<IDXGISwapChain> facade;
+    SwapChainRecord* record{};
+
+    explicit NativeFacadeFixture(Device& value,
+        AcquirePresentationBuffer acquire = AcquireApplicationPresentationBuffer,
+        bool flipTransport = false) : device(value)
+    {
+        g_presentation = {};
+        g_rendererDevice = {};
+        g_rendererDevice.activeDevice = device.device.Get();
+        g_rendererDevice.activeContext = device.context.Get();
+        CheckHresult(device.context.As(&g_rendererDevice.activeContext1), "Get native facade context1");
+        g_configuration.enabled = true;
+        g_configuration.productionRequested = true;
+        g_lifecycle.Detach();
+        FO4HDR_WARP_CHECK(g_lifecycle.BindDeviceAndSwapChain());
+        native = flipTransport ? CreateTearingPresentationChain(device, window.handle) :
+            CreatePresentationChain(device, window.handle, 16, 8);
+        g_presentation.width = 16;
+        g_presentation.height = 8;
+        FO4HDR_WARP_CHECK(CreatePresentationProxy(native.Get(), device.device.Get()));
+        FO4HDR_WARP_CHECK(InstallSwapChainShadow(native.Get(), true, true));
+        record = FindSwapChain(native.Get());
+        FO4HDR_WARP_CHECK(record != nullptr);
+        DXGI_SWAP_CHAIN_DESC application{};
+        CheckHresult(native->GetDesc(&application), "Read native integration facade descriptor");
+        if (!flipTransport)
+        {
+            application.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+            application.BufferCount = 1;
+        }
+        CheckHresult(CreatePresentationSwapChain({native.Get(),
+            g_presentation.presentationProxy.Get(), application,
+            acquire, RetireApplicationPresentationBuffer}, &facade),
+            "Create facade over exact production presentation proxy");
+        g_presentation.applicationFacadeChain = native.Get();
+        record->applicationFp16Facade = true;
+    }
+
+    ~NativeFacadeFixture()
+    {
+        device.context->OMSetRenderTargets(0, nullptr, nullptr);
+        facade.Reset();
+        g_presentation.applicationFacadeChain = nullptr;
+        ResetResources();
+        if (record)
+        {
+            void* expected = record->shadow.data();
+            std::atomic_ref<void*> slot(*reinterpret_cast<void**>(native.Get()));
+            FO4HDR_WARP_CHECK(slot.compare_exchange_strong(expected, record->originalVtable));
+            FO4HDR_WARP_CHECK(record->identity.Retire(native.Get(), record->identity.Generation()));
+            record->ownsRendererClaim = false;
+            record->applicationFp16Facade = false;
+            record->developerHdrDescriptor = false;
+        }
+        g_rendererDevice = savedDevice;
+        g_presentation = savedPresentation;
+        g_configuration = savedConfiguration;
+        g_lifecycle = savedLifecycle;
+        g_heartbeat = savedHeartbeat;
+        g_referenceHealthy = savedHealthy;
+    }
+};
+
+struct FacadePresentProbe
+{
+    IDXGISwapChain* chain{};
+    UINT interval{}, flags{}, calls{};
+};
+FacadePresentProbe g_facadePresentProbe;
+
+HRESULT STDMETHODCALLTYPE ProbeFacadePresent(IDXGISwapChain* chain, UINT interval, UINT flags)
+{
+    g_facadePresentProbe = {chain, interval, flags, g_facadePresentProbe.calls + 1};
+    return DXGI_STATUS_OCCLUDED;
+}
+
+void VerifyFacadePresentPolicy(NativeFacadeFixture& fixture)
+{
+    const auto next = fixture.record->nextPresent;
+    fixture.record->nextPresent = &ProbeFacadePresent;
+    struct PresentCase { UINT interval, flags; };
+    for (const auto test : {PresentCase{1, 0},
+             PresentCase{0, DXGI_PRESENT_ALLOW_TEARING | DXGI_PRESENT_DO_NOT_WAIT}})
+    {
+        g_facadePresentProbe = {};
+        FO4HDR_WARP_CHECK(fixture.facade->Present(test.interval, test.flags) == DXGI_STATUS_OCCLUDED);
+        FO4HDR_WARP_CHECK(g_facadePresentProbe.chain == fixture.native.Get());
+        FO4HDR_WARP_CHECK(g_facadePresentProbe.interval == test.interval);
+        FO4HDR_WARP_CHECK(g_facadePresentProbe.flags == test.flags && g_facadePresentProbe.calls == 1);
+    }
+    fixture.record->nextPresent = next;
+}
+
+void VerifyFacadeFlipTransport(Device& device)
+{
+    NativeFacadeFixture fixture(device, AcquireApplicationPresentationBuffer, true);
+    DXGI_SWAP_CHAIN_DESC application{}, native{};
+    CheckHresult(fixture.facade->GetDesc(&application), "Read legacy facade over flip transport");
+    CheckHresult(fixture.native->GetDesc(&native), "Read native tearing transport");
+    FO4HDR_WARP_CHECK(application.SwapEffect == DXGI_SWAP_EFFECT_DISCARD);
+    FO4HDR_WARP_CHECK(application.BufferDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    FO4HDR_WARP_CHECK(application.BufferCount == 3 && native.BufferCount == 3);
+    FO4HDR_WARP_CHECK(application.Flags == DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH);
+    FO4HDR_WARP_CHECK(native.SwapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD);
+    FO4HDR_WARP_CHECK(native.BufferDesc.Format == DXGI_FORMAT_R10G10B10A2_UNORM);
+    FO4HDR_WARP_CHECK(native.Flags == (application.Flags | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING));
+    void* unavailable = fixture.native.Get();
+    FO4HDR_WARP_CHECK(fixture.facade->QueryInterface(__uuidof(IDXGISwapChain4), &unavailable) == E_NOINTERFACE);
+    FO4HDR_WARP_CHECK(unavailable == nullptr);
+    FO4HDR_WARP_CHECK(fixture.facade->GetBuffer(1, __uuidof(ID3D11Texture2D), &unavailable) ==
+        DXGI_ERROR_INVALID_CALL);
+    VerifyDescriptorFilteredBackground(device, *fixture.facade.Get());
+    VerifyFacadePresentPolicy(fixture);
+    {
+        auto retained = FacadeBuffer(*fixture.facade.Get());
+        ExpectFacadeResizeBlocked(device, *fixture.facade.Get());
+    }
+    for (const auto flags : {application.Flags, native.Flags})
+    {
+        CheckHresult(fixture.facade->ResizeBuffers(0, 16, 8, DXGI_FORMAT_UNKNOWN, flags),
+            "Preserve native tearing through public or HFPF resize flags");
+        CheckHresult(fixture.native->GetDesc(&native), "Read preserved tearing resize");
+        FO4HDR_WARP_CHECK(native.BufferCount == 3);
+        FO4HDR_WARP_CHECK(native.Flags == (application.Flags | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING));
+        FO4HDR_WARP_CHECK(FacadeBuffer(*fixture.facade.Get()).Get() ==
+            g_presentation.presentationProxy.Get());
+    }
+    CheckDebugMessages(device);
+}
+
+void VerifyNativeFacadeProxyLifetime(Device& device)
+{
+    NativeFacadeFixture fixture(device);
+    auto exposed = FacadeBuffer(*fixture.facade.Get());
+    auto* exact = g_presentation.presentationProxy.Get();
+    FO4HDR_WARP_CHECK(exposed.Get() == exact && ApplicationPresentationFacadeActive());
+    FO4HDR_WARP_CHECK(fixture.facade->ResizeBuffers(0, 16, 8, DXGI_FORMAT_UNKNOWN,
+        DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) == DXGI_ERROR_INVALID_CALL);
+    FO4HDR_WARP_CHECK(FacadeBuffer(*fixture.facade.Get()).Get() == exact);
+    ResetResources(false, true);
+    FO4HDR_WARP_CHECK(g_presentation.presentationProxy.Get() == exact);
+    FO4HDR_WARP_CHECK(PresentationProxyReady() && PresentationOutputReady());
+    FO4HDR_WARP_CHECK(FacadeBuffer(*fixture.facade.Get()).Get() == exact);
+    ComPtr<ID3D11Texture2D> rejected;
+    FO4HDR_WARP_CHECK(AcquireApplicationPresentationBuffer(fixture.facade.Get(), &rejected) ==
+        DXGI_ERROR_INVALID_CALL);
+    FO4HDR_WARP_CHECK(!rejected);
+    exposed.Reset();
+    CheckHresult(fixture.facade->ResizeBuffers(1, 24, 12, DXGI_FORMAT_UNKNOWN, 0),
+        "Resize native facade after all owned references retire before flush");
+    exposed = FacadeBuffer(*fixture.facade.Get());
+    FO4HDR_WARP_CHECK(exposed.Get() == g_presentation.presentationProxy.Get());
+    D3D11_TEXTURE2D_DESC description{};
+    exposed->GetDesc(&description);
+    FO4HDR_WARP_CHECK(description.Width == 24 && description.Height == 12);
+    CheckDebugMessages(device);
+}
+
+void VerifyNativeFacadeForeignBinding(Device& device)
+{
+    NativeFacadeFixture fixture(device);
+    auto exposed = FacadeBuffer(*fixture.facade.Get());
+    ComPtr<ID3D11RenderTargetView> foreign;
+    CheckHresult(device.device->CreateRenderTargetView(exposed.Get(), nullptr, &foreign),
+        "Create foreign native facade view");
+    auto* bound = foreign.Get();
+    device.context->OMSetRenderTargets(1, &bound, nullptr);
+    foreign.Reset();
+    exposed.Reset();
+    ExpectFacadeResizeBlocked(device, *fixture.facade.Get());
+    device.context->OMGetRenderTargets(1, &foreign, nullptr);
+    FO4HDR_WARP_CHECK(foreign.Get() == bound);
+    device.context->OMSetRenderTargets(0, nullptr, nullptr);
+    foreign.Reset();
+    RecoverFacadeResize(device, *fixture.facade.Get());
+    FO4HDR_WARP_CHECK(FacadeBuffer(*fixture.facade.Get()).Get() ==
+        g_presentation.presentationProxy.Get());
+}
+
+HRESULT RejectFacadeBuffer(IDXGISwapChain*, ID3D11Texture2D** buffer) noexcept
+{
+    *buffer = nullptr;
+    return E_FAIL;
+}
+
+void VerifyNativeFacadeReacquisitionFailure(Device& device)
+{
+    NativeFacadeFixture fixture(device, RejectFacadeBuffer);
+    FO4HDR_WARP_CHECK(fixture.facade->ResizeBuffers(1, 24, 12, DXGI_FORMAT_UNKNOWN, 0) == E_FAIL);
+    FO4HDR_WARP_CHECK(!g_referenceHealthy.load() && !PresentationProxyReady());
+    void* unavailable = fixture.facade.Get();
+    FO4HDR_WARP_CHECK(fixture.facade->GetBuffer(0, __uuidof(ID3D11Texture2D), &unavailable) ==
+        DXGI_ERROR_INVALID_CALL);
+    FO4HDR_WARP_CHECK(unavailable == nullptr);
+    CheckDebugMessages(device);
+}
+
 }  // namespace
 
 void VerifyPresentationSwapChain(Device& device)
 {
+    VerifyFacadeFlipTransport(device);
+    VerifyNativeFacadeProxyLifetime(device);
+    VerifyNativeFacadeForeignBinding(device);
+    VerifyNativeFacadeReacquisitionFailure(device);
     PresentationWindow window;
     auto native = CreatePresentationChain(device, window.handle, 16, 8);
     VerifyFacadeCreationGates(device, *native.Get());

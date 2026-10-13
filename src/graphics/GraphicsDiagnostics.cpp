@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "GraphicsDiagnostics.hpp"
-#include "SharedUiFrame.hpp"
 #include "FrameTrace.hpp"
+#include "SharedUiFrame.hpp"
 #include "ShaderRegistry.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include <algorithm>
@@ -417,7 +417,7 @@ void ObservePipboyScreenDraw(ID3D11DeviceContext* context,
 
 namespace {
 
-[[nodiscard]] std::array<std::uint64_t, 36> LifecycleCounters(
+[[nodiscard]] std::array<std::uint64_t, 32> LifecycleCounters(
     const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
 {
     return {
@@ -443,10 +443,6 @@ namespace {
         graphics.temporalAaBypassFrameCount,
         graphics.temporalOutputRejectedCount,
         graphics.referenceRenderFailureCount,
-        graphics.nativeUiBackdropCaptureDrawCount,
-        graphics.nativeUiBackdropCaptureFrameCount,
-        graphics.nativeUiCaptureDrawCount,
-        graphics.nativeUiCaptureFrameCount,
         graphics.resourceGeneration,
         graphics.colorDomainGeneration,
         graphics.colorDomainMismatchCount,
@@ -465,7 +461,7 @@ namespace {
 
 [[nodiscard]] bool ShouldReportLifecycle(const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
 {
-    static std::array<std::atomic<std::uint64_t>, 36> lastCounters{};
+    static std::array<std::atomic<std::uint64_t>, 32> lastCounters{};
     static std::atomic<bool> reported{};
     const auto currentCounters = LifecycleCounters(graphics);
     bool changed{};
@@ -557,18 +553,13 @@ namespace {
     const fo4hdr::GraphicsObservationSnapshot& graphics)
 {
     return std::format(
-        " production_requested={} production_operator_draws={} production_frames={} native_ui_backdrop_draws={} "
-        "native_ui_backdrop_frames={} native_ui_draws={} native_ui_frames={} performance_requested={} "
+        " production_requested={} production_operator_draws={} production_frames={} performance_requested={} "
         "performance_path={} performance_cpu_samples={} performance_gpu_samples={} performance_cpu_complete={} "
         "performance_gpu_complete={} performance_cpu_budget={} performance_gpu_budget={} performance_cpu_p95_ns={} "
         "performance_cpu_p99_ns={} performance_gpu_p95_ns={} performance_gpu_p99_ns={}",
         graphics.productionRequested,
         graphics.productionOperatorDrawCount,
         graphics.productionFrameCount,
-        graphics.nativeUiBackdropCaptureDrawCount,
-        graphics.nativeUiBackdropCaptureFrameCount,
-        graphics.nativeUiCaptureDrawCount,
-        graphics.nativeUiCaptureFrameCount,
         graphics.performanceRequested,
         graphics.performanceActivePath ? "active" : "disabled-boundary",
         graphics.performanceCpuMeasuredSamples,
@@ -625,10 +616,10 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
     try
     {
         ReportFrameTrace(sink);
-        ReportSharedUi(sink);
         const auto graphics = fo4hdr::ReadGraphicsObservation();
         if (!ShouldReportLifecycle(graphics)) return;
         ReportRendererStatus(graphics, sink);
+        ReportSharedUi(sink);
         ReportNewShaders(graphics, sink);
     }
     catch (...)

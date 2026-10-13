@@ -376,6 +376,9 @@ void TestWideGamutReadinessAndSdrHandoff()
         LinearColorDomain::linearBt2020UiRelative, true) ==
         SdrHandoffAction::clearBlack);
     FO4HDR_CHECK(DecideSdrHandoff(false, true,
+        LinearColorDomain::encodedSrgbBt709UiRelative, true) ==
+        SdrHandoffAction::clearBlack);
+    FO4HDR_CHECK(DecideSdrHandoff(false, true,
         LinearColorDomain::unknown, true) ==
         SdrHandoffAction::clearBlackAndDisable);
 }
@@ -579,6 +582,18 @@ void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)
         DecideTemporalSceneAction(evaluation, {true, true, true, true}) ==
         TemporalSceneAction::acceptProxy);
     FO4HDR_CHECK(
+        DecideTemporalSceneAction(evaluation, {true, true, false, false, true}) ==
+        TemporalSceneAction::acceptInternalScene);
+    FO4HDR_CHECK(
+        DecideTemporalSceneAction(evaluation, {false, true, false, false, true}) ==
+        TemporalSceneAction::ignoreUnqualifiedBranch);
+    FO4HDR_CHECK(
+        DecideTemporalSceneAction(evaluation, {true, false, false, false, true}) ==
+        TemporalSceneAction::ignoreUnqualifiedBranch);
+    FO4HDR_CHECK(
+        DecideTemporalSceneAction(evaluation, {true, true, true, false, true}) ==
+        TemporalSceneAction::rejectMissingProxy);
+    FO4HDR_CHECK(
         heartbeat.Evaluate(2, 2).outcome ==
         PipelineHeartbeatEvaluation::Outcome::staleGeneration);
     FO4HDR_CHECK(
@@ -587,6 +602,9 @@ void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)
     FO4HDR_CHECK(
         heartbeat.Evaluate(1, 3).outcome ==
         PipelineHeartbeatEvaluation::Outcome::staleFrame);
+    for (const auto stale : {heartbeat.Evaluate(2, 2), heartbeat.Evaluate(1, 3)})
+        FO4HDR_CHECK(DecideTemporalSceneAction(stale, {true, true, false, false, true}) ==
+            TemporalSceneAction::ignoreUnqualifiedBranch);
 }
 
 void TestOrderedHeartbeat()
@@ -602,6 +620,9 @@ void TestOrderedHeartbeat()
     evaluation = heartbeat.Evaluate(1, 1);
     FO4HDR_CHECK(
         DecideTemporalSceneAction(evaluation, {true, true, true, false}) ==
+        TemporalSceneAction::ignoreUnqualifiedBranch);
+    FO4HDR_CHECK(
+        DecideTemporalSceneAction(evaluation, {true, true, false, false, true}) ==
         TemporalSceneAction::ignoreUnqualifiedBranch);
     heartbeat.Observe(RenoDxShaderPass::lut);
     evaluation = heartbeat.Evaluate(1, 1);

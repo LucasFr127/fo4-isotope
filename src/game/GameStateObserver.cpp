@@ -481,6 +481,11 @@ public:
                 // Present applies the transition at its next frame boundary.
                 fo4hdr::PublishGraphicsPresentationBlocked(event.opening);
             }
+            else if (menu == fo4hdr::MenuCode::Main && event.opening)
+            {
+                // End the world epoch even when loading has already paused presentation.
+                fo4hdr::PublishGraphicsLifecycle(false, true);
+            }
             [[maybe_unused]] const auto sequence = g_menuEvents.Push(
                 static_cast<std::uint8_t>(menu),
                 event.opening,

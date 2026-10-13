@@ -3,8 +3,6 @@
 
 namespace fo4hdr::tests {
 
-void RunFrameTraceBufferTests();
-void RunSharedUiContentTests();
 void RunShaderTestOptionsTests();
 void RunApproximateComparisonTests();
 void RunBoundedWaitReleaseTests();
@@ -12,6 +10,7 @@ void RunHdrSettingsTests();
 void TestHdrShortcutInput();
 void TestHdrShortcutWindowProcedure();
 void RunDirectCallPatchTests();
+void RunNativeUiResourcesTests();
 void RunSnapshotTests();
 void RunSnapshotLifecycleInvalidationTests();
 void RunImageSpaceSemanticDataTests();
@@ -25,9 +24,10 @@ void RunOwnedTaskTransferTests();
 void RunMenuEventQueueOverwriteRaceTests();
 void RunImageSpaceProvenanceTests();
 void RunScopedD3D11ComputeConstantBufferTests();
+void RunFrameTraceBufferTests();
+void RunSharedUiContentTests();
 void RunHookTests();
 void RunArmorUiCompositionTests();
-void RunNativeUiResourcesTests();
 void RunHdrCoreTests();
 void RunNativeLutObservationTests();
 void RunPerformanceTests();
