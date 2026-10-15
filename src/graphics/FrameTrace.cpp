@@ -2,6 +2,8 @@
 
 #include "FrameTrace.hpp"
 
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
+
 #include "FrameTraceBuffer.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
@@ -591,3 +593,58 @@ void ReportFrameTrace(GraphicsDiagnosticSink sink)
 }
 
 } // namespace fo4hdr
+
+#else
+
+namespace fo4hdr {
+
+ScopedFrameTraceOwnedCall::ScopedFrameTraceOwnedCall() noexcept = default;
+ScopedFrameTraceOwnedCall::~ScopedFrameTraceOwnedCall() = default;
+
+bool InitializeFrameTrace(bool) noexcept
+{
+    return false;
+}
+
+bool FrameTraceRequested() noexcept
+{
+    return false;
+}
+
+bool BeginFrameTrace() noexcept
+{
+    return false;
+}
+
+bool ArmFrameTrace() noexcept
+{
+    return false;
+}
+
+bool FrameTraceAutoReportPending() noexcept
+{
+    return false;
+}
+
+void CancelFrameTrace() noexcept {}
+void RetireFrameTrace() noexcept {}
+void ReportFrameTrace(GraphicsDiagnosticSink) {}
+void SetFrameTraceAutoReportSink(GraphicsDiagnosticSink) noexcept {}
+void TraceFrameDraw(ID3D11DeviceContext*, const DrawObservation&,
+    FrameTraceKind, const FrameTraceArguments&) noexcept {}
+void TraceFrameCopy(ID3D11DeviceContext*, const DrawObservation&,
+    const FrameTraceCopyArguments&) noexcept {}
+void TraceFrameClear(ID3D11DeviceContext*, const DrawObservation&,
+    ID3D11RenderTargetView*, const FLOAT*) noexcept {}
+void TraceFrameCommandList(ID3D11DeviceContext*, const DrawObservation&,
+    ID3D11CommandList*, BOOL) noexcept {}
+void TraceNativeBoundary(const ArmorUiScopeToken&, bool) noexcept {}
+void TraceFramePresent(IDXGISwapChain*, FrameTraceKind,
+    const FrameTracePresentArguments&) noexcept {}
+void TraceSharedUiPresentation(const FrameTraceSharedUiSnapshot&) noexcept {}
+void ProcessFrameTraceHotkey(bool, bool) noexcept {}
+void PollFrameTraceHotkey(IDXGISwapChain*) noexcept {}
+
+} // namespace fo4hdr
+
+#endif

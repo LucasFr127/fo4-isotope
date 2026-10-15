@@ -9,7 +9,9 @@ param(
 
     [switch]$AllowUnvalidatedRuntime,
 
-    [switch]$DisablePch
+    [switch]$DisablePch,
+
+    [switch]$DisableFrameTrace
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +21,8 @@ $ErrorActionPreference = "Stop"
     -Runtime $Runtime `
     -Mode $Mode `
     -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
-    -DisablePch:$DisablePch
+    -DisablePch:$DisablePch `
+    -DisableFrameTrace:$DisableFrameTrace
 
 $repoRoot = Get-Fo4HdrRepoRoot
 Push-Location $repoRoot

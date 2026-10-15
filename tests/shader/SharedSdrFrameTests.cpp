@@ -16,6 +16,7 @@
 namespace fo4hdr::tests::gpu {
 namespace {
 
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
 std::string g_startupOutputTrace;
 
 void CaptureStartupOutputTrace(std::string_view message)
@@ -23,6 +24,7 @@ void CaptureStartupOutputTrace(std::string_view message)
     g_startupOutputTrace.append(message);
     g_startupOutputTrace.push_back('\n');
 }
+#endif
 
 struct SdrDispatchScope
 {
@@ -293,14 +295,18 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
 
     void CheckStartupOutputTrace()
     {
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         const bool requested = FrameTraceRequested();
+#endif
         FO4HDR_WARP_CHECK(InitializeSharedUiSdr(device.context.Get()));
         g_scene = {};
         g_presentation.colorSpaceState = 1;
         g_evidence.hdrColorSpaceActive = true;
         constexpr float sdr[4]{0.25F, 0.25F, 0.25F, 1};
         device.context->ClearRenderTargetView(proxy.rtv.Get(), sdr);
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         FO4HDR_WARP_CHECK(InitializeFrameTrace(true) && ArmFrameTrace());
+#endif
         FO4HDR_WARP_CHECK(!PreparePresentFrame(chain.Get(), true));
         CheckOutputCode(QuantizeR10Unorm(EncodeSt2084Pq(std::pow(0.25, 2.2) * 203)));
         FO4HDR_WARP_CHECK(g_presentation.colorSpaceState == 1 && g_evidence.hdrColorSpaceActive.load());
@@ -313,16 +319,20 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
         FO4HDR_WARP_CHECK(!g_evidence.hdrColorSpaceActive.load() && g_referenceHealthy.load());
         TraceFramePresent(chain.Get(), FrameTraceKind::presentResult, {});
         TraceFramePresent(chain.Get(), FrameTraceKind::presentResult, {});
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         g_startupOutputTrace.clear();
         ReportFrameTrace(&CaptureStartupOutputTrace);
         const auto white = std::to_string(std::bit_cast<std::uint32_t>(203.0F));
         // Startup output still carries the incomplete-scene rejection (7).
         FO4HDR_WARP_CHECK(g_startupOutputTrace.find("args=1/7/16/" + white + "/") != std::string::npos);
         FO4HDR_WARP_CHECK(g_startupOutputTrace.find("args=2/7/16/") != std::string::npos);
+#endif
         CompletePresentFrame(false, false);
         CancelFrameTrace();
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         ReportFrameTrace(&CaptureStartupOutputTrace);
         (void)InitializeFrameTrace(requested);
+#endif
     }
 
     void CheckSdrMissingProducer()

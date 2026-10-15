@@ -12,10 +12,12 @@
 
 namespace fo4hdr::tests::gpu {
 
-constexpr std::array<std::string_view, 19> kSectionNames{
+constexpr auto kSectionNames = std::to_array<std::string_view>({
     "operator-lut",
     "context-query-safety",
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
     "frame-trace",
+#endif
     "presentation-proxy",
     "shared-ui-composition",
     "presentation-state",
@@ -32,7 +34,7 @@ constexpr std::array<std::string_view, 19> kSectionNames{
     "gt7-operator-ui",
     "ui-relative-temporal-gt7",
     "gt7-official-reference",
-};
+});
 
 const char* SectionOutcome(int failuresBefore, int skipsBefore)
 {
@@ -77,7 +79,9 @@ struct ShippingShaderRun
                 *device.device.Get(), *device.context.Get(), false);
         });
         RunSection(options.filter, "context-query-safety", VerifyContextQuerySafety);
+#if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         RunSection(options.filter, "frame-trace", [&] { VerifyFrameTrace(device); });
+#endif
         RunSection(options.filter, "presentation-proxy", [&] {
             VerifyPresentationProxy(device);
             VerifyPresentationSwapChain(device);

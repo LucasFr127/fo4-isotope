@@ -9,6 +9,8 @@ param(
 
     [switch]$AllowUnvalidatedRuntime,
 
+    [switch]$DisableFrameTrace,
+
     [ValidateSet("all", "compiled", "repository")]
     [string]$Scope = "all",
 
@@ -64,6 +66,7 @@ if ($runCompiled) {
                 'false'
             }
             fo4hdr_build_tests = 'true'
+            fo4hdr_frame_trace = if ($DisableFrameTrace) { 'false' } else { 'true' }
             commonlib_ini = 'false'
             commonlib_json = 'false'
             commonlib_toml = 'false'
@@ -86,7 +89,8 @@ if ($runCompiled) {
         & (Join-Path $PSScriptRoot "configure.ps1") `
             -Runtime $Runtime `
             -Mode $Mode `
-            -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime
+            -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
+            -DisableFrameTrace:$DisableFrameTrace
     }
 } elseif ($SkipConfigure) {
     throw "-SkipConfigure is unnecessary with -Scope repository."

@@ -9,7 +9,9 @@ param(
 
     [switch]$AllowUnvalidatedRuntime,
 
-    [switch]$DisablePch
+    [switch]$DisablePch,
+
+    [switch]$DisableFrameTrace
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +48,7 @@ Assert-Fo4HdrRuntimeActionAllowed `
 
 $allowFlag = if ($AllowUnvalidatedRuntime) { "y" } else { "n" }
 $pchFlag = if ($DisablePch) { "n" } else { "y" }
+$traceFlag = if ($DisableFrameTrace) { "n" } else { "y" }
 $toolset = Get-Fo4HdrMsvcToolset -Lock $lock
 $sdk = [string]$lock.toolchain.observed.windowsSdk.version
 
@@ -62,6 +65,7 @@ try {
         --fo4hdr_runtime=$Runtime `
         --fo4hdr_allow_unvalidated_runtime=$allowFlag `
         --fo4hdr_use_pch=$pchFlag `
+        --fo4hdr_frame_trace=$traceFlag `
         --fo4hdr_build_tests=y `
         --commonlib_ini=n `
         --commonlib_json=n `

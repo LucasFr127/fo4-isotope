@@ -182,7 +182,7 @@ if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture 
 
 function Write-BuildConfigurationStub {
     [IO.File]::WriteAllText((Join-Path $project 'scripts/configure.ps1'), @'
-param([string]$Runtime, [string]$Mode, [switch]$AllowUnvalidatedRuntime, [switch]$DisablePch)
+param([string]$Runtime, [string]$Mode)
 if ($Runtime -cne '1.10.163' -or $Mode -cne 'debug') { throw 'Unexpected fixture build configuration.' }
 '@)
 }

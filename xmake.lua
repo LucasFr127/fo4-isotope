@@ -74,6 +74,12 @@ option("fo4hdr_use_pch")
     set_description("Use the plugin-only precompiled header")
 option_end()
 
+option("fo4hdr_frame_trace")
+    set_default(true)
+    set_showmenu(true)
+    set_description("Build optional frame tracing and its integration tests")
+option_end()
+
 rule("fo4hdr.plugin")
     add_deps("commonlib.plugin")
 
@@ -233,6 +239,9 @@ target("fo4hdr-renderer")
     add_includedirs("include", { public = true })
     add_includedirs(path.join(os.projectdir(), "build", "generated"))
     add_packages("imgui")
+    if not has_config("fo4hdr_frame_trace") then
+        add_defines("FO4HDR_DISABLE_FRAME_TRACE=1", { public = true })
+    end
     add_syslinks("d3d11", "dxgi", "dxguid", "user32", "comctl32", { public = true })
 
     if (get_config("fo4hdr_runtime") or "1.10.163") == "1.10.163" then
@@ -313,6 +322,9 @@ if has_config("fo4hdr_build_tests") then
         set_default(true)
         add_deps("fo4hdr-core", "fo4hdr-shaders", "fo4hdr-renderer")
         add_files("tests/shader/**.cpp")
+        if not has_config("fo4hdr_frame_trace") then
+            remove_files("tests/shader/FrameTraceTests.cpp")
+        end
         add_files("tests/support/**.cpp")
         remove_files("tests/support/reference/Aces2LmtSourceOracle.cpp",
             "tests/support/reference/SelectiveColorSourceOracle.cpp")
