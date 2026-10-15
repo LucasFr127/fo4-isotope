@@ -41,7 +41,7 @@ jobs:
           FO4HDR_SOURCE_INVENTORY: ${{ vars.FO4HDR_SOURCE_INVENTORY }}
         run: git config --local fo4hdr.sourceInventory "$env:FO4HDR_SOURCE_INVENTORY"
 
-      - name: Install pinned XMake and REUSE
+      - name: Install pinned XMake
         run: |
           $ErrorActionPreference = 'Stop'
           $lock = Get-Content versions.lock.json -Raw | ConvertFrom-Json
@@ -56,15 +56,25 @@ jobs:
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $tools
           (Join-Path $tools 'xmake') >> $env:GITHUB_PATH
+          "FO4HDR_PWSH=$((Get-Process -Id $PID).Path)" >> $env:GITHUB_ENV
+          "XMAKE_PKG_INSTALLDIR=$(Join-Path $env:RUNNER_TEMP 'fo4hdr-xmake/packages')" >> $env:GITHUB_ENV
+          "XMAKE_PKG_CACHEDIR=$(Join-Path $env:RUNNER_TEMP 'fo4hdr-xmake/downloads')" >> $env:GITHUB_ENV
+
+      - name: Install pinned REUSE
+        if: matrix.mode == 'debug'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $lock = Get-Content versions.lock.json -Raw | ConvertFrom-Json
+          $tools = Join-Path $env:RUNNER_TEMP 'fo4hdr-tools'
           $reuseRoot = Join-Path $tools 'reuse'
           python -m venv $reuseRoot
           if ($LASTEXITCODE -ne 0) { throw 'REUSE virtual environment creation failed.' }
           & (Join-Path $reuseRoot 'Scripts/python.exe') -m pip install "reuse[charset-normalizer]==$($lock.toolchain.observed.reuse)"
           if ($LASTEXITCODE -ne 0) { throw 'REUSE installation failed.' }
           "FO4HDR_REUSE=$(Join-Path $reuseRoot 'Scripts/reuse.exe')" >> $env:GITHUB_ENV
-          "FO4HDR_PWSH=$((Get-Process -Id $PID).Path)" >> $env:GITHUB_ENV
 
       - name: Initialize x64 MSVC and locked Windows SDK
+        id: toolchain
         run: |
           $ErrorActionPreference = 'Stop'
           $lock = Get-Content versions.lock.json -Raw | ConvertFrom-Json
@@ -87,9 +97,22 @@ jobs:
               "$($entry.Name)=$($entry.Value)" >> $env:GITHUB_ENV
             }
           }
+          $compiler = (Get-Item (Get-Command cl.exe -CommandType Application).Source).VersionInfo.FileVersion
+          "compiler=$compiler" >> $env:GITHUB_OUTPUT
+          "toolset=$($env:VCToolsVersion.TrimEnd('\', '/'))" >> $env:GITHUB_OUTPUT
+          "sdk=$($env:WindowsSDKVersion.TrimEnd('\', '/'))" >> $env:GITHUB_OUTPUT
 
       - name: Verify compatible toolchain and pinned dependencies
         run: .\scripts\bootstrap.ps1
+
+      - name: Cache XMake dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.XMAKE_PKG_INSTALLDIR }}
+            ${{ env.XMAKE_PKG_CACHEDIR }}
+          key: >-
+            ${{ runner.os }}-x64-xmake-v1-${{ matrix.mode }}-${{ steps.toolchain.outputs.compiler }}-${{ steps.toolchain.outputs.toolset }}-${{ steps.toolchain.outputs.sdk }}-${{ hashFiles('versions.lock.json', 'xmake-requires.lock', 'xmake.lua') }}
 
       - name: Audit public source licenses and REUSE metadata
         if: matrix.mode == 'debug'
