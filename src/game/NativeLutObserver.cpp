@@ -96,12 +96,7 @@ bool LoadedPathMatches(const RE::NiTexture& native, const fo4hdr::LutSnapshot& l
 }
 std::uintptr_t TextureView(const RE::BSGraphics::Texture* texture) noexcept
 {
-#if defined(FO4HDR_RUNTIME_1_10_163)
-    return *reinterpret_cast<const std::uintptr_t*>(
-        reinterpret_cast<const std::byte*>(texture) + fo4hdr::generated::kNativeLutTextureSrvOffset);
-#else
-    return 0;
-#endif
+    return reinterpret_cast<std::uintptr_t>(texture->srView);
 }
 
 bool CopyObservedPath(const char* name, fo4hdr::LutSnapshot& lut) noexcept

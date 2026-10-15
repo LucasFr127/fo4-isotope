@@ -163,7 +163,7 @@ void AddCatalogEntry(Catalog& catalog, RE::TESImageSpace* form)
 {
     if (form == nullptr) return;
     const auto formId = form->GetFormID();
-    if ((formId >> 24U) == 0xFFU) return;
+    if (form->IsCreated()) return;
     const auto* origin = form->GetFile(0);
     if (origin == nullptr) return;
 

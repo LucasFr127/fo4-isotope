@@ -79,35 +79,50 @@ Assert-Rejected {
         Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
 } 'retired xEdit source metadata'
 
-$wrongBoundary = Copy-Profile $profile
-$wrongBoundary.topLevelEffectCount = 71
-Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $wrongBoundary } `
-    "wrong top-level effect boundary"
+foreach ($case in @('managerSize', 'currentEofDataOffset', 'topLevelEffectCount', 'effects')) {
+    $retired = Copy-Profile $manifest
+    $retired.commonlibObservation.imageSpaceProfile |
+        Add-Member -NotePropertyName $case -NotePropertyValue 0
+    Assert-Rejected {
+        $null = $retired | ConvertTo-Json -Depth 30 |
+            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+    } "duplicated CommonLib profile fact: $case"
+}
+foreach ($case in @('manager', 'effect', 'lut')) {
+    $retired = Copy-Profile $manifest
+    $retired.commonlibObservation.imageSpaceProfile.layout |
+        Add-Member -NotePropertyName $case -NotePropertyValue @{}
+    Assert-Rejected {
+        $null = $retired | ConvertTo-Json -Depth 30 |
+            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+    } "duplicated CommonLib public layout: $case"
+}
+
+$retiredOffset = Copy-Profile $manifest
+$retiredOffset.commonlibObservation.imageSpaceProfile.activeData[0] |
+    Add-Member -NotePropertyName 'offset' -NotePropertyValue 128
+Assert-Rejected {
+    $null = $retiredOffset | ConvertTo-Json -Depth 30 |
+        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+} 'duplicated CommonLib active-data offset'
+
+$retiredTextureOffset = Copy-Profile $manifest
+$retiredTextureOffset.nativeLutObserver |
+    Add-Member -NotePropertyName 'textureSrvOffset' -NotePropertyValue 0
+Assert-Rejected {
+    $null = $retiredTextureOffset | ConvertTo-Json -Depth 30 |
+        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
+} 'duplicated CommonLib texture SRV offset'
 
 $missing = Copy-Profile $profile
-$missing.effects = @($missing.effects | Select-Object -First 71)
+$missing.activeData = @($missing.activeData | Select-Object -First 11)
 Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $missing } `
-    "missing effect"
+    "missing active-data field"
 
 $duplicate = Copy-Profile $profile
-$duplicate.effects[71].symbol = $duplicate.effects[70].symbol
+$duplicate.activeData[11].field = $duplicate.activeData[10].field
 Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $duplicate } `
-    "duplicate symbol"
-
-$wrongSymbol = Copy-Profile $profile
-$wrongSymbol.effects[22].symbol = "EFFECT_NOT_THE_REVIEWED_MAP_SLOT"
-Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $wrongSymbol } `
-    "wrong unique symbol"
-
-$unordered = Copy-Profile $profile
-$unordered.effects[1].index = 2
-Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $unordered } `
-    "unordered index"
-
-$wrongOffset = Copy-Profile $profile
-$wrongOffset.activeData[4].offset = 148
-Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $wrongOffset } `
-    "wrong active-data offset"
+    "duplicate active-data field"
 
 $wrongAlias = Copy-Profile $profile
 $wrongAlias.activeData[1].xeditAlias = "Middle Gray"
@@ -166,35 +181,24 @@ Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $wrongLayoutSource
 } "wrong CommonLib structural-layout source"
 
-$wrongManagerSize = Copy-Profile $profile
-$wrongManagerSize.managerSize = 0x1B0
-Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $wrongManagerSize } `
-    "wrong CommonLib manager size"
-
-$wrongCurrentEofDataOffset = Copy-Profile $profile
-$wrongCurrentEofDataOffset.currentEofDataOffset = 0x78
-Assert-Rejected {
-    $null = Assert-Fo4HdrImageSpaceProfile $wrongCurrentEofDataOffset
-} "wrong CommonLib currentEOFData offset"
-
 $missingLayout = Copy-Profile $profile
 $missingLayout.PSObject.Properties.Remove("layout")
 Assert-Rejected { $null = Assert-Fo4HdrImageSpaceProfile $missingLayout } `
-    "missing CommonLib structural layout"
+    "missing private array layout"
 
 $missingLayoutConstant = Copy-Profile $profile
-$missingLayoutConstant.layout.manager.PSObject.Properties.Remove(
-    "effectListOffset"
+$missingLayoutConstant.layout.primitiveArray.PSObject.Properties.Remove(
+    "freeIndexOffset"
 )
 Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $missingLayoutConstant
-} "missing CommonLib structural-layout constant"
+} "missing private array-layout constant"
 
 $wrongLayoutConstant = Copy-Profile $profile
-$wrongLayoutConstant.layout.lut.textureOffset = 0x48
+$wrongLayoutConstant.layout.primitiveArray.freeIndexOffset = 0x10
 Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $wrongLayoutConstant
-} "wrong CommonLib structural-layout constant"
+} "wrong private array-layout constant"
 
 $first = [IO.Path]::Combine(
     [IO.Path]::GetTempPath(),

@@ -138,14 +138,6 @@ function Assert-Fo4HdrCommonLibRelocationProfile {
     return $actual
 }
 
-function Test-Fo4HdrImageSpaceDimensions {
-    param($Profile)
-    return -not ([uint64]$Profile.managerSize -ne 0x1B8 -or
-        [uint64]$Profile.currentEofDataOffset -ne 0x80 -or
-        [uint64]$Profile.topLevelEffectCount -ne 72 -or
-        $Profile.effects.Count -ne 72)
-}
-
 function Assert-Fo4HdrImageSpaceProfile {
     param(
         [Parameter(Mandatory = $true)]
@@ -154,13 +146,7 @@ function Assert-Fo4HdrImageSpaceProfile {
 
     Assert-Fo4HdrImageSpaceSourceIdentity $Profile
 
-    if (-not (Test-Fo4HdrImageSpaceDimensions $Profile)) {
-        throw "Image-space semantic profile dimensions are invalid."
-    }
-
     Assert-Fo4HdrImageSpaceLayout $Profile
-
-    Assert-Fo4HdrImageSpaceEffects $Profile
 
     Assert-Fo4HdrImageSpaceActiveFields $Profile
 
@@ -222,31 +208,12 @@ function Assert-Fo4HdrImageSpaceLayoutSection {
 function Assert-Fo4HdrImageSpaceLayout {
     param([psobject]$Profile)
     $expectedLayout = [ordered]@{
-        manager = [ordered]@{
-            effectListOffset = 0x10
-            baseDataOffset = 0x60
-            overrideBaseDataOffset = 0x68
-            underwaterBaseDataOffset = 0x70
-            consoleBaseDataOffset = 0x78
-            lutDataOffset = 0x130
-            overrideLutDataOffset = 0x1A0
-            readyOffset = 0x1B4
-        }
         primitiveArray = [ordered]@{
             size = 0x18
             dataOffset = 0x08
             capacityOffset = 0x10
             freeIndexOffset = 0x12
             sizeOffset = 0x14
-        }
-        effect = [ordered]@{
-            storedActiveOffset = 0x08
-        }
-        lut = [ordered]@{
-            size = 0x70
-            entryCount = 4
-            weightOffset = 0x20
-            textureOffset = 0x50
         }
     }
     $actualLayoutSections = @($Profile.layout.PSObject.Properties.Name)
@@ -263,45 +230,10 @@ function Assert-Fo4HdrImageSpaceLayout {
 
 }
 
-function Register-Fo4HdrImageSpaceEffectIdentity {
-    param($Effect, [int]$Index, [string]$Symbol, $Symbols)
-    return -not ([uint64]$effect.index -ne [uint64]$index -or
-            $symbol -notmatch '^EFFECT_[A-Z0-9_x]+$' -or
-            -not $symbols.Add($symbol))
-}
-
-function Assert-Fo4HdrImageSpaceEffects {
-    param([psobject]$Profile)
-    $symbols = [Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::Ordinal
-    )
-    for ($index = 0; $index -lt 72; ++$index) {
-        $effect = $Profile.effects[$index]
-        $symbol = [string]$effect.symbol
-        if (-not (Register-Fo4HdrImageSpaceEffectIdentity $effect $index $symbol $symbols)) {
-            throw "Image-space effect semantics are incomplete or unordered."
-        }
-    }
-    $effectTable = (($Profile.effects | ForEach-Object {
-        "{0}:{1}" -f $_.index, $_.symbol
-    }) -join "`n") + "`n"
-    $effectTableHash = [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData(
-            [Text.UTF8Encoding]::new($false).GetBytes($effectTable)
-        )
-    ).ToLowerInvariant()
-    if ($effectTableHash -ne
-        "fd7918b8a53d003ea49d25ca82590af85571f2d5797dfd16ae343b45c4f94ba4") {
-        throw "Image-space effect semantics differ from the reviewed table."
-    }
-
-}
-
 function Test-Fo4HdrImageSpaceActiveField {
     param($Field, $Expected, $ActualAlias, $ActiveFields)
     $name = [string]$Field.field
     return -not ($activeFields.ContainsKey($name) -or
-        [uint64]$field.offset -ne [uint64]$expected.offset -or
         $actualAlias -ne $expected.xeditAlias)
 }
 
@@ -320,27 +252,26 @@ function Register-Fo4HdrImageSpaceActiveField {
     if (-not (Test-Fo4HdrImageSpaceActiveField $field $expected $actualAlias $activeFields)) {
         throw "Image-space active-data semantics are invalid."
     }
-    $activeFields[$name] = [uint64]$field.offset
+    $activeFields[$name] = $true
 }
 
 function Assert-Fo4HdrImageSpaceActiveFields {
     param([psobject]$Profile)
     $expectedFields = [ordered]@{
-        "eyeAdaptSpeed" = @{ offset = 0x80; xeditAlias = $null }
-        "bloomBlurRadius" = @{ offset = 0x84; xeditAlias = "Tonemap E" }
-        "bloomThreshold" = @{ offset = 0x88; xeditAlias = $null }
-        "bloomScale" = @{ offset = 0x8C; xeditAlias = $null }
+        "eyeAdaptSpeed" = @{ xeditAlias = $null }
+        "bloomBlurRadius" = @{ xeditAlias = "Tonemap E" }
+        "bloomThreshold" = @{ xeditAlias = $null }
+        "bloomScale" = @{ xeditAlias = $null }
         "receiveBloomThreshold" = @{
-            offset = 0x90
             xeditAlias = "Auto Exposure Max"
         }
-        "white" = @{ offset = 0x94; xeditAlias = "Auto Exposure Min" }
-        "sunlightScale" = @{ offset = 0x98; xeditAlias = $null }
-        "skyScale" = @{ offset = 0x9C; xeditAlias = $null }
-        "eyeAdaptStrength" = @{ offset = 0xA0; xeditAlias = "Middle Gray" }
-        "cinematicSaturation" = @{ offset = 0xA4; xeditAlias = $null }
-        "cinematicBrightness" = @{ offset = 0xA8; xeditAlias = $null }
-        "cinematicContrast" = @{ offset = 0xAC; xeditAlias = $null }
+        "white" = @{ xeditAlias = "Auto Exposure Min" }
+        "sunlightScale" = @{ xeditAlias = $null }
+        "skyScale" = @{ xeditAlias = $null }
+        "eyeAdaptStrength" = @{ xeditAlias = "Middle Gray" }
+        "cinematicSaturation" = @{ xeditAlias = $null }
+        "cinematicBrightness" = @{ xeditAlias = $null }
+        "cinematicContrast" = @{ xeditAlias = $null }
     }
     if ($Profile.activeData.Count -ne $expectedFields.Count) {
         throw "Image-space active-data profile has the wrong field count."

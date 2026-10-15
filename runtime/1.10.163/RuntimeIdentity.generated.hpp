@@ -68,7 +68,6 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x028C8B30;
 inline constexpr std::uint64_t kNativeLutRenderId = 1388477;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 280;
-inline constexpr std::size_t kNativeLutTextureSrvOffset = 0;
 inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ 72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0 }};
 inline constexpr std::uintptr_t kImageSpaceWeatherRva = 0x00651D00;
 inline constexpr std::uint64_t kImageSpaceWeatherId = 684671;
@@ -116,7 +115,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "92b63926837f5bdaea3885d7c1ae4124e7dae6580b05fb7b04d584b6a374a6c9";
+inline constexpr std::string_view kManifestSha256 = "5f62c1de15e61dc0841d9b6c7c8fe7709c83fe4e337198bd4064e1c69fae8859";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
     0xf97c127cu, 0xd49c4526u, 0x1a87d341u, 0x2a3edc35u
@@ -127,231 +126,31 @@ inline constexpr std::array<std::uint32_t, 4> kLateGameUiCompositeDxbcHash{{
 inline constexpr std::array<std::uint32_t, 4> kLateGameUiBackdropDxbcHash{{
     0xb939134cu, 0xc0f28bacu, 0x1a7e28c1u, 0xf4aff2feu
 }};
-struct ImageSpaceEffectSemantic
-{
-    std::uint16_t index;
-    std::string_view symbol;
-};
-
 struct ImageSpaceActiveDataSemantic
 {
     std::string_view field;
-    std::size_t offset;
     std::string_view xeditAlias;
 };
 
-template <class EffectEnum>
-inline constexpr std::array kImageSpaceEffectIndexMatches{
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_WORLD_CAMERA) == 0,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_TEMPORAL_AA_PRE_HDR) == 1,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SUNBEAMS) == 2,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_HDR) == 3,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_HDR_CS) == 4,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_REFRACTION) == 5,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_DEPTH_OF_FIELD) == 6,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN) == 7,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_RADIAL_BLUR) == 8,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_FULLSCREEN_BLUR) == 9,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_MOTIONBLUR) == 10,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_GETHIT) == 11,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_VATS_TARGET) == 12,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_FULLSCREEN_COLOR) == 13,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SHADER_GAMMA_CORRECT) == 14,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SHADER_GAMMA_CORRECT_LUT) == 15,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SHADER_GAMMA_CORRECT_RESIZE) == 16,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SHADER_FXAA) == 17,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_TEMPORAL_AA) == 18,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_TEMPORAL_OLD_AA) == 19,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BOKEH_DEPTH_OF_FIELD) == 20,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION) == 21,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_MAP) == 22,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR3) == 23,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR5) == 24,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR7) == 25,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR9) == 26,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR11) == 27,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR13) == 28,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR15) == 29,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR3) == 30,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR5) == 31,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR7) == 32,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR9) == 33,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR11) == 34,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR13) == 35,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NONHDR_BLUR15) == 36,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR3) == 37,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR5) == 38,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR7) == 39,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR9) == 40,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR11) == 41,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR13) == 42,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR15) == 43,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS) == 44,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS) == 45,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS) == 46,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR3_480x270CS) == 47,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR5_480x270CS) == 48,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR7_480x270CS) == 49,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR9_480x270CS) == 50,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR11_480x270CS) == 51,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR13_480x270CS) == 52,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BLUR15_480x270CS) == 53,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR3_480x270CS) == 54,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR5_480x270CS) == 55,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR7_480x270CS) == 56,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR9_480x270CS) == 57,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR11_480x270CS) == 58,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR13_480x270CS) == 59,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_BRIGHTPASS_BLUR15_480x270CS) == 60,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_WATER_DISPLACEMENT) == 61,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_NOISE) == 62,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_RAINSPLASH) == 63,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_VLS_LIGHT) == 64,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_VLS) == 65,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_PIPBOY_SCREEN) == 66,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_HUD_GLASS) == 67,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_MOD_MENU) == 68,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_AO) == 69,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SAO) == 70,
-        static_cast<std::uint16_t>(EffectEnum::EFFECT_SAO_CS) == 71
-};
-
-template <class EffectEnum>
-consteval bool ImageSpaceEffectEnumMatches()
-{
-    for (const bool match : kImageSpaceEffectIndexMatches<EffectEnum>)
-    {
-        if (!match) return false;
-    }
-    return true;
-}
-
-inline constexpr std::size_t kImageSpaceManagerSize = 440;
-inline constexpr std::size_t kImageSpaceCurrentEofDataOffset = 128;
-inline constexpr std::size_t kImageSpaceEffectListOffset = 16;
-inline constexpr std::size_t kImageSpaceBaseDataOffset = 96;
-inline constexpr std::size_t kImageSpaceOverrideBaseDataOffset = 104;
-inline constexpr std::size_t kImageSpaceUnderwaterBaseDataOffset = 112;
-inline constexpr std::size_t kImageSpaceConsoleBaseDataOffset = 120;
-inline constexpr std::size_t kImageSpaceLutDataOffset = 304;
-inline constexpr std::size_t kImageSpaceOverrideLutDataOffset = 416;
-inline constexpr std::size_t kImageSpaceReadyOffset = 436;
 inline constexpr std::size_t kImageSpacePrimitiveArraySize = 24;
 inline constexpr std::size_t kImageSpacePrimitiveArrayDataOffset = 8;
 inline constexpr std::size_t kImageSpacePrimitiveArrayCapacityOffset = 16;
 inline constexpr std::size_t kImageSpacePrimitiveArrayFreeIndexOffset = 18;
 inline constexpr std::size_t kImageSpacePrimitiveArraySizeOffset = 20;
-inline constexpr std::size_t kImageSpaceEffectStoredActiveOffset = 8;
-inline constexpr std::size_t kImageSpaceLutDataSize = 112;
-inline constexpr std::size_t kImageSpaceLutEntryCount = 4;
-inline constexpr std::size_t kImageSpaceLutWeightOffset = 32;
-inline constexpr std::size_t kImageSpaceLutTextureOffset = 80;
-inline constexpr std::uint16_t kImageSpaceTopLevelEffectCount = 72;
-inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
-inline constexpr std::string_view kImageSpaceEffectTableSha256 = "fd7918b8a53d003ea49d25ca82590af85571f2d5797dfd16ae343b45c4f94ba4";
-inline constexpr std::array<ImageSpaceEffectSemantic, kImageSpaceTopLevelEffectCount>
-    kImageSpaceEffectSemantics{{
-    ImageSpaceEffectSemantic{0, "EFFECT_WORLD_CAMERA"},
-    ImageSpaceEffectSemantic{1, "EFFECT_TEMPORAL_AA_PRE_HDR"},
-    ImageSpaceEffectSemantic{2, "EFFECT_SUNBEAMS"},
-    ImageSpaceEffectSemantic{3, "EFFECT_HDR"},
-    ImageSpaceEffectSemantic{4, "EFFECT_HDR_CS"},
-    ImageSpaceEffectSemantic{5, "EFFECT_REFRACTION"},
-    ImageSpaceEffectSemantic{6, "EFFECT_DEPTH_OF_FIELD"},
-    ImageSpaceEffectSemantic{7, "EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN"},
-    ImageSpaceEffectSemantic{8, "EFFECT_RADIAL_BLUR"},
-    ImageSpaceEffectSemantic{9, "EFFECT_FULLSCREEN_BLUR"},
-    ImageSpaceEffectSemantic{10, "EFFECT_MOTIONBLUR"},
-    ImageSpaceEffectSemantic{11, "EFFECT_GETHIT"},
-    ImageSpaceEffectSemantic{12, "EFFECT_VATS_TARGET"},
-    ImageSpaceEffectSemantic{13, "EFFECT_FULLSCREEN_COLOR"},
-    ImageSpaceEffectSemantic{14, "EFFECT_SHADER_GAMMA_CORRECT"},
-    ImageSpaceEffectSemantic{15, "EFFECT_SHADER_GAMMA_CORRECT_LUT"},
-    ImageSpaceEffectSemantic{16, "EFFECT_SHADER_GAMMA_CORRECT_RESIZE"},
-    ImageSpaceEffectSemantic{17, "EFFECT_SHADER_FXAA"},
-    ImageSpaceEffectSemantic{18, "EFFECT_TEMPORAL_AA"},
-    ImageSpaceEffectSemantic{19, "EFFECT_TEMPORAL_OLD_AA"},
-    ImageSpaceEffectSemantic{20, "EFFECT_BOKEH_DEPTH_OF_FIELD"},
-    ImageSpaceEffectSemantic{21, "EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION"},
-    ImageSpaceEffectSemantic{22, "EFFECT_MAP"},
-    ImageSpaceEffectSemantic{23, "EFFECT_BLUR3"},
-    ImageSpaceEffectSemantic{24, "EFFECT_BLUR5"},
-    ImageSpaceEffectSemantic{25, "EFFECT_BLUR7"},
-    ImageSpaceEffectSemantic{26, "EFFECT_BLUR9"},
-    ImageSpaceEffectSemantic{27, "EFFECT_BLUR11"},
-    ImageSpaceEffectSemantic{28, "EFFECT_BLUR13"},
-    ImageSpaceEffectSemantic{29, "EFFECT_BLUR15"},
-    ImageSpaceEffectSemantic{30, "EFFECT_NONHDR_BLUR3"},
-    ImageSpaceEffectSemantic{31, "EFFECT_NONHDR_BLUR5"},
-    ImageSpaceEffectSemantic{32, "EFFECT_NONHDR_BLUR7"},
-    ImageSpaceEffectSemantic{33, "EFFECT_NONHDR_BLUR9"},
-    ImageSpaceEffectSemantic{34, "EFFECT_NONHDR_BLUR11"},
-    ImageSpaceEffectSemantic{35, "EFFECT_NONHDR_BLUR13"},
-    ImageSpaceEffectSemantic{36, "EFFECT_NONHDR_BLUR15"},
-    ImageSpaceEffectSemantic{37, "EFFECT_BRIGHTPASS_BLUR3"},
-    ImageSpaceEffectSemantic{38, "EFFECT_BRIGHTPASS_BLUR5"},
-    ImageSpaceEffectSemantic{39, "EFFECT_BRIGHTPASS_BLUR7"},
-    ImageSpaceEffectSemantic{40, "EFFECT_BRIGHTPASS_BLUR9"},
-    ImageSpaceEffectSemantic{41, "EFFECT_BRIGHTPASS_BLUR11"},
-    ImageSpaceEffectSemantic{42, "EFFECT_BRIGHTPASS_BLUR13"},
-    ImageSpaceEffectSemantic{43, "EFFECT_BRIGHTPASS_BLUR15"},
-    ImageSpaceEffectSemantic{44, "EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS"},
-    ImageSpaceEffectSemantic{45, "EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS"},
-    ImageSpaceEffectSemantic{46, "EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS"},
-    ImageSpaceEffectSemantic{47, "EFFECT_BLUR3_480x270CS"},
-    ImageSpaceEffectSemantic{48, "EFFECT_BLUR5_480x270CS"},
-    ImageSpaceEffectSemantic{49, "EFFECT_BLUR7_480x270CS"},
-    ImageSpaceEffectSemantic{50, "EFFECT_BLUR9_480x270CS"},
-    ImageSpaceEffectSemantic{51, "EFFECT_BLUR11_480x270CS"},
-    ImageSpaceEffectSemantic{52, "EFFECT_BLUR13_480x270CS"},
-    ImageSpaceEffectSemantic{53, "EFFECT_BLUR15_480x270CS"},
-    ImageSpaceEffectSemantic{54, "EFFECT_BRIGHTPASS_BLUR3_480x270CS"},
-    ImageSpaceEffectSemantic{55, "EFFECT_BRIGHTPASS_BLUR5_480x270CS"},
-    ImageSpaceEffectSemantic{56, "EFFECT_BRIGHTPASS_BLUR7_480x270CS"},
-    ImageSpaceEffectSemantic{57, "EFFECT_BRIGHTPASS_BLUR9_480x270CS"},
-    ImageSpaceEffectSemantic{58, "EFFECT_BRIGHTPASS_BLUR11_480x270CS"},
-    ImageSpaceEffectSemantic{59, "EFFECT_BRIGHTPASS_BLUR13_480x270CS"},
-    ImageSpaceEffectSemantic{60, "EFFECT_BRIGHTPASS_BLUR15_480x270CS"},
-    ImageSpaceEffectSemantic{61, "EFFECT_WATER_DISPLACEMENT"},
-    ImageSpaceEffectSemantic{62, "EFFECT_NOISE"},
-    ImageSpaceEffectSemantic{63, "EFFECT_RAINSPLASH"},
-    ImageSpaceEffectSemantic{64, "EFFECT_VLS_LIGHT"},
-    ImageSpaceEffectSemantic{65, "EFFECT_VLS"},
-    ImageSpaceEffectSemantic{66, "EFFECT_PIPBOY_SCREEN"},
-    ImageSpaceEffectSemantic{67, "EFFECT_HUD_GLASS"},
-    ImageSpaceEffectSemantic{68, "EFFECT_MOD_MENU"},
-    ImageSpaceEffectSemantic{69, "EFFECT_AO"},
-    ImageSpaceEffectSemantic{70, "EFFECT_SAO"},
-    ImageSpaceEffectSemantic{71, "EFFECT_SAO_CS"}
-    }};
-inline constexpr std::array<std::size_t, 12> kImageSpaceActiveDataOffsets{{
-    128,
-    132,
-    136,
-    140,
-    144,
-    148,
-    152,
-    156,
-    160,
-    164,
-    168,
-    172
-    }};
 inline constexpr std::array<ImageSpaceActiveDataSemantic, 12>
     kImageSpaceActiveDataSemantics{{
-    ImageSpaceActiveDataSemantic{"eyeAdaptSpeed", 128, ""},
-    ImageSpaceActiveDataSemantic{"bloomBlurRadius", 132, "Tonemap E"},
-    ImageSpaceActiveDataSemantic{"bloomThreshold", 136, ""},
-    ImageSpaceActiveDataSemantic{"bloomScale", 140, ""},
-    ImageSpaceActiveDataSemantic{"receiveBloomThreshold", 144, "Auto Exposure Max"},
-    ImageSpaceActiveDataSemantic{"white", 148, "Auto Exposure Min"},
-    ImageSpaceActiveDataSemantic{"sunlightScale", 152, ""},
-    ImageSpaceActiveDataSemantic{"skyScale", 156, ""},
-    ImageSpaceActiveDataSemantic{"eyeAdaptStrength", 160, "Middle Gray"},
-    ImageSpaceActiveDataSemantic{"cinematicSaturation", 164, ""},
-    ImageSpaceActiveDataSemantic{"cinematicBrightness", 168, ""},
-    ImageSpaceActiveDataSemantic{"cinematicContrast", 172, ""}
+    ImageSpaceActiveDataSemantic{"eyeAdaptSpeed", ""},
+    ImageSpaceActiveDataSemantic{"bloomBlurRadius", "Tonemap E"},
+    ImageSpaceActiveDataSemantic{"bloomThreshold", ""},
+    ImageSpaceActiveDataSemantic{"bloomScale", ""},
+    ImageSpaceActiveDataSemantic{"receiveBloomThreshold", "Auto Exposure Max"},
+    ImageSpaceActiveDataSemantic{"white", "Auto Exposure Min"},
+    ImageSpaceActiveDataSemantic{"sunlightScale", ""},
+    ImageSpaceActiveDataSemantic{"skyScale", ""},
+    ImageSpaceActiveDataSemantic{"eyeAdaptStrength", "Middle Gray"},
+    ImageSpaceActiveDataSemantic{"cinematicSaturation", ""},
+    ImageSpaceActiveDataSemantic{"cinematicBrightness", ""},
+    ImageSpaceActiveDataSemantic{"cinematicContrast", ""}
     }};
 
 }  // namespace fo4hdr::generated

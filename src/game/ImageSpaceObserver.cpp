@@ -612,47 +612,107 @@ bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterfac
 }
 
 namespace {
-static_assert(
-    sizeof(RE::ImageSpaceManager) ==
-    fo4hdr::generated::kImageSpaceManagerSize);
-static_assert(
-    offsetof(RE::ImageSpaceManager, currentEOFData) ==
-    fo4hdr::generated::kImageSpaceCurrentEofDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, effectList) ==
-    fo4hdr::generated::kImageSpaceEffectListOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, baseData) ==
-    fo4hdr::generated::kImageSpaceBaseDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, overRideBaseData) ==
-    fo4hdr::generated::kImageSpaceOverrideBaseDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, underwaterBaseData) ==
-    fo4hdr::generated::kImageSpaceUnderwaterBaseDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, consoleBaseData) ==
-    fo4hdr::generated::kImageSpaceConsoleBaseDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, lutData) ==
-    fo4hdr::generated::kImageSpaceLutDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, overrideLUTData) ==
-    fo4hdr::generated::kImageSpaceOverrideLutDataOffset);
-static_assert(
-    offsetof(RE::ImageSpaceManager, isReady) ==
-    fo4hdr::generated::kImageSpaceReadyOffset);
-static_assert(
-    static_cast<std::uint16_t>(
-        RE::ImageSpaceManager::ImageSpaceEffectEnum::EFFECT_TOP_LEVEL_END) ==
-    fo4hdr::generated::kImageSpaceTopLevelEffectCount);
-static_assert(
-    fo4hdr::generated::ImageSpaceEffectEnumMatches<
-        RE::ImageSpaceManager::ImageSpaceEffectEnum>());
-static_assert(
-    fo4hdr::generated::kImageSpaceCommonLibSourceCommit ==
-    fo4hdr::generated::kCommonLibCommit);
-constexpr auto kDearImageSpaceActiveDataOffsets = [] {
+using ImageSpaceEffectEnum = RE::ImageSpaceManager::ImageSpaceEffectEnum;
+constexpr auto kImageSpaceTopLevelEffectCount =
+    static_cast<std::uint16_t>(ImageSpaceEffectEnum::EFFECT_TOP_LEVEL_END);
+
+struct ImageSpaceEffectSemantic
+{
+    ImageSpaceEffectEnum effect;
+    std::string_view symbol;
+};
+
+#define FO4HDR_IMAGE_SPACE_EFFECT(symbol) \
+    ImageSpaceEffectSemantic{ImageSpaceEffectEnum::symbol, #symbol}
+constexpr std::array kImageSpaceEffectSemantics{
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_WORLD_CAMERA),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_TEMPORAL_AA_PRE_HDR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SUNBEAMS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_HDR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_HDR_CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_REFRACTION),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_DEPTH_OF_FIELD),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_DEPTH_OF_FIELD_SPLIT_SCREEN),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_RADIAL_BLUR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_FULLSCREEN_BLUR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_MOTIONBLUR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_GETHIT),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_VATS_TARGET),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_FULLSCREEN_COLOR),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SHADER_GAMMA_CORRECT),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SHADER_GAMMA_CORRECT_LUT),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SHADER_GAMMA_CORRECT_RESIZE),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SHADER_FXAA),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_TEMPORAL_AA),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_TEMPORAL_OLD_AA),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BOKEH_DEPTH_OF_FIELD),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_UPSAMPLE_DYNAMIC_RESOLUTION),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_MAP),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR3),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR5),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR7),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR9),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR11),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR13),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR15),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR3),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR5),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR7),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR9),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR11),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR13),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NONHDR_BLUR15),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR3),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR5),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR7),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR9),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR11),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR13),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR15),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_HDR_BLUR15_320x180CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_HDR_BLUR15_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_HDR_BLUR15_1024x1024CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR3_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR5_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR7_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR9_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR11_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR13_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BLUR15_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR3_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR5_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR7_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR9_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR11_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR13_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_BRIGHTPASS_BLUR15_480x270CS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_WATER_DISPLACEMENT),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_NOISE),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_RAINSPLASH),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_VLS_LIGHT),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_VLS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_PIPBOY_SCREEN),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_HUD_GLASS),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_MOD_MENU),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_AO),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SAO),
+    FO4HDR_IMAGE_SPACE_EFFECT(EFFECT_SAO_CS)
+};
+#undef FO4HDR_IMAGE_SPACE_EFFECT
+
+static_assert(kImageSpaceEffectSemantics.size() == kImageSpaceTopLevelEffectCount);
+static_assert([] {
+    for (std::size_t index = 0; index < kImageSpaceEffectSemantics.size(); ++index)
+    {
+        if (static_cast<std::size_t>(kImageSpaceEffectSemantics[index].effect) != index)
+        {
+            return false;
+        }
+    }
+    return true;
+}());
+
+constexpr auto kImageSpaceActiveDataOffsets = [] {
     constexpr auto managerData =
         offsetof(RE::ImageSpaceManager, currentEOFData);
     constexpr auto baseData =
@@ -679,8 +739,11 @@ constexpr auto kDearImageSpaceActiveDataOffsets = [] {
     };
 }();
 static_assert(
-    kDearImageSpaceActiveDataOffsets ==
-    fo4hdr::generated::kImageSpaceActiveDataOffsets);
+    kImageSpaceActiveDataOffsets.size() == fo4hdr::kImageSpaceActiveDataFieldCount);
+static_assert(
+    kImageSpaceActiveDataOffsets.size() ==
+    fo4hdr::generated::kImageSpaceActiveDataSemantics.size());
+// The pin has no array-header accessors for the guarded metadata validation.
 struct ImageSpacePrimitiveArrayView
 {
     std::uintptr_t virtualTable{};
@@ -714,31 +777,14 @@ static_assert(
     offsetof(ImageSpacePrimitiveArrayView, size) ==
     fo4hdr::generated::kImageSpacePrimitiveArraySizeOffset);
 static_assert(
-    offsetof(RE::ImageSpaceEffect, isActive) ==
-    fo4hdr::generated::kImageSpaceEffectStoredActiveOffset);
-static_assert(
-    sizeof(RE::ImageSpaceLUTData) ==
-    fo4hdr::generated::kImageSpaceLutDataSize);
-static_assert(
-    offsetof(RE::ImageSpaceLUTData, weight) ==
-    fo4hdr::generated::kImageSpaceLutWeightOffset);
-static_assert(
-    offsetof(RE::ImageSpaceLUTData, texture) ==
-    fo4hdr::generated::kImageSpaceLutTextureOffset);
-static_assert(
-    std::extent_v<decltype(RE::ImageSpaceLUTData::weight)> ==
-    fo4hdr::generated::kImageSpaceLutEntryCount);
-static_assert(
-    std::extent_v<decltype(RE::ImageSpaceLUTData::texture)> ==
-    fo4hdr::generated::kImageSpaceLutEntryCount);
-static_assert(
-    std::tuple_size_v<decltype(
-        fo4hdr::generated::kImageSpaceEffectSemantics)> ==
-    std::tuple_size_v<decltype(
-        fo4hdr::GameHdrSnapshot{}.imageSpaceEffects)>);
+    std::tuple_size_v<decltype(fo4hdr::GameHdrSnapshot{}.imageSpaceEffects)> ==
+    kImageSpaceTopLevelEffectCount);
 static_assert(
     std::tuple_size_v<decltype(fo4hdr::GameHdrSnapshot{}.luts)> ==
-    fo4hdr::generated::kImageSpaceLutEntryCount);
+    std::extent_v<decltype(RE::ImageSpaceLUTData::weight)>);
+static_assert(
+    std::tuple_size_v<decltype(fo4hdr::GameHdrSnapshot{}.luts)> ==
+    std::extent_v<decltype(RE::ImageSpaceLUTData::texture)>);
 
 }
 namespace fo4hdr::game::observation {
@@ -746,8 +792,8 @@ class ImageSpaceCollector
 {
     GameSnapshotStore& store;
     RE::ImageSpaceManager* manager{};
-    static constexpr std::size_t kManagerSize = fo4hdr::generated::kImageSpaceManagerSize;
-    static constexpr std::size_t kLutSize = fo4hdr::generated::kImageSpaceLutDataSize;
+    static constexpr std::size_t kManagerSize = sizeof(RE::ImageSpaceManager);
+    static constexpr std::size_t kLutSize = sizeof(RE::ImageSpaceLUTData);
     std::array<std::byte, kManagerSize> managerBytes{};
     fo4hdr::GameHdrSnapshot observed{};
     std::uint8_t readyByte{};
@@ -761,7 +807,7 @@ class ImageSpaceCollector
     std::uintptr_t consoleData{};
     std::uintptr_t overrideLut{};
     static constexpr auto kEffectList =
-        fo4hdr::generated::kImageSpaceEffectListOffset;
+        offsetof(RE::ImageSpaceManager, effectList);
 
     bool Fail(std::string_view reason) noexcept
     {
@@ -785,7 +831,7 @@ class ImageSpaceCollector
     bool ReadEffectHeader()
     {
         using namespace fo4hdr::generated;
-        return ReadSnapshotField(managerBytes, kImageSpaceReadyOffset, readyByte) &&
+        return ReadSnapshotField(managerBytes, offsetof(RE::ImageSpaceManager, isReady), readyByte) &&
             ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayDataOffset, effectStorage) &&
             ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayCapacityOffset, effectCapacity) &&
             ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayFreeIndexOffset, effectFreeIndex) &&
@@ -794,12 +840,15 @@ class ImageSpaceCollector
 
     bool ReadDataPointers()
     {
-        using namespace fo4hdr::generated;
-        return ReadSnapshotField(managerBytes, kImageSpaceBaseDataOffset, baseData) &&
-            ReadSnapshotField(managerBytes, kImageSpaceOverrideBaseDataOffset, overrideData) &&
-            ReadSnapshotField(managerBytes, kImageSpaceUnderwaterBaseDataOffset, underwaterData) &&
-            ReadSnapshotField(managerBytes, kImageSpaceConsoleBaseDataOffset, consoleData) &&
-            ReadSnapshotField(managerBytes, kImageSpaceOverrideLutDataOffset, overrideLut);
+        return ReadSnapshotField(managerBytes, offsetof(RE::ImageSpaceManager, baseData), baseData) &&
+            ReadSnapshotField(
+                managerBytes, offsetof(RE::ImageSpaceManager, overRideBaseData), overrideData) &&
+            ReadSnapshotField(
+                managerBytes, offsetof(RE::ImageSpaceManager, underwaterBaseData), underwaterData) &&
+            ReadSnapshotField(
+                managerBytes, offsetof(RE::ImageSpaceManager, consoleBaseData), consoleData) &&
+            ReadSnapshotField(
+                managerBytes, offsetof(RE::ImageSpaceManager, overrideLUTData), overrideLut);
     }
 
     bool ReadFields()
@@ -819,7 +868,7 @@ class ImageSpaceCollector
         }
         const auto effectListValid = fo4hdr::ValidateImageSpaceEffectListPrefix(
             {effectCapacity, effectSize, effectFreeIndex, effectStorage},
-            fo4hdr::generated::kImageSpaceTopLevelEffectCount);
+            kImageSpaceTopLevelEffectCount);
         if (!effectListValid)
         {
             REX::WARN(
@@ -829,7 +878,7 @@ class ImageSpaceCollector
                 effectSize,
                 effectFreeIndex,
                 effectStorage != 0,
-                fo4hdr::generated::kImageSpaceTopLevelEffectCount);
+                kImageSpaceTopLevelEffectCount);
             return Fail("effect-list-prefix-invalid");
         }
 
@@ -847,7 +896,7 @@ class ImageSpaceCollector
         observed.imageSpaceOverride = overrideData != 0;
         if (!fo4hdr::DecodeImageSpaceActiveData(
                 managerBytes,
-                fo4hdr::generated::kImageSpaceActiveDataOffsets,
+                kImageSpaceActiveDataOffsets,
                 observed.activeImageSpace))
         {
             return Fail("active-data-invalid");
@@ -874,8 +923,7 @@ class ImageSpaceCollector
             std::uint8_t storedActiveByte{};
             if (!GuardedReadValue(
                     reinterpret_cast<const std::byte*>(effectIdentity) +
-                        fo4hdr::generated::
-                            kImageSpaceEffectStoredActiveOffset,
+                        offsetof(RE::ImageSpaceEffect, isActive),
                     storedActiveByte) ||
                 storedActiveByte > 1)
             {
@@ -911,12 +959,12 @@ class ImageSpaceCollector
         auto& destination = observed.luts[index];
         if (!ReadSnapshotField(
                 lutBytes,
-                fo4hdr::generated::kImageSpaceLutWeightOffset +
+                offsetof(RE::ImageSpaceLUTData, weight) +
                     index * sizeof(float),
                 destination.weight) ||
             !ReadSnapshotField(
                 lutBytes,
-                fo4hdr::generated::kImageSpaceLutTextureOffset +
+                offsetof(RE::ImageSpaceLUTData, texture) +
                     index * sizeof(std::uintptr_t),
                 destination.engineTextureId))
         {
@@ -945,7 +993,7 @@ class ImageSpaceCollector
             std::memcpy(
                 lutBytes.data(),
                 managerBytes.data() +
-                    fo4hdr::generated::kImageSpaceLutDataOffset,
+                    offsetof(RE::ImageSpaceManager, lutData),
                 kLutSize);
         }
         return true;
@@ -1011,7 +1059,7 @@ class ImageSpaceCollector
             effectCapacity,
             effectSize,
             effectFreeIndex,
-            fo4hdr::generated::kImageSpaceTopLevelEffectCount,
+            kImageSpaceTopLevelEffectCount,
             observed.imageSpaceEffectCount,
             observed.activeLutCount,
             observed.activeImageSpace.eyeAdaptSpeed,
@@ -1052,27 +1100,26 @@ void ReportImageSpaceSemanticProfile()
 {
     REX::INFO(
         "m2 image_space_profile layout_exact=true effect_table_exact=true "
-        "effects={} table_sha256={} commonlib_source_commit={} "
+        "effects={} commonlib_source_commit={} "
         "xedit_alias_behavior=unverified",
-        fo4hdr::generated::kImageSpaceTopLevelEffectCount,
-        fo4hdr::generated::kImageSpaceEffectTableSha256,
-        fo4hdr::generated::kImageSpaceCommonLibSourceCommit);
+        kImageSpaceTopLevelEffectCount,
+        fo4hdr::generated::kCommonLibCommit);
     for (const auto& semantic :
-         fo4hdr::generated::kImageSpaceEffectSemantics)
+         kImageSpaceEffectSemantics)
     {
         REX::INFO(
             "m2 image_space_profile_effect index={} symbol={}",
-            semantic.index,
+            static_cast<std::uint16_t>(semantic.effect),
             semantic.symbol);
     }
-    for (const auto& semantic :
-         fo4hdr::generated::kImageSpaceActiveDataSemantics)
+    for (std::size_t index = 0; index < kImageSpaceActiveDataOffsets.size(); ++index)
     {
+        const auto& semantic = fo4hdr::generated::kImageSpaceActiveDataSemantics[index];
         REX::INFO(
             "m2 image_space_profile_active_field field={} offset={} "
             "xedit_alias=\"{}\" alias_behavior=unverified",
             semantic.field,
-            semantic.offset,
+            kImageSpaceActiveDataOffsets[index],
             semantic.xeditAlias.empty() ? "none" : semantic.xeditAlias);
     }
 }
@@ -1089,11 +1136,11 @@ void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
         {
             const auto& effect = snapshot.imageSpaceEffects[index];
             const auto& semantic =
-                fo4hdr::generated::kImageSpaceEffectSemantics[index];
+                kImageSpaceEffectSemantics[index];
             REX::INFO(
                 "m2 image_space_effect index={} symbol={} present={} "
                 "stored_active={} semantic_mapping=exact-1.10.163",
-                semantic.index,
+                static_cast<std::uint16_t>(semantic.effect),
                 semantic.symbol,
                 effect.present,
                 effect.active);

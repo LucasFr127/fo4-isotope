@@ -169,7 +169,7 @@
     },
     "nativeLutObserver": {
       "type": "object",
-      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "textureSrvOffset", "target"],
+      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "target"],
       "properties": {
         "status": { "const": "unvalidated" },
         "scope": { "const": "synchronous-gamma-correct-lut-render" },
@@ -177,7 +177,6 @@
         "authorityGap": { "type": "string", "minLength": 1 },
         "lifetime": { "type": "string", "minLength": 1 },
         "effectSubobjectOffset": { "const": 280 },
-        "textureSrvOffset": { "const": 0 },
         "target": {
           "type": "object",
           "required": ["addressLibraryId", "rva", "expectedBytes"],
@@ -601,11 +600,7 @@
           "type": "object",
           "required": [
             "sources",
-            "managerSize",
-            "currentEofDataOffset",
             "layout",
-            "topLevelEffectCount",
-            "effects",
             "activeData"
           ],
           "properties": {
@@ -639,36 +634,10 @@
               },
               "additionalProperties": false
             },
-            "managerSize": { "const": 440 },
-            "currentEofDataOffset": { "const": 128 },
             "layout": {
               "type": "object",
-              "required": ["manager", "primitiveArray", "effect", "lut"],
+              "required": ["primitiveArray"],
               "properties": {
-                "manager": {
-                  "type": "object",
-                  "required": [
-                    "effectListOffset",
-                    "baseDataOffset",
-                    "overrideBaseDataOffset",
-                    "underwaterBaseDataOffset",
-                    "consoleBaseDataOffset",
-                    "lutDataOffset",
-                    "overrideLutDataOffset",
-                    "readyOffset"
-                  ],
-                  "properties": {
-                    "effectListOffset": { "const": 16 },
-                    "baseDataOffset": { "const": 96 },
-                    "overrideBaseDataOffset": { "const": 104 },
-                    "underwaterBaseDataOffset": { "const": 112 },
-                    "consoleBaseDataOffset": { "const": 120 },
-                    "lutDataOffset": { "const": 304 },
-                    "overrideLutDataOffset": { "const": 416 },
-                    "readyOffset": { "const": 436 }
-                  },
-                  "additionalProperties": false
-                },
                 "primitiveArray": {
                   "type": "object",
                   "required": [
@@ -686,47 +655,9 @@
                     "sizeOffset": { "const": 20 }
                   },
                   "additionalProperties": false
-                },
-                "effect": {
-                  "type": "object",
-                  "required": ["storedActiveOffset"],
-                  "properties": {
-                    "storedActiveOffset": { "const": 8 }
-                  },
-                  "additionalProperties": false
-                },
-                "lut": {
-                  "type": "object",
-                  "required": ["size", "entryCount", "weightOffset", "textureOffset"],
-                  "properties": {
-                    "size": { "const": 112 },
-                    "entryCount": { "const": 4 },
-                    "weightOffset": { "const": 32 },
-                    "textureOffset": { "const": 80 }
-                  },
-                  "additionalProperties": false
                 }
               },
               "additionalProperties": false
-            },
-            "topLevelEffectCount": { "const": 72 },
-            "effects": {
-              "type": "array",
-              "minItems": 72,
-              "maxItems": 72,
-              "uniqueItems": true,
-              "items": {
-                "type": "object",
-                "required": ["index", "symbol"],
-                "properties": {
-                  "index": { "type": "integer", "minimum": 0, "maximum": 71 },
-                  "symbol": {
-                    "type": "string",
-                    "pattern": "^EFFECT_[A-Z0-9_x]+$"
-                  }
-                },
-                "additionalProperties": false
-              }
             },
             "activeData": {
               "type": "array",
@@ -735,7 +666,7 @@
               "uniqueItems": true,
               "items": {
                 "type": "object",
-                "required": ["field", "offset"],
+                "required": ["field"],
                 "properties": {
                   "field": {
                     "enum": [
@@ -753,7 +684,6 @@
                       "cinematicContrast"
                     ]
                   },
-                  "offset": { "type": "integer", "minimum": 0, "maximum": 436 },
                   "xeditAlias": {
                     "enum": [
                       "Tonemap E",

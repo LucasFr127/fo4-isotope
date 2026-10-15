@@ -166,40 +166,8 @@ if ([string]$imageSpaceProfile.sources.commonlib.repository -ne
         "active dependency lock."
     )
 }
-$effectTableText = (($imageSpaceProfile.effects | ForEach-Object {
-    "{0}:{1}" -f $_.index, $_.symbol
-}) -join "`n") + "`n"
-$effectTableHash = [Convert]::ToHexString(
-    [Security.Cryptography.SHA256]::HashData(
-        [Text.UTF8Encoding]::new($false).GetBytes($effectTableText)
-    )
-).ToLowerInvariant()
-$effectSemanticLines = @(
-    for ($index = 0; $index -lt $imageSpaceProfile.effects.Count; ++$index) {
-        $symbol = [string]$imageSpaceProfile.effects[$index].symbol
-        $suffix = if ($index -eq $imageSpaceProfile.effects.Count - 1) {
-            ""
-        } else {
-            ","
-        }
-        "    ImageSpaceEffectSemantic{$index, `"$symbol`"}$suffix"
-    }
-)
-$effectEnumComparisonLines = @(
-    for ($index = 0; $index -lt $imageSpaceProfile.effects.Count; ++$index) {
-        $semantic = $imageSpaceProfile.effects[$index]
-        $suffix = if ($index -eq $imageSpaceProfile.effects.Count - 1) {
-            ""
-        } else {
-            ","
-        }
-        "        static_cast<std::uint16_t>(EffectEnum::$($semantic.symbol)) == $($semantic.index)$suffix"
-    }
-)
-$activeOffsetsByName = @{}
 $activeAliasesByName = @{}
 foreach ($field in $imageSpaceProfile.activeData) {
-    $activeOffsetsByName[[string]$field.field] = [uint64]$field.offset
     $activeAliasesByName[[string]$field.field] =
         if ($null -eq $field.PSObject.Properties["xeditAlias"]) {
             ""
@@ -221,17 +189,11 @@ $activeFieldOrder = @(
     "cinematicBrightness",
     "cinematicContrast"
 )
-$activeOffsetLines = @(
-    for ($index = 0; $index -lt $activeFieldOrder.Count; ++$index) {
-        $suffix = if ($index -eq $activeFieldOrder.Count - 1) { "" } else { "," }
-        "    $($activeOffsetsByName[$activeFieldOrder[$index]])$suffix"
-    }
-)
 $activeSemanticLines = @(
     for ($index = 0; $index -lt $activeFieldOrder.Count; ++$index) {
         $field = $activeFieldOrder[$index]
         $suffix = if ($index -eq $activeFieldOrder.Count - 1) { "" } else { "," }
-        "    ImageSpaceActiveDataSemantic{`"$field`", $($activeOffsetsByName[$field]), `"$($activeAliasesByName[$field])`"}$suffix"
+        "    ImageSpaceActiveDataSemantic{`"$field`", `"$($activeAliasesByName[$field])`"}$suffix"
     }
 )
 
@@ -354,7 +316,7 @@ $lut = $manifest.nativeLutObserver
 if ($lut.status -ne 'unvalidated' -or
     $lut.scope -ne 'synchronous-gamma-correct-lut-render' -or
     $lut.abi -ne 'void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)' -or
-    $lut.effectSubobjectOffset -ne 280 -or $lut.textureSrvOffset -ne 0 -or
+    $lut.effectSubobjectOffset -ne 280 -or
     @($lut.target.expectedBytes).Count -ne 25) {
     throw 'The native LUT observation contract is incomplete.'
 }
@@ -362,7 +324,6 @@ $lutLines = @(
     "inline constexpr std::uintptr_t kNativeLutRenderRva = $($lut.target.rva);",
     "inline constexpr std::uint64_t kNativeLutRenderId = $($lut.target.addressLibraryId);",
     "inline constexpr std::size_t kNativeLutEffectSubobjectOffset = $($lut.effectSubobjectOffset);",
-    "inline constexpr std::size_t kNativeLutTextureSrvOffset = $($lut.textureSrvOffset);",
     "inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ $($lut.target.expectedBytes -join ', ') }};"
 )
 
@@ -460,64 +421,17 @@ $lines = @(
     "inline constexpr std::array<std::uint32_t, 4> kLateGameUiBackdropDxbcHash{{",
     "    $($lateGameUiBackdropHashWords -join ', ')",
     "}};",
-    "struct ImageSpaceEffectSemantic",
-    "{",
-    "    std::uint16_t index;",
-    "    std::string_view symbol;",
-    "};",
-    "",
     "struct ImageSpaceActiveDataSemantic",
     "{",
     "    std::string_view field;",
-    "    std::size_t offset;",
     "    std::string_view xeditAlias;",
     "};",
     "",
-    "template <class EffectEnum>",
-    "inline constexpr std::array kImageSpaceEffectIndexMatches{"
-) + $effectEnumComparisonLines + @(
-    "};",
-    "",
-    "template <class EffectEnum>",
-    "consteval bool ImageSpaceEffectEnumMatches()",
-    "{",
-    "    for (const bool match : kImageSpaceEffectIndexMatches<EffectEnum>)",
-    "    {",
-    "        if (!match) return false;",
-    "    }",
-    "    return true;",
-    "}",
-    "",
-    "inline constexpr std::size_t kImageSpaceManagerSize = $($imageSpaceProfile.managerSize);",
-    "inline constexpr std::size_t kImageSpaceCurrentEofDataOffset = $($imageSpaceProfile.currentEofDataOffset);",
-    "inline constexpr std::size_t kImageSpaceEffectListOffset = $($imageSpaceLayout.manager.effectListOffset);",
-    "inline constexpr std::size_t kImageSpaceBaseDataOffset = $($imageSpaceLayout.manager.baseDataOffset);",
-    "inline constexpr std::size_t kImageSpaceOverrideBaseDataOffset = $($imageSpaceLayout.manager.overrideBaseDataOffset);",
-    "inline constexpr std::size_t kImageSpaceUnderwaterBaseDataOffset = $($imageSpaceLayout.manager.underwaterBaseDataOffset);",
-    "inline constexpr std::size_t kImageSpaceConsoleBaseDataOffset = $($imageSpaceLayout.manager.consoleBaseDataOffset);",
-    "inline constexpr std::size_t kImageSpaceLutDataOffset = $($imageSpaceLayout.manager.lutDataOffset);",
-    "inline constexpr std::size_t kImageSpaceOverrideLutDataOffset = $($imageSpaceLayout.manager.overrideLutDataOffset);",
-    "inline constexpr std::size_t kImageSpaceReadyOffset = $($imageSpaceLayout.manager.readyOffset);",
     "inline constexpr std::size_t kImageSpacePrimitiveArraySize = $($imageSpaceLayout.primitiveArray.size);",
     "inline constexpr std::size_t kImageSpacePrimitiveArrayDataOffset = $($imageSpaceLayout.primitiveArray.dataOffset);",
     "inline constexpr std::size_t kImageSpacePrimitiveArrayCapacityOffset = $($imageSpaceLayout.primitiveArray.capacityOffset);",
     "inline constexpr std::size_t kImageSpacePrimitiveArrayFreeIndexOffset = $($imageSpaceLayout.primitiveArray.freeIndexOffset);",
     "inline constexpr std::size_t kImageSpacePrimitiveArraySizeOffset = $($imageSpaceLayout.primitiveArray.sizeOffset);",
-    "inline constexpr std::size_t kImageSpaceEffectStoredActiveOffset = $($imageSpaceLayout.effect.storedActiveOffset);",
-    "inline constexpr std::size_t kImageSpaceLutDataSize = $($imageSpaceLayout.lut.size);",
-    "inline constexpr std::size_t kImageSpaceLutEntryCount = $($imageSpaceLayout.lut.entryCount);",
-    "inline constexpr std::size_t kImageSpaceLutWeightOffset = $($imageSpaceLayout.lut.weightOffset);",
-    "inline constexpr std::size_t kImageSpaceLutTextureOffset = $($imageSpaceLayout.lut.textureOffset);",
-    "inline constexpr std::uint16_t kImageSpaceTopLevelEffectCount = $($imageSpaceProfile.topLevelEffectCount);",
-    "inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = `"$($imageSpaceProfile.sources.commonlib.commit)`";",
-    "inline constexpr std::string_view kImageSpaceEffectTableSha256 = `"$effectTableHash`";",
-    "inline constexpr std::array<ImageSpaceEffectSemantic, kImageSpaceTopLevelEffectCount>",
-    "    kImageSpaceEffectSemantics{{"
-) + $effectSemanticLines + @(
-    "    }};",
-    "inline constexpr std::array<std::size_t, 12> kImageSpaceActiveDataOffsets{{"
-) + $activeOffsetLines + @(
-    "    }};",
     "inline constexpr std::array<ImageSpaceActiveDataSemantic, 12>",
     "    kImageSpaceActiveDataSemantics{{"
 ) + $activeSemanticLines + @(
