@@ -10,9 +10,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
-#if defined(FO4HDR_RUNTIME_1_10_163)
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
-#endif
+#include "../../runtime/1.11.240/RuntimeIdentity.generated.hpp"
 
 namespace {
 using Render = void (*)(RE::ImageSpaceEffect*, RE::BSTriShape*, RE::ImageSpaceEffectParam*);
@@ -172,7 +171,6 @@ void RenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
         fo4hdr::SetNativeLutObserverStatus(fo4hdr::NativeLutObserverStatus::unavailable);
     }
 }
-#if defined(FO4HDR_RUNTIME_1_10_163)
 std::uintptr_t Resolve(const REL::Offset2ID& mappings, std::uintptr_t base, std::uint64_t id)
 {
     for (const auto& entry : mappings)
@@ -189,26 +187,39 @@ bool InSection(const REX::FModule& module, const char* name,
         info.AllocationBase == reinterpret_cast<void*>(module.GetBaseAddress()) && info.Type == MEM_IMAGE;
 }
 
-bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target)
+struct LutIdentity
 {
-    using namespace fo4hdr::generated;
-    std::array<std::uint8_t, kNativeLutRenderBytes.size()> bytes{};
-    if (target != module.GetBaseAddress() + kNativeLutRenderRva) return false;
+    std::uintptr_t renderRva{};
+    std::uint64_t renderId{};
+    std::size_t subobjectOffset{};
+    std::array<std::uint8_t, 25> renderBytes{};
+};
+constexpr LutIdentity kOgLut{fo4hdr::generated::og::kNativeLutRenderRva,
+    fo4hdr::generated::og::kNativeLutRenderId, fo4hdr::generated::og::kNativeLutEffectSubobjectOffset,
+    fo4hdr::generated::og::kNativeLutRenderBytes};
+constexpr LutIdentity kAeLut{fo4hdr::generated::ae::kNativeLutRenderRva,
+    fo4hdr::generated::ae::kNativeLutRenderId, fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset,
+    fo4hdr::generated::ae::kNativeLutRenderBytes};
+
+bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target, const LutIdentity& identity)
+{
+    std::array<std::uint8_t, 25> bytes{};
+    if (target != module.GetBaseAddress() + identity.renderRva) return false;
     if (!InSection(module, ".text", target, bytes.size())) return false;
     MEMORY_BASIC_INFORMATION codeInfo{};
     if (!Region(reinterpret_cast<void*>(target), bytes.size(), codeInfo)) return false;
     if ((codeInfo.Protect & 0xFF) != PAGE_EXECUTE_READ) return false;
-    return Read(reinterpret_cast<void*>(target), bytes.data(), bytes.size()) && bytes == kNativeLutRenderBytes;
+    return Read(reinterpret_cast<void*>(target), bytes.data(), bytes.size()) && bytes == identity.renderBytes;
 }
 
-bool ValidLocator(const REX::FModule& module, std::uintptr_t table)
+bool ValidLocator(const REX::FModule& module, std::uintptr_t table, const LutIdentity& identity)
 {
     std::uintptr_t locator{};
     std::uint32_t subobjectOffset{};
     if (!Read(reinterpret_cast<void*>(table - sizeof(void*)), &locator, sizeof(locator))) return false;
     if (!InSection(module, ".rdata", locator, 12)) return false;
     return Read(reinterpret_cast<void*>(locator + 4), &subobjectOffset, sizeof(subobjectOffset)) &&
-        subobjectOffset == fo4hdr::generated::kNativeLutEffectSubobjectOffset;
+        subobjectOffset == identity.subobjectOffset;
 }
 
 bool ReadRenderSlot(void** slot, void*& original)
@@ -264,22 +275,20 @@ bool InstallQualifiedTarget(std::uintptr_t table, std::uintptr_t manager, std::u
     SetNativeLutObserverStatus(Status::ready);
     return true;
 }
-bool ResolveAndInstall(const REX::FModule& module)
+bool ResolveAndInstall(const REX::FModule& module, const LutIdentity& identity)
 {
-    using namespace fo4hdr::generated;
     const auto base = module.GetBaseAddress();
     REL::Offset2ID mappings;
     mappings.load_v2();
     const auto table = Resolve(mappings, base, RE::VTABLE::BSImagespaceShaderGammaCorrectLUT[2].id());
     const auto manager = RE::ID::ImageSpaceManager::Singleton.address();
-    const auto target = Resolve(mappings, base, kNativeLutRenderId);
+    const auto target = Resolve(mappings, base, identity.renderId);
     if (!InSection(module, ".rdata", table - sizeof(void*), 3 * sizeof(void*))) return false;
     if (!InSection(module, ".data", manager, sizeof(void*))) return false;
-    if (!ValidRenderTarget(module, target)) return false;
-    if (!ValidLocator(module, table)) return false;
+    if (!ValidRenderTarget(module, target, identity)) return false;
+    if (!ValidLocator(module, table, identity)) return false;
     return InstallQualifiedTarget(table, manager, target);
 }
-#endif
 }
 
 namespace fo4hdr::game {
@@ -289,17 +298,14 @@ bool InitializeNativeLutObserver(bool requested) noexcept
     if (g_attempted.exchange(true)) return GetNativeLutObserverStatus() == Status::ready;
     if (!requested) return false;
     SetNativeLutObserverStatus(Status::unsupportedRuntime);
-#if !defined(FO4HDR_RUNTIME_1_10_163)
-    return false;
-#else
     try {
-        using namespace generated;
+        const auto* profile = ActiveRuntimeProfile();
+        if (!profile) return false;
         const auto module = REX::FModule::GetExecutingModule();
         const auto base = module.GetBaseAddress();
-        if (!base || module.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
+        if (!base || module.GetFileVersion().pack() != profile->runtimeVersion) return false;
         SetNativeLutObserverStatus(Status::invalidTarget);
-        return ResolveAndInstall(module);
+        return ResolveAndInstall(module, IsOriginalRuntime() ? kOgLut : kAeLut);
     } catch (...) { return false; }
-#endif
 }
 }

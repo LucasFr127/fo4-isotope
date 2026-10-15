@@ -3,6 +3,7 @@
 #include "ShaderTestOptions.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include "ShaderTestSuite.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 #include <algorithm>
 #include <array>
 #include <exception>
@@ -68,6 +69,12 @@ struct ShippingShaderRun
 {
     ShaderTestOptions options;
     bool armorEncodedRan{};
+    bool InitializeRuntime() const
+    {
+        return fo4hdr::InitializeRuntimeProfile(
+            options.aeRuntime ? 0x010B0F00U : 0x010A0A30U,
+            options.aeRuntime ? 0x00070090U : 0x00060170U);
+    }
     bool KnownFilter() const
     {
         return !options.filtering || std::find(kSectionNames.begin(), kSectionNames.end(), options.filter) != kSectionNames.end();
@@ -244,6 +251,7 @@ int main(int argumentCount, char** arguments)
     using namespace fo4hdr::tests::gpu;
     ShippingShaderRun run;
     if (!run.options.Parse(argumentCount, arguments) || !run.options.ValidateModes()) return 2;
+    if (!run.InitializeRuntime()) return 2;
     if (run.options.list) {
         for (const auto name : kSectionNames) std::cout << name << '\n';
         return 0;

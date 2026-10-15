@@ -100,6 +100,7 @@ void RunCallPatchOwnershipTests()
     const std::array<hook::Site, 2> armorSites{{
         {1, {0xE8, 1, 0, 0, 0}, {0xE8, 5, 0, 0, 0}, 0},
         {2, {0xE8, 2, 0, 0, 0}, {0xE8, 6, 0, 0, 0}, 0}}};
+    CheckCallPatchOwnership(std::array<hook::Site, 1>{armorSites[0]});
     const std::array<hook::Site, 4> screenSites{{
         armorSites[0], armorSites[1],
         {3, {0xE8, 3, 0, 0, 0}, {0xE8, 7, 0, 0, 0}, 0},

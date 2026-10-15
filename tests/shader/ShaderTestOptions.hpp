@@ -10,6 +10,7 @@ struct ShaderTestOptions
 {
     bool hardware{};
     bool debugLayer{};
+    bool aeRuntime{};
     bool list{};
     bool filtering{};
     bool armorEncodedOnly{};

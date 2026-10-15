@@ -9,7 +9,7 @@ $fixture = Join-Path $tempBase ('FO4Isotope-deploy-test-' + [Guid]::NewGuid().To
 $project = Join-Path $fixture 'project'
 $destination = Join-Path $fixture 'FO4Isotope-mod'
 $game = Join-Path $fixture 'game'
-$stage = Join-Path $project 'dist/1.10.163/Data'
+$stage = Join-Path $project 'dist/universal/Data'
 $deploy = Join-Path $project 'scripts/deploy.ps1'
 function Get-DeploymentEnvironment {
     $saved = @{}
@@ -199,7 +199,8 @@ $relativeFiles = @(
     'F4SE/Plugins/FO4Isotope.dll',
     'F4SE/Plugins/FO4Isotope.pdb',
     'F4SE/Plugins/FO4Isotope.ini',
-    'F4SE/Plugins/FO4Isotope/runtime-1.10.163.json'
+    'F4SE/Plugins/FO4Isotope/runtime-1.10.163.json',
+    'F4SE/Plugins/FO4Isotope/runtime-1.11.240.json'
 )
 
 try {

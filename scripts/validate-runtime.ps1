@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = $env:FO4HDR_RUNTIME
 )
 
@@ -78,7 +78,7 @@ Assert-Fo4HdrExactRuntimeFileVersion `
     -Runtime $Runtime `
     -FileVersion $fileVersion
 
-if ($Runtime -eq "1.10.163") {
+if ($Runtime -in @("1.10.163", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $Runtime `
         -Check
@@ -95,12 +95,14 @@ Require-Hash `
     $entry.addressLibrarySha256 `
     "Address Library"
 
+$requiredRelocations = @()
+if ($null -ne $manifest.PSObject.Properties['commonlibObservation']) {
+    $requiredRelocations = @($manifest.commonlibObservation.relocations)
+}
 $addressLibrary = Assert-Fo4HdrAddressLibraryV0 `
     -Path $paths.address `
     -ExecutablePath $paths.exe `
-    -RequiredRelocations @(
-        $manifest.commonlibObservation.relocations
-    )
+    -RequiredRelocations $requiredRelocations
 
 Write-Host (
     "Runtime identity validation passed for $Runtime " +

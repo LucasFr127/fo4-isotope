@@ -176,7 +176,8 @@
         "abi": { "const": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)" },
         "authorityGap": { "type": "string", "minLength": 1 },
         "lifetime": { "type": "string", "minLength": 1 },
-        "effectSubobjectOffset": { "const": 280 },
+        "effectSubobjectOffset": { "type": "integer", "minimum": 1 },
+        "evidenceQualification": { "type": "string", "minLength": 1 },
         "target": {
           "type": "object",
           "required": ["addressLibraryId", "rva", "expectedBytes"],
@@ -237,7 +238,7 @@
           "required": [
             "status", "comparison", "authorityGap", "keyStorageAddressLibraryId",
             "keyStorageRva", "keyStorageSection", "keyGetterAddressLibraryId",
-            "keyGetterRva", "keyGetterExpectedBytes", "modelConstructorRva",
+            "keyGetterRva", "keyGetterExpectedBytes", "keyStorageReferenceOffset", "modelConstructorRva",
             "modelSetupRva", "modelDestructorRva", "lifetime", "semantics",
             "evidenceQualification"
           ],
@@ -251,9 +252,10 @@
             "keyGetterAddressLibraryId": { "type": "integer", "minimum": 1 },
             "keyGetterRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
             "keyGetterExpectedBytes": {
-              "type": "array", "minItems": 26, "maxItems": 26,
+              "type": "array", "minItems": 26, "maxItems": 130,
               "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             },
+            "keyStorageReferenceOffset": { "type": "integer", "minimum": 0, "maximum": 123 },
             "modelConstructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
             "modelSetupRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
             "modelDestructorRva": { "type": "string", "pattern": "^0x[0-9a-fA-F]{8}$" },
@@ -334,7 +336,7 @@
         },
         "calls": {
           "type": "array",
-          "minItems": 2,
+          "minItems": 1,
           "maxItems": 2,
           "items": {
             "type": "object",

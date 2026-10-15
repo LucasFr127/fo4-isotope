@@ -7,20 +7,28 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
+function Get-NativeRendererKeyStorage {
+    param([long]$Getter, [byte[]]$Bytes, [int]$Offset)
+    if ($offset -lt 0 -or $offset + 7 -gt $bytes.Count) {
+        throw 'Native renderer key reference lies outside its fingerprint.'
+    }
+    $opcode = @($bytes[$offset], $bytes[$offset + 1], ($bytes[$offset + 2] -band 0xC7))
+    if (($opcode -join ',') -ne '72,141,5') {
+        throw 'Native renderer key getter requires a RIP-relative canonical-storage instruction.'
+    }
+    return $getter + $offset + 7 + [BitConverter]::ToInt32($bytes, $offset + 3)
+}
+
 function Assert-NativeRendererKeyRelationship {
     param([Parameter(Mandatory)]$Identity)
     $getter = [Convert]::ToInt64($Identity.keyGetterRva.Substring(2), 16)
     $storage = [Convert]::ToInt64($Identity.keyStorageRva.Substring(2), 16)
-    $bytes = [byte[]]@($Identity.keyGetterExpectedBytes)
-    $lea = $bytes[19..21] -join ','
-    $addressesStorage = $getter + 26 + [BitConverter]::ToInt32($bytes, 22) -eq $storage
     if ($Identity.keyStorageAddressLibraryId -eq $Identity.keyGetterAddressLibraryId) {
         throw 'Native renderer key storage and getter require distinct mappings.'
     }
-    if ($lea -ne '72,141,29') {
-        throw 'Native renderer key getter requires a RIP-relative canonical-storage instruction.'
-    }
-    if (-not $addressesStorage) {
+    $referencedStorage = Get-NativeRendererKeyStorage $getter `
+        ([byte[]]@($Identity.keyGetterExpectedBytes)) ([int]$Identity.keyStorageReferenceOffset)
+    if ($referencedStorage -ne $storage) {
         throw 'Native renderer key getter does not address its canonical pooled-key storage.'
     }
 }
@@ -118,8 +126,8 @@ function Assert-LockedRuntimeIdentity {
 function Assert-NativeLutRuntime {
     param([string]$Runtime, $Manifest)
     $lutProperty = $manifest.PSObject.Properties['nativeLutObserver']
-    if ($null -ne $lutProperty -and $runtime -ne '1.10.163') {
-        throw 'The native LUT observer is scoped to runtime 1.10.163.'
+    if ($null -ne $lutProperty -and $runtime -notin @('1.10.163', '1.11.240')) {
+        throw 'The native LUT observer has no qualified profile for this runtime.'
     }
 }
 
@@ -179,8 +187,8 @@ function Assert-ScreenUiRuntime {
     param([string]$Runtime, $Manifest)
     $profileProperty = $Manifest.PSObject.Properties['experimentalScreenUiObserver']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -ne '1.10.163') {
-        throw 'The screen-space UI entry is scoped to runtime 1.10.163.'
+    if ($Runtime -notin @('1.10.163', '1.11.240')) {
+        throw 'The screen-space UI entry has no qualified profile for this runtime.'
     }
     $profile = $profileProperty.Value
     $target = [Convert]::ToInt64($profile.target.rva.Substring(2), 16)
@@ -197,8 +205,12 @@ function Assert-ArmorUiContract {
     param([string]$Runtime, $Armor)
     $validStatus = $armor.status -eq 'unvalidated' -and
         $armor.scope -eq 'power-armor-encoded-peak-composition'
-    if ($runtime -ne '1.10.163' -or -not $validStatus) {
+    if ($runtime -notin @('1.10.163', '1.11.240') -or -not $validStatus) {
         throw 'Armor observer runtime, status or scope is invalid.'
+    }
+    $expectedCalls = if ($runtime -eq '1.10.163') { 2 } else { 1 }
+    if (@($armor.calls).Count -ne $expectedCalls) {
+        throw 'Armor observer call count differs from the qualified runtime boundary.'
     }
 }
 
@@ -245,7 +257,7 @@ $checks = @(
 foreach ($runtime in @(
     "1.10.163",
     "1.10.984",
-    "1.11.221"
+    "1.11.240"
 )) {
     $checks += @{
         Json = Join-Path $repoRoot "runtime\$runtime\manifest.json"
@@ -263,7 +275,7 @@ $lock = Get-Content -LiteralPath (
 foreach ($runtime in @(
     "1.10.163",
     "1.10.984",
-    "1.11.221"
+    "1.11.240"
 )) {
     $manifestPath = Join-Path $repoRoot "runtime\$runtime\manifest.json"
     $manifest = Get-Content -LiteralPath $manifestPath -Raw |

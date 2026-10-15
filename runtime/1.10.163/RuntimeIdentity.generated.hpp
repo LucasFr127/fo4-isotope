@@ -6,8 +6,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
-namespace fo4hdr::generated {
+namespace fo4hdr::generated::og {
 inline constexpr std::uintptr_t kArmorUiTargetRva = 0x00AE8780;
 inline constexpr std::uint64_t kArmorUiTargetId = 495082;
 inline constexpr std::array<std::uint8_t, 23> kArmorUiTargetBytes{{ 72, 137, 108, 36, 24, 87, 72, 131, 236, 80, 72, 131, 185, 128, 0, 0, 0, 0, 139, 234, 72, 139, 249 }};
@@ -107,6 +108,8 @@ inline constexpr std::size_t kWeatherGradeGlareColorIndex = 15;
 inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ 0, 8, 16 }};
 
 inline constexpr std::string_view kRuntimeVersion = "1.10.163.0";
+inline constexpr std::uint32_t kRuntimePackedVersion = 17435184u;
+inline constexpr std::uint32_t kF4sePackedVersion = 393584u;
 inline constexpr std::string_view kRuntimeStatus = "runtime-pinned-unvalidated";
 inline constexpr std::string_view kExecutableSha256 = "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36";
 inline constexpr std::string_view kF4seVersion = "0.6.23";
@@ -115,8 +118,9 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "5f62c1de15e61dc0841d9b6c7c8fe7709c83fe4e337198bd4064e1c69fae8859";
+inline constexpr std::string_view kManifestSha256 = "2bf0b5ea4a37b966a6d32c00d68d9416e3d5112570cd37195f73165203ff4b0a";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
+inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
     0xf97c127cu, 0xd49c4526u, 0x1a87d341u, 0x2a3edc35u
 }};
@@ -153,4 +157,20 @@ inline constexpr std::array<ImageSpaceActiveDataSemantic, 12>
     ImageSpaceActiveDataSemantic{"cinematicContrast", ""}
     }};
 
-}  // namespace fo4hdr::generated
+
+inline constexpr RuntimeProfile kProfile{
+    .key = "1.10.163",
+    .identity = {kRuntimeVersion, kExecutableSha256, kF4seVersion,
+        kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,
+        kAddressLibrarySha256, kManifestSha256},
+    .status = kRuntimeStatus,
+    .f4seRuntimeFile = kF4seRuntimeFile,
+    .commonLibCommit = kCommonLibCommit,
+    .runtimeVersion = kRuntimePackedVersion,
+    .f4seVersion = kF4sePackedVersion,
+    .hasNativeSceneComposite = kHasNativeSceneComposite,
+    .nativeSceneCompositeHash = kNativeSceneCompositeDxbcHash,
+    .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,
+    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash
+};
+}  // namespace fo4hdr::generated::og

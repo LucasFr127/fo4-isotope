@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ArchivePath,
 
-    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = "1.10.163",
 
     [ValidateSet("debug", "releasedbg")]

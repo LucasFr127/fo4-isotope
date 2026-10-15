@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163")]
+    [ValidateSet("1.10.163", "1.11.240")]
     [string]$Runtime = "1.10.163",
 
     [string]$OutputPath,
@@ -25,24 +25,28 @@ $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 $sceneComposites = @($manifest.shaders | Where-Object {
     [string]$_.name -eq "native-scene-composite"
 })
-if ($sceneComposites.Count -ne 1) {
+if ($sceneComposites.Count -gt 1 -or
+    ($Runtime -eq '1.10.163' -and $sceneComposites.Count -ne 1)) {
     throw "Runtime manifest must contain one native-scene-composite shader."
 }
-$sceneComposite = $sceneComposites[0]
-$sceneCompositeHash = [string]$sceneComposite.dxbcHash
-if ($sceneComposite.stage -ne "pixel" -or
-    $sceneComposite.signal -ne "linear-bt709-relative" -or
-    $sceneComposite.draw.kind -ne "indexed" -or
-    $sceneComposite.draw.indexCount -ne 3 -or
-    $sceneComposite.target.format -ne "R16G16B16A16_FLOAT" -or
-    $sceneComposite.target.extent -ne "presentation" -or
-    $sceneComposite.role -ne "initialize-depth-tested-scene-target" -or
-    $sceneCompositeHash -notmatch '^[0-9a-f]{8}(-[0-9a-f]{8}){3}$') {
-    throw "The native scene composite shader fact is incomplete or malformed."
+$sceneCompositeHashWords = @('0x00000000u', '0x00000000u', '0x00000000u', '0x00000000u')
+if ($sceneComposites.Count -eq 1) {
+    $sceneComposite = $sceneComposites[0]
+    $sceneCompositeHash = [string]$sceneComposite.dxbcHash
+    if ($sceneComposite.stage -ne "pixel" -or
+        $sceneComposite.signal -ne "linear-bt709-relative" -or
+        $sceneComposite.draw.kind -ne "indexed" -or
+        $sceneComposite.draw.indexCount -ne 3 -or
+        $sceneComposite.target.format -ne "R16G16B16A16_FLOAT" -or
+        $sceneComposite.target.extent -ne "presentation" -or
+        $sceneComposite.role -ne "initialize-depth-tested-scene-target" -or
+        $sceneCompositeHash -notmatch '^[0-9a-f]{8}(-[0-9a-f]{8}){3}$') {
+        throw "The native scene composite shader fact is incomplete or malformed."
+    }
+    $sceneCompositeHashWords = @($sceneCompositeHash.Split("-") | ForEach-Object {
+        "0x$($_)u"
+    })
 }
-$sceneCompositeHashWords = @($sceneCompositeHash.Split("-") | ForEach-Object {
-    "0x$($_)u"
-})
 
 $lateGameUiShaders = @($manifest.shaders | Where-Object {
     [string]$_.name -eq "late-game-ui-composite"
@@ -146,61 +150,64 @@ if ($lock.commonlib.commit -notmatch '^[0-9a-f]{40}$') {
     throw "CommonLibF4 commit is not initialized."
 }
 
-if ($manifest.commonlibObservation.status -ne
-        "implementation-pending-runtime-validation" -and
-    $manifest.commonlibObservation.status -ne "runtime-validated") {
-    throw "CommonLib observation status is missing or invalid for $Runtime."
-}
-$null = Assert-Fo4HdrCommonLibRelocationProfile `
-    -Observation $manifest.commonlibObservation `
-    -CommonLibLock $lock.commonlib
-$imageSpaceProfile = Assert-Fo4HdrImageSpaceProfile `
-    $manifest.commonlibObservation.imageSpaceProfile
-$imageSpaceLayout = $imageSpaceProfile.layout
-if ([string]$imageSpaceProfile.sources.commonlib.repository -ne
-        [string]$lock.commonlib.repository -or
-    [string]$imageSpaceProfile.sources.commonlib.commit -ne
-        [string]$lock.commonlib.commit) {
-    throw (
-        "The image-space profile CommonLib source differs from the " +
-        "active dependency lock."
+if ($Runtime -eq '1.10.163') {
+    if ($manifest.commonlibObservation.status -ne
+            "implementation-pending-runtime-validation" -and
+        $manifest.commonlibObservation.status -ne "runtime-validated") {
+        throw "CommonLib observation status is missing or invalid for $Runtime."
+    }
+    $null = Assert-Fo4HdrCommonLibRelocationProfile `
+        -Observation $manifest.commonlibObservation `
+        -CommonLibLock $lock.commonlib
+    $imageSpaceProfile = Assert-Fo4HdrImageSpaceProfile `
+        $manifest.commonlibObservation.imageSpaceProfile
+    $imageSpaceLayout = $imageSpaceProfile.layout
+    if ([string]$imageSpaceProfile.sources.commonlib.repository -ne
+            [string]$lock.commonlib.repository -or
+        [string]$imageSpaceProfile.sources.commonlib.commit -ne
+            [string]$lock.commonlib.commit) {
+        throw (
+            "The image-space profile CommonLib source differs from the " +
+            "active dependency lock."
+        )
+    }
+    $activeAliasesByName = @{}
+    foreach ($field in $imageSpaceProfile.activeData) {
+        $activeAliasesByName[[string]$field.field] =
+            if ($null -eq $field.PSObject.Properties["xeditAlias"]) {
+                ""
+            } else {
+                [string]$field.xeditAlias
+            }
+    }
+    $activeFieldOrder = @(
+        "eyeAdaptSpeed",
+        "bloomBlurRadius",
+        "bloomThreshold",
+        "bloomScale",
+        "receiveBloomThreshold",
+        "white",
+        "sunlightScale",
+        "skyScale",
+        "eyeAdaptStrength",
+        "cinematicSaturation",
+        "cinematicBrightness",
+        "cinematicContrast"
+    )
+    $activeSemanticLines = @(
+        for ($index = 0; $index -lt $activeFieldOrder.Count; ++$index) {
+            $field = $activeFieldOrder[$index]
+            $suffix = if ($index -eq $activeFieldOrder.Count - 1) { "" } else { "," }
+            "    ImageSpaceActiveDataSemantic{`"$field`", `"$($activeAliasesByName[$field])`"}$suffix"
+        }
     )
 }
-$activeAliasesByName = @{}
-foreach ($field in $imageSpaceProfile.activeData) {
-    $activeAliasesByName[[string]$field.field] =
-        if ($null -eq $field.PSObject.Properties["xeditAlias"]) {
-            ""
-        } else {
-            [string]$field.xeditAlias
-        }
-}
-$activeFieldOrder = @(
-    "eyeAdaptSpeed",
-    "bloomBlurRadius",
-    "bloomThreshold",
-    "bloomScale",
-    "receiveBloomThreshold",
-    "white",
-    "sunlightScale",
-    "skyScale",
-    "eyeAdaptStrength",
-    "cinematicSaturation",
-    "cinematicBrightness",
-    "cinematicContrast"
-)
-$activeSemanticLines = @(
-    for ($index = 0; $index -lt $activeFieldOrder.Count; ++$index) {
-        $field = $activeFieldOrder[$index]
-        $suffix = if ($index -eq $activeFieldOrder.Count - 1) { "" } else { "," }
-        "    ImageSpaceActiveDataSemantic{`"$field`", `"$($activeAliasesByName[$field])`"}$suffix"
-    }
-)
 
 $armor = $manifest.experimentalArmorUiObserver
+$armorCallCount = if ($Runtime -eq '1.10.163') { 2 } else { 1 }
 if ($armor.status -ne 'unvalidated' -or
     $armor.scope -ne 'power-armor-encoded-peak-composition' -or
-    $armor.abi -ne 'void(Renderer*,uint32_t)' -or @($armor.calls).Count -ne 2 -or
+    $armor.abi -ne 'void(Renderer*,uint32_t)' -or @($armor.calls).Count -ne $armorCallCount -or
     @($armor.target.expectedBytes).Count -ne 23) {
     throw 'The armor submission observer contract is incomplete.'
 }
@@ -208,14 +215,14 @@ $armorLines = @(
     "inline constexpr std::uintptr_t kArmorUiTargetRva = $($armor.target.rva);",
     "inline constexpr std::uint64_t kArmorUiTargetId = $($armor.target.addressLibraryId);",
     "inline constexpr std::array<std::uint8_t, 23> kArmorUiTargetBytes{{ $($armor.target.expectedBytes -join ', ') }};",
-    "inline constexpr std::array<std::uintptr_t, 2> kArmorUiCallerRvas{{ $($armor.calls.callerRva -join ', ') }};",
-    "inline constexpr std::array<std::uint64_t, 2> kArmorUiCallerIds{{ $($armor.calls.callerAddressLibraryId -join ', ') }};",
-    "inline constexpr std::array<std::uintptr_t, 2> kArmorUiCallRvas{{ $($armor.calls.rva -join ', ') }};",
-    'inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kArmorUiCallBytes{{'
+    "inline constexpr std::array<std::uintptr_t, $armorCallCount> kArmorUiCallerRvas{{ $($armor.calls.callerRva -join ', ') }};",
+    "inline constexpr std::array<std::uint64_t, $armorCallCount> kArmorUiCallerIds{{ $($armor.calls.callerAddressLibraryId -join ', ') }};",
+    "inline constexpr std::array<std::uintptr_t, $armorCallCount> kArmorUiCallRvas{{ $($armor.calls.rva -join ', ') }};",
+    "inline constexpr std::array<std::array<std::uint8_t, 5>, $armorCallCount> kArmorUiCallBytes{{"
 )
 foreach ($call in $armor.calls) {
     if (@($call.expectedBytes).Count -ne 5 -or $call.expectedBytes[0] -ne 232) {
-        throw 'The armor observer requires two exact direct CALL fingerprints.'
+        throw 'The armor observer requires exact direct CALL fingerprints.'
     }
     $armorLines += "    {{ $($call.expectedBytes -join ', ') }},"
 }
@@ -228,10 +235,11 @@ $rendererKeys = [ordered]@{
 }
 foreach ($key in $rendererKeys.GetEnumerator()) {
     $identity = $key.Value
+    $getterSize = @($identity.keyGetterExpectedBytes).Count
     if ($identity.status -ne 'static-reviewed-native-unvalidated' -or
         $identity.comparison -ne 'non-null-native-pooled-entry-pointer' -or
         $identity.keyStorageSection -ne '.data' -or
-        @($identity.keyGetterExpectedBytes).Count -ne 26) {
+        $getterSize -lt 26 -or $getterSize -gt 130) {
         throw "The native $($key.Key) pooled-key identity contract is incomplete."
     }
     $prefix = "k$($key.Key)UiKey"
@@ -240,7 +248,7 @@ foreach ($key in $rendererKeys.GetEnumerator()) {
         "inline constexpr std::uint64_t $($prefix)StorageId = $($identity.keyStorageAddressLibraryId);",
         "inline constexpr std::uintptr_t $($prefix)GetterRva = $($identity.keyGetterRva);",
         "inline constexpr std::uint64_t $($prefix)GetterId = $($identity.keyGetterAddressLibraryId);",
-        "inline constexpr std::array<std::uint8_t, 26> $($prefix)GetterBytes{{ $($identity.keyGetterExpectedBytes -join ', ') }};"
+        "inline constexpr std::array<std::uint8_t, $getterSize> $($prefix)GetterBytes{{ $($identity.keyGetterExpectedBytes -join ', ') }};"
     )
 }
 
@@ -283,40 +291,43 @@ foreach ($call in $screenUi.calls) {
 }
 $screenUiLines += '}};'
 
-$nativeUi = $manifest.nativeUiResources
-if ($nativeUi.status -ne 'unvalidated' -or
-    $nativeUi.scope -ne 'dedicated-pause-blur-fp16' -or
-    $nativeUi.abi -ne 'void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)' -or
-    $nativeUi.propertiesSize -ne 32 -or $nativeUi.formatOffset -ne 8 -or
-    $nativeUi.sourceFormat -ne 24 -or $nativeUi.promotedFormat -ne 10 -or
-    $nativeUi.mode -ne 1 -or @($nativeUi.calls).Count -ne 2 -or
-    @($nativeUi.target.expectedBytes).Count -ne 16) {
-    throw 'The native pause resource allocation contract is incomplete.'
-}
-$nativeUiLines = @(
-    "inline constexpr std::uintptr_t kNativeUiTargetRva = $($nativeUi.target.rva);",
-    "inline constexpr std::uint64_t kNativeUiTargetId = $($nativeUi.target.addressLibraryId);",
-    "inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ $($nativeUi.target.expectedBytes -join ', ') }};",
-    "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ $($nativeUi.calls.callerRva -join ', ') }};",
-    "inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ $($nativeUi.calls.callerAddressLibraryId -join ', ') }};",
-    "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ $($nativeUi.calls.rva -join ', ') }};",
-    'inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{'
-)
-for ($index = 0; $index -lt 2; ++$index) {
-    $call = $nativeUi.calls[$index]
-    if ($call.slot -ne (24 + $index) -or @($call.expectedBytes).Count -ne 5 -or
-        $call.expectedBytes[0] -ne 232) {
-        throw 'The native pause allocation call order/fingerprint is invalid.'
+$nativeUiLines = @()
+if ($Runtime -eq '1.10.163') {
+    $nativeUi = $manifest.nativeUiResources
+    if ($nativeUi.status -ne 'unvalidated' -or
+        $nativeUi.scope -ne 'dedicated-pause-blur-fp16' -or
+        $nativeUi.abi -ne 'void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)' -or
+        $nativeUi.propertiesSize -ne 32 -or $nativeUi.formatOffset -ne 8 -or
+        $nativeUi.sourceFormat -ne 24 -or $nativeUi.promotedFormat -ne 10 -or
+        $nativeUi.mode -ne 1 -or @($nativeUi.calls).Count -ne 2 -or
+        @($nativeUi.target.expectedBytes).Count -ne 16) {
+        throw 'The native pause resource allocation contract is incomplete.'
     }
-    $nativeUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
+    $nativeUiLines = @(
+        "inline constexpr std::uintptr_t kNativeUiTargetRva = $($nativeUi.target.rva);",
+        "inline constexpr std::uint64_t kNativeUiTargetId = $($nativeUi.target.addressLibraryId);",
+        "inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ $($nativeUi.target.expectedBytes -join ', ') }};",
+        "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ $($nativeUi.calls.callerRva -join ', ') }};",
+        "inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ $($nativeUi.calls.callerAddressLibraryId -join ', ') }};",
+        "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ $($nativeUi.calls.rva -join ', ') }};",
+        'inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{'
+    )
+    for ($index = 0; $index -lt 2; ++$index) {
+        $call = $nativeUi.calls[$index]
+        if ($call.slot -ne (24 + $index) -or @($call.expectedBytes).Count -ne 5 -or
+            $call.expectedBytes[0] -ne 232) {
+            throw 'The native pause allocation call order/fingerprint is invalid.'
+        }
+        $nativeUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
+    }
+    $nativeUiLines += '}};'
 }
-$nativeUiLines += '}};'
 
 $lut = $manifest.nativeLutObserver
 if ($lut.status -ne 'unvalidated' -or
     $lut.scope -ne 'synchronous-gamma-correct-lut-render' -or
     $lut.abi -ne 'void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)' -or
-    $lut.effectSubobjectOffset -ne 280 -or
+    $lut.effectSubobjectOffset -le 0 -or
     @($lut.target.expectedBytes).Count -ne 25) {
     throw 'The native LUT observation contract is incomplete.'
 }
@@ -327,60 +338,82 @@ $lutLines = @(
     "inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ $($lut.target.expectedBytes -join ', ') }};"
 )
 
-$imageSpace = $manifest.imageSpaceObserver
-$weatherGrade = $imageSpace.weatherGrade
-$weatherGradeLines = @(
-    "inline constexpr std::size_t kWeatherGradeSunlightColorIndex = $($weatherGrade.sunlightColorIndex);",
-    "inline constexpr std::size_t kWeatherGradeGlareColorIndex = $($weatherGrade.glareColorIndex);",
-    "inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ $($weatherGrade.rgbByteShifts -join ', ') }};"
-)
-$targetNames = @('Weather', 'Accumulate', 'RoomBlend', 'SetLut')
-$targetAbis = @('void(Sky*)', 'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
-    'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
-    'void(ImageSpaceManager*,const ImageSpaceLUTData*)')
-if ($imageSpace.status -ne 'unvalidated' -or
-    $imageSpace.scope -ne 'weather-imagespace-provenance' -or
-    @($imageSpace.targets).Count -ne 4 -or @($imageSpace.calls).Count -ne 11) {
-    throw 'The ImageSpace provenance contract is incomplete.'
-}
 $imageSpaceLines = @()
-for ($index = 0; $index -lt 4; ++$index) {
-    $target = $imageSpace.targets[$index]
-    if ($target.name -cne $targetNames[$index] -or $target.abi -cne $targetAbis[$index]) {
-        throw 'The ImageSpace provenance target order/ABI is invalid.'
-    }
-    $prefix = 'kImageSpace' + $target.name
-    $imageSpaceLines += @(
-        "inline constexpr std::uintptr_t $($prefix)Rva = $($target.rva);",
-        "inline constexpr std::uint64_t $($prefix)Id = $($target.addressLibraryId);",
-        "inline constexpr std::array<std::uint8_t, $(@($target.expectedBytes).Count)> $($prefix)Bytes{{ $($target.expectedBytes -join ', ') }};"
+$weatherGradeLines = @()
+$imageSpaceDiagnosticLines = @()
+if ($Runtime -eq '1.10.163') {
+    $imageSpace = $manifest.imageSpaceObserver
+    $weatherGrade = $imageSpace.weatherGrade
+    $weatherGradeLines = @(
+        "inline constexpr std::size_t kWeatherGradeSunlightColorIndex = $($weatherGrade.sunlightColorIndex);",
+        "inline constexpr std::size_t kWeatherGradeGlareColorIndex = $($weatherGrade.glareColorIndex);",
+        "inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ $($weatherGrade.rgbByteShifts -join ', ') }};"
     )
-}
-foreach ($name in @('Lut', 'Base')) {
-    $global = $imageSpace.globals.($name.ToLowerInvariant())
-    $imageSpaceLines += @(
-        "inline constexpr std::uintptr_t kImageSpaceGlobal$($name)Rva = $($global.rva);",
-        "inline constexpr std::uint64_t kImageSpaceGlobal$($name)Id = $($global.addressLibraryId);"
-    )
-}
-$imageSpaceLines += @(
-    "inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallRvas{{ $($imageSpace.calls.rva -join ', ') }};",
-    "inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallerRvas{{ $($imageSpace.calls.callerRva -join ', ') }};",
-    "inline constexpr std::array<std::uint64_t, 11> kImageSpaceCallerIds{{ $($imageSpace.calls.callerAddressLibraryId -join ', ') }};",
-    "inline constexpr std::array<std::uint32_t, 11> kImageSpaceCallTargetIndices{{ $($imageSpace.calls.targetIndex -join ', ') }};",
-    'inline constexpr std::array<std::array<std::uint8_t, 5>, 11> kImageSpaceCallBytes{{'
-)
-$expectedTargetIndices = @(0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3)
-for ($index = 0; $index -lt 11; ++$index) {
-    $call = $imageSpace.calls[$index]
-    if ($call.targetIndex -ne $expectedTargetIndices[$index] -or
-        @($call.expectedBytes).Count -ne 5 -or $call.expectedBytes[0] -ne 232) {
-        throw 'The ImageSpace provenance call order/fingerprint is invalid.'
+    $targetNames = @('Weather', 'Accumulate', 'RoomBlend', 'SetLut')
+    $targetAbis = @('void(Sky*)', 'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
+        'void(ImageSpaceBaseData*,const ImageSpaceBaseData*,const ImageSpaceBaseData*,float)',
+        'void(ImageSpaceManager*,const ImageSpaceLUTData*)')
+    if ($imageSpace.status -ne 'unvalidated' -or
+        $imageSpace.scope -ne 'weather-imagespace-provenance' -or
+        @($imageSpace.targets).Count -ne 4 -or @($imageSpace.calls).Count -ne 11) {
+        throw 'The ImageSpace provenance contract is incomplete.'
     }
-    $imageSpaceLines += "    {{ $($call.expectedBytes -join ', ') }},"
-}
-$imageSpaceLines += '}};'
+    $imageSpaceLines = @()
+    for ($index = 0; $index -lt 4; ++$index) {
+        $target = $imageSpace.targets[$index]
+        if ($target.name -cne $targetNames[$index] -or $target.abi -cne $targetAbis[$index]) {
+            throw 'The ImageSpace provenance target order/ABI is invalid.'
+        }
+        $prefix = 'kImageSpace' + $target.name
+        $imageSpaceLines += @(
+            "inline constexpr std::uintptr_t $($prefix)Rva = $($target.rva);",
+            "inline constexpr std::uint64_t $($prefix)Id = $($target.addressLibraryId);",
+            "inline constexpr std::array<std::uint8_t, $(@($target.expectedBytes).Count)> $($prefix)Bytes{{ $($target.expectedBytes -join ', ') }};"
+        )
+    }
+    foreach ($name in @('Lut', 'Base')) {
+        $global = $imageSpace.globals.($name.ToLowerInvariant())
+        $imageSpaceLines += @(
+            "inline constexpr std::uintptr_t kImageSpaceGlobal$($name)Rva = $($global.rva);",
+            "inline constexpr std::uint64_t kImageSpaceGlobal$($name)Id = $($global.addressLibraryId);"
+        )
+    }
+    $imageSpaceLines += @(
+        "inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallRvas{{ $($imageSpace.calls.rva -join ', ') }};",
+        "inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallerRvas{{ $($imageSpace.calls.callerRva -join ', ') }};",
+        "inline constexpr std::array<std::uint64_t, 11> kImageSpaceCallerIds{{ $($imageSpace.calls.callerAddressLibraryId -join ', ') }};",
+        "inline constexpr std::array<std::uint32_t, 11> kImageSpaceCallTargetIndices{{ $($imageSpace.calls.targetIndex -join ', ') }};",
+        'inline constexpr std::array<std::array<std::uint8_t, 5>, 11> kImageSpaceCallBytes{{'
+    )
+    $expectedTargetIndices = @(0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3)
+    for ($index = 0; $index -lt 11; ++$index) {
+        $call = $imageSpace.calls[$index]
+        if ($call.targetIndex -ne $expectedTargetIndices[$index] -or
+            @($call.expectedBytes).Count -ne 5 -or $call.expectedBytes[0] -ne 232) {
+            throw 'The ImageSpace provenance call order/fingerprint is invalid.'
+        }
+        $imageSpaceLines += "    {{ $($call.expectedBytes -join ', ') }},"
+    }
+    $imageSpaceLines += '}};'
 
+    $imageSpaceDiagnosticLines = @(
+        "struct ImageSpaceActiveDataSemantic",
+        "{",
+        "    std::string_view field;",
+        "    std::string_view xeditAlias;",
+        "};",
+        "",
+        "inline constexpr std::size_t kImageSpacePrimitiveArraySize = $($imageSpaceLayout.primitiveArray.size);",
+        "inline constexpr std::size_t kImageSpacePrimitiveArrayDataOffset = $($imageSpaceLayout.primitiveArray.dataOffset);",
+        "inline constexpr std::size_t kImageSpacePrimitiveArrayCapacityOffset = $($imageSpaceLayout.primitiveArray.capacityOffset);",
+        "inline constexpr std::size_t kImageSpacePrimitiveArrayFreeIndexOffset = $($imageSpaceLayout.primitiveArray.freeIndexOffset);",
+        "inline constexpr std::size_t kImageSpacePrimitiveArraySizeOffset = $($imageSpaceLayout.primitiveArray.sizeOffset);",
+        "inline constexpr std::array<ImageSpaceActiveDataSemantic, 12>",
+        "    kImageSpaceActiveDataSemantics{{"
+    ) + $activeSemanticLines + @("    }};", "")
+}
+
+$profileNamespace = if ($Runtime -eq '1.10.163') { 'og' } else { 'ae' }
 $lines = @(
     # REUSE-IgnoreStart
     "// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions",
@@ -392,8 +425,9 @@ $lines = @(
     "#include <cstddef>",
     "#include <cstdint>",
     "#include <string_view>",
+    '#include "FO4Isotope/runtime/RuntimeProfile.hpp"',
     "",
-    "namespace fo4hdr::generated {",
+    "namespace fo4hdr::generated::$profileNamespace {",
     ($armorLines -join "`n"),
     ($screenUiLines -join "`n"),
     ($nativeUiLines -join "`n"),
@@ -402,6 +436,8 @@ $lines = @(
     ($weatherGradeLines -join "`n"),
     "",
     "inline constexpr std::string_view kRuntimeVersion = `"$manifestVersion`";",
+    "inline constexpr std::uint32_t kRuntimePackedVersion = $(ConvertTo-Fo4HdrPackedPluginVersion $Runtime)u;",
+    "inline constexpr std::uint32_t kF4sePackedVersion = $(ConvertTo-Fo4HdrPackedPluginVersion $entry.f4seVersion)u;",
     "inline constexpr std::string_view kRuntimeStatus = `"$($entry.status)`";",
     "inline constexpr std::string_view kExecutableSha256 = `"$($entry.exeSha256)`";",
     "inline constexpr std::string_view kF4seVersion = `"$($entry.f4seVersion)`";",
@@ -412,6 +448,7 @@ $lines = @(
     "inline constexpr std::string_view kAddressLibrarySha256 = `"$($entry.addressLibrarySha256)`";",
     "inline constexpr std::string_view kManifestSha256 = `"$manifestHash`";",
     "inline constexpr std::string_view kCommonLibCommit = `"$($lock.commonlib.commit)`";",
+    "inline constexpr bool kHasNativeSceneComposite = $(($sceneComposites.Count -eq 1).ToString().ToLowerInvariant());",
     "inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{",
     "    $($sceneCompositeHashWords -join ', ')",
     "}};",
@@ -421,23 +458,24 @@ $lines = @(
     "inline constexpr std::array<std::uint32_t, 4> kLateGameUiBackdropDxbcHash{{",
     "    $($lateGameUiBackdropHashWords -join ', ')",
     "}};",
-    "struct ImageSpaceActiveDataSemantic",
-    "{",
-    "    std::string_view field;",
-    "    std::string_view xeditAlias;",
-    "};",
+    ($imageSpaceDiagnosticLines -join "`n"),
     "",
-    "inline constexpr std::size_t kImageSpacePrimitiveArraySize = $($imageSpaceLayout.primitiveArray.size);",
-    "inline constexpr std::size_t kImageSpacePrimitiveArrayDataOffset = $($imageSpaceLayout.primitiveArray.dataOffset);",
-    "inline constexpr std::size_t kImageSpacePrimitiveArrayCapacityOffset = $($imageSpaceLayout.primitiveArray.capacityOffset);",
-    "inline constexpr std::size_t kImageSpacePrimitiveArrayFreeIndexOffset = $($imageSpaceLayout.primitiveArray.freeIndexOffset);",
-    "inline constexpr std::size_t kImageSpacePrimitiveArraySizeOffset = $($imageSpaceLayout.primitiveArray.sizeOffset);",
-    "inline constexpr std::array<ImageSpaceActiveDataSemantic, 12>",
-    "    kImageSpaceActiveDataSemantics{{"
-) + $activeSemanticLines + @(
-    "    }};",
-    "",
-    "}  // namespace fo4hdr::generated",
+    'inline constexpr RuntimeProfile kProfile{',
+    "    .key = `"$Runtime`",",
+    '    .identity = {kRuntimeVersion, kExecutableSha256, kF4seVersion,',
+    '        kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,',
+    '        kAddressLibrarySha256, kManifestSha256},',
+    '    .status = kRuntimeStatus,',
+    '    .f4seRuntimeFile = kF4seRuntimeFile,',
+    '    .commonLibCommit = kCommonLibCommit,',
+    '    .runtimeVersion = kRuntimePackedVersion,',
+    '    .f4seVersion = kF4sePackedVersion,',
+    '    .hasNativeSceneComposite = kHasNativeSceneComposite,',
+    '    .nativeSceneCompositeHash = kNativeSceneCompositeDxbcHash,',
+    '    .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,',
+    '    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash',
+    '};',
+    "}  // namespace fo4hdr::generated::$profileNamespace",
     ""
 )
 $generated = $lines -join "`n"

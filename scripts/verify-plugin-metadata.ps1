@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [ValidateSet("1.10.163", "1.11.240")]
     [string]$Runtime = "1.10.163",
 
     [ValidateSet("debug", "releasedbg")]
@@ -14,14 +14,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
-
-function ConvertTo-Fo4HdrPackedPluginVersion {
-    param([string]$Version)
-    $parts = $Version.Split('.') | ForEach-Object { [uint32]$_ }
-    return (($parts[0] -band 0xFF) -shl 24) -bor
-        (($parts[1] -band 0xFF) -shl 16) -bor
-        (($parts[2] -band 0xFFF) -shl 4)
-}
 
 function Assert-Fo4HdrPluginVersion {
     param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
@@ -38,9 +30,7 @@ function Assert-Fo4HdrPluginVersion {
     if ($dataVersion -ne 1 -or $pluginName -ne "FO4Isotope") {
         throw "The exported F4SE plugin identity is invalid."
     }
-    $expectedFlags = if ($Runtime -eq "1.10.984") { 2 } else { 4 }
-    if ($addressIndependence -ne $expectedFlags -or
-        $structureIndependence -ne $expectedFlags) {
+    if ($addressIndependence -ne 4 -or $structureIndependence -ne 0) {
         throw "The exported Address Library/layout flags are invalid."
     }
 
@@ -49,16 +39,19 @@ function Assert-Fo4HdrPluginVersion {
 
 function Assert-Fo4HdrPluginVersionRequirements {
     param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
-    $expectedPacked = ConvertTo-Fo4HdrPackedPluginVersion $Runtime
+    $expectedPacked = @(
+        (ConvertTo-Fo4HdrPackedPluginVersion '1.10.163'),
+        (ConvertTo-Fo4HdrPackedPluginVersion '1.11.240')
+    )
     for ($index = 0; $index -lt 16; ++$index) {
         $actual = [uint32][Runtime.InteropServices.Marshal]::ReadInt32(
             $version,
             0x210 + ($index * 4))
-        $expected = if ($index -eq 0) { $expectedPacked } else { 0 }
+        $expected = if ($index -lt $expectedPacked.Count) { $expectedPacked[$index] } else { 0 }
         if ($actual -ne $expected) {
             throw (
                 "PluginVersion compatible runtimes are not exactly " +
-                "$Runtime followed by zero terminators."
+                "OG 1.10.163 and AE 1.11.240 followed by zero terminators."
             )
         }
     }
@@ -96,13 +89,14 @@ function Assert-Fo4HdrPluginMetadataFixture {
         [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $version, $bytes.Length)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x000, 1)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x208, $Fixture.Flags)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x20C, $Fixture.Flags)
+        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x20C, 0)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x210, $Fixture.Packed)
+        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x214, 0x010B0F00)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x250, $Fixture.Minimum)
         $arguments = @{
             Version = $version
             Runtime = $Fixture.Runtime
-            F4seVersion = $Lock.runtimes.($Fixture.Runtime).f4seVersion
+            F4seVersion = $Lock.runtimes.'1.10.163'.f4seVersion
         }
         Assert-Fo4HdrPluginVersion @arguments
         $invalidFields = @(
@@ -111,12 +105,15 @@ function Assert-Fo4HdrPluginMetadataFixture {
             @{ Offset = 0x208; Value = 0 },
             @{ Offset = 0x208; Value = 6 },
             @{ Offset = 0x208; Value = 6 - $Fixture.Flags },
-            @{ Offset = 0x20C; Value = 0 },
+            @{ Offset = 0x20C; Value = 4 },
             @{ Offset = 0x20C; Value = 6 },
             @{ Offset = 0x20C; Value = 6 - $Fixture.Flags },
             @{ Offset = 0x210; Value = 0 },
             @{ Offset = 0x210; Value = $Fixture.Packed + 16 },
             @{ Offset = 0x214; Value = $Fixture.Packed },
+            @{ Offset = 0x214; Value = 0x010A3D80 },
+            @{ Offset = 0x214; Value = 0x010B0DD0 },
+            @{ Offset = 0x218; Value = $Fixture.Packed },
             @{ Offset = 0x24C; Value = $Fixture.Packed },
             @{ Offset = 0x250; Value = 0 },
             @{ Offset = 0x250; Value = $Fixture.Minimum - 16 },
@@ -135,13 +132,12 @@ function Invoke-Fo4HdrPluginMetadataSelfTest {
     param($Lock)
     foreach ($fixture in @(
         @{ Runtime = '1.10.163'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 },
-        @{ Runtime = '1.10.984'; Packed = 0x010A3D80; Flags = 2; Minimum = 0x00070020 },
-        @{ Runtime = '1.11.221'; Packed = 0x010B0DD0; Flags = 4; Minimum = 0x00070080 }
+        @{ Runtime = '1.11.240'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 }
     )) {
         Assert-Fo4HdrPluginMetadataFixture $fixture $Lock
     }
     Assert-Fo4HdrStagedManifestFixtures
-    Write-Host "Plugin metadata self-tests passed for OG, NG and AE."
+    Write-Host "Shared OG/AE plugin metadata self-tests passed."
 }
 
 function Assert-Fo4HdrStagedManifestHash {
@@ -190,8 +186,7 @@ function Assert-Fo4HdrPluginStaging {
     foreach ($path in @(
         $stagedDll,
         (Join-Path $pluginRoot "FO4Isotope.pdb"),
-        (Join-Path $pluginRoot "FO4Isotope.ini"),
-        $stagedManifest
+        (Join-Path $pluginRoot "FO4Isotope.ini")
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Expected built/staged plugin file is missing: $path"
@@ -199,11 +194,20 @@ function Assert-Fo4HdrPluginStaging {
     }
 
     if (-not $StageOnly) { Assert-Fo4HdrBuiltPlugin }
+    Assert-Fo4HdrStagedRuntimeManifests
+}
 
-    Assert-Fo4HdrStagedManifestHash `
-        -StagedHash (Get-Fo4HdrCanonicalTextSha256 $stagedManifest) `
-        -SourceHash (Get-Fo4HdrCanonicalTextSha256 (Join-Path $repoRoot "runtime/$Runtime/manifest.json")) `
-        -Entry $entry
+function Assert-Fo4HdrStagedRuntimeManifests {
+    foreach ($profileRuntime in @('1.10.163', '1.11.240')) {
+        $manifest = Join-Path $pluginRoot "FO4Isotope/runtime-$profileRuntime.json"
+        if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+            throw "Staged runtime manifest is missing: $manifest"
+        }
+        Assert-Fo4HdrStagedManifestHash `
+            -StagedHash (Get-Fo4HdrCanonicalTextSha256 $manifest) `
+            -SourceHash (Get-Fo4HdrCanonicalTextSha256 (Join-Path $repoRoot "runtime/$profileRuntime/manifest.json")) `
+            -Entry $lock.runtimes.$profileRuntime
+    }
 }
 
 $repoRoot = Get-Fo4HdrRepoRoot
@@ -219,11 +223,8 @@ $stageRoot = Join-Path $repoRoot "dist"
 $builtDll =
     Join-Path $repoRoot "build\windows\x64\$Mode\FO4Isotope.dll"
 $pluginRoot =
-    Join-Path $stageRoot "$Runtime\Data\F4SE\Plugins"
+    Join-Path $stageRoot "universal\Data\F4SE\Plugins"
 $stagedDll = Join-Path $pluginRoot "FO4Isotope.dll"
-$stagedManifest = Join-Path `
-    $pluginRoot `
-    "FO4Isotope\runtime-$Runtime.json"
 
 Assert-Fo4HdrPluginStaging
 
@@ -282,13 +283,13 @@ try {
         throw "The plugin does not export the required F4SE entry points."
     }
 
-    Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime -F4seVersion $entry.f4seVersion
+    Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime -F4seVersion $lock.runtimes.'1.10.163'.f4seVersion
 }
 finally {
     [void][Fo4Hdr.NativeMethods]::FreeLibrary($module)
 }
 
 Write-Host (
-    "Verified plugin staging and exact $Runtime metadata" +
+    "Verified shared OG/AE plugin metadata and both staged runtime manifests" +
     $(if ($StageOnly) { "." } else { " for $Mode." })
 )

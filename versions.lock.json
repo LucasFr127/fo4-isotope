@@ -92,7 +92,7 @@
       "f4seRuntimeDllSha256": "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd",
       "addressLibraryFile": "version-1-10-163-0.bin",
       "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
-      "runtimeManifestCanonicalSha256": "5f62c1de15e61dc0841d9b6c7c8fe7709c83fe4e337198bd4064e1c69fae8859",
+      "runtimeManifestCanonicalSha256": "2bf0b5ea4a37b966a6d32c00d68d9416e3d5112570cd37195f73165203ff4b0a",
       "shaderManifestSha256": "FILL_AFTER_CAPTURE",
       "observedAtUtc": "2026-08-09T21:33:23.9297903Z"
     },
@@ -108,17 +108,18 @@
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": null
     },
-    "1.11.221": {
-      "status": "planned",
-      "platform": "unvalidated",
-      "f4seVersion": "0.7.8",
-      "exeSha256": "UNVALIDATED",
-      "f4seLoaderSha256": "UNVALIDATED",
-      "f4seRuntimeDllSha256": "UNVALIDATED",
-      "addressLibraryFile": "version-1-11-221-0.bin",
-      "addressLibrarySha256": "UNVALIDATED",
+    "1.11.240": {
+      "status": "runtime-pinned-unvalidated",
+      "platform": "steam",
+      "f4seVersion": "0.7.9",
+      "exeSha256": "fdcef37ac1230af6d0b0050eb2142b139ef3a867b37b9211fb6edfcc646072f8",
+      "f4seLoaderSha256": "0925bb3139b994a2f81a623d83cc98892c2354dbedf6a37fac1e3f893bb00bde",
+      "f4seRuntimeDllSha256": "25759ed8fb110ff3ce79f174d2acf15aa82834179d9e69c53d3fb9f59176a2ef",
+      "addressLibraryFile": "version-1-11-240-0.bin",
+      "addressLibrarySha256": "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06",
       "shaderManifestSha256": "UNVALIDATED",
-      "observedAtUtc": null
+      "observedAtUtc": "2026-10-15T16:13:06.5613276Z",
+      "runtimeManifestCanonicalSha256": "a18843f0241746f07c4c9b4ea737402a58f0c69c9b6cb983e892d992b0164025"
     }
   },
   "aces2": {

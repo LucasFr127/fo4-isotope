@@ -11,6 +11,7 @@
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
 #include "FO4Isotope/TestShaders.generated.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -364,7 +365,8 @@ void CheckNativeSceneShaderIdentity()
     std::array<std::uint32_t, 5> header{0x43425844, 0xf97c127c, 0xd49c4526, 0x1a87d341, 0x2a3edc35};
     CreatedShaderIdentity identity;
     identity.Observe(header.data(), sizeof(header), false);
-    FO4HDR_WARP_CHECK(identity.nativeSceneComposite && identity.descriptor == nullptr);
+    FO4HDR_WARP_CHECK(identity.nativeSceneComposite == fo4hdr::IsOriginalRuntime());
+    FO4HDR_WARP_CHECK(identity.descriptor == nullptr);
     CreatedShaderIdentity truncated;
     truncated.Observe(header.data(), sizeof(header) - 1, false);
     FO4HDR_WARP_CHECK(!truncated.nativeSceneComposite);

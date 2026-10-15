@@ -88,4 +88,16 @@ Assert-Rejected {
         -AllowUnvalidatedRuntime
 } "unknown normalized status"
 
+$savedRuntime = $env:FO4HDR_RUNTIME
+try {
+    $env:FO4HDR_RUNTIME = $null
+    $message = ''
+    try {
+        & (Join-Path $repoRoot 'scripts/test.ps1') -Mode debug -SkipConfigure -Scope compiled
+    } catch { $message = $_.Exception.Message }
+    if ($message -notlike 'Specify -Runtime or set FO4HDR_RUNTIME*') {
+        throw "Compiled tests did not reject an unspecified runtime before execution: $message"
+    }
+} finally { $env:FO4HDR_RUNTIME = $savedRuntime }
+
 Write-Host "Runtime status action-policy regression tests passed."

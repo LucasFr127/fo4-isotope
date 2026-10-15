@@ -5,6 +5,14 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot "Project.Runtime.Binary.ps1")
 . (Join-Path $PSScriptRoot "Project.Runtime.Profiles.ps1")
 
+function ConvertTo-Fo4HdrPackedPluginVersion {
+    param([string]$Version)
+    $parts = $Version.Split('.') | ForEach-Object { [uint32]$_ }
+    return (($parts[0] -band 0xFF) -shl 24) -bor
+        (($parts[1] -band 0xFF) -shl 16) -bor
+        (($parts[2] -band 0xFFF) -shl 4)
+}
+
 function Test-Fo4HdrRuntimeActionAuthorization {
     param([string]$Status, [string]$Action, [bool]$AllowUnvalidatedRuntime)
     $allowed = switch ($Action) {
@@ -164,7 +172,7 @@ function Test-Fo4HdrIdentityBoundEvidencePresent {
 function Get-Fo4HdrRuntimeDefinition {
     param(
         [Parameter(Mandatory = $true)]
-        [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+        [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
         [string]$Runtime
     )
 
@@ -183,11 +191,11 @@ function Get-Fo4HdrRuntimeDefinition {
             AddressLibraryFile = "version-1-10-984-0.bin"
             AllowedPlatforms = @("Steam")
         }
-        "1.11.221" = [pscustomobject]@{
-            Runtime = "1.11.221"
-            F4SEVersion = "0.7.8"
-            RuntimeDll = "f4se_1_11_221.dll"
-            AddressLibraryFile = "version-1-11-221-0.bin"
+        "1.11.240" = [pscustomobject]@{
+            Runtime = "1.11.240"
+            F4SEVersion = "0.7.9"
+            RuntimeDll = "f4se_1_11_240.dll"
+            AddressLibraryFile = "version-1-11-240-0.bin"
             AllowedPlatforms = @("Steam")
         }
     }

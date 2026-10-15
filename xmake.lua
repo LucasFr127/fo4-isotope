@@ -52,9 +52,9 @@ add_rules("plugin.vsxmake.autoupdate")
 
 option("fo4hdr_runtime")
     set_default("1.10.163")
-    set_values("1.10.163", "1.10.984", "1.11.221")
+    set_values("1.10.163", "1.11.240")
     set_showmenu(true)
-    set_description("Fallout 4 runtime package")
+    set_description("Local validation runtime for the shared OG/AE DLL")
 option_end()
 
 option("fo4hdr_allow_unvalidated_runtime")
@@ -100,7 +100,7 @@ rule("fo4hdr.plugin")
             "installdir",
             path.join(
                 stage,
-                get_config("fo4hdr_runtime"),
+                "universal",
                 "Data"))
 
         target:add(
@@ -115,19 +115,12 @@ rule("fo4hdr.plugin")
             "installfiles",
             "config/FO4Isotope.ini",
             { prefixdir = "F4SE/Plugins" })
-        target:add(
-            "installfiles",
-            path.join(
-                "runtime",
-                get_config("fo4hdr_runtime"),
-                "manifest.json"),
-            {
+        for _, runtime in ipairs({"1.10.163", "1.11.240"}) do
+            target:add("installfiles", path.join("runtime", runtime, "manifest.json"), {
                 prefixdir = "F4SE/Plugins/FO4Isotope",
-                filename =
-                    "runtime-" ..
-                    get_config("fo4hdr_runtime") ..
-                    ".json"
+                filename = "runtime-" .. runtime .. ".json"
             })
+        end
     end)
 rule_end()
 
@@ -244,10 +237,6 @@ target("fo4hdr-renderer")
     end
     add_syslinks("d3d11", "dxgi", "dxguid", "user32", "comctl32", { public = true })
 
-    if (get_config("fo4hdr_runtime") or "1.10.163") == "1.10.163" then
-        add_defines("FO4HDR_RUNTIME_1_10_163=1")
-    end
-
 target_end()
 
 target("FO4Isotope")
@@ -265,32 +254,7 @@ target("FO4Isotope")
         set_pcxxheader("src/plugin/PluginPch.hpp")
     end
 
-    local runtime = get_config("fo4hdr_runtime") or "1.10.163"
-    if runtime == "1.10.163" then
-        add_files("src/game/**.cpp")
-        add_files("runtime/1.10.163/PluginVersion.cpp")
-        add_defines("FO4HDR_RUNTIME_1_10_163=1")
-    elseif runtime == "1.10.984" then
-        if not has_config("fo4hdr_allow_unvalidated_runtime") then
-            os.raise(
-                "1.10.984 is not validated. Reconfigure explicitly with " ..
-                "--fo4hdr_allow_unvalidated_runtime=y for porting work.")
-        end
-        add_files("runtime/1.10.984/PluginVersion.cpp")
-        add_defines("FO4HDR_RUNTIME_1_10_984=1")
-    elseif runtime == "1.11.221" then
-        if not has_config("fo4hdr_allow_unvalidated_runtime") then
-            os.raise(
-                "1.11.221 is not validated. Reconfigure explicitly with " ..
-                "--fo4hdr_allow_unvalidated_runtime=y for porting work.")
-        end
-        add_files("runtime/1.11.221/PluginVersion.cpp")
-        add_defines("FO4HDR_RUNTIME_1_11_221=1")
-    else
-        os.raise(
-            "Unsupported fo4hdr_runtime: " ..
-            tostring(runtime))
-    end
+    add_files("src/game/**.cpp", "runtime/PluginVersion.cpp")
 target_end()
 
 if has_config("fo4hdr_build_tests") then
@@ -348,9 +312,6 @@ if has_config("fo4hdr_build_tests") then
         add_includedirs("include", ".", "src/config", "src/game", "src/graphics", "src/ui",
             "src/runtime", "tests/support",
             path.join(os.projectdir(), "build", "generated"))
-        if (get_config("fo4hdr_runtime") or "1.10.163") == "1.10.163" then
-            add_defines("FO4HDR_RUNTIME_1_10_163=1")
-        end
         on_load(function (target)
             local headers = os.files("include/**.hpp")
             table.join2(headers, os.files("src/**.hpp"))

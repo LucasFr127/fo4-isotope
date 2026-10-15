@@ -15,9 +15,7 @@
 #include "RenoDxShaderIdentity.hpp"
 #include "FO4Isotope/hooks/HookOwnership.hpp"
 
-#if defined(FO4HDR_RUNTIME_1_10_163)
-#  include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
-#endif
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
 #include <algorithm>
 #include <array>
@@ -84,16 +82,11 @@ enum class LateGameUiShaderKind { composite, backdrop };
 [[nodiscard]] bool MatchesLateGameUiBytecode(const void* bytecode,
     std::size_t bytecodeLength, LateGameUiShaderKind kind) noexcept
 {
-#if defined(FO4HDR_RUNTIME_1_10_163)
+    const auto* profile = ActiveRuntimeProfile();
+    if (!profile) return false;
     const auto& hash = kind == LateGameUiShaderKind::composite ?
-        generated::kLateGameUiCompositeDxbcHash : generated::kLateGameUiBackdropDxbcHash;
+        profile->lateGameUiCompositeHash : profile->lateGameUiBackdropHash;
     return MatchesDxbcHash(bytecode, bytecodeLength, hash);
-#else
-    (void)bytecode;
-    (void)bytecodeLength;
-    (void)kind;
-    return false;
-#endif
 }
 
 template <std::size_t Count>
@@ -235,10 +228,9 @@ void CreatedShaderIdentity::Observe(const void* bytecode, std::size_t length, bo
     if (bytecode == nullptr || length == 0) return;
     lateGameUiComposite = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::composite);
     lateGameUiBackdrop = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::backdrop);
-#if defined(FO4HDR_RUNTIME_1_10_163)
-    nativeSceneComposite = MatchesDxbcHash(
-        bytecode, length, generated::kNativeSceneCompositeDxbcHash);
-#endif
+    const auto* profile = ActiveRuntimeProfile();
+    nativeSceneComposite = profile && profile->hasNativeSceneComposite && MatchesDxbcHash(
+        bytecode, length, profile->nativeSceneCompositeHash);
     const auto crc32 = ComputeRenoDxShaderCrc32(
         std::span<const std::byte>(static_cast<const std::byte*>(bytecode), length));
     descriptor = FindRenoDxFallout4Shader(crc32);

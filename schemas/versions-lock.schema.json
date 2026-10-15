@@ -481,7 +481,7 @@
       "required": [
         "1.10.163",
         "1.10.984",
-        "1.11.221"
+        "1.11.240"
       ],
       "properties": {
         "1.10.163": {
@@ -490,7 +490,7 @@
         "1.10.984": {
           "$ref": "#/definitions/runtimeEntry"
         },
-        "1.11.221": {
+        "1.11.240": {
           "$ref": "#/definitions/runtimeEntry"
         }
       },

@@ -5,12 +5,35 @@
 #include "TestHarness.hpp"
 
 #include "FO4Isotope/runtime/RuntimeValidation.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
 #include <string_view>
 
 namespace fo4hdr::tests {
 
 namespace {
+void TestSharedRuntimeSelection()
+{
+    const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
+    const auto* ae = FindRuntimeProfile(0x010B0F00, 0x00070090);
+    FO4HDR_CHECK(og && ae && og != ae);
+    FO4HDR_CHECK(og->key == "1.10.163" && ae->key == "1.11.240");
+    FO4HDR_CHECK(og->hasNativeSceneComposite && !ae->hasNativeSceneComposite);
+    FO4HDR_CHECK(og->identity.executableSha256 != ae->identity.executableSha256);
+    FO4HDR_CHECK(ValidateRuntimeIdentity(og->identity, og->identity).valid);
+    FO4HDR_CHECK(ValidateRuntimeIdentity(ae->identity, ae->identity).valid);
+    FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ae->identity).valid);
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010A0A30, 0x00070090));
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00060170));
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010A3D80, 0x00070020));
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0DD0, 0x00070080));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(0, 0));
+    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
+    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(0x010B0F00, 0x00070090));
+    FO4HDR_CHECK(ActiveRuntimeProfile() == og && IsOriginalRuntime());
+}
+
 constexpr std::string_view hashA =
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 constexpr std::string_view hashB =
@@ -295,6 +318,7 @@ void TestUnknownAuthorization()
 
 void RunRuntimeValidationTests()
 {
+    TestSharedRuntimeSelection();
     TestMatchingIdentity();
     TestExecutableIdentity();
     TestRuntimeAndF4seIdentity();

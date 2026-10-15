@@ -29,7 +29,7 @@ $forbiddenNames = @(
     "f4se_loader.exe",
     "f4se_1_10_163.dll",
     "f4se_1_10_984.dll",
-    "f4se_1_11_221.dll",
+    "f4se_1_11_240.dll",
     "local.env.ps1"
 )
 

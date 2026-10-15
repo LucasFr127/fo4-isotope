@@ -8,6 +8,7 @@
 #include "GameSnapshotStore.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 #include "MenuEventQueue.hpp"
 #include "FO4Isotope/ui/HdrSettingsInput.hpp"
 #include <Windows.h>
@@ -723,6 +724,8 @@ void ReportPublishedObservation()
 void ObserveAtLifecycle(
     fo4hdr::GameLifecycleEvent event)
 {
+    // shortcut: optional engine diagnostics are OG-only until their AE profiles are verified.
+    if (!fo4hdr::IsOriginalRuntime()) return;
     const auto name = LifecycleName(event);
     fo4hdr::game::observation::ObserveImageSpace(g_snapshotStore, name);
     fo4hdr::game::observation::ObserveRendererAndTargets(g_snapshotStore, name);
@@ -799,7 +802,8 @@ bool VerifyCollectorThread(const ObservationRequest& request)
     const auto requestGeneration = request.generation;
     const auto sourceThread = request.sourceThread;
     const auto executeThread = REX::W32::GetCurrentThreadId();
-    const auto readsEngine = fo4hdr::GameObservationReadsEngine(event, request.observe);
+    const auto readsEngine = fo4hdr::IsOriginalRuntime() &&
+        fo4hdr::GameObservationReadsEngine(event, request.observe);
     if (!fo4hdr::TryClaimGameObservationThread(g_collectorThread, executeThread, readsEngine))
     {
         REX::WARN(

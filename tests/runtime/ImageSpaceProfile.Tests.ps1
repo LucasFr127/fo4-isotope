@@ -200,24 +200,26 @@ Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $wrongLayoutConstant
 } "wrong private array-layout constant"
 
-$first = [IO.Path]::Combine(
-    [IO.Path]::GetTempPath(),
-    "FO4Isotope.RuntimeIdentity.first.$([Guid]::NewGuid()).hpp")
-$second = [IO.Path]::Combine(
-    [IO.Path]::GetTempPath(),
-    "FO4Isotope.RuntimeIdentity.second.$([Guid]::NewGuid()).hpp")
-try {
+function Test-RuntimeIdentityGeneration {
+    param([string]$Runtime, [string]$First, [string]$Second)
     & (Join-Path $repoRoot "scripts\generate-runtime-identity.ps1") `
-        -Runtime "1.10.163" `
+        -Runtime $runtime `
         -OutputPath $first
     & (Join-Path $repoRoot "scripts\generate-runtime-identity.ps1") `
-        -Runtime "1.10.163" `
+        -Runtime $runtime `
         -OutputPath $second
     if ((Get-FileHash -LiteralPath $first -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath $second -Algorithm SHA256).Hash) {
         throw "Repeated runtime identity generation was not byte-identical."
     }
 
+    if ($runtime -eq '1.11.240') {
+        $generated = Get-Content -LiteralPath $first -Raw
+        if ($generated -match 'kImageSpaceCallRvas|kNativeUiTargetRva|kWeatherGradeColorShifts' -or
+            $generated -notmatch 'kHasNativeSceneComposite = false;') {
+            throw 'AE generated output admitted an unverified OG-only feature.'
+        }
+    }
     [IO.File]::AppendAllText(
         $second,
         "// stale`n",
@@ -225,10 +227,22 @@ try {
     )
     Assert-Rejected {
         & (Join-Path $repoRoot "scripts\generate-runtime-identity.ps1") `
-            -Runtime "1.10.163" `
+            -Runtime $runtime `
             -OutputPath $second `
             -Check
     } "stale generated output"
+}
+
+$first = [IO.Path]::Combine(
+    [IO.Path]::GetTempPath(),
+    "FO4Isotope.RuntimeIdentity.first.$([Guid]::NewGuid()).hpp")
+$second = [IO.Path]::Combine(
+    [IO.Path]::GetTempPath(),
+    "FO4Isotope.RuntimeIdentity.second.$([Guid]::NewGuid()).hpp")
+try {
+    foreach ($runtime in @('1.10.163', '1.11.240')) {
+        Test-RuntimeIdentityGeneration $runtime $first $second
+    }
 }
 finally {
     Remove-Item -LiteralPath $first, $second -Force -ErrorAction SilentlyContinue

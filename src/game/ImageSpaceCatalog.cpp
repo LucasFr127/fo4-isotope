@@ -209,7 +209,7 @@ std::array<std::uint8_t, 3> DecodeWeatherColor(std::uint32_t packed) noexcept
     std::array<std::uint8_t, 3> result{};
     for (std::size_t channel = 0; channel < result.size(); ++channel)
         result[channel] = static_cast<std::uint8_t>(
-            packed >> fo4hdr::generated::kWeatherGradeColorShifts[channel]);
+            packed >> fo4hdr::generated::og::kWeatherGradeColorShifts[channel]);
     return result;
 }
 
@@ -217,9 +217,9 @@ bool ReadWeatherColors(const RE::TESWeather& weather, WeatherColors& result) noe
 {
     std::array<std::uint32_t, 8> sunlight{}, glare{};
     if (!fo4hdr::game::observation::GuardedReadValue(
-            weather.colorData[fo4hdr::generated::kWeatherGradeSunlightColorIndex], sunlight) ||
+            weather.colorData[fo4hdr::generated::og::kWeatherGradeSunlightColorIndex], sunlight) ||
         !fo4hdr::game::observation::GuardedReadValue(
-            weather.colorData[fo4hdr::generated::kWeatherGradeGlareColorIndex], glare)) return false;
+            weather.colorData[fo4hdr::generated::og::kWeatherGradeGlareColorIndex], glare)) return false;
     for (std::size_t slot = 0; slot < result.size(); ++slot)
     {
         result[slot].sunlight = DecodeWeatherColor(sunlight[slot]);
@@ -369,6 +369,7 @@ namespace fo4hdr::game {
 
 void BuildImageSpaceCatalog() noexcept
 {
+    if (!IsOriginalRuntime()) return;
     if (g_buildAttempted.exchange(true, std::memory_order_acq_rel)) return;
     try
     {

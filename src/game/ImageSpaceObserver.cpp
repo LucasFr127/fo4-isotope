@@ -19,9 +19,7 @@
 #include <memory>
 #include <string_view>
 #include <vector>
-#if defined(FO4HDR_RUNTIME_1_10_163)
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
-#endif
 
 namespace {
 namespace provenance = fo4hdr::game::imagespace_detail;
@@ -409,8 +407,7 @@ struct PatchBackend
             WriteBytes(site.address, replacement, site.protection);
     }
 };
-#if defined(FO4HDR_RUNTIME_1_10_163)
-using namespace fo4hdr::generated;
+using namespace fo4hdr::generated::og;
 class ImageSpaceInstallation
 {
     REX::FModule module{REX::FModule::GetExecutingModule()};
@@ -555,7 +552,6 @@ public:
         return Publish();
     }
 };
-#endif
 }
 
 namespace fo4hdr::game {
@@ -599,15 +595,11 @@ bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterfac
 {
     if (g_attempted.exchange(true, std::memory_order_acq_rel))
         return g_installed.load(std::memory_order_acquire);
-    if (!requested) return false;
-#if !defined(FO4HDR_RUNTIME_1_10_163)
-    return false;
-#else
+    if (!requested || !IsOriginalRuntime()) return false;
     try {
         ImageSpaceInstallation installation;
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
-#endif
 }
 }
 
@@ -742,7 +734,7 @@ static_assert(
     kImageSpaceActiveDataOffsets.size() == fo4hdr::kImageSpaceActiveDataFieldCount);
 static_assert(
     kImageSpaceActiveDataOffsets.size() ==
-    fo4hdr::generated::kImageSpaceActiveDataSemantics.size());
+    fo4hdr::generated::og::kImageSpaceActiveDataSemantics.size());
 // The pin has no array-header accessors for the guarded metadata validation.
 struct ImageSpacePrimitiveArrayView
 {
@@ -757,25 +749,25 @@ using DearImageSpacePrimitiveArray =
     RE::NiTPrimitiveArray<RE::ImageSpaceEffect*>;
 static_assert(
     sizeof(ImageSpacePrimitiveArrayView) ==
-    fo4hdr::generated::kImageSpacePrimitiveArraySize);
+    fo4hdr::generated::og::kImageSpacePrimitiveArraySize);
 static_assert(
     sizeof(DearImageSpacePrimitiveArray) ==
-    fo4hdr::generated::kImageSpacePrimitiveArraySize);
+    fo4hdr::generated::og::kImageSpacePrimitiveArraySize);
 static_assert(
     alignof(ImageSpacePrimitiveArrayView) ==
     alignof(DearImageSpacePrimitiveArray));
 static_assert(
     offsetof(ImageSpacePrimitiveArrayView, data) ==
-    fo4hdr::generated::kImageSpacePrimitiveArrayDataOffset);
+    fo4hdr::generated::og::kImageSpacePrimitiveArrayDataOffset);
 static_assert(
     offsetof(ImageSpacePrimitiveArrayView, capacity) ==
-    fo4hdr::generated::kImageSpacePrimitiveArrayCapacityOffset);
+    fo4hdr::generated::og::kImageSpacePrimitiveArrayCapacityOffset);
 static_assert(
     offsetof(ImageSpacePrimitiveArrayView, freeIndex) ==
-    fo4hdr::generated::kImageSpacePrimitiveArrayFreeIndexOffset);
+    fo4hdr::generated::og::kImageSpacePrimitiveArrayFreeIndexOffset);
 static_assert(
     offsetof(ImageSpacePrimitiveArrayView, size) ==
-    fo4hdr::generated::kImageSpacePrimitiveArraySizeOffset);
+    fo4hdr::generated::og::kImageSpacePrimitiveArraySizeOffset);
 static_assert(
     std::tuple_size_v<decltype(fo4hdr::GameHdrSnapshot{}.imageSpaceEffects)> ==
     kImageSpaceTopLevelEffectCount);
@@ -830,7 +822,7 @@ class ImageSpaceCollector
 
     bool ReadEffectHeader()
     {
-        using namespace fo4hdr::generated;
+        using namespace fo4hdr::generated::og;
         return ReadSnapshotField(managerBytes, offsetof(RE::ImageSpaceManager, isReady), readyByte) &&
             ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayDataOffset, effectStorage) &&
             ReadSnapshotField(managerBytes, kEffectList + kImageSpacePrimitiveArrayCapacityOffset, effectCapacity) &&
@@ -1090,6 +1082,7 @@ public:
 
 void ObserveImageSpace(GameSnapshotStore& store, std::string_view trigger)
 {
+    if (!IsOriginalRuntime()) return;
     ImageSpaceCollector collector(store);
     collector.Collect(trigger);
 }
@@ -1098,12 +1091,13 @@ void ObserveImageSpace(GameSnapshotStore& store, std::string_view trigger)
 namespace fo4hdr::game::observation {
 void ReportImageSpaceSemanticProfile()
 {
+    if (!IsOriginalRuntime()) return;
     REX::INFO(
         "m2 image_space_profile layout_exact=true effect_table_exact=true "
         "effects={} commonlib_source_commit={} "
         "xedit_alias_behavior=unverified",
         kImageSpaceTopLevelEffectCount,
-        fo4hdr::generated::kCommonLibCommit);
+        fo4hdr::generated::og::kCommonLibCommit);
     for (const auto& semantic :
          kImageSpaceEffectSemantics)
     {
@@ -1114,7 +1108,7 @@ void ReportImageSpaceSemanticProfile()
     }
     for (std::size_t index = 0; index < kImageSpaceActiveDataOffsets.size(); ++index)
     {
-        const auto& semantic = fo4hdr::generated::kImageSpaceActiveDataSemantics[index];
+        const auto& semantic = fo4hdr::generated::og::kImageSpaceActiveDataSemantics[index];
         REX::INFO(
             "m2 image_space_profile_active_field field={} offset={} "
             "xedit_alias=\"{}\" alias_behavior=unverified",
@@ -1126,6 +1120,7 @@ void ReportImageSpaceSemanticProfile()
 
 void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
 {
+    if (!IsOriginalRuntime()) return;
     if (fo4hdr::HasGameSnapshotFeature(
             snapshot.availableFeatures,
             fo4hdr::GameSnapshotFeature::ImageSpace))

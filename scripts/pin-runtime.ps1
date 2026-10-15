@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime,
 
     [Parameter(Mandatory = $true)]
@@ -153,7 +153,7 @@ Write-Fo4HdrJsonFile `
     -Path $lockPath `
     -SchemaPath (Join-Path $repoRoot "schemas\versions-lock.schema.json")
 
-if ($Runtime -eq "1.10.163") {
+if ($Runtime -in @("1.10.163", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $Runtime
 }

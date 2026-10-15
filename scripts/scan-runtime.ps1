@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("1.10.163", "1.10.984", "1.11.221")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime,
 
     [Parameter(Mandatory = $true)]

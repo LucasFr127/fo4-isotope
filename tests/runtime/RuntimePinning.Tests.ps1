@@ -114,7 +114,7 @@ try {
     Copy-Item -LiteralPath (
         Join-Path $repoRoot "third_party\xmake-source-manifest.json"
     ) -Destination $thirdPartyRoot
-    foreach ($runtime in @("1.10.163", "1.10.984", "1.11.221")) {
+    foreach ($runtime in @("1.10.163", "1.10.984", "1.11.240")) {
         $runtimeRoot = Join-Path $fixture "runtime\$runtime"
         New-Item -ItemType Directory -Path $runtimeRoot | Out-Null
         Copy-Item -LiteralPath (

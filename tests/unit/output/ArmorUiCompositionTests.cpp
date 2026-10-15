@@ -157,10 +157,9 @@ void TestNativeRendererScopeIdentity(ArmorUiOwner owner)
 
 void TestNativeRendererCodeFingerprint()
 {
-    std::array<std::uint8_t, 40> memory{};
+    std::array<std::uint8_t, 131> memory{};
     for (std::size_t i = 0; i < memory.size(); ++i) memory[i] = static_cast<std::uint8_t>(i);
     const auto expected = memory;
-    const std::span<const std::uint8_t> fingerprint{expected.data(), 39};
     const auto address = reinterpret_cast<std::uintptr_t>(memory.data());
     std::size_t reads{};
     const auto read = [&](const void* source, void* destination, std::size_t size) noexcept {
@@ -168,11 +167,15 @@ void TestNativeRendererCodeFingerprint()
         std::memcpy(destination, source, size);
         return true;
     };
-    FO4HDR_CHECK(game::detail::MatchesNativeCode(address, fingerprint, read));
-    memory[38] ^= 1;
-    FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, fingerprint, read));
+    for (const auto size : {39U, 130U}) {
+        const std::span<const std::uint8_t> fingerprint{expected.data(), size};
+        FO4HDR_CHECK(game::detail::MatchesNativeCode(address, fingerprint, read));
+        memory[size - 1] ^= 1;
+        FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, fingerprint, read));
+        memory[size - 1] ^= 1;
+    }
     FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, expected, read));
-    FO4HDR_CHECK(reads == 2);
+    FO4HDR_CHECK(reads == 4);
     const auto unavailable = [](const void*, void*, std::size_t) noexcept { return false; };
     const std::array<std::uint8_t, 39> unreadable{};
     FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, unreadable, unavailable));

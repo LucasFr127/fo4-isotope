@@ -15,9 +15,7 @@
 #include <iterator>
 #include <span>
 #include <tuple>
-#if defined(FO4HDR_RUNTIME_1_10_163)
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
-#endif
 
 namespace {
 namespace patch = fo4hdr::game::direct_call_patch;
@@ -241,8 +239,7 @@ void RegisterTargetHook(Manager* manager, std::int32_t slot, const Properties* p
     }
 }
 
-#if defined(FO4HDR_RUNTIME_1_10_163)
-using namespace fo4hdr::generated;
+using namespace fo4hdr::generated::og;
 class NativeUiInstallation
 {
     REX::FModule module_{REX::FModule::GetExecutingModule()};
@@ -340,7 +337,6 @@ public:
         return Target() && Globals() && Allocator(allocatorInterface, handle) && PrepareSites(handle) && Publish();
     }
 };
-#endif
 }  // namespace
 
 namespace fo4hdr::game {
@@ -350,14 +346,10 @@ bool InitializeNativeUiResources(bool requested, const void* trampolineInterface
     if (g_attempted.exchange(true, std::memory_order_acq_rel))
         return g_installed.load(std::memory_order_acquire);
     fo4hdr::SetSharedUiPauseResourcesReady(false);
-    if (!requested) return false;
-#if !defined(FO4HDR_RUNTIME_1_10_163)
-    return false;
-#else
+    if (!requested || !IsOriginalRuntime()) return false;
     try {
         NativeUiInstallation installation;
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
-#endif
 }
 }  // namespace fo4hdr::game

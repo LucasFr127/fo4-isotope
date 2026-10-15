@@ -21,9 +21,7 @@
 #include <spdlog/sinks/msvc_sink.h>
 #include <spdlog/spdlog.h>
 
-#if defined(FO4HDR_RUNTIME_1_10_163)
-#  include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
-#endif
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
 #include <Windows.h>
 
@@ -41,19 +39,6 @@
 
 namespace {
 
-[[nodiscard]] constexpr std::string_view CompiledRuntime() noexcept
-{
-#if defined(FO4HDR_RUNTIME_1_10_163)
-    return "1.10.163";
-#elif defined(FO4HDR_RUNTIME_1_10_984)
-    return "1.10.984";
-#elif defined(FO4HDR_RUNTIME_1_11_221)
-    return "1.11.221";
-#else
-#  error "No FO4Isotope runtime selected"
-#endif
-}
-
 enum class PluginLoadState : std::uint8_t
 {
     notStarted,
@@ -64,7 +49,7 @@ enum class PluginLoadState : std::uint8_t
 
 std::atomic<PluginLoadState> g_pluginLoadState{PluginLoadState::notStarted};
 
-struct LegacyF4seInterface
+struct F4seInterfacePrefix
 {
     std::uint32_t f4seVersion;
     std::uint32_t runtimeVersion;
@@ -76,14 +61,14 @@ struct LegacyF4seInterface
     const void*(F4SEAPI* getPluginInfo)(const char*);
 };
 
-static_assert(sizeof(LegacyF4seInterface) == 0x30);
-static_assert(std::is_standard_layout_v<LegacyF4seInterface>);
-static_assert(offsetof(LegacyF4seInterface, queryInterface) == 0x10);
-static_assert(offsetof(LegacyF4seInterface, getPluginHandle) == 0x18);
-static_assert(offsetof(LegacyF4seInterface, getReleaseIndex) == 0x20);
-static_assert(offsetof(LegacyF4seInterface, getPluginInfo) == 0x28);
+static_assert(sizeof(F4seInterfacePrefix) == 0x30);
+static_assert(std::is_standard_layout_v<F4seInterfacePrefix>);
+static_assert(offsetof(F4seInterfacePrefix, queryInterface) == 0x10);
+static_assert(offsetof(F4seInterfacePrefix, getPluginHandle) == 0x18);
+static_assert(offsetof(F4seInterfacePrefix, getReleaseIndex) == 0x20);
+static_assert(offsetof(F4seInterfacePrefix, getPluginInfo) == 0x28);
 
-struct LegacyF4seServices
+struct F4seServices
 {
     const void* messaging{};
     const void* task{};
@@ -91,18 +76,13 @@ struct LegacyF4seServices
     std::uint32_t pluginHandle{UINT32_MAX};
 };
 
-[[nodiscard]] constexpr REL::Version ExpectedF4seVersion() noexcept
-{
-    return { 0, 6, 23, 0 };
-}
-
-[[nodiscard]] bool IsExpectedLegacyRuntime(
+[[nodiscard]] bool IsExpectedRuntime(
     const F4SE::QueryInterface* f4se) noexcept
 {
     return f4se != nullptr &&
            !f4se->IsEditor() &&
-           f4se->F4SEVersion() == ExpectedF4seVersion() &&
-           f4se->RuntimeVersion() == F4SE::RUNTIME_1_10_163;
+           fo4hdr::FindRuntimeProfile(f4se->RuntimeVersion().pack(),
+               f4se->F4SEVersion().pack()) != nullptr;
 }
 
 void InitializeProjectLogging()
@@ -141,10 +121,10 @@ void InitializeProjectLogging()
     REX::INFO("FO4Isotope v0");
 }
 
-[[nodiscard]] LegacyF4seServices QueryLegacyF4seServices(
+[[nodiscard]] F4seServices QueryF4seServices(
     const F4SE::LoadInterface* f4se)
 {
-    LegacyF4seInterface legacy{};
+    F4seInterfacePrefix legacy{};
     std::memcpy(&legacy, f4se, sizeof(legacy));
     if (legacy.queryInterface == nullptr)
     {
@@ -203,34 +183,6 @@ void InitializeProjectLogging()
            std::to_string(version.patch());
 }
 
-[[nodiscard]] fo4hdr::RuntimeIdentity ExpectedIdentity() noexcept
-{
-#if defined(FO4HDR_RUNTIME_1_10_163)
-    return {
-        .runtimeVersion = fo4hdr::generated::kRuntimeVersion,
-        .executableSha256 = fo4hdr::generated::kExecutableSha256,
-        .f4seVersion = fo4hdr::generated::kF4seVersion,
-        .f4seLoaderSha256 = fo4hdr::generated::kF4seLoaderSha256,
-        .f4seRuntimeSha256 = fo4hdr::generated::kF4seRuntimeSha256,
-        .addressLibraryFile = fo4hdr::generated::kAddressLibraryFile,
-        .addressLibrarySha256 =
-            fo4hdr::generated::kAddressLibrarySha256,
-        .manifestSha256 = fo4hdr::generated::kManifestSha256
-    };
-#else
-    return {
-        .runtimeVersion = CompiledRuntime(),
-        .executableSha256 = "UNVALIDATED",
-        .f4seVersion = "UNVALIDATED",
-        .f4seLoaderSha256 = "UNVALIDATED",
-        .f4seRuntimeSha256 = "UNVALIDATED",
-        .addressLibraryFile = "UNVALIDATED",
-        .addressLibrarySha256 = "UNVALIDATED",
-        .manifestSha256 = "UNVALIDATED"
-    };
-#endif
-}
-
 struct ObservedRuntimeIdentity
 {
     std::string runtimeVersion;
@@ -267,11 +219,10 @@ struct ObservedRuntimeIdentity
     {
         const auto root = executable->parent_path();
         observed.executableHash = fo4hdr::Sha256File(*executable).value_or("");
-#if defined(FO4HDR_RUNTIME_1_10_163)
         observed.loaderHash =
             fo4hdr::Sha256File(root / L"f4se_loader.exe").value_or("");
         if (const auto runtimeModule = LoadedModulePath(
-                fo4hdr::generated::kF4seRuntimeFile))
+                fo4hdr::ActiveRuntimeProfile()->f4seRuntimeFile))
         {
             observed.runtimeHash = fo4hdr::Sha256File(*runtimeModule).value_or("");
         }
@@ -281,9 +232,8 @@ struct ObservedRuntimeIdentity
                           .value_or("");
         observed.manifestHash = fo4hdr::Sha256CanonicalTextFile(
             root / L"Data" / L"F4SE" / L"Plugins" /
-            L"FO4Isotope" / L"runtime-1.10.163.json")
+            L"FO4Isotope" / ("runtime-" + std::string(fo4hdr::ActiveRuntimeProfile()->key) + ".json"))
                            .value_or("");
-#endif
     }
 
     return observed;
@@ -342,7 +292,7 @@ F4SE_EXPORT bool F4SEPlugin_Query(
         a_info->infoVersion = F4SE::PluginInfo::kVersion;
         a_info->name = "FO4Isotope";
         a_info->version = 0;
-        return IsExpectedLegacyRuntime(a_f4se);
+        return IsExpectedRuntime(a_f4se);
     }
     catch (...)
     {
@@ -355,7 +305,8 @@ namespace
 
 [[nodiscard]] bool ValidatePluginIdentity(const F4SE::LoadInterface* a_f4se)
 {
-    const auto expected = ExpectedIdentity();
+    const auto& profile = *fo4hdr::ActiveRuntimeProfile();
+    const auto& expected = profile.identity;
     const auto identity = ObserveIdentity(a_f4se, expected);
     const auto observed = identity.View(expected.addressLibraryFile);
 
@@ -371,12 +322,8 @@ namespace
         DisplayHash(observed.addressLibrarySha256));
     REX::INFO("identity runtime_manifest_sha256={}",
         DisplayHash(observed.manifestSha256));
-#if defined(FO4HDR_RUNTIME_1_10_163)
     REX::INFO(
-        "identity commonlibf4_commit={}", fo4hdr::generated::kCommonLibCommit);
-#else
-    REX::INFO("identity commonlibf4_commit=unvalidated-profile");
-#endif
+        "identity commonlibf4_commit={}", profile.commonLibCommit);
 
     const auto validation = fo4hdr::ValidateRuntimeIdentity(expected, observed);
     if (!validation.valid)
@@ -386,16 +333,15 @@ namespace
         return false;
     }
 
-#if defined(FO4HDR_RUNTIME_1_10_163)
     constexpr auto runtimeAction = fo4hdr::RuntimeAction::MilestoneValidation;
     const auto actionAuthorization = fo4hdr::ValidateRuntimeAction(
-        fo4hdr::generated::kRuntimeStatus, runtimeAction);
+        profile.status, runtimeAction);
     const auto packagingAuthorization =
-        fo4hdr::ValidateRuntimeAction(fo4hdr::generated::kRuntimeStatus,
+        fo4hdr::ValidateRuntimeAction(profile.status,
             fo4hdr::RuntimeAction::ReleasePackaging);
     REX::INFO("identity runtime_status={} action={} authorized={} "
               "release_packaging_eligible={}",
-        fo4hdr::generated::kRuntimeStatus,
+        profile.status,
         fo4hdr::ToString(runtimeAction),
         actionAuthorization.allowed,
         packagingAuthorization.allowed);
@@ -403,10 +349,9 @@ namespace
     {
         REX::CRITICAL("plugin active=false reason={} runtime_status={}",
             fo4hdr::ToString(actionAuthorization.reason),
-            fo4hdr::generated::kRuntimeStatus);
+            profile.status);
         return false;
     }
-#endif
     REX::INFO("plugin active=true reason=exact-runtime-identity-matched");
     return true;
 }
@@ -485,31 +430,29 @@ struct ObserverBoundaries
 
 [[nodiscard]] ObserverBoundaries InitializeObserverBoundaries(bool observerActive,
     bool graphicsActive, const fo4hdr::PluginConfigurationResult& diagnosticsConfiguration,
-    const LegacyF4seServices& legacyServices)
+    const F4seServices& services)
 {
     ObserverBoundaries active;
 
-#if defined(FO4HDR_RUNTIME_1_10_163)
     if (observerActive && graphicsActive)
     {
         const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
         active.nativeLut = fo4hdr::game::InitializeNativeLutObserver(
             ProductionRequested(diagnosticsConfiguration));
         active.imageSpace = fo4hdr::game::InitializeImageSpaceObserver(
-            active.nativeLut, legacyServices.trampoline, legacyServices.pluginHandle);
+            active.nativeLut, services.trampoline, services.pluginHandle);
         active.armorUi = fo4hdr::game::InitializeArmorUiObserver(
             ProductionRequested(diagnosticsConfiguration) ||
                 (diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode &&
                     diagnosticsConfiguration.value.traceRenderPipeline),
-            legacyServices.trampoline, legacyServices.pluginHandle);
+            services.trampoline, services.pluginHandle);
         active.pauseResources = fo4hdr::game::InitializeNativeUiResources(
             sharedUiRequested,
-            legacyServices.trampoline, legacyServices.pluginHandle);
+            services.trampoline, services.pluginHandle);
         active.screenUi = fo4hdr::game::InitializeScreenUiObserver(
             sharedUiRequested,
-            legacyServices.trampoline, legacyServices.pluginHandle);
+            services.trampoline, services.pluginHandle);
     }
-#endif
     return active;
 }
 
@@ -545,37 +488,32 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
 
 [[nodiscard]] bool LoadPluginImpl(const F4SE::LoadInterface* a_f4se)
 {
-    if (!IsExpectedLegacyRuntime(a_f4se))
+    if (!IsExpectedRuntime(a_f4se) ||
+        !fo4hdr::InitializeRuntimeProfile(a_f4se->RuntimeVersion().pack(),
+            a_f4se->F4SEVersion().pack()))
     {
         return false;
     }
     InitializeProjectLogging();
-    const auto legacyServices = QueryLegacyF4seServices(a_f4se);
+    const auto services = QueryF4seServices(a_f4se);
 
     if (!ValidatePluginIdentity(a_f4se)) return false;
-#if defined(FO4HDR_RUNTIME_1_10_163)
     const auto executable = ExecutablePath();
     const auto diagnosticsConfiguration = LoadDiagnosticsConfiguration(executable);
     const auto observerActive =
         executable.has_value() &&
         fo4hdr::game::InitializeGameStateObserver(
-            legacyServices.messaging,
-            legacyServices.task,
-            legacyServices.pluginHandle,
+            services.messaging,
+            services.task,
+            services.pluginHandle,
             &ReportLifecycleGraphics);
     ReportGameObserverStatus(observerActive);
-#else
-    REX::INFO("m2 observer active=false reason=runtime-profile-unvalidated");
-    constexpr bool observerActive = false;
-    const auto diagnosticsConfiguration =
-        fo4hdr::PluginConfigurationResult{};
-#endif
     const auto graphicsActive = fo4hdr::InitializeGraphicsObservation(
         diagnosticsConfiguration.valid ? diagnosticsConfiguration.value :
             fo4hdr::PluginConfiguration{});
     if (graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
     const auto boundaries = InitializeObserverBoundaries(observerActive, graphicsActive,
-        diagnosticsConfiguration, legacyServices);
+        diagnosticsConfiguration, services);
     ReportInitializedRenderer(boundaries, diagnosticsConfiguration, graphicsActive);
     // Listener registration and IAT installation publish process-lifetime
     // callbacks into F4SE/the executable. From the observer call onward,

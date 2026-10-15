@@ -12,7 +12,7 @@ template <class Reader>
 bool MatchesNativeCode(std::uintptr_t address, std::span<const std::uint8_t> expected,
     Reader read) noexcept
 {
-    std::array<std::uint8_t, 39> actual{};
+    std::array<std::uint8_t, 130> actual{};
     return expected.size() <= actual.size() && read(reinterpret_cast<const void*>(address),
         actual.data(), expected.size()) && std::equal(expected.begin(), expected.end(), actual.begin());
 }
