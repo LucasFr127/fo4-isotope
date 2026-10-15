@@ -14,7 +14,6 @@ struct RuntimeIdentity
     std::string_view f4seRuntimeSha256;
     std::string_view addressLibraryFile;
     std::string_view addressLibrarySha256;
-    std::string_view manifestSha256;
 };
 
 enum class RuntimeValidationReason
@@ -31,9 +30,7 @@ enum class RuntimeValidationReason
     F4seRuntimeHashMismatch,
     AddressLibraryFileMismatch,
     AddressLibraryUnavailable,
-    AddressLibraryHashMismatch,
-    ManifestUnavailable,
-    ManifestHashMismatch
+    AddressLibraryHashMismatch
 };
 
 struct RuntimeValidationResult

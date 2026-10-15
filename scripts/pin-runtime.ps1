@@ -153,7 +153,7 @@ Write-Fo4HdrJsonFile `
     -Path $lockPath `
     -SchemaPath (Join-Path $repoRoot "schemas\versions-lock.schema.json")
 
-if ($Runtime -in @("1.10.163", "1.11.240")) {
+if ($Runtime -in @("1.10.163", "1.10.984", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $Runtime
 }

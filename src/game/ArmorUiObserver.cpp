@@ -11,6 +11,7 @@
 #include <cstring>
 #include <span>
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
+#include "../../runtime/1.10.984/RuntimeIdentity.generated.hpp"
 #include "../../runtime/1.11.240/RuntimeIdentity.generated.hpp"
 
 namespace {
@@ -256,6 +257,21 @@ constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetRva, kA
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetRva, kScreenUiTargetId,
     kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas, kScreenUiCallBytes};
 }
+namespace ng {
+using namespace fo4hdr::generated::ng;
+constexpr std::array<RendererKeyIdentity, 5> kKeys{{
+    {kHudUiKeyStorageId, kHudUiKeyStorageRva, kHudUiKeyGetterId, kHudUiKeyGetterRva, kHudUiKeyGetterBytes},
+    {kFlatUiKeyStorageId, kFlatUiKeyStorageRva, kFlatUiKeyGetterId, kFlatUiKeyGetterRva, kFlatUiKeyGetterBytes},
+    {kArmorUiKeyStorageId, kArmorUiKeyStorageRva, kArmorUiKeyGetterId, kArmorUiKeyGetterRva, kArmorUiKeyGetterBytes},
+    {kRainUiKeyStorageId, kRainUiKeyStorageRva, kRainUiKeyGetterId, kRainUiKeyGetterRva, kRainUiKeyGetterBytes},
+    {kWorkshopUiKeyStorageId, kWorkshopUiKeyStorageRva, kWorkshopUiKeyInitializerId,
+        kWorkshopUiKeyInitializerRva, kWorkshopUiKeyInitializerBytes}
+}};
+constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetRva, kArmorUiTargetId,
+    kArmorUiTargetBytes, kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, kArmorUiCallBytes, &kKeys};
+constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetRva, kScreenUiTargetId,
+    kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas, kScreenUiCallBytes};
+}
 namespace ae {
 using namespace fo4hdr::generated::ae;
 constexpr std::array<RendererKeyIdentity, 5> kKeys{{
@@ -425,13 +441,15 @@ bool InitializeArmorUiObserver(bool requested, const void* trampolineInterface,
         return g_armorObserver.installed.load(std::memory_order_acquire);
     if (!requested) return false;
     try {
-        if (!ActiveRuntimeProfile()) return false;
+        const auto* profile = ActiveRuntimeProfile();
+        if (!profile) return false;
         if (IsOriginalRuntime()) {
             ObserverInstallation installation(og::kArmor, g_armorObserver,
                 static_cast<ScreenSubmit>(&ScreenSubmitHook));
             return installation.Install(trampolineInterface, pluginHandle);
         }
-        ObserverInstallation installation(ae::kArmor, g_armorObserver,
+        const auto& boundary = profile->key == "1.10.984" ? ng::kArmor : ae::kArmor;
+        ObserverInstallation installation(boundary, g_armorObserver,
             static_cast<ScreenSubmit>(&ScreenSubmitHook));
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
@@ -443,8 +461,10 @@ bool InitializeScreenUiObserver(bool requested, const void* trampolineInterface,
         return g_screenObserver.installed.load(std::memory_order_acquire);
     if (!requested) return false;
     try {
-        if (!ActiveRuntimeProfile()) return false;
-        const auto& boundary = IsOriginalRuntime() ? og::kScreen : ae::kScreen;
+        const auto* profile = ActiveRuntimeProfile();
+        if (!profile) return false;
+        const auto& boundary = IsOriginalRuntime() ? og::kScreen :
+            (profile->key == "1.10.984" ? ng::kScreen : ae::kScreen);
         ObserverInstallation installation(boundary, g_screenObserver,
             static_cast<ScreenUiSubmit>(&ScreenUiSubmitHook));
         return installation.Install(trampolineInterface, pluginHandle);

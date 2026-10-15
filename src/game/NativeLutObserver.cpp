@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
+#include "../../runtime/1.10.984/RuntimeIdentity.generated.hpp"
 #include "../../runtime/1.11.240/RuntimeIdentity.generated.hpp"
 
 namespace {
@@ -200,6 +201,16 @@ constexpr LutIdentity kOgLut{fo4hdr::generated::og::kNativeLutRenderRva,
 constexpr LutIdentity kAeLut{fo4hdr::generated::ae::kNativeLutRenderRva,
     fo4hdr::generated::ae::kNativeLutRenderId, fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset,
     fo4hdr::generated::ae::kNativeLutRenderBytes};
+constexpr LutIdentity kNgLut{fo4hdr::generated::ng::kNativeLutRenderRva,
+    fo4hdr::generated::ng::kNativeLutRenderId, fo4hdr::generated::ng::kNativeLutEffectSubobjectOffset,
+    fo4hdr::generated::ng::kNativeLutRenderBytes};
+
+const LutIdentity& RuntimeLutIdentity(const fo4hdr::RuntimeProfile& profile) noexcept
+{
+    if (profile.key == "1.10.163") return kOgLut;
+    if (profile.key == "1.10.984") return kNgLut;
+    return kAeLut;
+}
 
 bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target, const LutIdentity& identity)
 {
@@ -305,7 +316,7 @@ bool InitializeNativeLutObserver(bool requested) noexcept
         const auto base = module.GetBaseAddress();
         if (!base || module.GetFileVersion().pack() != profile->runtimeVersion) return false;
         SetNativeLutObserverStatus(Status::invalidTarget);
-        return ResolveAndInstall(module, IsOriginalRuntime() ? kOgLut : kAeLut);
+        return ResolveAndInstall(module, RuntimeLutIdentity(*profile));
     } catch (...) { return false; }
 }
 }

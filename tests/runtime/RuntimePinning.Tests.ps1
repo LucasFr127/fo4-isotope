@@ -14,23 +14,25 @@ function Assert-Rejected {
 
 function Assert-ManifestProfileRejected {
     param([string]$Fixture, [string]$Profile, [string]$Case, [scriptblock]$Mutate)
-    $manifestPath = Join-Path $Fixture 'runtime\1.10.163\manifest.json'
-    $sourcePath = Join-Path $repoRoot 'runtime\1.10.163\manifest.json'
-    $identityManifest = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json
-    $selectedProfile = $identityManifest
-    foreach ($part in $Profile.Split('.')) { $selectedProfile = $selectedProfile.$part }
-    & $Mutate $selectedProfile
-    Write-Fo4HdrCanonicalUtf8Text -Path $manifestPath `
-        -Text (($identityManifest | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
-    $lockPath = Join-Path $Fixture 'versions.lock.json'
-    $identityLock = Get-Content (Join-Path $repoRoot 'versions.lock.json') -Raw | ConvertFrom-Json
-    $identityLock.runtimes.'1.10.163'.runtimeManifestCanonicalSha256 =
-        Get-Fo4HdrCanonicalTextSha256 $manifestPath
-    Write-Fo4HdrCanonicalUtf8Text -Path $lockPath `
-        -Text (($identityLock | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
-    Assert-Rejected { & $validator -RepoRoot $Fixture } $Case
-    Copy-Item -LiteralPath $sourcePath -Destination $manifestPath -Force
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'versions.lock.json') -Destination $lockPath -Force
+    foreach ($runtime in @('1.10.163', '1.10.984', '1.11.240')) {
+        $manifestPath = Join-Path $Fixture "runtime\$runtime\manifest.json"
+        $sourcePath = Join-Path $repoRoot "runtime\$runtime\manifest.json"
+        $identityManifest = Get-Content -LiteralPath $sourcePath -Raw | ConvertFrom-Json
+        $selectedProfile = $identityManifest
+        foreach ($part in $Profile.Split('.')) { $selectedProfile = $selectedProfile.$part }
+        & $Mutate $selectedProfile
+        Write-Fo4HdrCanonicalUtf8Text -Path $manifestPath `
+            -Text (($identityManifest | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
+        $lockPath = Join-Path $Fixture 'versions.lock.json'
+        $identityLock = Get-Content (Join-Path $repoRoot 'versions.lock.json') -Raw | ConvertFrom-Json
+        $identityLock.runtimes.$runtime.runtimeManifestCanonicalSha256 =
+            Get-Fo4HdrCanonicalTextSha256 $manifestPath
+        Write-Fo4HdrCanonicalUtf8Text -Path $lockPath `
+            -Text (($identityLock | ConvertTo-Json -Depth 32).Replace("`r`n", "`n") + "`n")
+        Assert-Rejected { & $validator -RepoRoot $Fixture } "$runtime $Case"
+        Copy-Item -LiteralPath $sourcePath -Destination $manifestPath -Force
+        Copy-Item -LiteralPath (Join-Path $repoRoot 'versions.lock.json') -Destination $lockPath -Force
+    }
 }
 
 Assert-Fo4HdrExactRuntimeFileVersion -Runtime "1.10.163" -FileVersion "1.10.163.0"
@@ -124,6 +126,13 @@ try {
     $validator = Join-Path $repoRoot "scripts\validate-manifests.ps1"
     & $validator -RepoRoot $fixture
 
+    Assert-ManifestProfileRejected $fixture 'imageSpaceObserver' 'ImageSpace wrong CALL target' {
+        param($profile) $profile.calls[0].expectedBytes[1] = $profile.calls[0].expectedBytes[1] -bxor 1
+    }
+    Assert-ManifestProfileRejected $fixture 'imageSpaceObserver' 'ImageSpace missing caller' {
+        param($profile) $profile.calls[0].PSObject.Properties.Remove('callerAddressLibraryId')
+    }
+
     foreach ($profile in @('hudRendererIdentity', 'flatRendererIdentity',
             'armorRendererIdentity', 'rainRendererIdentity')) {
         Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile promoted status" {
@@ -139,7 +148,9 @@ try {
             param($key) $key.keyGetterExpectedBytes = @($key.keyGetterExpectedBytes[0..24])
         }
         Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile addresses another key" {
-            param($key) $key.keyGetterExpectedBytes[22] = $key.keyGetterExpectedBytes[22] -bxor 1
+            param($key)
+            $displacement = $key.keyStorageReferenceOffset + 3
+            $key.keyGetterExpectedBytes[$displacement] = $key.keyGetterExpectedBytes[$displacement] -bxor 1
         }
         Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile reuses one mapping" {
             param($key) $key.keyGetterAddressLibraryId = $key.keyStorageAddressLibraryId
@@ -178,7 +189,7 @@ try {
         param($profile) $profile.target.PSObject.Properties.Remove('addressLibraryId')
     }
     Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation wrong CALL target' {
-        param($profile) $profile.calls[0].expectedBytes[1] = 13
+        param($profile) $profile.calls[0].expectedBytes[1] = $profile.calls[0].expectedBytes[1] -bxor 1
     }
     Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation duplicate CALL' {
         param($profile) $profile.calls[1].rva = $profile.calls[0].rva
@@ -194,7 +205,7 @@ try {
         param($profile) $profile.calls[3].PSObject.Properties.Remove('callerAddressLibraryId')
     }
     Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI wrong CALL target' {
-        param($profile) $profile.calls[0].expectedBytes[1] = 161
+        param($profile) $profile.calls[0].expectedBytes[1] = $profile.calls[0].expectedBytes[1] -bxor 1
     }
     Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI duplicate CALL' {
         param($profile) $profile.calls[3].rva = $profile.calls[0].rva

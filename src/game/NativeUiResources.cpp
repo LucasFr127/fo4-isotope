@@ -2,6 +2,7 @@
 #include "NativeUiResources.hpp"
 #include "DirectCallPatch.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -15,7 +16,6 @@
 #include <iterator>
 #include <span>
 #include <tuple>
-#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 
 namespace {
 namespace patch = fo4hdr::game::direct_call_patch;
@@ -239,16 +239,16 @@ void RegisterTargetHook(Manager* manager, std::int32_t slot, const Properties* p
     }
 }
 
-using namespace fo4hdr::generated::og;
 class NativeUiInstallation
 {
+    const fo4hdr::NativeUiRuntimeProfile& identity_;
     REX::FModule module_{REX::FModule::GetExecutingModule()};
     std::uintptr_t base_{module_.GetBaseAddress()};
     REX::FModuleSection text_{};
     REL::Offset2ID mappings_;
     TrampolineInterface allocator_{};
     std::array<patch::Site, 2> sites_{};
-    std::uintptr_t target_{base_ + kNativeUiTargetRva};
+    std::uintptr_t target_{};
     std::uintptr_t hook_{reinterpret_cast<std::uintptr_t>(&RegisterTargetHook)};
     bool Code(std::uintptr_t address, std::size_t size) const
     {
@@ -263,8 +263,8 @@ class NativeUiInstallation
     }
     bool Target() const
     {
-        return target_ != hook_ && Mapping(kNativeUiTargetId, kNativeUiTargetRva) &&
-            Code(target_, kNativeUiTargetBytes.size()) && MatchesBytes(target_, kNativeUiTargetBytes);
+        return target_ != hook_ && Mapping(identity_.targetId, identity_.targetRva) &&
+            Code(target_, identity_.targetBytes.size()) && MatchesBytes(target_, identity_.targetBytes);
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
     {
@@ -273,18 +273,18 @@ class NativeUiInstallation
     }
     bool SiteMatches(std::size_t index) const
     {
-        const auto address = base_ + kNativeUiCallRvas[index];
-        return Mapping(kNativeUiCallerIds[index], kNativeUiCallerRvas[index]) &&
-            Code(base_ + kNativeUiCallerRvas[index], 1) && Code(address, 5) &&
-            MatchesBytes(address, kNativeUiCallBytes[index]) &&
-            patch::CallTarget(address, kNativeUiCallBytes[index]) == target_;
+        const auto address = base_ + identity_.callRvas[index];
+        return Mapping(identity_.callerIds[index], identity_.callerRvas[index]) &&
+            Code(base_ + identity_.callerRvas[index], 1) && Code(address, 5) &&
+            MatchesBytes(address, identity_.callBytes[index]) &&
+            patch::CallTarget(address, identity_.callBytes[index]) == target_;
     }
     bool PrepareSite(std::size_t index)
     {
-        const auto address = base_ + kNativeUiCallRvas[index];
+        const auto address = base_ + identity_.callRvas[index];
         MEMORY_BASIC_INFORMATION info{};
         if (!SiteMatches(index) || !Region(reinterpret_cast<void*>(address), 5, info)) return false;
-        sites_[index] = {address, kNativeUiCallBytes[index], {}, info.Protect};
+        sites_[index] = {address, identity_.callBytes[index], {}, info.Protect};
         return true;
     }
     bool PrepareRelay(patch::Site& site, std::uint32_t handle)
@@ -311,7 +311,7 @@ class NativeUiInstallation
     }
     bool Publish()
     {
-        if (!MatchesBytes(target_, kNativeUiTargetBytes)) return false;
+        if (!MatchesBytes(target_, identity_.targetBytes)) return false;
         // Failed rollback may leave a relay reachable. Its exact native predecessor
         // must remain callable even when admission was never published.
         g_next.store(reinterpret_cast<RegisterTarget>(target_), std::memory_order_release);
@@ -329,9 +329,14 @@ class NativeUiInstallation
             ContainsBytes(data.GetAddress(), data.GetSize(), g_rendererStorage, sizeof(void*));
     }
 public:
+    explicit NativeUiInstallation(const fo4hdr::NativeUiRuntimeProfile& identity) :
+        identity_(identity), target_(base_ + identity.targetRva) {}
+
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        if (!base_ || module_.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
+        const auto* profile = fo4hdr::ActiveRuntimeProfile();
+        if (!base_ || !profile) return false;
+        if (module_.GetFileVersion().pack() != profile->runtimeVersion) return false;
         text_ = module_.GetSection(".text");
         mappings_.load_v2();
         return Target() && Globals() && Allocator(allocatorInterface, handle) && PrepareSites(handle) && Publish();
@@ -346,9 +351,11 @@ bool InitializeNativeUiResources(bool requested, const void* trampolineInterface
     if (g_attempted.exchange(true, std::memory_order_acq_rel))
         return g_installed.load(std::memory_order_acquire);
     fo4hdr::SetSharedUiPauseResourcesReady(false);
-    if (!requested || !IsOriginalRuntime()) return false;
+    if (!requested) return false;
+    const auto* profile = ActiveRuntimeProfile();
+    if (!profile || !profile->nativeUi) return false;
     try {
-        NativeUiInstallation installation;
+        NativeUiInstallation installation(*profile->nativeUi);
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
 }

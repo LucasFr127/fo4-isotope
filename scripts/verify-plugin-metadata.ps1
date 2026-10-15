@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = "1.10.163",
 
     [ValidateSet("debug", "releasedbg")]
@@ -41,6 +41,7 @@ function Assert-Fo4HdrPluginVersionRequirements {
     param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
     $expectedPacked = @(
         (ConvertTo-Fo4HdrPackedPluginVersion '1.10.163'),
+        (ConvertTo-Fo4HdrPackedPluginVersion '1.10.984'),
         (ConvertTo-Fo4HdrPackedPluginVersion '1.11.240')
     )
     for ($index = 0; $index -lt 16; ++$index) {
@@ -51,7 +52,7 @@ function Assert-Fo4HdrPluginVersionRequirements {
         if ($actual -ne $expected) {
             throw (
                 "PluginVersion compatible runtimes are not exactly " +
-                "OG 1.10.163 and AE 1.11.240 followed by zero terminators."
+                "OG 1.10.163, NG 1.10.984 and AE 1.11.240 followed by zero terminators."
             )
         }
     }
@@ -91,7 +92,8 @@ function Assert-Fo4HdrPluginMetadataFixture {
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x208, $Fixture.Flags)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x20C, 0)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x210, $Fixture.Packed)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x214, 0x010B0F00)
+        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x214, 0x010A3D80)
+        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x218, 0x010B0F00)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x250, $Fixture.Minimum)
         $arguments = @{
             Version = $version
@@ -111,9 +113,11 @@ function Assert-Fo4HdrPluginMetadataFixture {
             @{ Offset = 0x210; Value = 0 },
             @{ Offset = 0x210; Value = $Fixture.Packed + 16 },
             @{ Offset = 0x214; Value = $Fixture.Packed },
-            @{ Offset = 0x214; Value = 0x010A3D80 },
+            @{ Offset = 0x214; Value = 0x010B0F00 },
             @{ Offset = 0x214; Value = 0x010B0DD0 },
             @{ Offset = 0x218; Value = $Fixture.Packed },
+            @{ Offset = 0x218; Value = 0 },
+            @{ Offset = 0x21C; Value = $Fixture.Packed },
             @{ Offset = 0x24C; Value = $Fixture.Packed },
             @{ Offset = 0x250; Value = 0 },
             @{ Offset = 0x250; Value = $Fixture.Minimum - 16 },
@@ -132,45 +136,12 @@ function Invoke-Fo4HdrPluginMetadataSelfTest {
     param($Lock)
     foreach ($fixture in @(
         @{ Runtime = '1.10.163'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 },
+        @{ Runtime = '1.10.984'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 },
         @{ Runtime = '1.11.240'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 }
     )) {
         Assert-Fo4HdrPluginMetadataFixture $fixture $Lock
     }
-    Assert-Fo4HdrStagedManifestFixtures
-    Write-Host "Shared OG/AE plugin metadata self-tests passed."
-}
-
-function Assert-Fo4HdrStagedManifestHash {
-    param([string]$StagedHash, [string]$SourceHash, $Entry)
-    if ($StagedHash -cne $SourceHash) {
-        throw "The staged runtime manifest differs from the selected source manifest."
-    }
-    if ($Entry.status -in @("runtime-pinned-unvalidated", "capture-complete", "release-approved") -and
-        $StagedHash -cne $Entry.runtimeManifestCanonicalSha256) {
-        throw "The staged runtime manifest differs from versions.lock.json."
-    }
-}
-
-function Assert-Fo4HdrStagedManifestFixtures {
-    foreach ($case in @(
-        @{ Status = 'planned'; Source = 'a'; Staged = 'a'; Locked = $null; Accept = $true },
-        @{ Status = 'planned'; Source = 'a'; Staged = 'b'; Locked = $null; Accept = $false },
-        @{ Status = 'runtime-pinned-unvalidated'; Source = 'a'; Staged = 'a'; Locked = 'a'; Accept = $true },
-        @{ Status = 'runtime-pinned-unvalidated'; Source = 'a'; Staged = 'a'; Locked = 'b'; Accept = $false },
-        @{ Status = 'runtime-pinned-unvalidated'; Source = 'a'; Staged = 'b'; Locked = 'b'; Accept = $false }
-    )) {
-        $entry = [pscustomobject]@{ status = $case.Status }
-        if ($case.Locked) {
-            $entry | Add-Member -NotePropertyName runtimeManifestCanonicalSha256 -NotePropertyValue $case.Locked
-        }
-        $accepted = $true
-        try {
-            Assert-Fo4HdrStagedManifestHash $case.Staged $case.Source $entry
-        } catch { $accepted = $false }
-        if ($accepted -ne $case.Accept) {
-            throw "Staged manifest hash regression for $($case.Status)."
-        }
-    }
+    Write-Host "Shared OG/NG/AE plugin metadata self-tests passed."
 }
 
 function Assert-Fo4HdrBuiltPlugin {
@@ -194,20 +165,6 @@ function Assert-Fo4HdrPluginStaging {
     }
 
     if (-not $StageOnly) { Assert-Fo4HdrBuiltPlugin }
-    Assert-Fo4HdrStagedRuntimeManifests
-}
-
-function Assert-Fo4HdrStagedRuntimeManifests {
-    foreach ($profileRuntime in @('1.10.163', '1.11.240')) {
-        $manifest = Join-Path $pluginRoot "FO4Isotope/runtime-$profileRuntime.json"
-        if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
-            throw "Staged runtime manifest is missing: $manifest"
-        }
-        Assert-Fo4HdrStagedManifestHash `
-            -StagedHash (Get-Fo4HdrCanonicalTextSha256 $manifest) `
-            -SourceHash (Get-Fo4HdrCanonicalTextSha256 (Join-Path $repoRoot "runtime/$profileRuntime/manifest.json")) `
-            -Entry $lock.runtimes.$profileRuntime
-    }
 }
 
 $repoRoot = Get-Fo4HdrRepoRoot
@@ -290,6 +247,6 @@ finally {
 }
 
 Write-Host (
-    "Verified shared OG/AE plugin metadata and both staged runtime manifests" +
+    "Verified shared OG/NG/AE plugin metadata and staged DLL" +
     $(if ($StageOnly) { "." } else { " for $Mode." })
 )

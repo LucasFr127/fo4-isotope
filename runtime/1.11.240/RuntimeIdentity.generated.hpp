@@ -55,13 +55,67 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 4> kScreenUiCallBytes{{
     {{ 232, 176, 130, 228, 0 }},
     {{ 232, 51, 166, 161, 0 }},
 }};
-
+inline constexpr std::uintptr_t kNativeUiTargetRva = 0x01839130;
+inline constexpr std::uint64_t kNativeUiTargetId = 2277176;
+inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ 64, 87, 65, 86, 65, 87, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254 }};
+inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ 0x02233E60, 0x02233E60 }};
+inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ 2318909, 2318909 }};
+inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ 0x0223469A, 0x022346B2 }};
+inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{
+    {{ 232, 145, 74, 96, 255 }},
+    {{ 232, 121, 74, 96, 255 }},
+}};
+inline constexpr NativeUiRuntimeProfile kNativeUiProfile{
+    kNativeUiTargetRva, kNativeUiTargetId, kNativeUiTargetBytes,
+    kNativeUiCallerRvas, kNativeUiCallerIds, kNativeUiCallRvas, kNativeUiCallBytes};
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x0224E820;
 inline constexpr std::uint64_t kNativeLutRenderId = 2319297;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 400;
 inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ 72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0 }};
-
-
+inline constexpr std::uintptr_t kImageSpaceWeatherRva = 0x006BFDF0;
+inline constexpr std::uint64_t kImageSpaceWeatherId = 2208864;
+inline constexpr std::array<std::uint8_t, 12> kImageSpaceWeatherBytes{{ 64, 86, 72, 129, 236, 224, 0, 0, 0, 72, 139, 241 }};
+inline constexpr std::uintptr_t kImageSpaceAccumulateRva = 0x021EF870;
+inline constexpr std::uint64_t kImageSpaceAccumulateId = 2318275;
+inline constexpr std::array<std::uint8_t, 13> kImageSpaceAccumulateBytes{{ 15, 40, 194, 15, 40, 202, 243, 15, 89, 2, 76, 139, 193 }};
+inline constexpr std::uintptr_t kImageSpaceRoomBlendRva = 0x021EFA40;
+inline constexpr std::uint64_t kImageSpaceRoomBlendId = 2318276;
+inline constexpr std::array<std::uint8_t, 16> kImageSpaceRoomBlendBytes{{ 243, 15, 16, 37, 16, 154, 115, 0, 15, 40, 195, 243, 65, 15, 89, 0 }};
+inline constexpr std::uintptr_t kImageSpaceSetLutRva = 0x02186570;
+inline constexpr std::uint64_t kImageSpaceSetLutId = 2316617;
+inline constexpr std::array<std::uint8_t, 17> kImageSpaceSetLutBytes{{ 72, 133, 210, 116, 12, 72, 129, 193, 48, 1, 0, 0, 233, 111, 116, 0, 0 }};
+inline constexpr std::uintptr_t kImageSpaceGlobalLutRva = 0x031F0490;
+inline constexpr std::uint64_t kImageSpaceGlobalLutId = 4799147;
+inline constexpr std::uintptr_t kImageSpaceGlobalBaseRva = 0x031F0430;
+inline constexpr std::uint64_t kImageSpaceGlobalBaseId = 4799141;
+inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallRvas{{ 0x006BB3E0, 0x006BCB22, 0x006BFCAB, 0x006C0097, 0x006C0159, 0x006C021F, 0x006C02DD, 0x006BBE7D, 0x006BBD27, 0x006BBF04, 0x0083587B }};
+inline constexpr std::array<std::uintptr_t, 11> kImageSpaceCallerRvas{{ 0x006BB240, 0x006BC5E0, 0x006BFBE0, 0x006BFDF0, 0x006BFDF0, 0x006BFDF0, 0x006BFDF0, 0x006BB9C0, 0x006BB9C0, 0x006BB9C0, 0x00835760 }};
+inline constexpr std::array<std::uint64_t, 11> kImageSpaceCallerIds{{ 2208843, 2208848, 2208860, 2208864, 2208864, 2208864, 2208864, 2208846, 2208846, 2208846, 2214956 }};
+inline constexpr std::array<std::uint32_t, 11> kImageSpaceCallTargetIndices{{ 0, 0, 0, 1, 1, 1, 1, 2, 3, 3, 3 }};
+inline constexpr std::array<std::array<std::uint8_t, 5>, 11> kImageSpaceCallBytes{{
+    {{ 232, 11, 74, 0, 0 }},
+    {{ 232, 201, 50, 0, 0 }},
+    {{ 232, 64, 1, 0, 0 }},
+    {{ 232, 212, 247, 178, 1 }},
+    {{ 232, 18, 247, 178, 1 }},
+    {{ 232, 76, 246, 178, 1 }},
+    {{ 232, 142, 245, 178, 1 }},
+    {{ 232, 190, 59, 179, 1 }},
+    {{ 232, 68, 168, 172, 1 }},
+    {{ 232, 103, 166, 172, 1 }},
+    {{ 232, 240, 12, 149, 1 }},
+}};
+inline constexpr std::size_t kWeatherGradeSunlightColorIndex = 4;
+inline constexpr std::size_t kWeatherGradeGlareColorIndex = 15;
+inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ 0, 8, 16 }};
+inline constexpr ImageSpaceRuntimeProfile kImageSpaceProfile{
+    {kImageSpaceWeatherRva, kImageSpaceAccumulateRva, kImageSpaceRoomBlendRva, kImageSpaceSetLutRva},
+    {kImageSpaceWeatherId, kImageSpaceAccumulateId, kImageSpaceRoomBlendId, kImageSpaceSetLutId},
+    {kImageSpaceWeatherBytes, kImageSpaceAccumulateBytes, kImageSpaceRoomBlendBytes, kImageSpaceSetLutBytes},
+    kImageSpaceGlobalLutRva, kImageSpaceGlobalBaseRva, kImageSpaceGlobalLutId, kImageSpaceGlobalBaseId,
+    kImageSpaceCallRvas, kImageSpaceCallerRvas, kImageSpaceCallerIds,
+    kImageSpaceCallTargetIndices, kImageSpaceCallBytes,
+    kWeatherGradeSunlightColorIndex, kWeatherGradeGlareColorIndex, kWeatherGradeColorShifts};
 
 inline constexpr std::string_view kRuntimeVersion = "1.11.240.0";
 inline constexpr std::uint32_t kRuntimePackedVersion = 17501952u;
@@ -74,7 +128,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_11_240.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "25759ed8fb110ff3ce79f174d2acf15aa82834179d9e69c53d3fb9f59176a2ef";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-11-240-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06";
-inline constexpr std::string_view kManifestSha256 = "a18843f0241746f07c4c9b4ea737402a58f0c69c9b6cb983e892d992b0164025";
+inline constexpr std::string_view kManifestSha256 = "0dffb1563ad395bd5df1d87ae4f4b7a3fec12b0b30197705c4734de0b69b4fdb";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = false;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
@@ -92,7 +146,8 @@ inline constexpr RuntimeProfile kProfile{
     .key = "1.11.240",
     .identity = {kRuntimeVersion, kExecutableSha256, kF4seVersion,
         kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,
-        kAddressLibrarySha256, kManifestSha256},
+        kAddressLibrarySha256},
+    .manifestSha256 = kManifestSha256,
     .status = kRuntimeStatus,
     .f4seRuntimeFile = kF4seRuntimeFile,
     .commonLibCommit = kCommonLibCommit,
@@ -101,6 +156,8 @@ inline constexpr RuntimeProfile kProfile{
     .hasNativeSceneComposite = kHasNativeSceneComposite,
     .nativeSceneCompositeHash = kNativeSceneCompositeDxbcHash,
     .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,
-    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash
+    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash,
+    .nativeUi = &kNativeUiProfile,
+    .imageSpace = &kImageSpaceProfile
 };
 }  // namespace fo4hdr::generated::ae

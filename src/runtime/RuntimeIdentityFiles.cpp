@@ -5,11 +5,9 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <fstream>
-#include <iterator>
 #include <span>
 #include <vector>
 
@@ -50,31 +48,6 @@ public:
     DWORD resultSize{};
     return BCryptGetProperty(algorithm, property,
         reinterpret_cast<PUCHAR>(&value), sizeof(value), &resultSize, 0) == 0;
-}
-
-[[nodiscard]] bool HasUtf8Bom(std::span<const unsigned char> bytes) noexcept
-{
-    constexpr std::array<unsigned char, 3> bom{0xEF, 0xBB, 0xBF};
-    return bytes.size() >= bom.size() &&
-        std::equal(bom.begin(), bom.end(), bytes.begin());
-}
-
-[[nodiscard]] std::optional<std::vector<unsigned char>> ReadCanonicalText(
-    std::istream& stream)
-{
-    std::vector<unsigned char> bytes(
-        (std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>{});
-    if (stream.bad() || bytes.empty()) return std::nullopt;
-    if (bytes.back() != '\n' || HasUtf8Bom(bytes)) return std::nullopt;
-
-    // The final LF rules out a trailing CR; every other CR must belong to CRLF.
-    const auto bareCr = std::adjacent_find(bytes.begin(), bytes.end(),
-        [](unsigned char current, unsigned char next) noexcept {
-            return current == '\r' && next != '\n';
-        });
-    if (bareCr != bytes.end()) return std::nullopt;
-    std::erase(bytes, '\r');
-    return bytes;
 }
 
 [[nodiscard]] std::string FormatSha256(std::span<const UCHAR> digest)
@@ -164,35 +137,6 @@ public:
                     }
                 }
                 return stream.eof() && !stream.bad();
-            });
-    }
-    catch (...)
-    {
-        return std::nullopt;
-    }
-}
-
-[[nodiscard]] std::optional<std::string> Sha256CanonicalTextFile(
-    const std::filesystem::path& path) noexcept
-{
-    try
-    {
-        std::ifstream stream(path, std::ios::binary);
-        if (!stream)
-        {
-            return std::nullopt;
-        }
-
-        auto canonical = ReadCanonicalText(stream);
-        if (!canonical) return std::nullopt;
-
-        return ComputeSha256(
-            [&](BCRYPT_HASH_HANDLE hash) noexcept {
-                return BCryptHashData(
-                    hash,
-                    canonical->data(),
-                    static_cast<ULONG>(canonical->size()),
-                    0) == 0;
             });
     }
     catch (...)

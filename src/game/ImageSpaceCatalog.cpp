@@ -2,6 +2,7 @@
 
 #include "ImageSpaceObserver.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 #include <RE/Fallout.h>
 #include "GameObservationMemory.hpp"
 #include <algorithm>
@@ -9,7 +10,6 @@
 #include <memory>
 #include <string_view>
 #include <vector>
-#include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 
 namespace {
 
@@ -204,31 +204,41 @@ static_assert(static_cast<std::size_t>(WeatherColorTime::kCount) ==
 static_assert(kWeatherDiffuseColorCount ==
     fo4hdr::game::imagespace_detail::WeatherGradeSlotColors{}.diffuse.size());
 
-std::array<std::uint8_t, 3> DecodeWeatherColor(std::uint32_t packed) noexcept
+std::array<std::uint8_t, 3> DecodeWeatherColor(std::uint32_t packed,
+    const std::array<std::uint8_t, 3>& shifts) noexcept
 {
     std::array<std::uint8_t, 3> result{};
     for (std::size_t channel = 0; channel < result.size(); ++channel)
         result[channel] = static_cast<std::uint8_t>(
-            packed >> fo4hdr::generated::og::kWeatherGradeColorShifts[channel]);
+            packed >> shifts[channel]);
     return result;
+}
+
+const fo4hdr::ImageSpaceRuntimeProfile* ImageSpaceProfile() noexcept
+{
+    const auto* profile = fo4hdr::ActiveRuntimeProfile();
+    return profile ? profile->imageSpace : nullptr;
 }
 
 bool ReadWeatherColors(const RE::TESWeather& weather, WeatherColors& result) noexcept
 {
+    const auto* profile = ImageSpaceProfile();
+    if (!profile) return false;
+    const auto& colors = *profile;
     std::array<std::uint32_t, 8> sunlight{}, glare{};
     if (!fo4hdr::game::observation::GuardedReadValue(
-            weather.colorData[fo4hdr::generated::og::kWeatherGradeSunlightColorIndex], sunlight) ||
+            weather.colorData[colors.sunlightColorIndex], sunlight) ||
         !fo4hdr::game::observation::GuardedReadValue(
-            weather.colorData[fo4hdr::generated::og::kWeatherGradeGlareColorIndex], glare)) return false;
+            weather.colorData[colors.glareColorIndex], glare)) return false;
     for (std::size_t slot = 0; slot < result.size(); ++slot)
     {
-        result[slot].sunlight = DecodeWeatherColor(sunlight[slot]);
-        result[slot].glare = DecodeWeatherColor(glare[slot]);
+        result[slot].sunlight = DecodeWeatherColor(sunlight[slot], colors.colorShifts);
+        result[slot].glare = DecodeWeatherColor(glare[slot], colors.colorShifts);
         std::array<std::uint32_t, kWeatherDiffuseColorCount> diffuse{};
         if (!fo4hdr::game::observation::GuardedReadValue(
                 weather.directionalAmbientLightingColors[slot].colorValues, diffuse)) return false;
         for (std::size_t direction = 0; direction < diffuse.size(); ++direction)
-            result[slot].diffuse[direction] = DecodeWeatherColor(diffuse[direction]);
+            result[slot].diffuse[direction] = DecodeWeatherColor(diffuse[direction], colors.colorShifts);
     }
     return true;
 }
@@ -369,7 +379,7 @@ namespace fo4hdr::game {
 
 void BuildImageSpaceCatalog() noexcept
 {
-    if (!IsOriginalRuntime()) return;
+    if (!ImageSpaceProfile()) return;
     if (g_buildAttempted.exchange(true, std::memory_order_acq_rel)) return;
     try
     {

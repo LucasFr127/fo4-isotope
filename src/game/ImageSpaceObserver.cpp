@@ -3,6 +3,7 @@
 #include "ImageSpaceObserver.hpp"
 #include "DirectCallPatch.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/runtime/RuntimeProfile.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
@@ -407,21 +408,14 @@ struct PatchBackend
             WriteBytes(site.address, replacement, site.protection);
     }
 };
-using namespace fo4hdr::generated::og;
 class ImageSpaceInstallation
 {
+    const fo4hdr::ImageSpaceRuntimeProfile& identity;
     REX::FModule module{REX::FModule::GetExecutingModule()};
     std::uintptr_t base{module.GetBaseAddress()};
     REL::Offset2ID mappings;
     TrampolineInterface allocator{};
     std::array<patch::Site, 11> sites{};
-    static constexpr std::array targetRvas{kImageSpaceWeatherRva, kImageSpaceAccumulateRva,
-        kImageSpaceRoomBlendRva, kImageSpaceSetLutRva};
-    static constexpr std::array targetIds{kImageSpaceWeatherId, kImageSpaceAccumulateId,
-        kImageSpaceRoomBlendId, kImageSpaceSetLutId};
-    static constexpr std::array<std::span<const std::uint8_t>, 4> targetBytes{
-        kImageSpaceWeatherBytes, kImageSpaceAccumulateBytes,
-        kImageSpaceRoomBlendBytes, kImageSpaceSetLutBytes};
     const std::array<std::uintptr_t, 6> hooks{
         reinterpret_cast<std::uintptr_t>(&WeatherHook),
         reinterpret_cast<std::uintptr_t>(&AccumulateHook),
@@ -446,24 +440,24 @@ class ImageSpaceInstallation
     }
     bool TargetValid(std::size_t i) const
     {
-        return Mapping(targetIds[i], targetRvas[i]) &&
-            InSection(".text", base + targetRvas[i], targetBytes[i].size()) &&
-            Executable(reinterpret_cast<void*>(base + targetRvas[i]), targetBytes[i].size()) &&
-            MatchesBytes(base + targetRvas[i], targetBytes[i]) &&
-            std::find(hooks.begin(), hooks.end(), base + targetRvas[i]) == hooks.end();
+        return Mapping(identity.targetIds[i], identity.targetRvas[i]) &&
+            InSection(".text", base + identity.targetRvas[i], identity.targetBytes[i].size()) &&
+            Executable(reinterpret_cast<void*>(base + identity.targetRvas[i]), identity.targetBytes[i].size()) &&
+            MatchesBytes(base + identity.targetRvas[i], identity.targetBytes[i]) &&
+            std::find(hooks.begin(), hooks.end(), base + identity.targetRvas[i]) == hooks.end();
     }
     bool ValidateTargets() const
     {
-        for (std::size_t i = 0; i < targetRvas.size(); ++i)
+        for (std::size_t i = 0; i < identity.targetRvas.size(); ++i)
             if (!TargetValid(i)) return false;
         return true;
     }
     bool GlobalsValid() const
     {
-        return Mapping(kImageSpaceGlobalLutId, kImageSpaceGlobalLutRva) &&
-            Mapping(kImageSpaceGlobalBaseId, kImageSpaceGlobalBaseRva) &&
-            InSection(".data", base + kImageSpaceGlobalLutRva, sizeof(RE::ImageSpaceLUTData)) &&
-            InSection(".data", base + kImageSpaceGlobalBaseRva, sizeof(RE::ImageSpaceBaseData));
+        return Mapping(identity.globalLutId, identity.globalLutRva) &&
+            Mapping(identity.globalBaseId, identity.globalBaseRva) &&
+            InSection(".data", base + identity.globalLutRva, sizeof(RE::ImageSpaceLUTData)) &&
+            InSection(".data", base + identity.globalBaseRva, sizeof(RE::ImageSpaceBaseData));
     }
     bool ReadAllocator(const void* allocatorInterface, std::uint32_t handle)
     {
@@ -472,21 +466,21 @@ class ImageSpaceInstallation
     }
     bool CallMatches(std::size_t i, std::uintptr_t address) const
     {
-        return MatchesBytes(address, kImageSpaceCallBytes[i]) &&
-            kImageSpaceCallTargetIndices[i] < targetRvas.size() &&
-            patch::CallTarget(address, kImageSpaceCallBytes[i]) ==
-                base + targetRvas[kImageSpaceCallTargetIndices[i]];
+        return MatchesBytes(address, identity.callBytes[i]) &&
+            identity.callTargetIndices[i] < identity.targetRvas.size() &&
+            patch::CallTarget(address, identity.callBytes[i]) ==
+                base + identity.targetRvas[identity.callTargetIndices[i]];
     }
     bool PrepareSite(std::size_t i)
     {
-        const auto address = base + kImageSpaceCallRvas[i];
+        const auto address = base + identity.callRvas[i];
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = Mapping(kImageSpaceCallerIds[i], kImageSpaceCallerRvas[i]) &&
-            InSection(".text", base + kImageSpaceCallerRvas[i], 1) &&
+        const bool valid = Mapping(identity.callerIds[i], identity.callerRvas[i]) &&
+            InSection(".text", base + identity.callerRvas[i], 1) &&
             InSection(".text", address, 5) && Executable(reinterpret_cast<void*>(address), 5) &&
             CallMatches(i, address) && Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites[i] = {address, kImageSpaceCallBytes[i], {}, info.Protect};
+        sites[i] = {address, identity.callBytes[i], {}, info.Protect};
         return true;
     }
     bool PrepareSites()
@@ -516,20 +510,20 @@ class ImageSpaceInstallation
     }
     bool TargetsUnchanged() const
     {
-        for (std::size_t i = 0; i < targetRvas.size(); ++i)
-            if (!MatchesBytes(base + targetRvas[i], targetBytes[i])) return false;
+        for (std::size_t i = 0; i < identity.targetRvas.size(); ++i)
+            if (!MatchesBytes(base + identity.targetRvas[i], identity.targetBytes[i])) return false;
         return true;
     }
     bool Publish()
     {
-        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(base + kImageSpaceGlobalLutRva);
-        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(base + kImageSpaceGlobalBaseRva);
+        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(base + identity.globalLutRva);
+        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(base + identity.globalBaseRva);
         // All relays and forwarding targets outlive rollback, including a
         // protection failure that leaves an owned CALL reachable at shutdown.
-        g_weather.store(reinterpret_cast<Weather>(base + kImageSpaceWeatherRva), std::memory_order_release);
-        g_accumulate.store(reinterpret_cast<Accumulate>(base + kImageSpaceAccumulateRva), std::memory_order_release);
-        g_blend.store(reinterpret_cast<Blend>(base + kImageSpaceRoomBlendRva), std::memory_order_release);
-        g_setLut.store(reinterpret_cast<SetLut>(base + kImageSpaceSetLutRva), std::memory_order_release);
+        g_weather.store(reinterpret_cast<Weather>(base + identity.targetRvas[0]), std::memory_order_release);
+        g_accumulate.store(reinterpret_cast<Accumulate>(base + identity.targetRvas[1]), std::memory_order_release);
+        g_blend.store(reinterpret_cast<Blend>(base + identity.targetRvas[2]), std::memory_order_release);
+        g_setLut.store(reinterpret_cast<SetLut>(base + identity.targetRvas[3]), std::memory_order_release);
         PatchBackend backend;
         if (!patch::InstallPair(sites, backend)) return false;
         fo4hdr::SetImageSpaceObservationReady(true);
@@ -537,6 +531,7 @@ class ImageSpaceInstallation
         return true;
     }
 public:
+    explicit ImageSpaceInstallation(const fo4hdr::ImageSpaceRuntimeProfile& profile) : identity(profile) {}
     bool Prepare(const void* allocatorInterface, std::uint32_t handle)
     {
         if (!ValidateTargets() || !GlobalsValid()) return false;
@@ -545,7 +540,9 @@ public:
     }
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        if (!base || module.GetFileVersion() != REL::Version{1, 10, 163, 0}) return false;
+        const auto* profile = fo4hdr::ActiveRuntimeProfile();
+        if (!base || !profile) return false;
+        if (module.GetFileVersion().pack() != profile->runtimeVersion) return false;
         mappings.load_v2();
         if (!Prepare(allocatorInterface, handle)) return false;
         if (!TargetsUnchanged()) return false;
@@ -595,9 +592,11 @@ bool InitializeImageSpaceObserver(bool requested, const void* trampolineInterfac
 {
     if (g_attempted.exchange(true, std::memory_order_acq_rel))
         return g_installed.load(std::memory_order_acquire);
-    if (!requested || !IsOriginalRuntime()) return false;
+    if (!requested) return false;
+    const auto* profile = ActiveRuntimeProfile();
+    if (!profile || !profile->imageSpace) return false;
     try {
-        ImageSpaceInstallation installation;
+        ImageSpaceInstallation installation(*profile->imageSpace);
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
 }
@@ -1038,7 +1037,7 @@ class ImageSpaceCollector
             "m2 image_space available=true trigger={} thread={} ready=true "
             "override={} effect_capacity={} effect_size={} effect_free_index={} "
             "top_level_effect_count={} effects={} active_luts={} "
-            "effect_semantics=exact-1.10.163 active_field_names=commonlib "
+            "effect_semantics=pinned-commonlib active_field_names=commonlib "
             "xedit_alias_behavior=unverified current_eof_data=true "
             "eye_adapt_speed={} bloom_blur_radius={} bloom_threshold={} "
             "bloom_scale={} receive_bloom_threshold={} white={} "
@@ -1082,7 +1081,7 @@ public:
 
 void ObserveImageSpace(GameSnapshotStore& store, std::string_view trigger)
 {
-    if (!IsOriginalRuntime()) return;
+    if (!ActiveRuntimeProfile()) return;
     ImageSpaceCollector collector(store);
     collector.Collect(trigger);
 }
@@ -1091,13 +1090,14 @@ void ObserveImageSpace(GameSnapshotStore& store, std::string_view trigger)
 namespace fo4hdr::game::observation {
 void ReportImageSpaceSemanticProfile()
 {
-    if (!IsOriginalRuntime()) return;
+    const auto* profile = ActiveRuntimeProfile();
+    if (!profile) return;
     REX::INFO(
         "m2 image_space_profile layout_exact=true effect_table_exact=true "
         "effects={} commonlib_source_commit={} "
         "xedit_alias_behavior=unverified",
         kImageSpaceTopLevelEffectCount,
-        fo4hdr::generated::og::kCommonLibCommit);
+        profile->commonLibCommit);
     for (const auto& semantic :
          kImageSpaceEffectSemantics)
     {
@@ -1120,7 +1120,7 @@ void ReportImageSpaceSemanticProfile()
 
 void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
 {
-    if (!IsOriginalRuntime()) return;
+    if (!ActiveRuntimeProfile()) return;
     if (fo4hdr::HasGameSnapshotFeature(
             snapshot.availableFeatures,
             fo4hdr::GameSnapshotFeature::ImageSpace))
@@ -1134,7 +1134,7 @@ void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
                 kImageSpaceEffectSemantics[index];
             REX::INFO(
                 "m2 image_space_effect index={} symbol={} present={} "
-                "stored_active={} semantic_mapping=exact-1.10.163",
+                "stored_active={} semantic_mapping=pinned-commonlib",
                 static_cast<std::uint16_t>(semantic.effect),
                 semantic.symbol,
                 effect.present,

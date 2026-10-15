@@ -126,7 +126,7 @@ function Assert-LockedRuntimeIdentity {
 function Assert-NativeLutRuntime {
     param([string]$Runtime, $Manifest)
     $lutProperty = $manifest.PSObject.Properties['nativeLutObserver']
-    if ($null -ne $lutProperty -and $runtime -notin @('1.10.163', '1.11.240')) {
+    if ($null -ne $lutProperty -and $runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
         throw 'The native LUT observer has no qualified profile for this runtime.'
     }
 }
@@ -145,8 +145,8 @@ function Assert-ImageSpaceRuntime {
     param([string]$Runtime, $Manifest)
     $imageSpaceProperty = $manifest.PSObject.Properties['imageSpaceObserver']
     if ($null -eq $imageSpaceProperty) { return }
-    if ($runtime -ne '1.10.163') {
-        throw 'The ImageSpace provenance observer is scoped to runtime 1.10.163.'
+    if ($runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
+        throw 'The ImageSpace provenance observer has no qualified profile for this runtime.'
     }
     $imageSpace = $imageSpaceProperty.Value
     $seenCalls = @{}
@@ -177,8 +177,8 @@ function Assert-NativeUiResourcesRuntime {
     param([string]$Runtime, $Manifest)
     $profileProperty = $Manifest.PSObject.Properties['nativeUiResources']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -ne '1.10.163') {
-        throw 'Native pause resource allocation is scoped to runtime 1.10.163.'
+    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
+        throw 'Native pause resource allocation has no qualified profile for this runtime.'
     }
     Assert-NativeUiCallSequence $profileProperty.Value
 }
@@ -187,7 +187,7 @@ function Assert-ScreenUiRuntime {
     param([string]$Runtime, $Manifest)
     $profileProperty = $Manifest.PSObject.Properties['experimentalScreenUiObserver']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -notin @('1.10.163', '1.11.240')) {
+    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
         throw 'The screen-space UI entry has no qualified profile for this runtime.'
     }
     $profile = $profileProperty.Value
@@ -205,7 +205,7 @@ function Assert-ArmorUiContract {
     param([string]$Runtime, $Armor)
     $validStatus = $armor.status -eq 'unvalidated' -and
         $armor.scope -eq 'power-armor-encoded-peak-composition'
-    if ($runtime -notin @('1.10.163', '1.11.240') -or -not $validStatus) {
+    if ($runtime -notin @('1.10.163', '1.10.984', '1.11.240') -or -not $validStatus) {
         throw 'Armor observer runtime, status or scope is invalid.'
     }
     $expectedCalls = if ($runtime -eq '1.10.163') { 2 } else { 1 }

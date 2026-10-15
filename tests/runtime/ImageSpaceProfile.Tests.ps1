@@ -213,12 +213,14 @@ function Test-RuntimeIdentityGeneration {
         throw "Repeated runtime identity generation was not byte-identical."
     }
 
-    if ($runtime -eq '1.11.240') {
-        $generated = Get-Content -LiteralPath $first -Raw
-        if ($generated -match 'kImageSpaceCallRvas|kNativeUiTargetRva|kWeatherGradeColorShifts' -or
-            $generated -notmatch 'kHasNativeSceneComposite = false;') {
-            throw 'AE generated output admitted an unverified OG-only feature.'
-        }
+    $generated = Get-Content -LiteralPath $first -Raw
+    if ($generated -notmatch '\.imageSpace = &kImageSpaceProfile' -or
+        $generated -notmatch '\.nativeUi = &kNativeUiProfile') {
+        throw "$runtime generated output omitted a qualified native adapter."
+    }
+    if ($runtime -ne '1.10.163' -and
+        $generated -notmatch 'kHasNativeSceneComposite = false;') {
+        throw "$runtime generated output admitted an unverified scene-clear identity."
     }
     [IO.File]::AppendAllText(
         $second,
@@ -240,7 +242,7 @@ $second = [IO.Path]::Combine(
     [IO.Path]::GetTempPath(),
     "FO4Isotope.RuntimeIdentity.second.$([Guid]::NewGuid()).hpp")
 try {
-    foreach ($runtime in @('1.10.163', '1.11.240')) {
+    foreach ($runtime in @('1.10.163', '1.10.984', '1.11.240')) {
         Test-RuntimeIdentityGeneration $runtime $first $second
     }
 }

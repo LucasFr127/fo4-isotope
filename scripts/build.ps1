@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = $env:FO4HDR_RUNTIME,
 
     [ValidateSet("debug", "releasedbg")]
@@ -32,11 +32,18 @@ try {
         throw "Build failed."
     }
 
-    $retiredDefault = Resolve-Fo4HdrChildPath `
-        -Parent (Join-Path $repoRoot "dist") `
-        -RelativePath "universal/Data/F4SE/Plugins/FO4Isotope/Default.ini"
-    if (Test-Path -LiteralPath $retiredDefault -PathType Leaf) {
-        Remove-Item -LiteralPath $retiredDefault -Force
+    foreach ($relative in @(
+        "universal/Data/F4SE/Plugins/FO4Isotope/Default.ini",
+        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.10.163.json",
+        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.10.984.json",
+        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.11.240.json"
+    )) {
+        $retiredFile = Resolve-Fo4HdrChildPath `
+            -Parent (Join-Path $repoRoot "dist") `
+            -RelativePath $relative
+        if (Test-Path -LiteralPath $retiredFile -PathType Leaf) {
+            Remove-Item -LiteralPath $retiredFile -Force
+        }
     }
 
     xmake install -v FO4Isotope

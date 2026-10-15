@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = $env:FO4HDR_RUNTIME,
 
     [ValidateSet("debug", "releasedbg")]
@@ -34,7 +34,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Get-Fo4HdrRepoRoot
 $runCompiled = $Scope -in @("all", "compiled")
 $runRepository = $Scope -in @("all", "repository")
-if ($runCompiled -and $Runtime -notin @('1.10.163', '1.11.240')) {
+if ($runCompiled -and $Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
     throw 'Specify -Runtime or set FO4HDR_RUNTIME to an enabled runtime for compiled tests.'
 }
 if (($Suite -ne "all" -or $Filter -or $List) -and $Scope -ne "compiled") {
@@ -116,6 +116,9 @@ try {
             $arguments = $testArguments
             if ($Runtime -eq '1.11.240' -and $target -eq 'fo4hdr-shader-tests') {
                 $arguments = @($arguments) + '--ae-runtime'
+            }
+            if ($Runtime -eq '1.10.984' -and $target -eq 'fo4hdr-shader-tests') {
+                $arguments = @($arguments) + '--ng-runtime'
             }
             # Launch the resolved executable directly to preserve its skip exit code.
             Invoke-Fo4HdrTestProcess -FilePath ([IO.Path]::GetFullPath($targetFile, $repoRoot)) `

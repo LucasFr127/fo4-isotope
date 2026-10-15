@@ -25,13 +25,42 @@ void TestSharedRuntimeSelection()
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ae->identity).valid);
     FO4HDR_CHECK(!FindRuntimeProfile(0x010A0A30, 0x00070090));
     FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00060170));
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010A3D80, 0x00070020));
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010A3D80, 0x00070090));
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00070020));
     FO4HDR_CHECK(!FindRuntimeProfile(0x010B0DD0, 0x00070080));
     FO4HDR_CHECK(!InitializeRuntimeProfile(0, 0));
     FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
     FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
     FO4HDR_CHECK(!InitializeRuntimeProfile(0x010B0F00, 0x00070090));
     FO4HDR_CHECK(ActiveRuntimeProfile() == og && IsOriginalRuntime());
+}
+
+void TestNextGenerationRuntimeSelection()
+{
+    const auto* ng = FindRuntimeProfile(0x010A3D80, 0x00070020);
+    FO4HDR_CHECK(ng);
+    if (!ng) return;
+    FO4HDR_CHECK(ng->key == "1.10.984");
+    FO4HDR_CHECK(!ng->hasNativeSceneComposite);
+    FO4HDR_CHECK(ValidateRuntimeIdentity(ng->identity, ng->identity).valid);
+    const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
+    FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ng->identity).valid);
+}
+
+void TestCompiledRuntimeProvenance()
+{
+    for (const auto* profile : {
+             FindRuntimeProfile(0x010A0A30, 0x00060170),
+             FindRuntimeProfile(0x010A3D80, 0x00070020),
+             FindRuntimeProfile(0x010B0F00, 0x00070090)})
+    {
+        FO4HDR_CHECK(profile);
+        if (!profile) continue;
+        FO4HDR_CHECK(profile->manifestSha256.size() == 64);
+        FO4HDR_CHECK(profile->manifestSha256.find_first_not_of("0123456789abcdef") ==
+            std::string_view::npos);
+        FO4HDR_CHECK(profile->nativeUi && profile->imageSpace);
+    }
 }
 
 constexpr std::string_view hashA =
@@ -42,8 +71,6 @@ constexpr std::string_view hashC =
     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 constexpr std::string_view hashD =
     "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
-constexpr std::string_view hashE =
-    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 
 const fo4hdr::RuntimeIdentity expected{
     .runtimeVersion = "1.10.163.0",
@@ -52,8 +79,7 @@ const fo4hdr::RuntimeIdentity expected{
     .f4seLoaderSha256 = hashB,
     .f4seRuntimeSha256 = hashC,
     .addressLibraryFile = "version-1-10-163-0.bin",
-    .addressLibrarySha256 = hashD,
-    .manifestSha256 = hashE
+    .addressLibrarySha256 = hashD
 };
 
 void TestMatchingIdentity()
@@ -160,24 +186,6 @@ void TestAddressLibraryIdentity()
         fo4hdr::RuntimeValidationReason::AddressLibraryHashMismatch);
 }
 
-void TestManifestIdentity()
-{
-    auto observed = expected;
-    RuntimeValidationResult result;
-    observed.manifestSha256 = hashA;
-    result = fo4hdr::ValidateRuntimeIdentity(expected, observed);
-    FO4HDR_CHECK(
-        result.reason ==
-        fo4hdr::RuntimeValidationReason::ManifestHashMismatch);
-
-    observed = expected;
-    observed.manifestSha256 = {};
-    result = fo4hdr::ValidateRuntimeIdentity(expected, observed);
-    FO4HDR_CHECK(
-        result.reason ==
-        fo4hdr::RuntimeValidationReason::ManifestUnavailable);
-}
-
 void TestUninitializedProfile()
 {
     RuntimeValidationResult result;
@@ -195,14 +203,13 @@ void TestFailurePrecedence()
     auto observed = expected;
     observed.runtimeVersion = "unknown";
     observed.executableSha256 = {};
-    observed.manifestSha256 = {};
     FO4HDR_CHECK(ValidateRuntimeIdentity(expected, observed).reason ==
         RuntimeValidationReason::RuntimeVersionMismatch);
     observed.runtimeVersion = expected.runtimeVersion;
     FO4HDR_CHECK(ValidateRuntimeIdentity(expected, observed).reason ==
         RuntimeValidationReason::ExecutableUnavailable);
     auto uninitialized = expected;
-    uninitialized.manifestSha256 = "UNVALIDATED";
+    uninitialized.addressLibrarySha256 = "UNVALIDATED";
     FO4HDR_CHECK(ValidateRuntimeIdentity(uninitialized, observed).reason ==
         RuntimeValidationReason::ProfileUninitialized);
     FO4HDR_CHECK(ToString(static_cast<RuntimeValidationReason>(-1)) ==
@@ -239,11 +246,7 @@ constexpr ReasonText reasonTexts[]{
     { fo4hdr::RuntimeValidationReason::AddressLibraryUnavailable,
       "address-library-unavailable" },
     { fo4hdr::RuntimeValidationReason::AddressLibraryHashMismatch,
-      "address-library-hash-mismatch" },
-    { fo4hdr::RuntimeValidationReason::ManifestUnavailable,
-      "manifest-unavailable" },
-    { fo4hdr::RuntimeValidationReason::ManifestHashMismatch,
-      "manifest-hash-mismatch" }
+      "address-library-hash-mismatch" }
 };
 void TestReasonNames()
 {
@@ -319,11 +322,12 @@ void TestUnknownAuthorization()
 void RunRuntimeValidationTests()
 {
     TestSharedRuntimeSelection();
+    TestNextGenerationRuntimeSelection();
+    TestCompiledRuntimeProvenance();
     TestMatchingIdentity();
     TestExecutableIdentity();
     TestRuntimeAndF4seIdentity();
     TestAddressLibraryIdentity();
-    TestManifestIdentity();
     TestUninitializedProfile();
     TestFailurePrecedence();
     TestReasonNames();

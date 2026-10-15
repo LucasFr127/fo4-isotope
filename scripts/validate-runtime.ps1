@@ -78,7 +78,7 @@ Assert-Fo4HdrExactRuntimeFileVersion `
     -Runtime $Runtime `
     -FileVersion $fileVersion
 
-if ($Runtime -in @("1.10.163", "1.11.240")) {
+if ($Runtime -in @("1.10.163", "1.10.984", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $Runtime `
         -Check

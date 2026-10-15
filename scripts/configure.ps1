@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = $env:FO4HDR_RUNTIME,
 
     [ValidateSet("debug", "releasedbg")]
@@ -23,7 +23,7 @@ if (-not $Runtime) {
 
 $repoRoot = Get-Fo4HdrRepoRoot
 & (Join-Path $PSScriptRoot "validate-manifests.ps1")
-foreach ($profileRuntime in @("1.10.163", "1.11.240")) {
+foreach ($profileRuntime in @("1.10.163", "1.10.984", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $profileRuntime `
         -Check

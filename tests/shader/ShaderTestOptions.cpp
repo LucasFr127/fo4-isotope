@@ -15,6 +15,7 @@ bool ShaderTestOptions::SetFlag(std::string_view argument)
 {
     const std::pair<std::string_view, bool*> flags[]{
         {"--hardware", &hardware}, {"--debug-layer", &debugLayer}, {"--ae-runtime", &aeRuntime},
+        {"--ng-runtime", &ngRuntime},
         {"--list", &list}, {"--armor-encoded-only", &armorEncodedOnly},
         {"--armor-encoded-benchmark", &armorEncodedBenchmark},
         {"--operator-lut-benchmark", &operatorLutBenchmark},
@@ -32,7 +33,7 @@ bool ShaderTestOptions::Parse(int argumentCount, char** arguments)
         const std::string_view argument{arguments[index]};
         if (SetFlag(argument)) continue;
         if (ParseFilter(argument, {arguments, static_cast<std::size_t>(argumentCount)}, index)) continue;
-        std::cerr << "Usage: fo4hdr-shader-tests [--hardware] [--debug-layer] [--ae-runtime] "
+        std::cerr << "Usage: fo4hdr-shader-tests [--hardware] [--debug-layer] [--ae-runtime|--ng-runtime] "
                      "[--list|--filter <section>] "
                      "[--presentation-benchmark|--overlay-benchmark|--operator-lut-benchmark|--armor-encoded-only|--armor-encoded-benchmark]\n";
         return false;
@@ -66,6 +67,7 @@ bool ShaderTestOptions::SelectionConflicts() const
 bool ShaderTestOptions::ValidateModes() const
 {
     const std::pair<bool, std::string_view> errors[]{
+        {aeRuntime && ngRuntime, "AE and NG runtime selections are mutually exclusive.\n"},
         {ConflictingModes(), "Benchmark and armor-only modes are mutually exclusive.\n"},
         {Benchmark() && !hardware, "Benchmarks require --hardware.\n"},
         {debugLayer && Benchmark(), "Benchmarks require the debug layer disabled.\n"},

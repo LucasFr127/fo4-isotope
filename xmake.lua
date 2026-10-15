@@ -52,9 +52,9 @@ add_rules("plugin.vsxmake.autoupdate")
 
 option("fo4hdr_runtime")
     set_default("1.10.163")
-    set_values("1.10.163", "1.11.240")
+    set_values("1.10.163", "1.10.984", "1.11.240")
     set_showmenu(true)
-    set_description("Local validation runtime for the shared OG/AE DLL")
+    set_description("Local validation runtime for the shared OG/NG/AE DLL")
 option_end()
 
 option("fo4hdr_allow_unvalidated_runtime")
@@ -115,12 +115,6 @@ rule("fo4hdr.plugin")
             "installfiles",
             "config/FO4Isotope.ini",
             { prefixdir = "F4SE/Plugins" })
-        for _, runtime in ipairs({"1.10.163", "1.11.240"}) do
-            target:add("installfiles", path.join("runtime", runtime, "manifest.json"), {
-                prefixdir = "F4SE/Plugins/FO4Isotope",
-                filename = "runtime-" .. runtime .. ".json"
-            })
-        end
     end)
 rule_end()
 

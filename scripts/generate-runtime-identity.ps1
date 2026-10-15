@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = "1.10.163",
 
     [string]$OutputPath,
@@ -292,7 +292,8 @@ foreach ($call in $screenUi.calls) {
 $screenUiLines += '}};'
 
 $nativeUiLines = @()
-if ($Runtime -eq '1.10.163') {
+$nativeUiProfile = 'nullptr'
+if ($null -ne $manifest.PSObject.Properties['nativeUiResources']) {
     $nativeUi = $manifest.nativeUiResources
     if ($nativeUi.status -ne 'unvalidated' -or
         $nativeUi.scope -ne 'dedicated-pause-blur-fp16' -or
@@ -321,6 +322,12 @@ if ($Runtime -eq '1.10.163') {
         $nativeUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
     }
     $nativeUiLines += '}};'
+    $nativeUiLines += @(
+        'inline constexpr NativeUiRuntimeProfile kNativeUiProfile{',
+        '    kNativeUiTargetRva, kNativeUiTargetId, kNativeUiTargetBytes,',
+        '    kNativeUiCallerRvas, kNativeUiCallerIds, kNativeUiCallRvas, kNativeUiCallBytes};'
+    )
+    $nativeUiProfile = '&kNativeUiProfile'
 }
 
 $lut = $manifest.nativeLutObserver
@@ -341,7 +348,8 @@ $lutLines = @(
 $imageSpaceLines = @()
 $weatherGradeLines = @()
 $imageSpaceDiagnosticLines = @()
-if ($Runtime -eq '1.10.163') {
+$imageSpaceRuntimeProfile = 'nullptr'
+if ($null -ne $manifest.PSObject.Properties['imageSpaceObserver']) {
     $imageSpace = $manifest.imageSpaceObserver
     $weatherGrade = $imageSpace.weatherGrade
     $weatherGradeLines = @(
@@ -395,7 +403,20 @@ if ($Runtime -eq '1.10.163') {
         $imageSpaceLines += "    {{ $($call.expectedBytes -join ', ') }},"
     }
     $imageSpaceLines += '}};'
+    $weatherGradeLines += @(
+        'inline constexpr ImageSpaceRuntimeProfile kImageSpaceProfile{',
+        '    {kImageSpaceWeatherRva, kImageSpaceAccumulateRva, kImageSpaceRoomBlendRva, kImageSpaceSetLutRva},',
+        '    {kImageSpaceWeatherId, kImageSpaceAccumulateId, kImageSpaceRoomBlendId, kImageSpaceSetLutId},',
+        '    {kImageSpaceWeatherBytes, kImageSpaceAccumulateBytes, kImageSpaceRoomBlendBytes, kImageSpaceSetLutBytes},',
+        '    kImageSpaceGlobalLutRva, kImageSpaceGlobalBaseRva, kImageSpaceGlobalLutId, kImageSpaceGlobalBaseId,',
+        '    kImageSpaceCallRvas, kImageSpaceCallerRvas, kImageSpaceCallerIds,',
+        '    kImageSpaceCallTargetIndices, kImageSpaceCallBytes,',
+        '    kWeatherGradeSunlightColorIndex, kWeatherGradeGlareColorIndex, kWeatherGradeColorShifts};'
+    )
+    $imageSpaceRuntimeProfile = '&kImageSpaceProfile'
+}
 
+if ($Runtime -eq '1.10.163') {
     $imageSpaceDiagnosticLines = @(
         "struct ImageSpaceActiveDataSemantic",
         "{",
@@ -413,7 +434,11 @@ if ($Runtime -eq '1.10.163') {
     ) + $activeSemanticLines + @("    }};", "")
 }
 
-$profileNamespace = if ($Runtime -eq '1.10.163') { 'og' } else { 'ae' }
+$profileNamespace = switch ($Runtime) {
+    '1.10.163' { 'og' }
+    '1.10.984' { 'ng' }
+    '1.11.240' { 'ae' }
+}
 $lines = @(
     # REUSE-IgnoreStart
     "// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions",
@@ -464,7 +489,8 @@ $lines = @(
     "    .key = `"$Runtime`",",
     '    .identity = {kRuntimeVersion, kExecutableSha256, kF4seVersion,',
     '        kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,',
-    '        kAddressLibrarySha256, kManifestSha256},',
+    '        kAddressLibrarySha256},',
+    '    .manifestSha256 = kManifestSha256,',
     '    .status = kRuntimeStatus,',
     '    .f4seRuntimeFile = kF4seRuntimeFile,',
     '    .commonLibCommit = kCommonLibCommit,',
@@ -473,7 +499,9 @@ $lines = @(
     '    .hasNativeSceneComposite = kHasNativeSceneComposite,',
     '    .nativeSceneCompositeHash = kNativeSceneCompositeDxbcHash,',
     '    .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,',
-    '    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash',
+    '    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash,',
+    "    .nativeUi = $nativeUiProfile,",
+    "    .imageSpace = $imageSpaceRuntimeProfile",
     '};',
     "}  // namespace fo4hdr::generated::$profileNamespace",
     ""

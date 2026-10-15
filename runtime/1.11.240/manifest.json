@@ -882,5 +882,333 @@
       "semantics": "Workshop setup creates the canonical renderer at depth 1, attaches its screen root, disables deferral, sets postAA and full premultiplied alpha, and chooses native custom target 37. Current adapter must independently qualify actual root, postAA and target resource; static identity is not a shader/resource promotion claim.",
       "evidenceQualification": "Static review of exact on-disk Fallout4.exe 1.11.240.0 and its version-1-11-240-0 Address Library. Exact live fingerprints and current-artifact native/gameplay validation remain required before a support claim."
     }
+  },
+  "imageSpaceObserver": {
+    "status": "unvalidated",
+    "scope": "weather-imagespace-provenance",
+    "authorityGap": "Pinned CommonLibF4 exposes ImageSpace records and LUT data but omits the weather accumulation, room overwrite and manager transfer call mappings.",
+    "lifetime": "Immutable game-data catalog owns record identities and normalized native LUT paths; invocation-local collection and fixed synchronized publication own all copied values.",
+    "thread": "Producer, transfer and Gamma callbacks may use different threads. Scoped writer counts and revisions reject overlapping or stale publications; payload copies use one try-lock attempt. Room mutation spans the blend call through its LUT setter.",
+    "weatherGrade": {
+      "sunlightColorIndex": 4,
+      "glareColorIndex": 15,
+      "rgbByteShifts": [
+        0,
+        8,
+        16
+      ],
+      "loadedColorSemantics": "NAM0 clears the full color array before copying eight-slot data or expanding legacy four-slot data with bytewise neighboring-slot means. DALC legacy data similarly expands to eight initialized slots. Loaded black is valid; serialized leaf absence is not a runtime missing-value marker."
+    },
+    "globals": {
+      "lut": {
+        "addressLibraryId": 4799147,
+        "rva": "0x031F0490"
+      },
+      "base": {
+        "addressLibraryId": 4799141,
+        "rva": "0x031F0430"
+      }
+    },
+    "targets": [
+      {
+        "name": "Weather",
+        "addressLibraryId": 2208864,
+        "rva": "0x006BFDF0",
+        "abi": "void(Sky*)",
+        "expectedBytes": [
+          64,
+          86,
+          72,
+          129,
+          236,
+          224,
+          0,
+          0,
+          0,
+          72,
+          139,
+          241
+        ]
+      },
+      {
+        "name": "Accumulate",
+        "addressLibraryId": 2318275,
+        "rva": "0x021EF870",
+        "abi": "void(ImageSpaceBaseData*,const ImageSpaceBaseData*,float)",
+        "expectedBytes": [
+          15,
+          40,
+          194,
+          15,
+          40,
+          202,
+          243,
+          15,
+          89,
+          2,
+          76,
+          139,
+          193
+        ]
+      },
+      {
+        "name": "RoomBlend",
+        "addressLibraryId": 2318276,
+        "rva": "0x021EFA40",
+        "abi": "void(ImageSpaceBaseData*,const ImageSpaceBaseData*,const ImageSpaceBaseData*,float)",
+        "expectedBytes": [
+          243,
+          15,
+          16,
+          37,
+          16,
+          154,
+          115,
+          0,
+          15,
+          40,
+          195,
+          243,
+          65,
+          15,
+          89,
+          0
+        ]
+      },
+      {
+        "name": "SetLut",
+        "addressLibraryId": 2316617,
+        "rva": "0x02186570",
+        "abi": "void(ImageSpaceManager*,const ImageSpaceLUTData*)",
+        "expectedBytes": [
+          72,
+          133,
+          210,
+          116,
+          12,
+          72,
+          129,
+          193,
+          48,
+          1,
+          0,
+          0,
+          233,
+          111,
+          116,
+          0,
+          0
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "rva": "0x006BB3E0",
+        "callerRva": "0x006BB240",
+        "callerAddressLibraryId": 2208843,
+        "expectedBytes": [
+          232,
+          11,
+          74,
+          0,
+          0
+        ],
+        "targetIndex": 0
+      },
+      {
+        "rva": "0x006BCB22",
+        "callerRva": "0x006BC5E0",
+        "callerAddressLibraryId": 2208848,
+        "expectedBytes": [
+          232,
+          201,
+          50,
+          0,
+          0
+        ],
+        "targetIndex": 0
+      },
+      {
+        "rva": "0x006BFCAB",
+        "callerRva": "0x006BFBE0",
+        "callerAddressLibraryId": 2208860,
+        "expectedBytes": [
+          232,
+          64,
+          1,
+          0,
+          0
+        ],
+        "targetIndex": 0
+      },
+      {
+        "rva": "0x006C0097",
+        "callerRva": "0x006BFDF0",
+        "callerAddressLibraryId": 2208864,
+        "expectedBytes": [
+          232,
+          212,
+          247,
+          178,
+          1
+        ],
+        "targetIndex": 1
+      },
+      {
+        "rva": "0x006C0159",
+        "callerRva": "0x006BFDF0",
+        "callerAddressLibraryId": 2208864,
+        "expectedBytes": [
+          232,
+          18,
+          247,
+          178,
+          1
+        ],
+        "targetIndex": 1
+      },
+      {
+        "rva": "0x006C021F",
+        "callerRva": "0x006BFDF0",
+        "callerAddressLibraryId": 2208864,
+        "expectedBytes": [
+          232,
+          76,
+          246,
+          178,
+          1
+        ],
+        "targetIndex": 1
+      },
+      {
+        "rva": "0x006C02DD",
+        "callerRva": "0x006BFDF0",
+        "callerAddressLibraryId": 2208864,
+        "expectedBytes": [
+          232,
+          142,
+          245,
+          178,
+          1
+        ],
+        "targetIndex": 1
+      },
+      {
+        "rva": "0x006BBE7D",
+        "callerRva": "0x006BB9C0",
+        "callerAddressLibraryId": 2208846,
+        "expectedBytes": [
+          232,
+          190,
+          59,
+          179,
+          1
+        ],
+        "targetIndex": 2
+      },
+      {
+        "rva": "0x006BBD27",
+        "callerRva": "0x006BB9C0",
+        "callerAddressLibraryId": 2208846,
+        "expectedBytes": [
+          232,
+          68,
+          168,
+          172,
+          1
+        ],
+        "targetIndex": 3
+      },
+      {
+        "rva": "0x006BBF04",
+        "callerRva": "0x006BB9C0",
+        "callerAddressLibraryId": 2208846,
+        "expectedBytes": [
+          232,
+          103,
+          166,
+          172,
+          1
+        ],
+        "targetIndex": 3
+      },
+      {
+        "rva": "0x0083587B",
+        "callerRva": "0x00835760",
+        "callerAddressLibraryId": 2214956,
+        "expectedBytes": [
+          232,
+          240,
+          12,
+          149,
+          1
+        ],
+        "targetIndex": 3
+      }
+    ]
+  },
+  "nativeUiResources": {
+    "status": "unvalidated",
+    "scope": "dedicated-pause-blur-fp16",
+    "abi": "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)",
+    "authorityGap": "Pinned CommonLibF4 owns the target-manager and 0x20 properties layouts but has no named mappings for the initializer registration calls or registrar.",
+    "evidenceQualification": "Exact runtime-1.11.240 executable and Address Library static review, including registrar ABI, full descriptor copy, mode-1 native allocation, FullScreenBlur slot consumers, and native release/recreation paths. Exact loaded fingerprints must be rechecked before mutation; current-artifact native validation remains pending.",
+    "lifetime": "Mode 1 copies all 32 property bytes synchronously into the native manager and creates dedicated native texture/RTV/SRV/UAV. Native manager reset releases them; three native reset paths subsequently invoke the same registered create callback. The shim retains no descriptor or COM references.",
+    "thread": "Synchronous native renderer allocation lifetime; preserve one nonoverlapping manager/thread pair per initializer invocation and fail closed on overlap. Static evidence does not establish a permanent thread identity; later resets may use another thread.",
+    "propertiesSize": 32,
+    "formatOffset": 8,
+    "sourceFormat": 24,
+    "promotedFormat": 10,
+    "mode": 1,
+    "target": {
+      "addressLibraryId": 2277176,
+      "rva": "0x01839130",
+      "expectedBytes": [
+        64,
+        87,
+        65,
+        86,
+        65,
+        87,
+        72,
+        131,
+        236,
+        64,
+        72,
+        199,
+        68,
+        36,
+        32,
+        254
+      ]
+    },
+    "calls": [
+      {
+        "callerAddressLibraryId": 2318909,
+        "callerRva": "0x02233E60",
+        "rva": "0x0223469A",
+        "slot": 24,
+        "expectedBytes": [
+          232,
+          145,
+          74,
+          96,
+          255
+        ]
+      },
+      {
+        "callerAddressLibraryId": 2318909,
+        "callerRva": "0x02233E60",
+        "rva": "0x022346B2",
+        "slot": 25,
+        "expectedBytes": [
+          232,
+          121,
+          74,
+          96,
+          255
+        ]
+      }
+    ]
   }
 }

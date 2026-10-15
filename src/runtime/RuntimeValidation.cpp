@@ -42,9 +42,7 @@ constexpr IdentityCheck kIdentityChecks[]{
     {&RuntimeIdentity::addressLibraryFile, RuntimeValidationReason::Valid,
      RuntimeValidationReason::AddressLibraryFileMismatch},
     {&RuntimeIdentity::addressLibrarySha256, RuntimeValidationReason::AddressLibraryUnavailable,
-     RuntimeValidationReason::AddressLibraryHashMismatch},
-    {&RuntimeIdentity::manifestSha256, RuntimeValidationReason::ManifestUnavailable,
-     RuntimeValidationReason::ManifestHashMismatch}
+     RuntimeValidationReason::AddressLibraryHashMismatch}
 };
 
 [[nodiscard]] bool IsInitialized(const RuntimeIdentity& identity) noexcept
@@ -131,9 +129,7 @@ std::string_view ToString(RuntimeValidationReason reason) noexcept
         {RuntimeValidationReason::F4seRuntimeHashMismatch, "f4se-runtime-hash-mismatch"},
         {RuntimeValidationReason::AddressLibraryFileMismatch, "address-library-file-mismatch"},
         {RuntimeValidationReason::AddressLibraryUnavailable, "address-library-unavailable"},
-        {RuntimeValidationReason::AddressLibraryHashMismatch, "address-library-hash-mismatch"},
-        {RuntimeValidationReason::ManifestUnavailable, "manifest-unavailable"},
-        {RuntimeValidationReason::ManifestHashMismatch, "manifest-hash-mismatch"}
+        {RuntimeValidationReason::AddressLibraryHashMismatch, "address-library-hash-mismatch"}
     };
     const auto found = std::find_if(std::begin(names), std::end(names),
         [reason](const auto& entry) noexcept { return entry.first == reason; });

@@ -164,6 +164,24 @@ void CheckRejectedArguments()
     }
 }
 
+void CheckRuntimeSelection()
+{
+    for (const auto* flag : {"--ae-runtime", "--ng-runtime"})
+    {
+        gpu::ShaderTestOptions options;
+        std::vector<std::string> arguments{"shader-tests", flag};
+        FO4HDR_CHECK(Parse(options, arguments));
+        FO4HDR_CHECK(options.aeRuntime != options.ngRuntime);
+        FO4HDR_CHECK(options.ValidateModes());
+    }
+    gpu::ShaderTestOptions options;
+    std::vector<std::string> arguments{"shader-tests", "--ae-runtime", "--ng-runtime"};
+    FO4HDR_CHECK(Parse(options, arguments));
+    DiagnosticCapture capture;
+    FO4HDR_CHECK(!options.ValidateModes());
+    FO4HDR_CHECK(capture.Text() == "AE and NG runtime selections are mutually exclusive.\n");
+}
+
 }  // namespace
 
 void RunShaderTestOptionsTests()
@@ -172,6 +190,7 @@ void RunShaderTestOptionsTests()
     CheckRecognizedFlags();
     CheckFilterParsing();
     CheckRejectedArguments();
+    CheckRuntimeSelection();
 }
 
 }  // namespace fo4hdr::tests

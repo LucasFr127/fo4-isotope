@@ -191,7 +191,6 @@ struct ObservedRuntimeIdentity
     std::string loaderHash;
     std::string runtimeHash;
     std::string addressHash;
-    std::string manifestHash;
 
     [[nodiscard]] fo4hdr::RuntimeIdentity View(std::string_view addressLibraryFile) const noexcept
     {
@@ -202,8 +201,7 @@ struct ObservedRuntimeIdentity
             .f4seLoaderSha256 = loaderHash,
             .f4seRuntimeSha256 = runtimeHash,
             .addressLibraryFile = addressLibraryFile,
-            .addressLibrarySha256 = addressHash,
-            .manifestSha256 = manifestHash
+            .addressLibrarySha256 = addressHash
         };
     }
 };
@@ -230,10 +228,6 @@ struct ObservedRuntimeIdentity
             root / L"Data" / L"F4SE" / L"Plugins" /
             std::filesystem::path(expected.addressLibraryFile))
                           .value_or("");
-        observed.manifestHash = fo4hdr::Sha256CanonicalTextFile(
-            root / L"Data" / L"F4SE" / L"Plugins" /
-            L"FO4Isotope" / ("runtime-" + std::string(fo4hdr::ActiveRuntimeProfile()->key) + ".json"))
-                           .value_or("");
     }
 
     return observed;
@@ -320,8 +314,8 @@ namespace
     REX::INFO("identity address_library={} sha256={}",
         observed.addressLibraryFile,
         DisplayHash(observed.addressLibrarySha256));
-    REX::INFO("identity runtime_manifest_sha256={}",
-        DisplayHash(observed.manifestSha256));
+    REX::INFO("provenance compiled_runtime_manifest_sha256={}",
+        profile.manifestSha256);
     REX::INFO(
         "identity commonlibf4_commit={}", profile.commonLibCommit);
 

@@ -48,6 +48,12 @@ function Test-DeploymentRejections {
         Assert-DeployRejected 'Staged runtime file set is not exact.'
         Remove-Item -LiteralPath $sidecarStage
     }
+    foreach ($runtime in @('1.10.163', '1.10.984', '1.11.240')) {
+        $sidecarStage = Join-Path $stage "F4SE/Plugins/FO4Isotope/runtime-$runtime.json"
+        [IO.File]::WriteAllText($sidecarStage, 'must not ship')
+        Assert-DeployRejected 'Staged runtime file set is not exact.'
+        Remove-Item -LiteralPath $sidecarStage
+    }
     $requiredFile = Join-Path $stage $relativeFiles[0]
     Remove-Item -LiteralPath $requiredFile
     Assert-DeployRejected 'Staged runtime file set is not exact.'
@@ -121,20 +127,28 @@ function Assert-DeployedFiles {
 
 function Test-BuildStageRetirement {
     $default = Join-Path $stage 'F4SE/Plugins/FO4Isotope/Default.ini'
+    $manifests = @('1.10.163', '1.10.984', '1.11.240') | ForEach-Object {
+        Join-Path $stage "F4SE/Plugins/FO4Isotope/runtime-$_.json"
+    }
     $userDefault = Join-Path $fixture 'user/Default.ini'
+    New-Item -ItemType Directory -Path (Split-Path $default) -Force | Out-Null
     New-Item -ItemType Directory -Path (Split-Path $userDefault) -Force | Out-Null
     [IO.File]::WriteAllText($default, 'retired generated default')
+    foreach ($manifest in $manifests) {
+        [IO.File]::WriteAllText($manifest, 'retired generated manifest')
+    }
     [IO.File]::WriteAllText($userDefault, 'keep user data')
     function xmake {
-        if ($args[0] -eq 'install' -and (Test-Path -LiteralPath $default)) {
-            throw 'Incremental staging retained the retired default.'
+        if ($args[0] -eq 'install' -and
+            (Test-Path -LiteralPath (@($default) + $manifests)) -contains $true) {
+            throw 'Incremental staging retained a retired file.'
         }
         $global:LASTEXITCODE = 0
     }
     & (Join-Path $project 'scripts/build.ps1') -Runtime '1.10.163' -Mode debug
-    if ((Test-Path -LiteralPath $default) -or
+    if ((Test-Path -LiteralPath (@($default) + $manifests)) -contains $true -or
         [IO.File]::ReadAllText($userDefault) -cne 'keep user data') {
-        throw 'Build cleanup must affect only the retired generated stage file.'
+        throw 'Build cleanup must affect only the retired generated stage files.'
     }
 }
 
@@ -198,9 +212,7 @@ function Initialize-DeploymentStage {
 $relativeFiles = @(
     'F4SE/Plugins/FO4Isotope.dll',
     'F4SE/Plugins/FO4Isotope.pdb',
-    'F4SE/Plugins/FO4Isotope.ini',
-    'F4SE/Plugins/FO4Isotope/runtime-1.10.163.json',
-    'F4SE/Plugins/FO4Isotope/runtime-1.11.240.json'
+    'F4SE/Plugins/FO4Isotope.ini'
 )
 
 try {

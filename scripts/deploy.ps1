@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
 param(
-    [ValidateSet("1.10.163", "1.11.240")]
+    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
     [string]$Runtime = $env:FO4HDR_RUNTIME,
 
     [switch]$AllowUnconventionalDestination
@@ -34,9 +34,7 @@ if (-not (Test-Path $source)) {
 $expectedRelativeFiles = @(
     "F4SE\Plugins\FO4Isotope.dll",
     "F4SE\Plugins\FO4Isotope.pdb",
-    "F4SE\Plugins\FO4Isotope.ini",
-    "F4SE\Plugins\FO4Isotope\runtime-1.10.163.json",
-    "F4SE\Plugins\FO4Isotope\runtime-1.11.240.json"
+    "F4SE\Plugins\FO4Isotope.ini"
 )
 $actualRelativeFiles = @(
     Get-ChildItem $source -Recurse -File |

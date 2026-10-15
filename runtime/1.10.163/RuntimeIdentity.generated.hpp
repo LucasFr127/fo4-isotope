@@ -66,6 +66,9 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{
     {{ 232, 12, 160, 73, 255 }},
     {{ 232, 244, 159, 73, 255 }},
 }};
+inline constexpr NativeUiRuntimeProfile kNativeUiProfile{
+    kNativeUiTargetRva, kNativeUiTargetId, kNativeUiTargetBytes,
+    kNativeUiCallerRvas, kNativeUiCallerIds, kNativeUiCallRvas, kNativeUiCallBytes};
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x028C8B30;
 inline constexpr std::uint64_t kNativeLutRenderId = 1388477;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 280;
@@ -106,6 +109,14 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 11> kImageSpaceCallByte
 inline constexpr std::size_t kWeatherGradeSunlightColorIndex = 4;
 inline constexpr std::size_t kWeatherGradeGlareColorIndex = 15;
 inline constexpr std::array<std::uint8_t, 3> kWeatherGradeColorShifts{{ 0, 8, 16 }};
+inline constexpr ImageSpaceRuntimeProfile kImageSpaceProfile{
+    {kImageSpaceWeatherRva, kImageSpaceAccumulateRva, kImageSpaceRoomBlendRva, kImageSpaceSetLutRva},
+    {kImageSpaceWeatherId, kImageSpaceAccumulateId, kImageSpaceRoomBlendId, kImageSpaceSetLutId},
+    {kImageSpaceWeatherBytes, kImageSpaceAccumulateBytes, kImageSpaceRoomBlendBytes, kImageSpaceSetLutBytes},
+    kImageSpaceGlobalLutRva, kImageSpaceGlobalBaseRva, kImageSpaceGlobalLutId, kImageSpaceGlobalBaseId,
+    kImageSpaceCallRvas, kImageSpaceCallerRvas, kImageSpaceCallerIds,
+    kImageSpaceCallTargetIndices, kImageSpaceCallBytes,
+    kWeatherGradeSunlightColorIndex, kWeatherGradeGlareColorIndex, kWeatherGradeColorShifts};
 
 inline constexpr std::string_view kRuntimeVersion = "1.10.163.0";
 inline constexpr std::uint32_t kRuntimePackedVersion = 17435184u;
@@ -162,7 +173,8 @@ inline constexpr RuntimeProfile kProfile{
     .key = "1.10.163",
     .identity = {kRuntimeVersion, kExecutableSha256, kF4seVersion,
         kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,
-        kAddressLibrarySha256, kManifestSha256},
+        kAddressLibrarySha256},
+    .manifestSha256 = kManifestSha256,
     .status = kRuntimeStatus,
     .f4seRuntimeFile = kF4seRuntimeFile,
     .commonLibCommit = kCommonLibCommit,
@@ -171,6 +183,8 @@ inline constexpr RuntimeProfile kProfile{
     .hasNativeSceneComposite = kHasNativeSceneComposite,
     .nativeSceneCompositeHash = kNativeSceneCompositeDxbcHash,
     .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,
-    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash
+    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash,
+    .nativeUi = &kNativeUiProfile,
+    .imageSpace = &kImageSpaceProfile
 };
 }  // namespace fo4hdr::generated::og

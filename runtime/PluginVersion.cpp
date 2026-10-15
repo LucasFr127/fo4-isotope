@@ -9,7 +9,7 @@ F4SE_EXPORT constinit auto F4SEPlugin_Version = []() noexcept {
     v.AuthorName("FO4Isotope contributors");
     v.UsesAddressLibraryAE(true);
     // Exact-version layout dependence makes AE enforce CompatibleVersions.
-    v.CompatibleVersions({ F4SE::RUNTIME_1_10_163, F4SE::RUNTIME_1_11_240 });
+    v.CompatibleVersions({ F4SE::RUNTIME_1_10_163, F4SE::RUNTIME_1_10_984, F4SE::RUNTIME_1_11_240 });
     v.MinimumRequiredXSEVersion({ 0, 6, 23, 0 });
     return v;
 }();
