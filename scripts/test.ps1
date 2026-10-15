@@ -151,6 +151,10 @@ try {
             '-NoProfile', '-NonInteractive', '-File',
             (Join-Path $repoRoot 'tests/source/ArchitectureLayout.Tests.ps1'), '-SelfTest')
 
+        Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
+            '-NoProfile', '-NonInteractive', '-File',
+            (Join-Path $repoRoot 'scripts/verify-plugin-metadata.ps1'), '-SelfTest')
+
         $auditScript = Join-Path $repoRoot 'scripts/audit-f4se-project.ps1'
         Invoke-Fo4HdrTestProcess @processOptions -Arguments @(
             '-NoProfile', '-NonInteractive', '-File', $auditScript, '-SelfTest')

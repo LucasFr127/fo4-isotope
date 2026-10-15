@@ -7,9 +7,10 @@ F4SE_PLUGIN_VERSION = []() noexcept {
     v.PluginVersion({ 0, 0, 0, 0 });
     v.PluginName("FO4Isotope");
     v.AuthorName("FO4Isotope contributors");
-    v.UsesAddressLibrary(true);
+    // Preserve legacy flags explicitly; the pin's generic setters alias AE.
+    v.UsesAddressLibraryAE(true);
     v.UsesSigScanning(false);
-    v.IsLayoutDependent(true);
+    v.IsLayoutDependentAE(true);
     v.HasNoStructUse(false);
     v.CompatibleVersions({ F4SE::RUNTIME_1_10_163 });
     v.MinimumRequiredXSEVersion({ 0, 6, 23, 0 });

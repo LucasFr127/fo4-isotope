@@ -48,8 +48,6 @@ finally {
     Pop-Location
 }
 
-if ($Runtime -eq "1.10.163") {
-    & (Join-Path $PSScriptRoot "verify-plugin-metadata.ps1") `
-        -Runtime $Runtime `
-        -Mode $Mode
-}
+& (Join-Path $PSScriptRoot "verify-plugin-metadata.ps1") `
+    -Runtime $Runtime `
+    -Mode $Mode
