@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
 
 namespace fo4hdr::tests {
 namespace {
@@ -19,6 +20,32 @@ struct TraceEvent
     std::uint64_t sequence{};
     std::uint64_t value{};
 };
+
+void VerifyEventValueInitialization()
+{
+    struct Event
+    {
+        std::uint64_t value;
+        std::uint32_t sentinel{73};
+        std::array<std::uint32_t, 3> arguments;
+    };
+    static_assert(std::is_nothrow_default_constructible_v<FrameTraceBuffer<Event, 2>>);
+    FrameTraceBuffer<Event, 2> trace;
+    FO4HDR_CHECK(trace.Begin());
+    FO4HDR_CHECK(trace.Record([](Event&, std::uint64_t) noexcept {}));
+    FO4HDR_CHECK(trace.Record([](Event&, std::uint64_t) noexcept {}));
+    FO4HDR_CHECK(trace.Report([](auto events, auto reason, auto dropped) {
+        FO4HDR_CHECK(reason == FrameTraceStop::capacity);
+        FO4HDR_CHECK(dropped == 0);
+        FO4HDR_CHECK(events.size() == 2);
+        for (const auto& event : events)
+        {
+            FO4HDR_CHECK(event.value == 0);
+            FO4HDR_CHECK(event.sentinel == 73);
+            FO4HDR_CHECK((event.arguments == std::array<std::uint32_t, 3>{}));
+        }
+    }));
+}
 
 void VerifyHotkeySurvivesPresentThreadMigration()
 {
@@ -354,6 +381,7 @@ void VerifyConcurrentCaptureScopeRejectsReport()
 
 void RunFrameTraceBufferTests()
 {
+    VerifyEventValueInitialization();
     VerifyHotkeySurvivesPresentThreadMigration();
     VerifyStartPublishesMetadataOnlyWhenAccepted();
     VerifyCapacityPreservesEvents();

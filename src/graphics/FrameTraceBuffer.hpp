@@ -30,6 +30,11 @@ class FrameTraceBuffer
     static_assert(Capacity > 0);
 
 public:
+    // Parenthesized value-initialization keeps large trace arrays compact for MSVC.
+    FrameTraceBuffer() noexcept(std::is_nothrow_default_constructible_v<Event>) :
+        events_()
+    {}
+
     [[nodiscard]] bool HotkeyPressed(bool down) noexcept
     {
         // Present may migrate to the loading thread while the chord remains held.
@@ -184,7 +189,7 @@ private:
             state == FrameTraceStop::retired;
     }
 
-    std::array<Event, Capacity> events_{};
+    std::array<Event, Capacity> events_;
     std::size_t count_{}, next_{};
     std::uint64_t sequence_{};
     bool rolling_{};
