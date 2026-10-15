@@ -172,7 +172,7 @@ function Test-Fo4HdrImageSpaceCommonLibSource {
     return -not ($commonLibSource.repository -ne
             "https://github.com/Dear-Modding-FO4/commonlibf4.git" -or
         $commonLibSource.commit -ne
-            "491a09a0bc71847ee509e3953621a804c468cb17" -or
+            "2ac026b6b31a6ef517641be081b2a7b6b585a125" -or
         (Compare-Object `
             -ReferenceObject $expectedCommonLibPaths `
             -DifferenceObject @($commonLibSource.paths) `

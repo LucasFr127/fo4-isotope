@@ -204,7 +204,7 @@
     "status": "unvalidated",
     "scope": "synchronous-gamma-correct-lut-render",
     "abi": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)",
-    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable and ImageSpaceEffect Render ABI but omits the Render target mapping, secondary-base offset and BSGraphics::Texture SRV layout.",
+    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset.",
     "lifetime": "native synchronous Render scope; bounded guarded copies; filename and NiTexture name plus rendererTexture agreement; same-draw SRV comparison required",
     "effectSubobjectOffset": 280,
     "textureSrvOffset": 0,
@@ -525,14 +525,14 @@
     },
     "relocationSource": {
       "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
-      "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+      "commit": "2ac026b6b31a6ef517641be081b2a7b6b585a125",
       "path": "include/RE/IDs.h"
     },
     "imageSpaceProfile": {
       "sources": {
         "commonlib": {
           "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
-          "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+          "commit": "2ac026b6b31a6ef517641be081b2a7b6b585a125",
           "paths": [
             "include/RE/I/ImageSpaceManager.h",
             "include/RE/I/ImageSpaceBaseData.h",

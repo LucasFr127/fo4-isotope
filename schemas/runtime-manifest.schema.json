@@ -488,7 +488,7 @@
               "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
             },
             "commit": {
-              "const": "491a09a0bc71847ee509e3953621a804c468cb17"
+              "const": "2ac026b6b31a6ef517641be081b2a7b6b585a125"
             },
             "path": { "const": "include/RE/IDs.h" }
           },
@@ -621,7 +621,7 @@
                       "const": "https://github.com/Dear-Modding-FO4/commonlibf4.git"
                     },
                     "commit": {
-                      "const": "491a09a0bc71847ee509e3953621a804c468cb17"
+                      "const": "2ac026b6b31a6ef517641be081b2a7b6b585a125"
                     },
                     "paths": {
                       "const": [

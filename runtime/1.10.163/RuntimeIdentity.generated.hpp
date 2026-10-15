@@ -116,8 +116,8 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "620e3ef5bafa171518f890e8213df254aa7773e05740e3e1480e73644c2b01c3";
-inline constexpr std::string_view kCommonLibCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
+inline constexpr std::string_view kManifestSha256 = "92b63926837f5bdaea3885d7c1ae4124e7dae6580b05fb7b04d584b6a374a6c9";
+inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
     0xf97c127cu, 0xd49c4526u, 0x1a87d341u, 0x2a3edc35u
 }};
@@ -247,7 +247,7 @@ inline constexpr std::size_t kImageSpaceLutEntryCount = 4;
 inline constexpr std::size_t kImageSpaceLutWeightOffset = 32;
 inline constexpr std::size_t kImageSpaceLutTextureOffset = 80;
 inline constexpr std::uint16_t kImageSpaceTopLevelEffectCount = 72;
-inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = "491a09a0bc71847ee509e3953621a804c468cb17";
+inline constexpr std::string_view kImageSpaceCommonLibSourceCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr std::string_view kImageSpaceEffectTableSha256 = "fd7918b8a53d003ea49d25ca82590af85571f2d5797dfd16ae343b45c4f94ba4";
 inline constexpr std::array<ImageSpaceEffectSemantic, kImageSpaceTopLevelEffectCount>
     kImageSpaceEffectSemantics{{

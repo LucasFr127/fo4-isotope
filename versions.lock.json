@@ -47,16 +47,16 @@
   },
   "commonlib": {
     "repository": "https://github.com/Dear-Modding-FO4/commonlibf4.git",
-    "commit": "491a09a0bc71847ee509e3953621a804c468cb17",
+    "commit": "2ac026b6b31a6ef517641be081b2a7b6b585a125",
     "licenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "exceptionsSha256": "27a35e0c9d21cab2f07081660c9389c6bb990c210341aedbd2980de272e4893d",
     "originalMitLicenseSha256": "7cf6f29361588eb812200ef1ae1926e774d36ec2d288fbae5ccc7bc6189c7b86",
     "commonlibSharedRepository": "https://github.com/Dear-Modding-FO4/commonlib-shared.git",
-    "commonlibSharedCommit": "ca0e527c5af60d48497f02197c3c4c436d683387",
+    "commonlibSharedCommit": "12e1c6a45623f9740a3d866f359d547ef94b5096",
     "commonlibSharedLicenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
     "commonlibSharedExceptionsSha256": "27a35e0c9d21cab2f07081660c9389c6bb990c210341aedbd2980de272e4893d",
     "dearModdingUiApiRepository": "https://github.com/Dear-Modding-FO4/DearModdingUI-API.git",
-    "dearModdingUiApiCommit": "9cfc0790a8d319cff798655a3b7f5f05a06a40c9",
+    "dearModdingUiApiCommit": "ad51a32c684e705cee0e7f5a742746d03d071d7e",
     "dearModdingUiApiLicenseSha256": "605e9047a563c5c8396ffb18232aa4304ec56586aee537c45064c6fb425e44ad"
   },
   "xmake": {
@@ -92,7 +92,7 @@
       "f4seRuntimeDllSha256": "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd",
       "addressLibraryFile": "version-1-10-163-0.bin",
       "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
-      "runtimeManifestCanonicalSha256": "620e3ef5bafa171518f890e8213df254aa7773e05740e3e1480e73644c2b01c3",
+      "runtimeManifestCanonicalSha256": "92b63926837f5bdaea3885d7c1ae4124e7dae6580b05fb7b04d584b6a374a6c9",
       "shaderManifestSha256": "FILL_AFTER_CAPTURE",
       "observedAtUtc": "2026-08-09T21:33:23.9297903Z"
     },
