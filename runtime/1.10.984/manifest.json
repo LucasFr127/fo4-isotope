@@ -1124,6 +1124,16 @@
   },
   "shaders": [
     {
+      "name": "native-scene-composite",
+      "stage": "pixel",
+      "dxbcHash": "555f3384-af6f2066-90145fc6-aa1e8b3a",
+      "signal": "linear-bt709-relative",
+      "draw": { "kind": "indexed", "indexCount": 3 },
+      "target": { "format": "R16G16B16A16_FLOAT", "extent": "presentation" },
+      "role": "initialize-depth-tested-scene-target",
+      "evidenceQualification": "User-supplied NG gameplay capture SHA256 af84a120dddf0317fdcd3c5585756e5e0cecfc6960bf6a6db073e5b578f3883c: event 4943 is the first use of the single-mip, single-sample, full-resolution FP16 scene target. Solid full-screen indexed triangle, unpredicated, full RGB writes, no blending or alpha-to-coverage, GREATER depth test with no depth writes or stencil, and no scissor or depth bias. Pixel (1286,712) fails at depth 1 and retains RGB (14392,24480,34016) before bloom. Capture qualifies the shader and target-initialization seam; fixed-DLL gameplay and release validation remain pending."
+    },
+    {
       "name": "late-game-ui-composite",
       "stage": "pixel",
       "dxbcHash": "525eaea9-af037d1b-3ca0d381-8531a8b3",

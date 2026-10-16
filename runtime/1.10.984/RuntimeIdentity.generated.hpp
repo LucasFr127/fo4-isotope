@@ -128,11 +128,11 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_984.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "39f9134f6ec80adac731103dff1c84febf621ff58d0ccaafed7f39a2362e5cfe";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-984-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "c13545f2dab806b7d19c5aa83a0d7524337b5afc89af79460f9915020e049d75";
-inline constexpr std::string_view kManifestSha256 = "59f70da5245aa33a8546fe8e1c520aa7d6e686bac492d2c2322abd809afe30a2";
+inline constexpr std::string_view kManifestSha256 = "7f51b662f7f0323154f36a3ccc2e7e9f3d403ca0f048155708e58730ff7a2ecb";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
-inline constexpr bool kHasNativeSceneComposite = false;
+inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
-    0x00000000u, 0x00000000u, 0x00000000u, 0x00000000u
+    0x555f3384u, 0xaf6f2066u, 0x90145fc6u, 0xaa1e8b3au
 }};
 inline constexpr std::array<std::uint32_t, 4> kLateGameUiCompositeDxbcHash{{
     0x525eaea9u, 0xaf037d1bu, 0x3ca0d381u, 0x8531a8b3u

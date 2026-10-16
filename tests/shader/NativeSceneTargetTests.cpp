@@ -129,7 +129,11 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
     void RegisterNativeRole()
     {
         auto* native = hudShader.Get();
-        CreatedShaderIdentity{.nativeSceneComposite = true}.Register(S_OK, &native);
+        std::array<std::uint32_t, 5> header{0x43425844};
+        std::ranges::copy(ActiveRuntimeProfile()->nativeSceneCompositeHash, header.begin() + 1);
+        CreatedShaderIdentity identity;
+        identity.Observe(header.data(), sizeof(header), false);
+        identity.Register(S_OK, &native);
         FO4HDR_WARP_CHECK(IsNativeSceneCompositeShader(native));
     }
 
@@ -360,12 +364,11 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
     }
 };
 
-void CheckNativeSceneShaderIdentity()
+void CheckNativeSceneShaderIdentity(std::array<std::uint32_t, 5> header, bool expected)
 {
-    std::array<std::uint32_t, 5> header{0x43425844, 0xf97c127c, 0xd49c4526, 0x1a87d341, 0x2a3edc35};
     CreatedShaderIdentity identity;
     identity.Observe(header.data(), sizeof(header), false);
-    FO4HDR_WARP_CHECK(identity.nativeSceneComposite == fo4hdr::IsOriginalRuntime());
+    FO4HDR_WARP_CHECK(identity.nativeSceneComposite == expected);
     FO4HDR_WARP_CHECK(identity.descriptor == nullptr);
     CreatedShaderIdentity truncated;
     truncated.Observe(header.data(), sizeof(header) - 1, false);
@@ -380,7 +383,10 @@ void CheckNativeSceneShaderIdentity()
 
 void VerifyNativeSceneInitialization(Device& device)
 {
-    CheckNativeSceneShaderIdentity();
+    CheckNativeSceneShaderIdentity(
+        {0x43425844, 0xf97c127c, 0xd49c4526, 0x1a87d341, 0x2a3edc35}, IsOriginalRuntime());
+    CheckNativeSceneShaderIdentity(
+        {0x43425844, 0x555f3384, 0xaf6f2066, 0x90145fc6, 0xaa1e8b3a}, !IsOriginalRuntime());
     NativeSceneInitializationFixture fixture(device);
     fixture.CheckInitialization();
     fixture.CheckRejections();

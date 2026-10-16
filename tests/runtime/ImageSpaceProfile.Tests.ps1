@@ -218,9 +218,8 @@ function Test-RuntimeIdentityGeneration {
         $generated -notmatch '\.nativeUi = &kNativeUiProfile') {
         throw "$runtime generated output omitted a qualified native adapter."
     }
-    if ($runtime -ne '1.10.163' -and
-        $generated -notmatch 'kHasNativeSceneComposite = false;') {
-        throw "$runtime generated output admitted an unverified scene-clear identity."
+    if ($generated -notmatch 'kHasNativeSceneComposite = true;') {
+        throw "$runtime generated output omitted the qualified scene-clear identity."
     }
     [IO.File]::AppendAllText(
         $second,

@@ -18,7 +18,8 @@ void TestSharedRuntimeSelection()
     const auto* ae = FindRuntimeProfile(0x010B0F00, 0x00070090);
     FO4HDR_CHECK(og && ae && og != ae);
     FO4HDR_CHECK(og->key == "1.10.163" && ae->key == "1.11.240");
-    FO4HDR_CHECK(og->hasNativeSceneComposite && !ae->hasNativeSceneComposite);
+    FO4HDR_CHECK(og->hasNativeSceneComposite && ae->hasNativeSceneComposite);
+    FO4HDR_CHECK(og->nativeSceneCompositeHash != ae->nativeSceneCompositeHash);
     FO4HDR_CHECK(og->identity.executableSha256 != ae->identity.executableSha256);
     FO4HDR_CHECK(ValidateRuntimeIdentity(og->identity, og->identity).valid);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ae->identity, ae->identity).valid);
@@ -41,7 +42,7 @@ void TestNextGenerationRuntimeSelection()
     FO4HDR_CHECK(ng);
     if (!ng) return;
     FO4HDR_CHECK(ng->key == "1.10.984");
-    FO4HDR_CHECK(!ng->hasNativeSceneComposite);
+    FO4HDR_CHECK(ng->hasNativeSceneComposite);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ng->identity, ng->identity).valid);
     const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ng->identity).valid);
