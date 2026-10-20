@@ -306,11 +306,13 @@ bool BuildWeatherGrades(Catalog& catalog, RE::TESDataHandler& dataHandler)
 
 void EnrichWeatherGrades(Catalog& catalog, RE::TESDataHandler& dataHandler) noexcept
 {
+    bool built{};
     try
     {
-        if (BuildWeatherGrades(catalog, dataHandler)) return;
+        built = BuildWeatherGrades(catalog, dataHandler);
     }
-    catch (...) {}
+    catch (...) { built = false; }
+    if (built) return;
     // An unreadable reference set could affect any aggregate; retain only identity provenance.
     for (auto& entry : catalog) entry.weatherGrade = {};
 }
