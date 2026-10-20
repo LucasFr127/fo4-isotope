@@ -1,12 +1,70 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <span>
+#include <utility>
 
 namespace fo4hdr::game::direct_call_patch {
 using CallBytes = std::array<std::uint8_t, 5>;
+
+// First native-site rejection since the last take, for startup diagnostics.
+// Records are per thread, so the F4SE load thread reads only its own attempt.
+struct SiteMismatch
+{
+    std::uintptr_t address{};
+    std::uint64_t id{};  // Nonzero when the Address Library mapping failed.
+    std::uintptr_t mappedRva{};  // The ID's mapped RVA, or zero when absent.
+    std::array<std::uint8_t, 16> observed{};
+    std::size_t observedSize{};
+    bool recorded{};
+};
+
+inline SiteMismatch& CurrentSiteMismatch() noexcept
+{
+    thread_local SiteMismatch mismatch;
+    return mismatch;
+}
+
+inline SiteMismatch TakeSiteMismatch() noexcept { return std::exchange(CurrentSiteMismatch(), {}); }
+
+inline void RecordSiteMismatch(std::uintptr_t address, std::span<const std::uint8_t> observed,
+    std::uint64_t id = 0, std::uintptr_t mappedRva = 0) noexcept
+{
+    auto& mismatch = CurrentSiteMismatch();
+    if (mismatch.recorded) return;
+    mismatch = {.address = address, .id = id, .mappedRva = mappedRva, .recorded = true};
+    mismatch.observedSize = (std::min)(observed.size(), mismatch.observed.size());
+    std::copy_n(observed.begin(), mismatch.observedSize, mismatch.observed.begin());
+}
+
+template <class Reader>
+bool MatchesNativeCode(std::uintptr_t address, std::span<const std::uint8_t> expected,
+    Reader read) noexcept
+{
+    std::array<std::uint8_t, 130> actual{};
+    if (expected.size() > actual.size()) return false;
+    const bool readable = read(reinterpret_cast<const void*>(address), actual.data(), expected.size());
+    if (readable && std::equal(expected.begin(), expected.end(), actual.begin())) return true;
+    RecordSiteMismatch(address, readable ? std::span{actual.data(), expected.size()} :
+        std::span<const std::uint8_t>{});
+    return false;
+}
+
+template <class Mappings>
+bool MatchesMapping(const Mappings& mappings, std::uintptr_t base, std::uint64_t id,
+    std::uintptr_t rva) noexcept
+{
+    const auto found = std::find_if(mappings.begin(), mappings.end(),
+        [id](const auto& entry) { return entry.id == id; });
+    if (found != mappings.end() && found->offset == rva) return true;
+    RecordSiteMismatch(base + rva, {}, id, found != mappings.end() ? found->offset : 0);
+    return false;
+}
 
 inline bool ValidCallSite(std::uintptr_t site) noexcept
 { return site != 0 && site <= UINTPTR_MAX - 5; }

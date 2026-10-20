@@ -67,9 +67,7 @@ bool Executable(const void* address, std::size_t size, const void* module = null
 }
 bool MatchesBytes(std::uintptr_t address, std::span<const std::uint8_t> expected) noexcept
 {
-    std::array<std::uint8_t, 32> actual{};
-    return expected.size() <= actual.size() && Read(reinterpret_cast<void*>(address),
-        actual.data(), expected.size()) && std::equal(expected.begin(), expected.end(), actual.begin());
+    return patch::MatchesNativeCode(address, expected, Read);
 }
 bool WriteBytes(std::uintptr_t address, std::span<const std::uint8_t> bytes, DWORD protection) noexcept
 {
@@ -256,11 +254,7 @@ class NativeUiInstallation
             Executable(reinterpret_cast<void*>(address), size, reinterpret_cast<void*>(base_));
     }
     bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    {
-        return std::any_of(mappings_.begin(), mappings_.end(), [&](const auto& entry) {
-            return entry.id == id && entry.offset == rva;
-        });
-    }
+    { return patch::MatchesMapping(mappings_, base_, id, rva); }
     bool Target() const
     {
         return target_ != hook_ && Mapping(identity_.targetId, identity_.targetRva) &&

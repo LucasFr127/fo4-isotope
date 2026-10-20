@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "NativeLutObserver.hpp"
+#include "DirectCallPatch.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
 #include "FO4Isotope/output/NativeLutObservation.hpp"
@@ -214,13 +215,18 @@ const LutIdentity& RuntimeLutIdentity(const fo4hdr::RuntimeProfile& profile) noe
 
 bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target, const LutIdentity& identity)
 {
-    std::array<std::uint8_t, 25> bytes{};
-    if (target != module.GetBaseAddress() + identity.renderRva) return false;
-    if (!InSection(module, ".text", target, bytes.size())) return false;
+    namespace patch = fo4hdr::game::direct_call_patch;
+    const auto base = module.GetBaseAddress();
+    const auto size = identity.renderBytes.size();
+    if (target != base + identity.renderRva) {
+        patch::RecordSiteMismatch(base + identity.renderRva, {}, identity.renderId, target ? target - base : 0);
+        return false;
+    }
+    if (!InSection(module, ".text", target, size)) return false;
     MEMORY_BASIC_INFORMATION codeInfo{};
-    if (!Region(reinterpret_cast<void*>(target), bytes.size(), codeInfo)) return false;
+    if (!Region(reinterpret_cast<void*>(target), size, codeInfo)) return false;
     if ((codeInfo.Protect & 0xFF) != PAGE_EXECUTE_READ) return false;
-    return Read(reinterpret_cast<void*>(target), bytes.data(), bytes.size()) && bytes == identity.renderBytes;
+    return patch::MatchesNativeCode(target, identity.renderBytes, Read);
 }
 
 bool ValidLocator(const REX::FModule& module, std::uintptr_t table, const LutIdentity& identity)

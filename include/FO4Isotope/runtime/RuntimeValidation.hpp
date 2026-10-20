@@ -59,7 +59,15 @@ struct RuntimeActionResult
     RuntimeActionReason reason;
 };
 
+// Exact audit of every pinned identity, required for release evidence.
 [[nodiscard]] RuntimeValidationResult ValidateRuntimeIdentity(
+    const RuntimeIdentity& expected,
+    const RuntimeIdentity& observed) noexcept;
+
+// Startup gate: executable version, executable hash and Address Library file
+// and hash only. F4SE version and hashes are excluded; selection enforces the
+// minimum F4SE release.
+[[nodiscard]] RuntimeValidationResult ValidateRuntimeLoadGate(
     const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept;
 

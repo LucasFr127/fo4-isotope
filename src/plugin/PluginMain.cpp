@@ -11,13 +11,14 @@
 #include "../game/NativeLutObserver.hpp"
 #include "../game/NativeUiResources.hpp"
 #include "../game/ImageSpaceObserver.hpp"
+#include "../game/DirectCallPatch.hpp"
 #include "../runtime/RuntimeIdentityFiles.hpp"
 
 #include <F4SE/F4SE.h>
 #include <REX/W32/OLE32.h>
 #include <REX/W32/SHELL32.h>
 
-#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/base_sink.h>
 #include <spdlog/sinks/msvc_sink.h>
 #include <spdlog/spdlog.h>
 
@@ -31,6 +32,8 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -76,16 +79,31 @@ struct F4seServices
     std::uint32_t pluginHandle{UINT32_MAX};
 };
 
-[[nodiscard]] bool IsExpectedRuntime(
-    const F4SE::QueryInterface* f4se) noexcept
+// The pinned spdlog opens narrow filenames through the ANSI code page, which
+// cannot name every Documents path. MSVC streams open filesystem paths wide.
+class WideFileSink final : public spdlog::sinks::base_sink<std::mutex>
 {
-    return f4se != nullptr &&
-           !f4se->IsEditor() &&
-           fo4hdr::FindRuntimeProfile(f4se->RuntimeVersion().pack(),
-               f4se->F4SEVersion().pack()) != nullptr;
-}
+public:
+    explicit WideFileSink(const std::filesystem::path& path) :
+        file_(path, std::ios::binary | std::ios::trunc)
+    {
+        if (!file_) throw std::runtime_error("log file could not be opened");
+    }
 
-void InitializeProjectLogging()
+protected:
+    void sink_it_(const spdlog::details::log_msg& message) override
+    {
+        spdlog::memory_buf_t formatted;
+        formatter_->format(message, formatted);
+        file_.write(formatted.data(), static_cast<std::streamsize>(formatted.size()));
+    }
+    void flush_() override { file_.flush(); }
+
+private:
+    std::ofstream file_;
+};
+
+[[nodiscard]] std::filesystem::path ProjectLogPath()
 {
     wchar_t* knownBuffer{};
     const auto knownResult = REX::W32::SHGetKnownFolderPath(
@@ -100,25 +118,51 @@ void InitializeProjectLogging()
         throw std::runtime_error("Documents folder is unavailable");
     }
 
-    auto path = std::filesystem::path(knownPath.get()) /
-        L"My Games" / L"Fallout4" / L"F4SE" / L"FO4Isotope.log";
-    std::vector<spdlog::sink_ptr> sinks{
-        std::make_shared<spdlog::sinks::msvc_sink_mt>(),
-        std::make_shared<spdlog::sinks::basic_file_sink_mt>(
-            path.string(), true)
-    };
-    auto logger = std::make_shared<spdlog::logger>(
-        "global", sinks.begin(), sinks.end());
+    auto directory = std::filesystem::path(knownPath.get()) /
+        L"My Games" / L"Fallout4" / L"F4SE";
+    std::error_code ignored;
+    std::filesystem::create_directories(directory, ignored);
+    return directory / L"FO4Isotope.log";
+}
+
+// Logging precedes every load decision and never fails Load; without a file
+// the debugger sink still receives each rejection reason.
+void InitializeProjectLogging() noexcept
+{
+    try
+    {
+        std::vector<spdlog::sink_ptr> sinks{
+            std::make_shared<spdlog::sinks::msvc_sink_mt>()};
+        std::string fileError;
+        try
+        {
+            sinks.push_back(std::make_shared<WideFileSink>(ProjectLogPath()));
+        }
+        catch (const std::exception& error)
+        {
+            fileError = error.what();
+        }
+        auto logger = std::make_shared<spdlog::logger>(
+            "global", sinks.begin(), sinks.end());
 #ifndef NDEBUG
-    constexpr auto level = spdlog::level::debug;
+        constexpr auto level = spdlog::level::debug;
 #else
-    constexpr auto level = spdlog::level::info;
+        constexpr auto level = spdlog::level::info;
 #endif
-    logger->set_level(level);
-    logger->flush_on(level);
-    spdlog::set_default_logger(std::move(logger));
-    spdlog::set_pattern("[%T.%e] [%=5t] [%L] %v");
-    REX::INFO("FO4Isotope v0");
+        logger->set_level(level);
+        logger->flush_on(level);
+        spdlog::set_default_logger(std::move(logger));
+        spdlog::set_pattern("[%T.%e] [%=5t] [%L] %v");
+        REX::INFO("FO4Isotope v0");
+        if (!fileError.empty())
+        {
+            REX::WARN("log file unavailable detail={}", fileError);
+        }
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: logging unavailable.\n");
+    }
 }
 
 [[nodiscard]] F4seServices QueryF4seServices(
@@ -286,7 +330,8 @@ F4SE_EXPORT bool F4SEPlugin_Query(
         a_info->infoVersion = F4SE::PluginInfo::kVersion;
         a_info->name = "FO4Isotope";
         a_info->version = 0;
-        return IsExpectedRuntime(a_f4se);
+        // Load owns the runtime decision so that every rejection is logged.
+        return a_f4se != nullptr && !a_f4se->IsEditor();
     }
     catch (...)
     {
@@ -296,6 +341,38 @@ F4SE_EXPORT bool F4SEPlugin_Query(
 
 namespace
 {
+
+[[nodiscard]] bool SelectRuntime(const F4SE::LoadInterface* a_f4se)
+{
+    const auto runtime = a_f4se->RuntimeVersion();
+    const auto f4se = a_f4se->F4SEVersion();
+    REX::INFO("runtime observed executable={} f4se={} editor={}",
+        runtime.string(), Version3(f4se), a_f4se->IsEditor());
+    if (a_f4se->IsEditor())
+    {
+        REX::CRITICAL("plugin active=false reason=editor-runtime");
+        return false;
+    }
+
+    const auto selection = fo4hdr::SelectRuntimeProfile(runtime.pack(), f4se.pack());
+    if (selection.reason != fo4hdr::RuntimeSelectionReason::Selected)
+    {
+        REX::CRITICAL("plugin active=false reason={} executable={} f4se={} "
+                      "profile={} minimum_f4se={}",
+            fo4hdr::ToString(selection.reason), runtime.string(), Version3(f4se),
+            selection.profile ? selection.profile->key : "none",
+            selection.profile ? selection.profile->identity.f4seVersion : "none");
+        return false;
+    }
+    if (!fo4hdr::InitializeRuntimeProfile(runtime.pack(), f4se.pack()))
+    {
+        REX::CRITICAL("plugin active=false reason=runtime-profile-conflict");
+        return false;
+    }
+    REX::INFO("runtime profile={} minimum_f4se={}",
+        selection.profile->key, selection.profile->identity.f4seVersion);
+    return true;
+}
 
 [[nodiscard]] bool ValidatePluginIdentity(const F4SE::LoadInterface* a_f4se)
 {
@@ -319,12 +396,25 @@ namespace
     REX::INFO(
         "identity commonlibf4_commit={}", profile.commonLibCommit);
 
-    const auto validation = fo4hdr::ValidateRuntimeIdentity(expected, observed);
-    if (!validation.valid)
+    // Every relocation depends on the exact executable and Address Library;
+    // CommonLib terminates on a bad database, so neither may reach it unchecked.
+    const auto gate = fo4hdr::ValidateRuntimeLoadGate(expected, observed);
+    if (!gate.valid)
     {
-        REX::CRITICAL("plugin active=false reason={}",
-            fo4hdr::ToString(validation.reason));
+        REX::CRITICAL("plugin active=false reason={} executable={} address_library={}",
+            fo4hdr::ToString(gate.reason), observed.runtimeVersion, expected.addressLibraryFile);
         return false;
+    }
+    // F4SE identity is release evidence; newer point releases and missing loaders load.
+    const auto audit = fo4hdr::ValidateRuntimeIdentity(expected, observed);
+    if (audit.valid)
+    {
+        REX::INFO("identity audit=exact-match");
+    }
+    else
+    {
+        REX::WARN("identity audit={} pinned_f4se={} gate=false",
+            fo4hdr::ToString(audit.reason), expected.f4seVersion);
     }
 
     constexpr auto runtimeAction = fo4hdr::RuntimeAction::MilestoneValidation;
@@ -346,7 +436,8 @@ namespace
             profile.status);
         return false;
     }
-    REX::INFO("plugin active=true reason=exact-runtime-identity-matched");
+    REX::INFO("plugin active=true reason={}",
+        audit.valid ? "exact-runtime-identity-matched" : "runtime-version-admitted");
     return true;
 }
 
@@ -408,58 +499,94 @@ void ReportGameObserverStatus(bool observerActive) noexcept
     }
 }
 
-struct ObserverBoundaries
-{
-    bool armorUi{};
-    bool screenUi{};
-    bool nativeLut{};
-    bool imageSpace{};
-    bool pauseResources{};
-};
-
 [[nodiscard]] bool ProductionRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
 {
     return configuration.valid && configuration.value.enabled && configuration.value.productionRequested;
 }
 
-[[nodiscard]] ObserverBoundaries InitializeObserverBoundaries(bool observerActive,
+[[nodiscard]] std::string FormatBytes(const fo4hdr::game::direct_call_patch::SiteMismatch& mismatch)
+{
+    std::string text;
+    for (std::size_t index = 0; index < mismatch.observedSize; ++index)
+        text += std::format("{}{:02X}", index ? " " : "", mismatch.observed[index]);
+    return text.empty() ? "unreadable" : text;
+}
+
+// Names the first rejected native site of a boundary that did not install.
+bool ReportBoundary(std::string_view boundary, bool installed) noexcept
+{
+    const auto mismatch = fo4hdr::game::direct_call_patch::TakeSiteMismatch();
+    try
+    {
+        const auto rva = mismatch.address -
+            reinterpret_cast<std::uintptr_t>(::GetModuleHandleW(nullptr));
+        if (installed || !mismatch.recorded)
+        {
+            REX::INFO("{} boundary installed={}", boundary, installed);
+        }
+        else if (mismatch.id != 0)
+        {
+            REX::WARN("{} boundary installed=false site_rva=0x{:X} address_library_id={} "
+                      "mapped_rva=0x{:X}",
+                boundary, rva, mismatch.id, mismatch.mappedRva);
+        }
+        else
+        {
+            REX::WARN("{} boundary installed=false site_rva=0x{:X} observed_bytes={}",
+                boundary, rva, FormatBytes(mismatch));
+        }
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: boundary status logging failed.\n");
+    }
+    return installed;
+}
+
+void InitializeObserverBoundaries(bool observerActive,
     bool graphicsActive, const fo4hdr::PluginConfigurationResult& diagnosticsConfiguration,
     const F4seServices& services)
 {
-    ObserverBoundaries active;
-
-    if (observerActive && graphicsActive)
+    if (!observerActive || !graphicsActive)
     {
-        const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
-        active.nativeLut = fo4hdr::game::InitializeNativeLutObserver(
-            ProductionRequested(diagnosticsConfiguration));
-        active.imageSpace = fo4hdr::game::InitializeImageSpaceObserver(
-            active.nativeLut, services.trampoline, services.pluginHandle);
-        active.armorUi = fo4hdr::game::InitializeArmorUiObserver(
-            ProductionRequested(diagnosticsConfiguration) ||
+        try
+        {
+            REX::INFO("native boundaries installed=false observer_active={} graphics_active={}",
+                observerActive, graphicsActive);
+        }
+        catch (...)
+        {
+            ::OutputDebugStringA("FO4Isotope: boundary status logging failed.\n");
+        }
+        return;
+    }
+
+    (void)fo4hdr::game::direct_call_patch::TakeSiteMismatch();
+    const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
+    const bool nativeLut = ReportBoundary("native LUT observation",
+        fo4hdr::game::InitializeNativeLutObserver(sharedUiRequested));
+    (void)ReportBoundary("ImageSpace provenance",
+        fo4hdr::game::InitializeImageSpaceObserver(
+            nativeLut, services.trampoline, services.pluginHandle));
+    (void)ReportBoundary("armor UI composition",
+        fo4hdr::game::InitializeArmorUiObserver(
+            sharedUiRequested ||
                 (diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode &&
                     diagnosticsConfiguration.value.traceRenderPipeline),
-            services.trampoline, services.pluginHandle);
-        active.pauseResources = fo4hdr::game::InitializeNativeUiResources(
-            sharedUiRequested,
-            services.trampoline, services.pluginHandle);
-        active.screenUi = fo4hdr::game::InitializeScreenUiObserver(
-            sharedUiRequested,
-            services.trampoline, services.pluginHandle);
-    }
-    return active;
+            services.trampoline, services.pluginHandle));
+    (void)ReportBoundary("native pause resource allocation",
+        fo4hdr::game::InitializeNativeUiResources(
+            sharedUiRequested, services.trampoline, services.pluginHandle));
+    (void)ReportBoundary("native screen-space UI",
+        fo4hdr::game::InitializeScreenUiObserver(
+            sharedUiRequested, services.trampoline, services.pluginHandle));
 }
 
-void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
+void ReportInitializedRenderer(
     const fo4hdr::PluginConfigurationResult& diagnosticsConfiguration, bool graphicsActive) noexcept
 {
     try
     {
-        REX::INFO("armor UI composition boundary installed={}", boundaries.armorUi);
-        REX::INFO("native screen-space UI boundary installed={}", boundaries.screenUi);
-        REX::INFO("native LUT observation boundary installed={}", boundaries.nativeLut);
-        REX::INFO("ImageSpace provenance boundaries installed={}", boundaries.imageSpace);
-        REX::INFO("native pause resource allocation boundary installed={}", boundaries.pauseResources);
         REX::INFO(
             "hdr production_active=false production_requested={} "
             "algorithm={} display_peak_nits={} "
@@ -482,16 +609,10 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
 
 [[nodiscard]] bool LoadPluginImpl(const F4SE::LoadInterface* a_f4se)
 {
-    if (!IsExpectedRuntime(a_f4se) ||
-        !fo4hdr::InitializeRuntimeProfile(a_f4se->RuntimeVersion().pack(),
-            a_f4se->F4SEVersion().pack()))
-    {
-        return false;
-    }
+    if (a_f4se == nullptr) return false;
     InitializeProjectLogging();
+    if (!SelectRuntime(a_f4se) || !ValidatePluginIdentity(a_f4se)) return false;
     const auto services = QueryF4seServices(a_f4se);
-
-    if (!ValidatePluginIdentity(a_f4se)) return false;
     const auto executable = ExecutablePath();
     const auto diagnosticsConfiguration = LoadDiagnosticsConfiguration(executable);
     const auto observerActive =
@@ -506,9 +627,8 @@ void ReportInitializedRenderer(const ObserverBoundaries& boundaries,
         diagnosticsConfiguration.valid ? diagnosticsConfiguration.value :
             fo4hdr::PluginConfiguration{});
     if (graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
-    const auto boundaries = InitializeObserverBoundaries(observerActive, graphicsActive,
-        diagnosticsConfiguration, services);
-    ReportInitializedRenderer(boundaries, diagnosticsConfiguration, graphicsActive);
+    InitializeObserverBoundaries(observerActive, graphicsActive, diagnosticsConfiguration, services);
+    ReportInitializedRenderer(diagnosticsConfiguration, graphicsActive);
     // Listener registration and IAT installation publish process-lifetime
     // callbacks into F4SE/the executable. From the observer call onward,
     // every operation contains its own failures and load must succeed so

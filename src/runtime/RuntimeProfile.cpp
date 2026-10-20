@@ -10,13 +10,35 @@ namespace {
 std::atomic<const RuntimeProfile*> g_profile{};
 }
 
-const RuntimeProfile* FindRuntimeProfile(
+RuntimeSelection SelectRuntimeProfile(
     std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept
 {
     for (const auto* profile : {&generated::og::kProfile, &generated::ng::kProfile, &generated::ae::kProfile})
-        if (profile->runtimeVersion == runtimeVersion && profile->f4seVersion == f4seVersion)
-            return profile;
-    return nullptr;
+        if (profile->runtimeVersion == runtimeVersion)
+            return {profile, f4seVersion >= profile->f4seVersion ?
+                RuntimeSelectionReason::Selected : RuntimeSelectionReason::F4seBelowMinimum};
+    return {};
+}
+
+std::string_view ToString(RuntimeSelectionReason reason) noexcept
+{
+    switch (reason)
+    {
+    case RuntimeSelectionReason::Selected:
+        return "selected";
+    case RuntimeSelectionReason::UnsupportedRuntime:
+        return "unsupported-runtime";
+    case RuntimeSelectionReason::F4seBelowMinimum:
+        return "f4se-below-minimum";
+    }
+    return "unknown-selection-reason";
+}
+
+const RuntimeProfile* FindRuntimeProfile(
+    std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept
+{
+    const auto selection = SelectRuntimeProfile(runtimeVersion, f4seVersion);
+    return selection.reason == RuntimeSelectionReason::Selected ? selection.profile : nullptr;
 }
 
 bool InitializeRuntimeProfile(std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept

@@ -89,7 +89,7 @@ bool Executable(const void* address, std::size_t size, const void* module = null
 
 bool MatchesBytes(std::uintptr_t address, std::span<const std::uint8_t> expected) noexcept
 {
-    return fo4hdr::game::detail::MatchesNativeCode(address, expected, Read);
+    return detail::MatchesNativeCode(address, expected, Read);
 }
 
 // Startup-only mutation. Each patch is contained in one memory region/page,
@@ -308,11 +308,7 @@ class ObserverInstallation
             Executable(reinterpret_cast<void*>(address), size, reinterpret_cast<void*>(base_));
     }
     bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    {
-        return std::any_of(mappings_.begin(), mappings_.end(), [&](const auto& entry) {
-            return entry.id == id && entry.offset == rva;
-        });
-    }
+    { return detail::MatchesMapping(mappings_, base_, id, rva); }
     bool Target() const
     {
         return Mapping(identity_.targetId, identity_.targetRva) && target_ != hook_ &&

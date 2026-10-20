@@ -3,6 +3,7 @@
 
 #include "FO4Isotope/output/ArmorUiComposition.hpp"
 #include "ArmorUiObserver.hpp"
+#include "DirectCallPatch.hpp"
 #include "TestHarness.hpp"
 
 #include <algorithm>
@@ -169,16 +170,16 @@ void TestNativeRendererCodeFingerprint()
     };
     for (const auto size : {39U, 130U}) {
         const std::span<const std::uint8_t> fingerprint{expected.data(), size};
-        FO4HDR_CHECK(game::detail::MatchesNativeCode(address, fingerprint, read));
+        FO4HDR_CHECK(game::direct_call_patch::MatchesNativeCode(address, fingerprint, read));
         memory[size - 1] ^= 1;
-        FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, fingerprint, read));
+        FO4HDR_CHECK(!game::direct_call_patch::MatchesNativeCode(address, fingerprint, read));
         memory[size - 1] ^= 1;
     }
-    FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, expected, read));
+    FO4HDR_CHECK(!game::direct_call_patch::MatchesNativeCode(address, expected, read));
     FO4HDR_CHECK(reads == 4);
     const auto unavailable = [](const void*, void*, std::size_t) noexcept { return false; };
     const std::array<std::uint8_t, 39> unreadable{};
-    FO4HDR_CHECK(!game::detail::MatchesNativeCode(address, unreadable, unavailable));
+    FO4HDR_CHECK(!game::direct_call_patch::MatchesNativeCode(address, unreadable, unavailable));
 }
 
 void TestNativeRendererPooledKey(const char* text)

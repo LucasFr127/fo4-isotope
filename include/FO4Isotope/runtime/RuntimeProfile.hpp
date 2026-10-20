@@ -44,6 +44,7 @@ struct RuntimeProfile
     std::string_view f4seRuntimeFile;
     std::string_view commonLibCommit;
     std::uint32_t runtimeVersion{};
+    // Pinned F4SE release; also the minimum admitted for this runtime.
     std::uint32_t f4seVersion{};
     bool hasNativeSceneComposite{};
     std::array<std::uint32_t, 4> nativeSceneCompositeHash{};
@@ -53,6 +54,25 @@ struct RuntimeProfile
     const ImageSpaceRuntimeProfile* imageSpace{};
 };
 
+enum class RuntimeSelectionReason
+{
+    Selected,
+    UnsupportedRuntime,
+    F4seBelowMinimum
+};
+
+struct RuntimeSelection
+{
+    // The exact-runtime candidate, also reported when its F4SE is too old.
+    const RuntimeProfile* profile{};
+    RuntimeSelectionReason reason{RuntimeSelectionReason::UnsupportedRuntime};
+};
+
+// Packed executable version must match exactly; packed F4SE must be at least
+// the profile's pinned release. ValidateRuntimeLoadGate then checks hashes.
+[[nodiscard]] RuntimeSelection SelectRuntimeProfile(
+    std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept;
+[[nodiscard]] std::string_view ToString(RuntimeSelectionReason reason) noexcept;
 [[nodiscard]] const RuntimeProfile* FindRuntimeProfile(
     std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept;
 // Startup selects one immutable profile before publishing any callbacks.

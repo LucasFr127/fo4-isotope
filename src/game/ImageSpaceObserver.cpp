@@ -372,9 +372,7 @@ bool Executable(const void* address, std::size_t size) noexcept
 }
 bool MatchesBytes(std::uintptr_t address, std::span<const std::uint8_t> expected) noexcept
 {
-    std::array<std::uint8_t, 32> actual{};
-    return expected.size() <= actual.size() && Read(reinterpret_cast<void*>(address),
-        actual.data(), expected.size()) && std::equal(expected.begin(), expected.end(), actual.begin());
+    return patch::MatchesNativeCode(address, expected, Read);
 }
 bool VerifyWrite(std::uintptr_t address, std::span<const std::uint8_t> bytes, DWORD protection) noexcept
 {
@@ -433,11 +431,7 @@ class ImageSpaceInstallation
             info.AllocationBase == reinterpret_cast<void*>(base) && info.Type == MEM_IMAGE;
     }
     bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    {
-        return std::any_of(mappings.begin(), mappings.end(), [&](const auto& entry) {
-            return entry.id == id && entry.offset == rva;
-        });
-    }
+    { return patch::MatchesMapping(mappings, base, id, rva); }
     bool TargetValid(std::size_t i) const
     {
         return Mapping(identity.targetIds[i], identity.targetRvas[i]) &&

@@ -156,9 +156,42 @@ void RunCallForwardingTests()
     }
     FO4HDR_CHECK(::VirtualFree(memory, 0, MEM_RELEASE) != FALSE);
 }
+void RunSiteMismatchTests()
+{
+    (void)hook::TakeSiteMismatch();
+    const std::array<std::uint8_t, 4> memory{0x48, 0x89, 0x5C, 0x24};
+    const auto address = reinterpret_cast<std::uintptr_t>(memory.data());
+    const auto read = [](const void* source, void* destination, std::size_t size) noexcept {
+        std::memcpy(destination, source, size);
+        return true;
+    };
+    FO4HDR_CHECK(hook::MatchesNativeCode(address, memory, read));
+    FO4HDR_CHECK(!hook::TakeSiteMismatch().recorded);
+    // The first rejection is retained with its observed bytes; later ones are ignored.
+    const std::array<std::uint8_t, 4> expected{0x40, 0x53, 0x48, 0x83};
+    FO4HDR_CHECK(!hook::MatchesNativeCode(address, expected, read));
+    FO4HDR_CHECK(!hook::MatchesNativeCode(address + 1, expected, read));
+    auto mismatch = hook::TakeSiteMismatch();
+    FO4HDR_CHECK(mismatch.recorded && mismatch.address == address && mismatch.id == 0);
+    FO4HDR_CHECK(mismatch.observedSize == memory.size() &&
+        std::equal(memory.begin(), memory.end(), mismatch.observed.begin()));
+    FO4HDR_CHECK(!hook::TakeSiteMismatch().recorded);
+
+    struct Mapping { std::uint64_t id; std::uintptr_t offset; };
+    const std::array<Mapping, 2> mappings{{{7, 0x70}, {9, 0x90}}};
+    FO4HDR_CHECK(hook::MatchesMapping(mappings, 0x1000, 7, 0x70));
+    FO4HDR_CHECK(!hook::MatchesMapping(mappings, 0x1000, 9, 0x80));
+    mismatch = hook::TakeSiteMismatch();
+    FO4HDR_CHECK(mismatch.address == 0x1080 && mismatch.id == 9 && mismatch.mappedRva == 0x90 &&
+        mismatch.observedSize == 0);
+    FO4HDR_CHECK(!hook::MatchesMapping(mappings, 0x1000, 11, 0xB0));
+    mismatch = hook::TakeSiteMismatch();
+    FO4HDR_CHECK(mismatch.id == 11 && mismatch.mappedRva == 0);
+}
 void RunDirectCallPatchTests()
 {
     RunCallPatchOwnershipTests();
     RunCallForwardingTests();
+    RunSiteMismatchTests();
 }
 }

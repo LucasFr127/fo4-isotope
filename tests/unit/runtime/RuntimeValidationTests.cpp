@@ -24,9 +24,8 @@ void TestSharedRuntimeSelection()
     FO4HDR_CHECK(ValidateRuntimeIdentity(og->identity, og->identity).valid);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ae->identity, ae->identity).valid);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ae->identity).valid);
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010A0A30, 0x00070090));
+    FO4HDR_CHECK(FindRuntimeProfile(0x010A0A30, 0x00070090) == og);
     FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00060170));
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010A3D80, 0x00070090));
     FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00070020));
     FO4HDR_CHECK(!FindRuntimeProfile(0x010B0DD0, 0x00070080));
     FO4HDR_CHECK(!InitializeRuntimeProfile(0, 0));
@@ -46,6 +45,29 @@ void TestNextGenerationRuntimeSelection()
     FO4HDR_CHECK(ValidateRuntimeIdentity(ng->identity, ng->identity).valid);
     const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ng->identity).valid);
+    FO4HDR_CHECK(FindRuntimeProfile(0x010A3D80, 0x00070090) == ng);
+}
+
+void TestRuntimeSelectionGate()
+{
+    const auto* ae = FindRuntimeProfile(0x010B0F00, 0x00070090);
+    // A newer F4SE point release for the exact runtime is admitted.
+    auto selection = SelectRuntimeProfile(0x010B0F00, 0x000700A0);
+    FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::Selected && selection.profile == ae);
+    // An older F4SE names the exact-runtime candidate but is rejected.
+    selection = SelectRuntimeProfile(0x010B0F00, 0x00070080);
+    FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::F4seBelowMinimum && selection.profile == ae);
+    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00070080));
+    // Other AE executables and FO4VR 1.2.72 never borrow a compiled profile.
+    for (const auto runtime : {0x010B0A90U, 0x010B0BF0U, 0x010B0DD0U, 0x010B0F10U, 0x01020480U})
+    {
+        selection = SelectRuntimeProfile(runtime, 0x00070090);
+        FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::UnsupportedRuntime && !selection.profile);
+    }
+    FO4HDR_CHECK(ToString(RuntimeSelectionReason::Selected) == "selected");
+    FO4HDR_CHECK(ToString(RuntimeSelectionReason::UnsupportedRuntime) == "unsupported-runtime");
+    FO4HDR_CHECK(ToString(RuntimeSelectionReason::F4seBelowMinimum) == "f4se-below-minimum");
+    FO4HDR_CHECK(ToString(static_cast<RuntimeSelectionReason>(-1)) == "unknown-selection-reason");
 }
 
 void TestCompiledRuntimeProvenance()
@@ -187,6 +209,45 @@ void TestAddressLibraryIdentity()
         fo4hdr::RuntimeValidationReason::AddressLibraryHashMismatch);
 }
 
+void TestLoadGate()
+{
+    // F4SE identity is audit evidence: point releases and missing loaders load.
+    auto observed = expected;
+    observed.f4seVersion = "0.6.24";
+    observed.f4seRuntimeSha256 = hashA;
+    observed.f4seLoaderSha256 = {};
+    FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, observed).valid);
+    FO4HDR_CHECK(ValidateRuntimeIdentity(expected, observed).reason ==
+        RuntimeValidationReason::F4seVersionMismatch);
+
+    // The executable and Address Library are exact address identity.
+    const struct
+    {
+        std::string_view RuntimeIdentity::* field;
+        std::string_view value;
+        RuntimeValidationReason reason;
+    } rejected[]{
+        {&RuntimeIdentity::runtimeVersion, "1.10.984.0", RuntimeValidationReason::RuntimeVersionMismatch},
+        {&RuntimeIdentity::executableSha256, hashB, RuntimeValidationReason::ExecutableHashMismatch},
+        {&RuntimeIdentity::executableSha256, {}, RuntimeValidationReason::ExecutableUnavailable},
+        {&RuntimeIdentity::addressLibrarySha256, hashA, RuntimeValidationReason::AddressLibraryHashMismatch},
+        {&RuntimeIdentity::addressLibrarySha256, {}, RuntimeValidationReason::AddressLibraryUnavailable},
+        {&RuntimeIdentity::addressLibraryFile, "version-1-10-984-0.bin",
+            RuntimeValidationReason::AddressLibraryFileMismatch}};
+    for (const auto& entry : rejected)
+    {
+        auto candidate = observed;
+        candidate.*entry.field = entry.value;
+        const auto result = ValidateRuntimeLoadGate(expected, candidate);
+        FO4HDR_CHECK(!result.valid && result.reason == entry.reason);
+    }
+
+    auto uninitialized = expected;
+    uninitialized.f4seLoaderSha256 = "UNVALIDATED";
+    FO4HDR_CHECK(ValidateRuntimeLoadGate(uninitialized, expected).reason ==
+        RuntimeValidationReason::ProfileUninitialized);
+}
+
 void TestUninitializedProfile()
 {
     RuntimeValidationResult result;
@@ -324,11 +385,13 @@ void RunRuntimeValidationTests()
 {
     TestSharedRuntimeSelection();
     TestNextGenerationRuntimeSelection();
+    TestRuntimeSelectionGate();
     TestCompiledRuntimeProvenance();
     TestMatchingIdentity();
     TestExecutableIdentity();
     TestRuntimeAndF4seIdentity();
     TestAddressLibraryIdentity();
+    TestLoadGate();
     TestUninitializedProfile();
     TestFailurePrecedence();
     TestReasonNames();
