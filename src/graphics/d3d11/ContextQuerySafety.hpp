@@ -20,6 +20,12 @@ namespace fo4hdr {
         sensitiveQueries.end();
 }
 
+// Begin is invalid for these End-only kinds and opens no scope.
+[[nodiscard]] constexpr bool IsEndOnlyQuery(D3D11_QUERY query) noexcept
+{
+    return query == D3D11_QUERY_EVENT || query == D3D11_QUERY_TIMESTAMP;
+}
+
 [[nodiscard]] constexpr bool IsProfilingQuery(D3D11_QUERY query) noexcept
 {
     return query == D3D11_QUERY_PIPELINE_STATISTICS || query == D3D11_QUERY_TIMESTAMP_DISJOINT;
@@ -42,9 +48,10 @@ namespace fo4hdr {
     return std::find(streamQueries.begin(), streamQueries.end(), query) != streamQueries.end();
 }
 
-// Context-lifetime bookkeeping: these opaque keys are never dereferenced or
+// Per-context bookkeeping: these opaque keys are never dereferenced or
 // owned. The caller must keep the API object alive for its Begin/End scope.
-// Broken or unobserved scopes disable owned GPU work until context retirement.
+// Broken or unobserved scopes disable optional owned GPU work until the next
+// presenting Present retires the frame; scopes are never latched across frames.
 struct ContextQuerySafety
 {
     static constexpr std::size_t capacity = 32;
@@ -61,6 +68,8 @@ struct ContextQuerySafety
     void End(const void* key) noexcept;
 
     [[nodiscard]] bool CanDispatch() const noexcept;
+
+    void RetireFrame() noexcept;
 };
 
 }  // namespace fo4hdr

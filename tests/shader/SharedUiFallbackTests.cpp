@@ -809,34 +809,21 @@ struct SharedUiFallbackFixture : SharedPresentationContextFixture
         }
     }
 
-    void CheckBlockedPresent()
-    {
-        const auto generation = g_evidence.resourceGeneration.load();
-        const auto* constants = g_presentation.constants.Get();
-        const auto productionFrames = g_evidence.productionFrameCount.load();
-        constexpr float sentinel[4]{0.8F, 0.3F, 0.6F, 1};
-        device.context->ClearRenderTargetView(output.rtv.Get(), sentinel);
-        FO4HDR_WARP_CHECK(!PreparePresentFrame(chain.Get(), true));
-        CheckOutputCode(0);
-        FO4HDR_WARP_CHECK(g_referenceHealthy.load());
-        FO4HDR_WARP_CHECK(g_evidence.resourceGeneration.load() == generation);
-        FO4HDR_WARP_CHECK(g_presentation.constants.Get() == constants);
-        FO4HDR_WARP_CHECK(g_presentation.presentationProxy.Get() == proxy.texture.Get());
-        FO4HDR_WARP_CHECK(g_evidence.productionFrameCount.load() == productionFrames);
-        FO4HDR_WARP_CHECK(g_evidence.hdrColorSpaceActive.load());
-        CompletePresentFrame(false, false);
-    }
-
-    void CheckBlockedQueries(bool startup)
+    // An application occlusion scope left open across Present blocks optional
+    // injection only; final output still renders and the scope may count it.
+    void CheckQueryOpenAcrossPresent(bool startup)
     {
         const D3D11_QUERY_DESC description{D3D11_QUERY_OCCLUSION, 0};
         ComPtr<ID3D11Query> query;
-        CheckHresult(device.device->CreateQuery(&description, &query), "Create blocked Present query");
+        CheckHresult(device.device->CreateQuery(&description, &query), "Create Present-spanning query");
         PrepareBlockedImage(startup);
         device.context->Begin(query.Get());
-        CheckBlockedPresent();
-        if (startup) FO4HDR_WARP_CHECK(SharedUiStartupSdr());
         FO4HDR_WARP_CHECK(!record->computeQueries.CanDispatch());
+        FO4HDR_WARP_CHECK(PreparePresentFrame(chain.Get(), true) == !startup);
+        CheckOutputCode(QuantizeR10Unorm(EncodeSt2084Pq(
+            (startup ? std::pow(0.5, 2.2) : 0.5) * 203)));
+        if (startup) FO4HDR_WARP_CHECK(SharedUiStartupSdr());
+        CompletePresentFrame(!startup, false);
         device.context->End(query.Get());
         FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
         CheckFrozenWhitePresentation();
@@ -1051,7 +1038,7 @@ void VerifySharedUiFallback(Device& device)
     fixture.CheckPublicUavMutations();
     for (const bool startup : {false, true})
     {
-        fixture.CheckBlockedQueries(startup);
+        fixture.CheckQueryOpenAcrossPresent(startup);
         fixture.CheckBlockedStreamOutput(startup);
     }
     fixture.CheckForeignRequiredShaders();

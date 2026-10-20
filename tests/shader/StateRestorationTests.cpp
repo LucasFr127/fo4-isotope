@@ -1058,7 +1058,39 @@ void VerifyContextQueryKinds()
         FO4HDR_WARP_CHECK(!fo4hdr::IsComputeSensitiveQuery(query));
         FO4HDR_WARP_CHECK(!fo4hdr::IsProfilingQuery(query));
         FO4HDR_WARP_CHECK(!fo4hdr::IsStreamOutputQuery(query));
+        FO4HDR_WARP_CHECK(
+            fo4hdr::IsEndOnlyQuery(query) == (query != static_cast<D3D11_QUERY>(-1)));
     }
+}
+
+// The latch never outlives its frame; ordinary Present retirement clears it.
+void VerifyContextQueryFrameRetirement()
+{
+    using fo4hdr::ContextQuerySafety;
+    std::array<int, ContextQuerySafety::capacity + 1> keys{};
+    ContextQuerySafety queries;
+    queries.Begin(nullptr);
+    FO4HDR_WARP_CHECK(!queries.CanDispatch());
+    queries.RetireFrame();
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
+    queries.Begin(&keys[1]);  // An unmatched scope is stale after its frame.
+    FO4HDR_WARP_CHECK(queries.EnterCommandList());
+    queries.RetireFrame();
+    FO4HDR_WARP_CHECK(!queries.CanDispatch());  // Live command-list depth survives.
+    queries.LeaveCommandList();
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
+    queries.End(&keys[1]);
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
+    for (const auto& key : keys) queries.Begin(&key);  // Slot overflow.
+    queries.RetireFrame();
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
+    for (std::size_t i = 0; i <= ContextQuerySafety::capacity; ++i)
+        (void)queries.EnterCommandList();
+    for (std::size_t i = 0; i <= ContextQuerySafety::capacity; ++i)
+        queries.LeaveCommandList();
+    FO4HDR_WARP_CHECK(!queries.CanDispatch());  // Depth overflow and underflow.
+    queries.RetireFrame();
+    FO4HDR_WARP_CHECK(queries.CanDispatch());
 }
 
 void VerifyContextQuerySafety()
@@ -1104,7 +1136,7 @@ void VerifyContextQuerySafety()
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
     queries.End(&keys[0]);
     FO4HDR_WARP_CHECK(queries.CanDispatch());
-    queries.Begin(nullptr);  // Genuine tracking failure remains sticky.
+    queries.Begin(nullptr);  // Genuine tracking failure remains sticky for the frame.
     queries.Begin(&keys[0]);
     queries.Begin(&keys[0]);
     queries.End(&keys[0]);
@@ -1127,6 +1159,7 @@ void VerifyContextQuerySafety()
         queries.LeaveCommandList();
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
     VerifyContextQueryKinds();
+    VerifyContextQueryFrameRetirement();
 
 }
 

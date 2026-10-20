@@ -43,4 +43,11 @@ bool ContextQuerySafety::CanDispatch() const noexcept
     return true;
 }
 
+void ContextQuerySafety::RetireFrame() noexcept
+{
+    // Command-list depth stays balanced by its own scope.
+    active.fill(nullptr);
+    unknown = false;
+}
+
 } // namespace fo4hdr

@@ -317,7 +317,7 @@ ID3D11DeviceContext* PrepareGpuPerformanceSample(IDXGISwapChain* swapChain,
     ID3D11DeviceContext* context) noexcept
 {
     if (!PresentationContextValid(context)) return PresentationResult::blocked;
-    ScopedPresentationContext ownedContext(context);
+    ScopedPresentationContext ownedContext(context, PresentationScope::finalOutput);
     if (!ownedContext.Ready()) return PresentationResult::blocked;
     const auto requiredDomain = ReferenceSceneDomain();
     if (!CurrentSceneMatches(requiredDomain)) return PresentationResult::unavailable;
@@ -368,7 +368,7 @@ PresentationResult RenderPublicSharedUiOutput(IDXGISwapChain* swapChain, ID3D11D
 {
     const auto& presentation = output.presentation;
     if (!PresentationContextValid(context)) return PresentationResult::blocked;
-    ScopedPresentationContext ownedContext(context);
+    ScopedPresentationContext ownedContext(context, PresentationScope::finalOutput);
     if (!ownedContext.Ready()) return PresentationResult::blocked;
     if (!PublicPresentationAvailable(presentation)) return PresentationResult::unavailable;
     if (!EnsurePresentationOutputResources(swapChain, device, context, !output.sdr))
@@ -423,7 +423,7 @@ bool StartupPresentationAvailable(const SharedUiPresentation* presentation) noex
     ID3D11DeviceContext* context, const SharedUiPresentation* presentation) noexcept
 {
     if (!PresentationContextValid(context)) return PresentationResult::blocked;
-    ScopedPresentationContext ownedContext(context);
+    ScopedPresentationContext ownedContext(context, PresentationScope::finalOutput);
     if (!ownedContext.Ready()) return PresentationResult::blocked;
     if (g_presentation.presentationProxySrv == nullptr) return PresentationResult::unavailable;
     if (!StartupPresentationAvailable(presentation))

@@ -18,10 +18,19 @@
 
 namespace fo4hdr {
 
+// Final fullscreen output is not gated by context query tracking; it must not
+// turn an unrelated or stale application query into a black presentation.
+enum class PresentationScope
+{
+    midFrame,
+    finalOutput
+};
+
 class ScopedPresentationContext
 {
 public:
-    explicit ScopedPresentationContext(ID3D11DeviceContext* context) noexcept;
+    explicit ScopedPresentationContext(ID3D11DeviceContext* context,
+        PresentationScope scope = PresentationScope::midFrame) noexcept;
     ~ScopedPresentationContext() noexcept;
     ScopedPresentationContext(const ScopedPresentationContext&) = delete;
     ScopedPresentationContext& operator=(const ScopedPresentationContext&) = delete;

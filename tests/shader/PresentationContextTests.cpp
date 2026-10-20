@@ -402,35 +402,67 @@ struct PresentationContextScenario : PresentationContextFixture
         device.context->Unmap(proxy.staging.Get(), 0);
     }
 
-    void CheckBlockedPresentation()
+    // Unsafe scopes block optional mid-frame work only. Final output still
+    // renders; an application scope left open across Present may count it.
+    void CheckQueryGatedPresentation()
     {
+        {
+            ScopedPresentationContext midFrame(device.context.Get());
+            FO4HDR_WARP_CHECK(!midFrame.Ready());
+        }
         const DrawObservation expected = *record;
         FO4HDR_WARP_CHECK(RenderReferenceFrame(chain.Get(), device.device.Get(), device.context.Get()) ==
-            PresentationResult::blocked);
-        FO4HDR_WARP_CHECK(RenderSdrPresentationProxy(chain.Get(), device.device.Get(), device.context.Get()) ==
+            PresentationResult::rendered);
+        FO4HDR_WARP_CHECK(RenderSdrPresentationProxy(chain.Get(), device.device.Get(), device.context.Get()) !=
             PresentationResult::blocked);
         CheckObservation(expected);
     }
 
+    static void STDMETHODCALLTYPE IgnoreBegin(ID3D11DeviceContext*, ID3D11Asynchronous*) {}
+
+    void CheckEndOnlyQueries()
+    {
+        // Begin is invalid for End-only kinds; terminate the probe before native D3D11.
+        const auto nextBegin = record->nextBegin;
+        record->nextBegin = &IgnoreBegin;
+        for (const auto type : {D3D11_QUERY_EVENT, D3D11_QUERY_TIMESTAMP})
+        {
+            const D3D11_QUERY_DESC description{type, 0};
+            ComPtr<ID3D11Query> query;
+            CheckHresult(device.device->CreateQuery(&description, &query), "Create End-only query");
+            HookBegin(device.context.Get(), query.Get());
+            FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
+        }
+        HookBegin(device.context.Get(), nullptr);
+        record->nextBegin = nextBegin;
+        FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
+    }
+
     void CheckUnsafeQueries()
     {
+        CheckEndOnlyQueries();
         const D3D11_QUERY_DESC description{D3D11_QUERY_OCCLUSION, 0};
         ComPtr<ID3D11Query> query;
         CheckHresult(device.device->CreateQuery(&description, &query), "Create hooked presentation query");
         device.context->Begin(query.Get());
         device.context->Begin(query.Get());
-        CheckBlockedPresentation();
+        CheckQueryGatedPresentation();
         device.context->End(query.Get());
-        FO4HDR_WARP_CHECK(ReadQuery<UINT64>(device, query.Get()) == 0);
+        FO4HDR_WARP_CHECK(ReadQuery<UINT64>(device, query.Get()) > 0);
         FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
         const D3D11_QUERY_DESC predicateDescription{D3D11_QUERY_OCCLUSION_PREDICATE, 0};
         ComPtr<ID3D11Predicate> predicate;
         CheckHresult(device.device->CreatePredicate(&predicateDescription, &predicate),
             "Create blocking occlusion predicate");
         device.context->Begin(predicate.Get());
-        CheckBlockedPresentation();
+        CheckQueryGatedPresentation();
         device.context->End(predicate.Get());
-        FO4HDR_WARP_CHECK(ReadQuery<BOOL>(device, predicate.Get()) == FALSE);
+        FO4HDR_WARP_CHECK(ReadQuery<BOOL>(device, predicate.Get()) == TRUE);
+        FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
+        // An unknown scope left by a broken caller expires with its frame.
+        record->computeQueries.unknown = true;
+        CheckQueryGatedPresentation();
+        record->computeQueries.RetireFrame();
         FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());
         FO4HDR_WARP_CHECK(RenderReferenceFrame(chain.Get(), device.device.Get(), device.context.Get()) ==
             PresentationResult::rendered);

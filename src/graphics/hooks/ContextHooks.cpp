@@ -65,12 +65,13 @@ bool InsideLowerPresent() noexcept
     return insideLowerPresent;
 }
 
-ScopedPresentationContext::ScopedPresentationContext(ID3D11DeviceContext* context) noexcept
+ScopedPresentationContext::ScopedPresentationContext(
+    ID3D11DeviceContext* context, PresentationScope scope) noexcept
 {
     if (ownedPresentationContext || context != g_rendererDevice.activeContext) return;
     const auto* record = FindContext(context);
     if (!record || !record->immediate) return;
-    if (!record->computeQueries.CanDispatch()) return;
+    if (scope == PresentationScope::midFrame && !record->computeQueries.CanDispatch()) return;
     context_ = context;
     ownedPresentationContext = context;
 }
@@ -103,11 +104,8 @@ ULONG STDMETHODCALLTYPE HookContextRelease(
 void ObserveQueryBegin(
     ContextQuerySafety& queries, ID3D11Asynchronous* asynchronous)
 {
-    if (asynchronous == nullptr)
-    {
-        queries.unknown = true;
-        return;
-    }
+    // A null Begin opens no scope.
+    if (asynchronous == nullptr) return;
     ComPtr<ID3D11Query> query;
     if (FAILED(asynchronous->QueryInterface(IID_PPV_ARGS(&query))))
     {
@@ -117,6 +115,7 @@ void ObserveQueryBegin(
     }
     D3D11_QUERY_DESC description{};
     query->GetDesc(&description);
+    if (IsEndOnlyQuery(description.Query)) return;
     if (IsComputeSensitiveQuery(description.Query))
         queries.Begin(asynchronous);
     else if (!IsProfilingQuery(description.Query) &&

@@ -165,6 +165,9 @@ static void CompleteOwnedPresent(SwapChainRecord& record, IDXGISwapChain* swapCh
     bool rendered, HRESULT result)
 {
     const bool deviceLost = result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET;
+    // Query tracking is per frame; a stale or unobserved scope never latches.
+    if (auto* context = FindContext(g_rendererDevice.activeContext))
+        context->computeQueries.RetireFrame();
     if (deviceLost)
     {
         RecordFailure(GraphicsObservationFailure::deviceLost);
