@@ -534,6 +534,35 @@ template <std::size_t Count>
     return PublishObjectShadow(swapChain, *record, current);
 }
 
+template <class Record, std::size_t Count>
+[[nodiscard]] void** ShadowOriginalTable(std::array<Record, Count>& records, void** table) noexcept
+{
+    const auto shadow = std::ranges::find_if(records, [table](const Record& record) {
+        return record.originalVtable != nullptr && record.shadow.data() == table;
+    });
+    return shadow == records.end() ? nullptr : shadow->originalVtable;
+}
+
+// A rolled-back object already carries its original table again.
+[[nodiscard]] void** ForwardingTable(void** table) noexcept
+{
+    for (auto* original : {ShadowOriginalTable(g_devices, table),
+             ShadowOriginalTable(g_contexts, table), ShadowOriginalTable(g_swapChains, table)})
+        if (original != nullptr) return original;
+    return table;
+}
+
+void* ResolveUnrecordedNext(void* object, VtablePatch hook) noexcept
+{
+    if (object == nullptr || hook.index >= kMaximumVtableSlots) return nullptr;
+    auto* table = static_cast<void**>(AtomicPointerLoad(static_cast<void* const*>(object)));
+    if (table == nullptr) return nullptr;
+    auto* const* slot = ForwardingTable(table) + hook.index;
+    if (!IsReadable(slot, sizeof(void*))) return nullptr;
+    auto* next = AtomicPointerLoad(slot);
+    return ValidateNext(next, hook.replacement) ? next : nullptr;
+}
+
 template <class Object, class Record>
 void RollBackShadow(Object* object, Record* record) noexcept
 {
@@ -949,7 +978,9 @@ ULONG STDMETHODCALLTYPE HookDeviceRelease(ID3D11Device* device) noexcept
 {
     return InvokeNoexceptBoundary<ULONG>(1, [=]() {
         auto* record = FindDevice(device);
-        if (record == nullptr || record->nextRelease == nullptr) return 1UL;
+        if (record == nullptr || record->nextRelease == nullptr)
+            return ForwardUnrecorded<DeviceRelease>(1UL, HookAt(kRelease, &HookDeviceRelease),
+                device);
         const auto generation = record->identity.Generation();
         const auto remaining = InvokeCapturedNext(record->nextRelease, device);
         if (remaining == 0 && record->identity.Retire(device, generation))
@@ -1006,7 +1037,9 @@ HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindDevice(device);
         if (record == nullptr || record->nextCreateTexture2D == nullptr)
-            return E_FAIL;
+            return ForwardUnrecorded<CreateTexture2D>(E_FAIL,
+                HookAt(kDeviceCreateTexture2D, &HookCreateTexture2D),
+                device, description, initialData, texture);
         // R11G11B10 and FP16 have different byte/row layouts. The trusted
         // aspect-ratio promotion is safe only for uninitialized render
         // targets; initialized resources keep their exact original format.
@@ -1024,13 +1057,15 @@ HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
     }, []() noexcept { RecordAbiException(); });
 }
 
-template <auto NextMember, class Description, class View>
+template <auto NextMember, std::size_t Slot, auto Hook, class Description, class View>
 HRESULT CreatePromotedView(ID3D11Device* device, ID3D11Resource* resource,
     const Description* description, View** view) noexcept
 {
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindDevice(device);
-        if (record == nullptr || record->*NextMember == nullptr) return E_FAIL;
+        if (record == nullptr || record->*NextMember == nullptr)
+            return ForwardUnrecorded<std::remove_cvref_t<decltype(record->*NextMember)>>(
+                E_FAIL, HookAt(Slot, Hook), device, resource, description, view);
         if (device != g_rendererDevice.activeDevice || description == nullptr)
             return InvokeCapturedNext(record->*NextMember, device, resource, description, view);
         auto remapped = *description;
@@ -1042,13 +1077,15 @@ HRESULT CreatePromotedView(ID3D11Device* device, ID3D11Resource* resource,
 HRESULT STDMETHODCALLTYPE HookCreateSrv(ID3D11Device* device, ID3D11Resource* resource,
     const D3D11_SHADER_RESOURCE_VIEW_DESC* description, ID3D11ShaderResourceView** view) noexcept
 {
-    return CreatePromotedView<&DeviceRecord::nextCreateSrv>(device, resource, description, view);
+    return CreatePromotedView<&DeviceRecord::nextCreateSrv, kDeviceCreateSrv, &HookCreateSrv>(
+        device, resource, description, view);
 }
 
 HRESULT STDMETHODCALLTYPE HookCreateUav(ID3D11Device* device, ID3D11Resource* resource,
     const D3D11_UNORDERED_ACCESS_VIEW_DESC* description, ID3D11UnorderedAccessView** view) noexcept
 {
-    return CreatePromotedView<&DeviceRecord::nextCreateUav>(device, resource, description, view);
+    return CreatePromotedView<&DeviceRecord::nextCreateUav, kDeviceCreateUav, &HookCreateUav>(
+        device, resource, description, view);
 }
 HRESULT STDMETHODCALLTYPE HookCreateRtv(
     ID3D11Device* device, ID3D11Resource* resource,
@@ -1058,7 +1095,9 @@ HRESULT STDMETHODCALLTYPE HookCreateRtv(
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindDevice(device);
         if (record == nullptr || record->nextCreateRtv == nullptr)
-            return E_FAIL;
+            return ForwardUnrecorded<CreateRenderTargetView>(E_FAIL,
+                HookAt(kDeviceCreateRtv, &HookCreateRtv),
+                device, resource, description, view);
         if (device != g_rendererDevice.activeDevice)
             return InvokeCapturedNext(record->nextCreateRtv, device,
                 resource, description, view);
@@ -1084,7 +1123,9 @@ HRESULT STDMETHODCALLTYPE HookCreatePixelShader(
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindDevice(device);
         if (record == nullptr || record->nextCreatePixelShader == nullptr)
-            return E_FAIL;
+            return ForwardUnrecorded<CreatePixelShader>(E_FAIL,
+                HookAt(kDeviceCreatePixelShader, &HookCreatePixelShader),
+                device, bytecode, bytecodeLength, linkage, shader);
         if (device != g_rendererDevice.activeDevice)
             return InvokeCapturedNext(record->nextCreatePixelShader, device,
                 bytecode, bytecodeLength, linkage, shader);

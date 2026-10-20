@@ -8,6 +8,9 @@
 #include "RendererLifetime.hpp"
 #include "GraphicsDiagnostics.hpp"
 
+#include <algorithm>
+#include <array>
+
 namespace fo4hdr::tests::gpu {
 
 struct PresentProbe
@@ -39,6 +42,35 @@ void VerifyTestPresent(IDXGISwapChain* chain, SwapChainRecord& record)
     FO4HDR_WARP_CHECK(g_presentProbe.lower && !InsideLowerPresent());
     FO4HDR_WARP_CHECK(g_presentProbe.interval == 3 && g_presentProbe.flags == flags);
     FO4HDR_WARP_CHECK(g_frame == frame && g_evidence.presentCount.load() == count);
+}
+
+// A retired record still forwards: through its shadow's original table while
+// the object carries that shadow, then through the object's restored table.
+void VerifyUnrecordedPresent(IDXGISwapChain* chain, SwapChainRecord& record)
+{
+    auto** object = reinterpret_cast<void***>(chain);
+    auto** native = *object;
+    std::array<void*, kSwapChainBaseSlots> original{};
+    original[kSwapChainPresent] = reinterpret_cast<void*>(&ProbePresent);
+    std::copy(native, native + kSwapChainBaseSlots, record.shadow.begin());
+    record.shadow[kSwapChainPresent] = reinterpret_cast<void*>(&HookPresent);
+    record.originalVtable = original.data();
+    const auto generation = record.identity.Generation();
+    FO4HDR_WARP_CHECK(record.identity.Retire(chain, generation));
+    g_presentProbe = {};
+    *object = record.shadow.data();
+    const auto shadowed = HookPresent(chain, 2, DXGI_PRESENT_TEST);
+    *object = native;
+    const auto restored = HookPresent(chain, 2, DXGI_PRESENT_TEST);
+    record.originalVtable = nullptr;
+    record.shadow = {};
+    FO4HDR_WARP_CHECK(record.identity.Publish(chain, generation));
+    FO4HDR_WARP_CHECK(shadowed == DXGI_STATUS_OCCLUDED && g_presentProbe.calls == 1);
+    FO4HDR_WARP_CHECK(g_presentProbe.chain == chain && g_presentProbe.interval == 2);
+    FO4HDR_WARP_CHECK(SUCCEEDED(restored) && g_presentProbe.calls == 1);
+    // The resolver never forwards a call back into the hook it serves.
+    const auto self = HookAt(kSwapChainPresent, native[kSwapChainPresent]);
+    FO4HDR_WARP_CHECK(ResolveUnrecordedNext(chain, self) == nullptr);
 }
 
 struct PresentationResizeHookScope
@@ -85,6 +117,7 @@ void VerifyPresentationResize(Device& device)
     CheckHresult(chain.As(&base), "Get base resize interface");
     PresentationResizeHookScope scope(base.Get());
     VerifyTestPresent(base.Get(), scope.record);
+    VerifyUnrecordedPresent(base.Get(), scope.record);
     FO4HDR_WARP_CHECK(g_rendererDevice.activeDevice == nullptr);
     struct ResizeCase { UINT requested, expected; };
     for (const auto test : {ResizeCase{0, 3}, {1, 2}, {2, 2}, {3, 3}, {8, 8}, {0, 8}})

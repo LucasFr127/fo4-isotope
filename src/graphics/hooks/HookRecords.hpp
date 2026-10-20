@@ -162,4 +162,30 @@ DeviceRecord* FindDevice(ID3D11Device*) noexcept;
 ContextRecord* FindContext(ID3D11DeviceContext*) noexcept;
 SwapChainRecord* FindSwapChain(IDXGISwapChain*) noexcept;
 
+// A hook can run without a live record during retirement or rollback races.
+// Resolve the predecessor from the object's current shadow or table instead of
+// failing the call; null only when no distinct executable predecessor exists.
+// The patch names the vtable slot and this project's hook installed there.
+[[nodiscard]] void* ResolveUnrecordedNext(void* object, VtablePatch hook) noexcept;
+
+template <class Hook>
+[[nodiscard]] VtablePatch HookAt(std::size_t slot, Hook hook) noexcept
+{
+    return {slot, reinterpret_cast<void*>(hook)};
+}
+
+template <class Next, class Result, class Object, class... Arguments>
+Result ForwardUnrecorded(Result failure, VtablePatch hook, Object* object, Arguments... arguments)
+{
+    const auto next = reinterpret_cast<Next>(ResolveUnrecordedNext(object, hook));
+    return next ? InvokeCapturedNext(next, object, arguments...) : failure;
+}
+
+template <class Next, class Object, class... Arguments>
+void ForwardUnrecordedCall(VtablePatch hook, Object* object, Arguments... arguments)
+{
+    if (const auto next = reinterpret_cast<Next>(ResolveUnrecordedNext(object, hook)))
+        InvokeCapturedNext(next, object, arguments...);
+}
+
 } // namespace fo4hdr

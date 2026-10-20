@@ -28,7 +28,9 @@ ULONG STDMETHODCALLTYPE HookSwapChainRelease(IDXGISwapChain* swapChain) noexcept
 {
     return InvokeNoexceptBoundary<ULONG>(1, [=]() {
         auto* record = FindSwapChain(swapChain);
-        if (record == nullptr || record->nextRelease == nullptr) return 1UL;
+        if (record == nullptr || record->nextRelease == nullptr)
+            return ForwardUnrecorded<SwapChainRelease>(1UL, HookAt(kRelease, &HookSwapChainRelease),
+                swapChain);
         const auto generation = record->identity.Generation();
         const auto remaining = InvokeCapturedNext(record->nextRelease,
             swapChain);
@@ -138,7 +140,10 @@ struct SwapChainResize
     HRESULT Run()
     {
         record = FindSwapChain(swapChain);
-        if (record == nullptr || record->nextResizeBuffers == nullptr) return E_FAIL;
+        if (record == nullptr || record->nextResizeBuffers == nullptr)
+            return ForwardUnrecorded<ResizeBuffers>(E_FAIL,
+                HookAt(kSwapChainResizeBuffers, &HookResizeBuffers),
+                swapChain, bufferCount, width, height, format, flags);
         if (!record->ownsRendererClaim) return ForwardOriginal();
         BeginOwnedResize();
         if (!HdrResizeRequested()) return Complete(ForwardOriginal());
@@ -189,7 +194,9 @@ HRESULT STDMETHODCALLTYPE HookPresent(
 {
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindSwapChain(swapChain);
-        if (record == nullptr || record->nextPresent == nullptr) return E_FAIL;
+        if (record == nullptr || record->nextPresent == nullptr)
+            return ForwardUnrecorded<Present>(E_FAIL, HookAt(kSwapChainPresent, &HookPresent),
+                swapChain, syncInterval, flags);
         if (record->ownsRendererClaim)
             TraceFramePresent(swapChain, FrameTraceKind::nativePresent, {syncInterval, flags});
         if (!PrepareOwnedPresent(*record, flags))

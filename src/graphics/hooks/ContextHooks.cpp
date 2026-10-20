@@ -33,11 +33,16 @@
 #include <wrl/client.h>
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <type_traits>
 #include <utility>
 
 namespace fo4hdr {
 
 using Microsoft::WRL::ComPtr;
+
+template <auto NextMember>
+using ContextNext = std::remove_cvref_t<decltype(std::declval<ContextRecord&>().*NextMember)>;
 
 namespace {
 thread_local ID3D11DeviceContext* ownedPresentationContext{};
@@ -86,7 +91,9 @@ ULONG STDMETHODCALLTYPE HookContextRelease(
 {
     return InvokeNoexceptBoundary<ULONG>(1, [=]() {
         auto* record = FindContext(context);
-        if (record == nullptr || record->nextRelease == nullptr) return 1UL;
+        if (record == nullptr || record->nextRelease == nullptr)
+            return ForwardUnrecorded<ContextRelease>(1UL, HookAt(kRelease, &HookContextRelease),
+                context);
         const auto generation = record->identity.Generation();
         const auto remaining = InvokeCapturedNext(record->nextRelease, context);
         if (remaining == 0)
@@ -127,7 +134,9 @@ void STDMETHODCALLTYPE HookBegin(
     ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->nextBegin == nullptr) return;
+    if (record == nullptr || record->nextBegin == nullptr)
+        return ForwardUnrecordedCall<BeginQuery>(HookAt(kContextBegin, &HookBegin),
+            context, asynchronous);
     try
     {
         ObserveQueryBegin(record->computeQueries, asynchronous);
@@ -149,7 +158,9 @@ void STDMETHODCALLTYPE HookEnd(
     ID3D11DeviceContext* context, ID3D11Asynchronous* asynchronous) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->nextEnd == nullptr) return;
+    if (record == nullptr || record->nextEnd == nullptr)
+        return ForwardUnrecordedCall<EndQuery>(HookAt(kContextEnd, &HookEnd),
+            context, asynchronous);
     // Retire only after next: a downstream hook can issue draws during End.
     try
     {
@@ -186,7 +197,10 @@ void STDMETHODCALLTYPE HookExecuteCommandList(
     BOOL restoreState) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->nextExecuteCommandList == nullptr) return;
+    if (record == nullptr || record->nextExecuteCommandList == nullptr)
+        return ForwardUnrecordedCall<ExecuteCommandList>(
+            HookAt(kContextExecuteCommandList, &HookExecuteCommandList),
+            context, commands, restoreState);
     // Opaque replay loses quality proof; restore armor before exposing its temporary codes.
     ObserveCopyResources(context, g_presentation.presentationProxy.Get(), nullptr);
     if (context != ownedPresentationContext)
@@ -267,7 +281,9 @@ void STDMETHODCALLTYPE HookPsSetShader(
     ID3D11ClassInstance* const* classes, UINT classCount) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->nextPsSetShader == nullptr) return;
+    if (record == nullptr || record->nextPsSetShader == nullptr)
+        return ForwardUnrecordedCall<PsSetShader>(HookAt(kContextPsSetShader, &HookPsSetShader),
+            context, shader, classes, classCount);
     if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextPsSetShader, context, shader, classes, classCount);
@@ -447,7 +463,10 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(
     ID3D11DepthStencilView* depth) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->nextOmSetRenderTargets == nullptr) return;
+    if (record == nullptr || record->nextOmSetRenderTargets == nullptr)
+        return ForwardUnrecordedCall<OmSetRenderTargets>(
+            HookAt(kContextOmSetRenderTargets, &HookOmSetRenderTargets),
+            context, count, views, depth);
     if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextOmSetRenderTargets, context, count, views, depth);
@@ -477,7 +496,9 @@ void BindRenderTargetsAndUavs(const RenderTargetsAndUavsRequest& request) noexce
     auto* record = FindContext(context);
     if (record == nullptr ||
         record->nextOmSetRenderTargetsAndUavs == nullptr)
-        return;
+        return ForwardUnrecordedCall<OmSetRenderTargetsAndUavs>(
+            HookAt(kContextOmSetRenderTargetsAndUavs, &HookOmSetRenderTargetsAndUavs), context,
+            rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts);
     if (!ObserveGameContext(context))
     {
         InvokeCapturedNext(record->nextOmSetRenderTargetsAndUavs, context,
@@ -503,12 +524,14 @@ void STDMETHODCALLTYPE HookOmSetRenderTargetsAndUavs(
     BindRenderTargetsAndUavs({context, rtvCount, rtvs, depth, uavStart, uavCount, uavs, initialCounts});
 }
 
-template <auto NextMember, class... Arguments>
+template <auto NextMember, std::size_t Slot, auto Hook, class... Arguments>
 void ForwardDrawCall(ID3D11DeviceContext* context, FrameTraceKind kind,
     Arguments... arguments) noexcept
 {
     auto* record = FindContext(context);
-    if (record == nullptr || record->*NextMember == nullptr) return;
+    if (record == nullptr || record->*NextMember == nullptr)
+        return ForwardUnrecordedCall<ContextNext<NextMember>>(HookAt(Slot, Hook),
+            context, arguments...);
     const auto next = record->*NextMember;
     if (context == ownedPresentationContext || insideLowerPresent)
     {
@@ -529,13 +552,14 @@ void ForwardDrawCall(ID3D11DeviceContext* context, FrameTraceKind kind,
 void STDMETHODCALLTYPE HookDraw(
     ID3D11DeviceContext* context, UINT vertexCount, UINT startVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDraw>(context, FrameTraceKind::draw, vertexCount, startVertex);
+    ForwardDrawCall<&ContextRecord::nextDraw, kContextDraw, &HookDraw>(
+        context, FrameTraceKind::draw, vertexCount, startVertex);
 }
 
 void STDMETHODCALLTYPE HookDrawIndexed(
     ID3D11DeviceContext* context, UINT indexCount, UINT startIndex, INT baseVertex) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexed>(context,
+    ForwardDrawCall<&ContextRecord::nextDrawIndexed, kContextDrawIndexed, &HookDrawIndexed>(context,
         FrameTraceKind::drawIndexed, indexCount, startIndex, baseVertex);
 }
 
@@ -543,7 +567,8 @@ void STDMETHODCALLTYPE HookDrawIndexedInstanced(
     ID3D11DeviceContext* context, UINT indices, UINT instances,
     UINT startIndex, INT baseVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced>(context, FrameTraceKind::drawIndexedInstanced,
+    ForwardDrawCall<&ContextRecord::nextDrawIndexedInstanced, kContextDrawIndexedInstanced,
+        &HookDrawIndexedInstanced>(context, FrameTraceKind::drawIndexedInstanced,
         indices, instances, startIndex, baseVertex, startInstance);
 }
 
@@ -551,7 +576,8 @@ void STDMETHODCALLTYPE HookDrawInstanced(
     ID3D11DeviceContext* context, UINT vertices, UINT instances,
     UINT startVertex, UINT startInstance) noexcept
 {
-    ForwardDrawCall<&ContextRecord::nextDrawInstanced>(context, FrameTraceKind::drawInstanced,
+    ForwardDrawCall<&ContextRecord::nextDrawInstanced, kContextDrawInstanced,
+        &HookDrawInstanced>(context, FrameTraceKind::drawInstanced,
         vertices, instances, startVertex, startInstance);
 }
 
@@ -566,7 +592,9 @@ void STDMETHODCALLTYPE HookCopyResource(ID3D11DeviceContext* context,
     ID3D11Resource* destination, ID3D11Resource* source) noexcept
 {
     auto* record = FindContext(context);
-    if (!record || !record->nextCopyResource) return;
+    if (!record || !record->nextCopyResource)
+        return ForwardUnrecordedCall<CopyResource>(HookAt(kContextCopyResource, &HookCopyResource),
+            context, destination, source);
     ObserveCopyResources(context, destination, source);
     if (context != ownedPresentationContext)
         TraceFrameCopy(context, *record, {FrameTraceKind::copy, destination, source});
@@ -579,7 +607,10 @@ void STDMETHODCALLTYPE HookCopySubresourceRegion(ID3D11DeviceContext* context,
     ID3D11Resource* source, UINT sourceSubresource, const D3D11_BOX* box) noexcept
 {
     auto* record = FindContext(context);
-    if (!record || !record->nextCopySubresourceRegion) return;
+    if (!record || !record->nextCopySubresourceRegion)
+        return ForwardUnrecordedCall<CopySubresourceRegion>(
+            HookAt(kContextCopySubresourceRegion, &HookCopySubresourceRegion), context,
+            destination, destinationSubresource, x, y, z, source, sourceSubresource, box);
     ObserveCopyResources(context, destination, source);
     if (context != ownedPresentationContext && FrameTraceRequested())
     {
@@ -599,7 +630,10 @@ void STDMETHODCALLTYPE HookClearRenderTargetView(ID3D11DeviceContext* context,
     ID3D11RenderTargetView* target, const FLOAT* color) noexcept
 {
     auto* record = FindContext(context);
-    if (!record || !record->nextClearRenderTargetView) return;
+    if (!record || !record->nextClearRenderTargetView)
+        return ForwardUnrecordedCall<ClearRenderTargetView>(
+            HookAt(kContextClearRenderTargetView, &HookClearRenderTargetView),
+            context, target, color);
     if (ObserveGameContext(context)) ObserveSharedUiClear(target);
     if (context != ownedPresentationContext) TraceFrameClear(context, *record, target, color);
     try { InvokeCapturedNext(record->nextClearRenderTargetView, context, target, color); }
@@ -632,11 +666,13 @@ void ObserveComputeWrites(ID3D11DeviceContext* context) noexcept
     }
 }
 
-template <auto NextMember, class... Arguments>
+template <auto NextMember, std::size_t Slot, auto Hook, class... Arguments>
 void ForwardComputeCall(ID3D11DeviceContext* context, Arguments... arguments) noexcept
 {
     auto* record = FindContext(context);
-    if (!record || !(record->*NextMember)) return;
+    if (!record || !(record->*NextMember))
+        return ForwardUnrecordedCall<ContextNext<NextMember>>(HookAt(Slot, Hook),
+            context, arguments...);
     ObserveComputeWrites(context);
     try { InvokeCapturedNext(record->*NextMember, context, arguments...); }
     catch (...) { RecordAbiException(); }
@@ -644,21 +680,25 @@ void ForwardComputeCall(ID3D11DeviceContext* context, Arguments... arguments) no
 
 void STDMETHODCALLTYPE HookDispatch(ID3D11DeviceContext* context, UINT x, UINT y, UINT z) noexcept
 {
-    ForwardComputeCall<&ContextRecord::nextDispatch>(context, x, y, z);
+    ForwardComputeCall<&ContextRecord::nextDispatch, kContextDispatch, &HookDispatch>(
+        context, x, y, z);
 }
 
 void STDMETHODCALLTYPE HookDispatchIndirect(ID3D11DeviceContext* context,
     ID3D11Buffer* arguments, UINT offset) noexcept
 {
-    ForwardComputeCall<&ContextRecord::nextDispatchIndirect>(context, arguments, offset);
+    ForwardComputeCall<&ContextRecord::nextDispatchIndirect, kContextDispatchIndirect,
+        &HookDispatchIndirect>(context, arguments, offset);
 }
 
-template <auto NextMember, class Value>
+template <auto NextMember, std::size_t Slot, auto Hook, class Value>
 void ForwardUnorderedAccessClear(ID3D11DeviceContext* context,
     ID3D11UnorderedAccessView* target, const Value* values) noexcept
 {
     auto* record = FindContext(context);
-    if (!record || !(record->*NextMember)) return;
+    if (!record || !(record->*NextMember))
+        return ForwardUnrecordedCall<ContextNext<NextMember>>(HookAt(Slot, Hook),
+            context, target, values);
     ObserveUnorderedAccessWrite(context, target);
     try { InvokeCapturedNext(record->*NextMember, context, target, values); }
     catch (...) { RecordAbiException(); }
@@ -667,13 +707,17 @@ void ForwardUnorderedAccessClear(ID3D11DeviceContext* context,
 void STDMETHODCALLTYPE HookClearUnorderedAccessViewUint(ID3D11DeviceContext* context,
     ID3D11UnorderedAccessView* target, const UINT* values) noexcept
 {
-    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewUint>(context, target, values);
+    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewUint,
+        kContextClearUnorderedAccessViewUint, &HookClearUnorderedAccessViewUint>(
+        context, target, values);
 }
 
 void STDMETHODCALLTYPE HookClearUnorderedAccessViewFloat(ID3D11DeviceContext* context,
     ID3D11UnorderedAccessView* target, const FLOAT* values) noexcept
 {
-    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewFloat>(context, target, values);
+    ForwardUnorderedAccessClear<&ContextRecord::nextClearUnorderedAccessViewFloat,
+        kContextClearUnorderedAccessViewFloat, &HookClearUnorderedAccessViewFloat>(
+        context, target, values);
 }
 
 } // namespace fo4hdr
