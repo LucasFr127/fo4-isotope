@@ -6,6 +6,7 @@
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "resources/HdrResourcePolicy.hpp"
+#include "resources/ScenePromotionPolicy.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
 #include "TestHarness.hpp"
@@ -455,6 +456,66 @@ void TestResourcePromotionPredicate()
     FO4HDR_CHECK(!ShouldPromoteSceneResourceToFp16(eligible, 1920, 1080));
     eligible.width = 0;
     FO4HDR_CHECK(!ShouldPromoteSceneResourceToFp16(eligible, 1920, 1080));
+}
+
+D3D11_TEXTURE2D_DESC GameSceneTarget()
+{
+    D3D11_TEXTURE2D_DESC description{};
+    description.Width = 1920;
+    description.Height = 1080;
+    description.MipLevels = 1;
+    description.ArraySize = 1;
+    description.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+    description.SampleDesc.Count = 1;
+    description.Usage = D3D11_USAGE_DEFAULT;
+    description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    return description;
+}
+
+void TestSceneTexturePromotionGate()
+{
+    FO4HDR_CHECK(IsSceneTexturePromotionCandidate(GameSceneTarget(), false, 1920, 1080));
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(GameSceneTarget(), true, 1920, 1080));
+    for (const auto usage : std::array{
+             D3D11_USAGE_IMMUTABLE, D3D11_USAGE_DYNAMIC, D3D11_USAGE_STAGING})
+    {
+        auto description = GameSceneTarget();
+        description.Usage = usage;
+        FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(description, false, 1920, 1080));
+    }
+    auto cpuVisible = GameSceneTarget();
+    cpuVisible.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(cpuVisible, false, 1920, 1080));
+    auto sampledOnly = GameSceneTarget();
+    sampledOnly.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(sampledOnly, false, 1920, 1080));
+    for (const auto flag : std::array<UINT, 4>{D3D11_RESOURCE_MISC_SHARED,
+             D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX, D3D11_RESOURCE_MISC_SHARED_NTHANDLE,
+             D3D11_RESOURCE_MISC_GDI_COMPATIBLE})
+    {
+        auto description = GameSceneTarget();
+        description.MiscFlags = flag;
+        FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(description, false, 1920, 1080));
+    }
+    auto mipmapped = GameSceneTarget();
+    mipmapped.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+    FO4HDR_CHECK(IsSceneTexturePromotionCandidate(mipmapped, false, 1920, 1080));
+    auto fp16 = GameSceneTarget();
+    fp16.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(fp16, false, 1920, 1080));
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(GameSceneTarget(), false, 1280, 1024));
+    FO4HDR_CHECK(!IsSceneTexturePromotionCandidate(GameSceneTarget(), false, 0, 0));
+}
+
+void TestPromotionCallerImage()
+{
+    std::array<std::byte, 16> image{};
+    const std::span<const std::byte> view(image);
+    FO4HDR_CHECK(ImageContains(view, image.data()));
+    FO4HDR_CHECK(ImageContains(view, image.data() + 15));
+    FO4HDR_CHECK(!ImageContains(view, image.data() + 16));
+    FO4HDR_CHECK(!ImageContains(view, nullptr));
+    FO4HDR_CHECK(!ImageContains({}, image.data()));
 }
 
 HdrPathCapabilities AllCapabilities()
@@ -931,6 +992,8 @@ void RunHdrCoreTests()
     TestAboveWhiteSurvivesReferencePipeline();
     TestTemporalIntermediateRoundTrip();
     TestResourcePromotionPredicate();
+    TestSceneTexturePromotionGate();
+    TestPromotionCallerImage();
     TestActivationPolicy();
     TestActivationCapabilityRequirements();
     TestOrderedHeartbeat();

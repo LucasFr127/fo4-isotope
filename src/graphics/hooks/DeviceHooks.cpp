@@ -25,12 +25,13 @@
 #include "../LiveSettings.hpp"
 #include "../RendererLifetime.hpp"
 #include "../ShaderRegistry.hpp"
-#include "../resources/HdrResourcePolicy.hpp"
+#include "../resources/ScenePromotionPolicy.hpp"
 #include "../resources/PresentationResources.hpp"
 #include "../d3d11/PresentationSwapChain.hpp"
 
 #include <wrl/client.h>
 #include <Windows.h>
+#include <intrin.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -273,6 +274,15 @@ static bool MainImageRegionReady(const void* base, MEMORY_BASIC_INFORMATION& inf
 namespace {
 PointerHookOwnership g_d3dIat;
 PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN g_nextD3d{};
+
+// Latched once per published device generation so every same-role texture of
+// that generation gets one format, independent of later health changes.
+struct ScenePromotionLatch
+{
+    bool eligible{};
+    std::span<std::byte> gameImage;
+};
+ScenePromotionLatch g_scenePromotion;
 }
 
 template <class Record, std::size_t Count>
@@ -870,6 +880,8 @@ private:    void ReleaseFailedCreationClaim()
         g_rendererDevice.activeContext1.Reset();
         (void)(*request_.context)->QueryInterface(IID_PPV_ARGS(&g_rendererDevice.activeContext1));
         ++g_deviceGeneration;
+        g_scenePromotion = {HdrPathRequested() && hdrDescriptor_ && g_referenceHealthy && g_productionHealthy,
+            MainImage()};
         if (SettingsWindowBackendReady()) (void)TryActivateGraphicsSettingsInputOnCurrentThread();
         if (facade_)
         {
@@ -990,69 +1002,57 @@ ULONG STDMETHODCALLTYPE HookDeviceRelease(ID3D11Device* device) noexcept
     }, []() noexcept { RecordAbiException(); });
 }
 
-bool ScenePromotionEligible(const D3D11_TEXTURE2D_DESC& desc) noexcept
-{
-    return HdrPathRequested() && g_referenceHealthy && g_productionHealthy &&
-        desc.Format == DXGI_FORMAT_R11G11B10_FLOAT &&
-        desc.Width != 0 && desc.Height != 0 && g_presentation.width != 0 && g_presentation.height != 0;
-}
-[[nodiscard]] bool ShouldPromote(const D3D11_TEXTURE2D_DESC& desc) noexcept
-{
-    if (!ScenePromotionEligible(desc)) return false;
-    return ShouldPromoteSceneResourceToFp16(
-        {
-            .format = SceneResourceFormat::r11g11b10Float,
-            .width = desc.Width,
-            .height = desc.Height
-        },
-        g_presentation.width,
-        g_presentation.height);
-}
-
 [[nodiscard]] DXGI_FORMAT RemapPromotedView(
     ID3D11Resource* resource, DXGI_FORMAT requested) noexcept
 {
     if (resource == nullptr || requested != DXGI_FORMAT_R11G11B10_FLOAT)
         return requested;
-    ComPtr<ID3D11Texture2D> texture;
-    if (FAILED(resource->QueryInterface(IID_PPV_ARGS(&texture))))
-        return requested;
-    D3D11_TEXTURE2D_DESC desc{};
-    texture->GetDesc(&desc);
-    return desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ?
-        DXGI_FORMAT_R16G16B16A16_FLOAT : requested;
+    std::uint8_t tag{};
+    UINT size = sizeof(tag);
+    const auto promoted = SUCCEEDED(resource->GetPrivateData(kPromotedSceneTexture, &size, &tag)) &&
+        size == sizeof(tag);
+    return promoted ? DXGI_FORMAT_R16G16B16A16_FLOAT : requested;
 }
 
-bool UninitializedScenePromotion(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
-    const D3D11_SUBRESOURCE_DATA* initialData) noexcept
+// The shadow vtable sits directly under the game's call site, so the game's
+// own targets return into its image; other plugins sharing the device do not.
+bool GameScenePromotion(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
+    const D3D11_SUBRESOURCE_DATA* initialData, const void* caller) noexcept
 {
-    return device == g_rendererDevice.activeDevice && description != nullptr && initialData == nullptr &&
-        ShouldPromote(*description);
+    return device == g_rendererDevice.activeDevice && description != nullptr && g_scenePromotion.eligible &&
+        ImageContains(g_scenePromotion.gameImage, caller) &&
+        IsSceneTexturePromotionCandidate(*description, initialData != nullptr,
+            g_presentation.width, g_presentation.height);
+}
+void TagPromotedTexture(HRESULT result, ID3D11Texture2D** texture) noexcept
+{
+    if (FAILED(result) || !HasCreatedObject(texture)) return;
+    g_evidence.promotedResourceCount.fetch_add(1, std::memory_order_relaxed);
+    // Fails only on E_OUTOFMEMORY; the texture still forwards exactly once.
+    constexpr std::uint8_t tag{1};
+    if (FAILED((*texture)->SetPrivateData(kPromotedSceneTexture, sizeof(tag), &tag)))
+        RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
 }
 HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
     ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
     const D3D11_SUBRESOURCE_DATA* initialData,
     ID3D11Texture2D** texture) noexcept
 {
+    const void* caller = _ReturnAddress();
     return InvokeNoexceptBoundary<HRESULT>(E_FAIL, [=]() {
         auto* record = FindDevice(device);
         if (record == nullptr || record->nextCreateTexture2D == nullptr)
             return ForwardUnrecorded<CreateTexture2D>(E_FAIL,
                 HookAt(kDeviceCreateTexture2D, &HookCreateTexture2D),
                 device, description, initialData, texture);
-        // R11G11B10 and FP16 have different byte/row layouts. The trusted
-        // aspect-ratio promotion is safe only for uninitialized render
-        // targets; initialized resources keep their exact original format.
-        if (!UninitializedScenePromotion(device, description, initialData))
+        if (!GameScenePromotion(device, description, initialData, caller))
             return InvokeCapturedNext(record->nextCreateTexture2D, device,
                 description, initialData, texture);
         auto promoted = *description;
         promoted.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
         const auto result = InvokeCapturedNext(record->nextCreateTexture2D,
             device, &promoted, initialData, texture);
-        if (SUCCEEDED(result))
-            g_evidence.promotedResourceCount.fetch_add(
-                1, std::memory_order_relaxed);
+        TagPromotedTexture(result, texture);
         return result;
     }, []() noexcept { RecordAbiException(); });
 }
