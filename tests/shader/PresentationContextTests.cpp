@@ -447,6 +447,9 @@ struct PresentationContextScenario : PresentationContextFixture
         device.context->Begin(query.Get());
         device.context->Begin(query.Get());
         CheckQueryGatedPresentation();
+        // A scope left open across Present still blocks the next frame's optional work.
+        record->computeQueries.RetireFrame();
+        CheckQueryGatedPresentation();
         device.context->End(query.Get());
         FO4HDR_WARP_CHECK(ReadQuery<UINT64>(device, query.Get()) > 0);
         FO4HDR_WARP_CHECK(record->computeQueries.CanDispatch());

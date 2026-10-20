@@ -1063,7 +1063,7 @@ void VerifyContextQueryKinds()
     }
 }
 
-// The latch never outlives its frame; ordinary Present retirement clears it.
+// Unknown state never outlives its frame; open scopes persist until their End.
 void VerifyContextQueryFrameRetirement()
 {
     using fo4hdr::ContextQuerySafety;
@@ -1073,16 +1073,18 @@ void VerifyContextQueryFrameRetirement()
     FO4HDR_WARP_CHECK(!queries.CanDispatch());
     queries.RetireFrame();
     FO4HDR_WARP_CHECK(queries.CanDispatch());
-    queries.Begin(&keys[1]);  // An unmatched scope is stale after its frame.
+    queries.Begin(&keys[1]);  // An occlusion scope left open across Present.
     FO4HDR_WARP_CHECK(queries.EnterCommandList());
     queries.RetireFrame();
-    FO4HDR_WARP_CHECK(!queries.CanDispatch());  // Live command-list depth survives.
+    FO4HDR_WARP_CHECK(!queries.CanDispatch());
     queries.LeaveCommandList();
-    FO4HDR_WARP_CHECK(queries.CanDispatch());
+    FO4HDR_WARP_CHECK(!queries.CanDispatch());  // The open scope survives retirement.
     queries.End(&keys[1]);
     FO4HDR_WARP_CHECK(queries.CanDispatch());
     for (const auto& key : keys) queries.Begin(&key);  // Slot overflow.
     queries.RetireFrame();
+    FO4HDR_WARP_CHECK(!queries.unknown && !queries.CanDispatch());
+    for (const auto& key : keys) queries.End(&key);
     FO4HDR_WARP_CHECK(queries.CanDispatch());
     for (std::size_t i = 0; i <= ContextQuerySafety::capacity; ++i)
         (void)queries.EnterCommandList();

@@ -45,8 +45,7 @@ bool ContextQuerySafety::CanDispatch() const noexcept
 
 void ContextQuerySafety::RetireFrame() noexcept
 {
-    // Command-list depth stays balanced by its own scope.
-    active.fill(nullptr);
+    // Open scopes stay live until End; command-list depth is balanced by its scope.
     unknown = false;
 }
 

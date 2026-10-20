@@ -50,8 +50,9 @@ namespace fo4hdr {
 
 // Per-context bookkeeping: these opaque keys are never dereferenced or
 // owned. The caller must keep the API object alive for its Begin/End scope.
-// Broken or unobserved scopes disable optional owned GPU work until the next
-// presenting Present retires the frame; scopes are never latched across frames.
+// Open occlusion/predicate scopes disable optional owned GPU work until End,
+// even across Present. Unknown state lasts only until the next presenting
+// Present; final output is never gated, so a stale key cannot cause black.
 struct ContextQuerySafety
 {
     static constexpr std::size_t capacity = 32;
