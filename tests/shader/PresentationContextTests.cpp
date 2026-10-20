@@ -314,24 +314,47 @@ struct PresentationContextScenario : PresentationContextFixture
         device.context->OMSetRenderTargets(1, &original, nullptr);
         FO4HDR_WARP_CHECK(record->currentPrimaryRtv == proxy.rtv.Get());
         FO4HDR_WARP_CHECK(record->currentSinglePresentationTarget);
-        CheckFullPresentationViewCache();
+        CheckPresentationViewIdentity();
     }
 
-    void CheckFullPresentationViewCache()
+    ID3D11RenderTargetView* BindAndRead(ID3D11RenderTargetView* view)
     {
-        g_presentation.presentationViews.fill(output.rtv.Get());
-        ComPtr<ID3D11RenderTargetView> uncached;
-        CheckHresult(device.device->CreateRenderTargetView(output.texture.Get(), nullptr, &uncached),
-            "Create uncached actual presentation view");
-        auto* view = uncached.Get();
         device.context->OMSetRenderTargets(1, &view, nullptr);
         ComPtr<ID3D11RenderTargetView> actual;
         device.context->OMGetRenderTargets(1, &actual, nullptr);
-        FO4HDR_WARP_CHECK(actual.Get() == proxy.rtv.Get());
+        return actual.Get();
+    }
+
+    void CheckPresentationViewIdentity()
+    {
+        // Backbuffer identity is proven at bind time, without a view cache.
+        ComPtr<ID3D11RenderTargetView> uncached;
+        CheckHresult(device.device->CreateRenderTargetView(output.texture.Get(), nullptr, &uncached),
+            "Create uncached actual presentation view");
+        FO4HDR_WARP_CHECK(BindAndRead(uncached.Get()) == proxy.rtv.Get());
         FO4HDR_WARP_CHECK(record->currentPrimaryRtv == proxy.rtv.Get());
         FO4HDR_WARP_CHECK(record->currentSinglePresentationTarget);
         FO4HDR_WARP_CHECK(g_referenceHealthy.load() && g_productionHealthy.load());
-        g_presentation.presentationViews.fill(nullptr);
+        auto unrelated = CreateTexture(*device.device.Get(), DXGI_FORMAT_R10G10B10A2_UNORM,
+            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+        FO4HDR_WARP_CHECK(!IsPresentationBackBufferTarget(unrelated.rtv.Get()));
+        FO4HDR_WARP_CHECK(BindAndRead(unrelated.rtv.Get()) == unrelated.rtv.Get());
+        {
+            // Overlay work inside the lower Present keeps its own backbuffer.
+            const DrawObservation expected = *record;
+            const ScopedLowerPresent lower;
+            FO4HDR_WARP_CHECK(InsideLowerPresent());
+            FO4HDR_WARP_CHECK(BindAndRead(uncached.Get()) == uncached.Get());
+            device.context->Draw(0, 0);
+            CheckObservation(expected);
+        }
+        FO4HDR_WARP_CHECK(!InsideLowerPresent());
+        // The facade game never sees the native backbuffer; foreign binds stay native.
+        g_presentation.applicationFacadeChain = chain.Get();
+        FO4HDR_WARP_CHECK(BindAndRead(uncached.Get()) == uncached.Get());
+        FO4HDR_WARP_CHECK(BindAndRead(proxy.rtv.Get()) == proxy.rtv.Get());
+        FO4HDR_WARP_CHECK(record->currentSinglePresentationTarget);
+        g_presentation.applicationFacadeChain = nullptr;
     }
 
     void CheckProxyViewRejection(DXGI_FORMAT textureFormat, DXGI_FORMAT viewFormat, UINT mip)

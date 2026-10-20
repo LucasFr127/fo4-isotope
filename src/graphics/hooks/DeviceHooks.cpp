@@ -992,30 +992,6 @@ bool ScenePromotionEligible(const D3D11_TEXTURE2D_DESC& desc) noexcept
         DXGI_FORMAT_R16G16B16A16_FLOAT : requested;
 }
 
-bool PresentationViewCandidate(ID3D11Resource* resource, ID3D11RenderTargetView* view) noexcept
-{
-    return resource != nullptr && view != nullptr &&
-        resource == static_cast<ID3D11Resource*>(g_presentation.presentationBackBuffer.Get());
-}
-[[nodiscard]] bool RememberPresentationView(
-    ID3D11Resource* resource, ID3D11RenderTargetView* view) noexcept
-{
-    if (!PresentationViewCandidate(resource, view))
-        return false;
-    for (auto*& known : g_presentation.presentationViews)
-    {
-        if (known == view) return true;
-        if (known == nullptr)
-        {
-            known = view;
-            return true;
-        }
-    }
-    RecordFailure(GraphicsObservationFailure::registryExhausted);
-    // Exact backbuffer identity remains usable without a cached view slot.
-    return true;
-}
-
 bool UninitializedScenePromotion(ID3D11Device* device, const D3D11_TEXTURE2D_DESC* description,
     const D3D11_SUBRESOURCE_DATA* initialData) noexcept
 {
@@ -1074,10 +1050,6 @@ HRESULT STDMETHODCALLTYPE HookCreateUav(ID3D11Device* device, ID3D11Resource* re
 {
     return CreatePromotedView<&DeviceRecord::nextCreateUav>(device, resource, description, view);
 }
-bool CreatedRenderTargetView(HRESULT result, ID3D11RenderTargetView** view) noexcept
-{
-    return SUCCEEDED(result) && view != nullptr && *view != nullptr;
-}
 HRESULT STDMETHODCALLTYPE HookCreateRtv(
     ID3D11Device* device, ID3D11Resource* resource,
     const D3D11_RENDER_TARGET_VIEW_DESC* description,
@@ -1098,11 +1070,8 @@ HRESULT STDMETHODCALLTYPE HookCreateRtv(
             remapped.Format = RemapPromotedView(resource, remapped.Format);
             selected = &remapped;
         }
-        const auto result = InvokeCapturedNext(record->nextCreateRtv,
+        return InvokeCapturedNext(record->nextCreateRtv,
             device, resource, selected, view);
-        if (CreatedRenderTargetView(result, view))
-            (void)RememberPresentationView(resource, *view);
-        return result;
     }, []() noexcept { RecordAbiException(); });
 }
 

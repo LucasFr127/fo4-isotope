@@ -11,8 +11,6 @@
 
 namespace fo4hdr {
 
-inline constexpr std::size_t kMaximumPresentationViews = 8;
-
 struct PresentationResources
 {
     IDXGISwapChain* applicationFacadeChain{};
@@ -23,8 +21,6 @@ struct PresentationResources
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> presentationProxyRtv;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> presentationProxySrv;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> presentationProxyUav;
-    std::array<ID3D11RenderTargetView*, kMaximumPresentationViews>
-        presentationViews{};
     Microsoft::WRL::ComPtr<ID3D11PixelShader> presentShader;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> presentVertexShader;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> presentRasterizer;

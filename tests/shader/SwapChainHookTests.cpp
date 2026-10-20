@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ShaderTestSuite.hpp"
+#include "hooks/ContextHooks.hpp"
 #include "hooks/HookRecords.hpp"
 #include "hooks/SwapChainHooks.hpp"
 #include "LiveSettings.hpp"
@@ -13,12 +14,13 @@ struct PresentProbe
 {
     IDXGISwapChain* chain{};
     UINT interval{}, flags{}, calls{};
+    bool lower{};
 };
 PresentProbe g_presentProbe;
 
 HRESULT STDMETHODCALLTYPE ProbePresent(IDXGISwapChain* chain, UINT interval, UINT flags)
 {
-    g_presentProbe = {chain, interval, flags, g_presentProbe.calls + 1};
+    g_presentProbe = {chain, interval, flags, g_presentProbe.calls + 1, InsideLowerPresent()};
     return DXGI_STATUS_OCCLUDED;
 }
 
@@ -34,6 +36,7 @@ void VerifyTestPresent(IDXGISwapChain* chain, SwapChainRecord& record)
     record.nextPresent = next;
     FO4HDR_WARP_CHECK(result == DXGI_STATUS_OCCLUDED);
     FO4HDR_WARP_CHECK(g_presentProbe.chain == chain && g_presentProbe.calls == 1);
+    FO4HDR_WARP_CHECK(g_presentProbe.lower && !InsideLowerPresent());
     FO4HDR_WARP_CHECK(g_presentProbe.interval == 3 && g_presentProbe.flags == flags);
     FO4HDR_WARP_CHECK(g_frame == frame && g_evidence.presentCount.load() == count);
 }

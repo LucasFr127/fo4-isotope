@@ -2,6 +2,7 @@
 
 #include "SwapChainHooks.hpp"
 
+#include "ContextHooks.hpp"
 #include "HookRecords.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../FrameTrace.hpp"
@@ -173,6 +174,13 @@ static void CompleteOwnedPresent(SwapChainRecord& record, IDXGISwapChain* swapCh
     if (!deviceLost && record.ownsRendererClaim) PollFrameTraceHotkey(swapChain);
 }
 
+static HRESULT InvokeLowerPresent(const SwapChainRecord& record, IDXGISwapChain* swapChain,
+    UINT syncInterval, UINT flags)
+{
+    const ScopedLowerPresent lower;
+    return InvokeCapturedNext(record.nextPresent, swapChain, syncInterval, flags);
+}
+
 HRESULT STDMETHODCALLTYPE HookPresent(
     IDXGISwapChain* swapChain, UINT syncInterval, UINT flags) noexcept
 {
@@ -183,14 +191,14 @@ HRESULT STDMETHODCALLTYPE HookPresent(
             TraceFramePresent(swapChain, FrameTraceKind::nativePresent, {syncInterval, flags});
         if (!PrepareOwnedPresent(*record, flags))
         {
-            const auto result = InvokeCapturedNext(record->nextPresent, swapChain, syncInterval, flags);
+            const auto result = InvokeLowerPresent(*record, swapChain, syncInterval, flags);
             if (record->ownsRendererClaim)
                 TraceFramePresent(swapChain, FrameTraceKind::presentResult, {syncInterval, flags, result});
             return result;
         }
         const bool rendered = PreparePresentFrame(swapChain, record->developerHdrDescriptor);
         TraceFramePresent(swapChain, FrameTraceKind::nextPresent, {syncInterval, flags});
-        const auto result = InvokeCapturedNext(record->nextPresent, swapChain, syncInterval, flags);
+        const auto result = InvokeLowerPresent(*record, swapChain, syncInterval, flags);
         TraceFramePresent(swapChain, FrameTraceKind::presentResult, {syncInterval, flags, result});
         CompleteOwnedPresent(*record, swapChain, rendered, result);
         return result;

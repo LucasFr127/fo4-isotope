@@ -31,6 +31,23 @@ private:
     ID3D11DeviceContext* context_{};
 };
 
+// Marks the current thread as inside the captured lower Present. Overlays
+// detouring DXGI Present draw there on the game's context; that work is
+// foreign and is never observed, replaced or redirected.
+class ScopedLowerPresent
+{
+public:
+    ScopedLowerPresent() noexcept;
+    ~ScopedLowerPresent() noexcept;
+    ScopedLowerPresent(const ScopedLowerPresent&) = delete;
+    ScopedLowerPresent& operator=(const ScopedLowerPresent&) = delete;
+
+private:
+    bool previous_{};
+};
+
+[[nodiscard]] bool InsideLowerPresent() noexcept;
+
 ULONG STDMETHODCALLTYPE HookContextRelease(
     ID3D11DeviceContext* context) noexcept;
 

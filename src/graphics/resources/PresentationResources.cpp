@@ -166,7 +166,6 @@ struct PresentationProxyCreation
     void Publish() noexcept
     {
         RetireSharedUiPublicImage();
-        g_presentation.presentationViews.fill(nullptr);
         g_presentation.presentationBackBuffer = std::move(backBuffer);
         g_presentation.presentationBackBufferRtv = std::move(outputRtv);
         g_presentation.presentationProxy = std::move(proxy);
@@ -438,7 +437,6 @@ void ResetPresentationResources(bool retainColorControl, bool retainPresentation
         g_presentation.width = 0;
         g_presentation.height = 0;
     }
-    g_presentation.presentationViews.fill(nullptr);
     g_presentation.constants.Reset();
     g_presentation.presentShader.Reset();
     g_presentation.presentVertexShader.Reset();

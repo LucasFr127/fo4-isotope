@@ -41,12 +41,29 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 thread_local ID3D11DeviceContext* ownedPresentationContext{};
+thread_local bool insideLowerPresent{};
 
 bool ObserveGameContext(ID3D11DeviceContext* context) noexcept
 {
-    return context == g_rendererDevice.activeContext && context != ownedPresentationContext;
+    return context == g_rendererDevice.activeContext && context != ownedPresentationContext &&
+        !insideLowerPresent;
 }
 } // namespace
+
+ScopedLowerPresent::ScopedLowerPresent() noexcept : previous_(insideLowerPresent)
+{
+    insideLowerPresent = true;
+}
+
+ScopedLowerPresent::~ScopedLowerPresent() noexcept
+{
+    insideLowerPresent = previous_;
+}
+
+bool InsideLowerPresent() noexcept
+{
+    return insideLowerPresent;
+}
 
 ScopedPresentationContext::ScopedPresentationContext(ID3D11DeviceContext* context) noexcept
 {
@@ -360,29 +377,24 @@ ID3D11RenderTargetView* PublishPresentationRedirect(ID3D11RenderTargetView* view
     return view;
 }
 
+// Resource identity is proven at every bind; a cached raw view pointer can be
+// reused by an unrelated view after release. The facade game never sees the
+// native backbuffer, so only foreign work can bind it there.
+bool IsRedirectedBackBuffer(ID3D11RenderTargetView* view) noexcept
+{
+    return !ApplicationPresentationFacadeActive() && IsPresentationBackBufferTarget(view);
+}
+
 [[nodiscard]] ID3D11RenderTargetView* RedirectPresentationView(
     ID3D11RenderTargetView* view) noexcept
 {
     if (!CanRedirectPresentation(view)) return view;
 
     const bool exactProxy = IsPresentationProxyTarget(view);
-    if (exactProxy || std::ranges::find(g_presentation.presentationViews, view) !=
-            g_presentation.presentationViews.end())
-    {
-        if (!AcceptPresentationDomain()) return view;
-        return PublishPresentationRedirect(exactProxy ? view : g_presentation.presentationProxyRtv.Get());
-    }
-
-    // Existing game RTVs survive a display-generation reset even when the
-    // proxy is recreated. Recover their exact backbuffer identity once.
-    D3D11_RENDER_TARGET_VIEW_DESC description{};
-    view->GetDesc(&description);
-    if (description.Format != DXGI_FORMAT_R10G10B10A2_UNORM)
-        return view;
-    ComPtr<ID3D11Resource> resource;
-    view->GetResource(&resource);
-    if (!RememberPresentationView(resource.Get(), view)) return view;
-    return PublishPresentationRedirect(g_presentation.presentationProxyRtv.Get());
+    if (!exactProxy && !IsRedirectedBackBuffer(view)) return view;
+    if (!AcceptPresentationDomain()) return view;
+    return PublishPresentationRedirect(
+        exactProxy ? view : g_presentation.presentationProxyRtv.Get());
 }
 
 using RenderTargetArray = std::array<ID3D11RenderTargetView*,
@@ -499,7 +511,7 @@ void ForwardDrawCall(ID3D11DeviceContext* context, FrameTraceKind kind,
     auto* record = FindContext(context);
     if (record == nullptr || record->*NextMember == nullptr) return;
     const auto next = record->*NextMember;
-    if (context == ownedPresentationContext)
+    if (context == ownedPresentationContext || insideLowerPresent)
     {
         InvokeCapturedNext(next, context, arguments...);
         return;

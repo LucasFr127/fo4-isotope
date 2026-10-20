@@ -122,6 +122,15 @@ bool IsFirstFp16RenderTarget(ID3D11RenderTargetView* view) noexcept
         RenderTargetMatchesResource(view, g_presentation.presentationProxy.Get());
 }
 
+[[nodiscard]] bool IsPresentationBackBufferTarget(ID3D11RenderTargetView* view) noexcept
+{
+    if (view == nullptr) return false;
+    D3D11_RENDER_TARGET_VIEW_DESC description{};
+    view->GetDesc(&description);
+    return description.Format == DXGI_FORMAT_R10G10B10A2_UNORM &&
+        RenderTargetMatchesResource(view, g_presentation.presentationBackBuffer.Get());
+}
+
 [[nodiscard]] bool CurrentPassConsumesSelectedScene(
     ID3D11DeviceContext* context,
     const DrawObservation& record) noexcept

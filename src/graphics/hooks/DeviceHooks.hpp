@@ -41,7 +41,6 @@ HRESULT STDMETHODCALLTYPE HookCreateRtv(
     const D3D11_RENDER_TARGET_VIEW_DESC* description,
     ID3D11RenderTargetView** view) noexcept;
 
-bool RememberPresentationView(ID3D11Resource*, ID3D11RenderTargetView*) noexcept;
 [[nodiscard]] bool InstallContextShadow(ID3D11DeviceContext*) noexcept;
 [[nodiscard]] bool InstallSwapChainShadow(IDXGISwapChain*, bool hdrDescriptor,
     bool ownsRendererClaim) noexcept;
