@@ -76,6 +76,8 @@ struct SettingsWindowView
     const char* armorEncodedStatus{"Off"};
     const char* rendererFailure{"none"};
     std::uint64_t resourceGeneration{}, frame{}, settingsGeneration{}, desiredSettingsGeneration{}, lutRequestGeneration{};
+    // Settings-layer pixel size; it can differ from the game window's client size.
+    std::uint32_t targetWidth{}, targetHeight{};
     SettingsDisplayView display;
     WeatherLutResponseView weatherLutResponse;
     SettingsPipboyView pipboy;

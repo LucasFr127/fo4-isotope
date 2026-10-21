@@ -24,6 +24,8 @@
 #include "FO4Isotope/TestShaders.generated.hpp"
 #include "d3d11/BorrowedFullscreenState.hpp"
 #include "resources/SharedUiComposition.hpp"
+#include "FO4Isotope/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/ui/SettingsWindow.hpp"
 
 #include <algorithm>
 #include <array>
@@ -1017,6 +1019,83 @@ void CheckOutputRecovery(Device& device)
     CompletePresentFrame(false, false);
 }
 
+bool AcceptSettingsInteraction(bool, std::uint32_t) noexcept { return true; }
+
+// Opens the production settings window on a popup whose client is half as wide
+// as the swap-chain-sized settings layer.
+struct SettingsOverlayWindow
+{
+    HWND window{CreateWindowExW(0, L"STATIC", L"FO4Isotope settings overlay test", WS_POPUP,
+        0, 0, kWidth / 2, kHeight, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr)};
+
+    explicit SettingsOverlayWindow(Device& device)
+    {
+        InitializeSettingsWindow(HdrSettings{}, HdrInterfaceSettings{});
+        RegisterHdrSettingsInteractionRequestHandler(&AcceptSettingsInteraction);
+        EnsureSettingsWindowBackend(true, window, device.device.Get(), device.context.Get());
+        FO4HDR_WARP_CHECK(TryActivateSettingsWindowInput().active);
+        FO4HDR_WARP_CHECK(SetSettingsWindowOpen(true) && SettingsWindowOpen());
+    }
+
+    ~SettingsOverlayWindow()
+    {
+        FO4HDR_WARP_CHECK(SetSettingsWindowOpen(false));
+        ShutdownSettingsWindowBackend();
+        RegisterHdrSettingsInteractionRequestHandler(nullptr);
+        if (window) DestroyWindow(window);
+    }
+
+    SettingsOverlayWindow(const SettingsOverlayWindow&) = delete;
+    SettingsOverlayWindow& operator=(const SettingsOverlayWindow&) = delete;
+
+    [[nodiscard]] SIZE ClientSize() const
+    {
+        RECT client{};
+        GetClientRect(window, &client);
+        return {client.right - client.left, client.bottom - client.top};
+    }
+};
+
+float SettingsLayerAlpha(SharedPresentationContextFixture& fixture, UINT x)
+{
+    auto* context = fixture.device.context.Get();
+    fixture.record->nextCopyResource(context, fixture.proxy.staging.Get(), g_uiTransport.ui.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    CheckHresult(context->Map(fixture.proxy.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+        "Read settings layer");
+    const auto alpha = Binary16ToFloat(static_cast<const std::uint16_t*>(mapped.pData)[x * 4 + 3]);
+    context->Unmap(fixture.proxy.staging.Get(), 0);
+    return alpha;
+}
+
+// After a semantic reset, fallback output rebuilds the settings layer once and
+// draws the open window onto it.
+void CheckSettingsOverlayFallback(Device& device)
+{
+    SharedPresentationContextFixture fixture(device);
+    SettingsOverlayWindow settings(device);
+    const auto render = [&] {
+        return RenderSdrPresentationProxy(fixture.chain.Get(), device.device.Get(),
+            device.context.Get());
+    };
+    const auto client = settings.ClientSize();
+    FO4HDR_WARP_CHECK(client.cx == kWidth / 2 && client.cy == kHeight);
+    ResetResources(true, true);
+    FO4HDR_WARP_CHECK(!DeveloperUiResourcesReady());
+    FO4HDR_WARP_CHECK(render() == PresentationResult::rendered);
+    FO4HDR_WARP_CHECK(DeveloperUiResourcesReady());
+    if (!DeveloperUiResourcesReady()) return;
+    // The clamped window covers its whole client, so it reaches the last layer
+    // column only when its client coordinates are scaled onto the layer.
+    FO4HDR_WARP_CHECK(SettingsLayerAlpha(fixture, 0) > 0.0F);
+    FO4HDR_WARP_CHECK(SettingsLayerAlpha(fixture, kWidth - 1) > 0.0F);
+    const auto* layer = g_uiTransport.ui.Get();
+    SetWindowPos(settings.window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    FO4HDR_WARP_CHECK(settings.ClientSize().cx == 0);
+    FO4HDR_WARP_CHECK(render() == PresentationResult::rendered);
+    FO4HDR_WARP_CHECK(g_uiTransport.ui.Get() == layer);
+}
+
 } // namespace
 
 void VerifyPresentationContext(Device& device)
@@ -1080,6 +1159,7 @@ void VerifyPresentationContext(Device& device)
         for (const bool empty : {false, true})
             CheckRetainedPartialCopy(native, productionDisabled, empty);
     CheckOutputRecovery(native);
+    CheckSettingsOverlayFallback(native);
 }
 
 } // namespace fo4hdr::tests::gpu

@@ -164,6 +164,8 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.settingsGeneration = g_settingsGeneration;
     result.desiredSettingsGeneration = g_desiredSettingsGeneration;
     result.lutRequestGeneration = g_lutRequestGeneration;
+    result.targetWidth = g_presentation.width;
+    result.targetHeight = g_presentation.height;
     result.display = UiDisplaySnapshot();
     result.weatherLutResponse = UiWeatherLutResponseSnapshot();
     result.pipboy = UiPipboySnapshot();

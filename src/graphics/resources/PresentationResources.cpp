@@ -369,7 +369,11 @@ bool PreparePresentationOutputColor(IDXGISwapChain* swapChain,
     if (!PresentationColorSupported(hdr) &&
         !PreparePresentationOutputColor(swapChain, device, context, hdr)) return false;
     if (!CreatePresentationProxy(swapChain, device)) return false;
-    return PresentationCompositionReady() || CreatePresentationComposition(device);
+    if (!PresentationCompositionReady() && !CreatePresentationComposition(device)) return false;
+    // A reset also retires the optional settings layer; output stays usable without it.
+    if (!DeveloperUiResourcesReady())
+        (void)CreateTextureViews(device, g_presentation.width, g_presentation.height);
+    return true;
 }
 
 [[nodiscard]] PresentationResourceCreation CreatePresentationResources(

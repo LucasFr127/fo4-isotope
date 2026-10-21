@@ -445,6 +445,22 @@ HdrSettingsInteractionState UpdateSettingsWindowInteraction() noexcept
     return interactionState;
 }
 
+// ImGui lays out in window client pixels but renders into the swap-chain-sized
+// settings layer, which DXGI stretches back over the client area.
+void BeginImGuiFrame() noexcept
+{
+    ImGui_ImplWin32_NewFrame();
+    ImGuiIO& io = ImGui::GetIO();
+    const ImVec2 target{static_cast<float>(g_view->targetWidth),
+        static_cast<float>(g_view->targetHeight)};
+    const bool sized = io.DisplaySize.x > 0.0F && io.DisplaySize.y > 0.0F &&
+        target.x > 0.0F && target.y > 0.0F;
+    io.DisplayFramebufferScale = sized ?
+        ImVec2(target.x / io.DisplaySize.x, target.y / io.DisplaySize.y) : ImVec2(1.0F, 1.0F);
+    ImGui_ImplDX11_NewFrame();
+    ImGui::NewFrame();
+}
+
 void BeginSettingsFrame(ImGuiIO& io) noexcept
 {
     io.MouseDrawCursor = true;
@@ -459,9 +475,7 @@ void BeginSettingsFrame(ImGuiIO& io) noexcept
             static_cast<float>(g_state.uiInterfaceDraft.scale);
         g_state.interfaceStylePending = false;
     }
-    ImGui_ImplWin32_NewFrame();
-    ImGui_ImplDX11_NewFrame();
-    ImGui::NewFrame();
+    BeginImGuiFrame();
     HdrSettingsHotkey capturedKey{};
     if (ConsumeHdrSettingsHotkeyCapture(capturedKey))
     {
@@ -532,9 +546,7 @@ bool DrawClosedSettingsOverlay() noexcept
         ImGuiIO& io = ImGui::GetIO();
         io.MouseDrawCursor = false;
         io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-        ImGui_ImplWin32_NewFrame();
-        ImGui_ImplDX11_NewFrame();
-        ImGui::NewFrame();
+        BeginImGuiFrame();
         ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_Always);
         constexpr auto lockFlags = ImGuiWindowFlags_NoDecoration |
             ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
