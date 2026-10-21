@@ -39,6 +39,18 @@ enum class GraphicsObservationFailure : std::uint32_t
     deviceLost
 };
 
+// The first post-creation check that released an HDR candidate before the
+// original-descriptor retry.
+enum class HdrCandidateRejection : std::uint8_t
+{
+    none,
+    creationFailed,
+    descriptorChanged,
+    outputUnavailable,
+    colorSpaceRejected,
+    shadersUnavailable
+};
+
 struct GraphicsObservationSnapshot
 {
     bool compiledIn{};
@@ -66,6 +78,12 @@ struct GraphicsObservationSnapshot
     bool candidateWindowed{};
     std::uint32_t candidateSwapEffect{};
     std::uint32_t candidateSwapChainFlags{};
+    // A created candidate's rejection, its creation result and created format.
+    HdrCandidateRejection hdrCandidateRejection{HdrCandidateRejection::none};
+    std::int32_t candidateCreateResult{};
+    std::uint32_t candidateCreatedFormat{};
+    // A foreign Present hook runs before final HDR composition overwrites it.
+    bool presentHookConflict{};
     bool liveSettingsThreadCompatible{};
     std::uint32_t qualifiedDrawThreadId{};
     std::uint32_t presentThreadId{};
@@ -153,5 +171,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept;
 void SetFrameTraceAutoReportSink(GraphicsDiagnosticSink sink) noexcept;
 [[nodiscard]] const char* GraphicsObservationFailureName(
     GraphicsObservationFailure failure) noexcept;
+[[nodiscard]] const char* HdrCandidateRejectionName(
+    HdrCandidateRejection rejection) noexcept;
 
 }  // namespace fo4hdr

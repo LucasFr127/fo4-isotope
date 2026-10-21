@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <string_view>
 
 namespace fo4hdr::tests::gpu {
 
@@ -114,6 +115,24 @@ void VerifyLoadedModuleExports()
     FO4HDR_WARP_CHECK(!LoadedModuleExports(nullptr));
     // The suite's HDR coverage depends on running without the ENB SDK export.
     FO4HDR_WARP_CHECK(!LoadedModuleExports("ENBGetSDKVersion"));
+}
+
+// An HDR add-on below the hook may answer the R10 request with an FP16 chain;
+// classification names it before any display or color-space check runs.
+void VerifyHdrCandidateRejection(Device& device)
+{
+    PresentationWindow window;
+    auto upgraded = CreatePresentationChain(device, window.handle, 16, 8);
+    CheckHresult(upgraded->ResizeBuffers(0, 0, 0, DXGI_FORMAT_R16G16B16A16_FLOAT, 0),
+        "Upgrade the requested R10 chain to FP16");
+    FO4HDR_WARP_CHECK(ClassifyCreatedHdrCandidate(upgraded.Get(), device.device.Get()) ==
+        HdrCandidateRejection::descriptorChanged);
+    FO4HDR_WARP_CHECK(ClassifyCreatedHdrCandidate(nullptr, device.device.Get()) ==
+        HdrCandidateRejection::creationFailed);
+    FO4HDR_WARP_CHECK(ClassifyCreatedHdrCandidate(upgraded.Get(), nullptr) ==
+        HdrCandidateRejection::creationFailed);
+    FO4HDR_WARP_CHECK(std::string_view{HdrCandidateRejectionName(
+        HdrCandidateRejection::descriptorChanged)} == "descriptor");
 }
 
 void VerifyPresentationResize(Device& device)

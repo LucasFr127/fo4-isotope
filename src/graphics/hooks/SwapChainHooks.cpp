@@ -161,6 +161,21 @@ HRESULT STDMETHODCALLTYPE HookResizeBuffers(
     }, []() noexcept { RecordAbiException(); });
 }
 
+bool ForeignPresentHookAbove(const SwapChainRecord& record, IDXGISwapChain* swapChain) noexcept
+{
+    const auto* table = record.shadow.data();
+    return AtomicPointerLoad(reinterpret_cast<void* const*>(swapChain)) != static_cast<const void*>(table) ||
+        AtomicPointerLoad(table + kSwapChainPresent) != reinterpret_cast<void*>(&HookPresent);
+}
+
+// Two pointer loads per owned HDR Present; the latch keeps the store one-time.
+static void NotePresentHookConflict(const SwapChainRecord& record, IDXGISwapChain* swapChain) noexcept
+{
+    if (!g_evidence.presentHookConflict.load(std::memory_order_relaxed) &&
+        ForeignPresentHookAbove(record, swapChain))
+        g_evidence.presentHookConflict.store(true, std::memory_order_relaxed);
+}
+
 bool PrepareOwnedPresent(const SwapChainRecord& record, UINT flags) noexcept
 {
     return record.ownsRendererClaim && (flags & DXGI_PRESENT_TEST) == 0;
@@ -197,6 +212,8 @@ HRESULT STDMETHODCALLTYPE HookPresent(
         if (record == nullptr || record->nextPresent == nullptr)
             return ForwardUnrecorded<Present>(E_FAIL, HookAt(kSwapChainPresent, &HookPresent),
                 swapChain, syncInterval, flags);
+        if (record->ownsRendererClaim && record->developerHdrDescriptor)
+            NotePresentHookConflict(*record, swapChain);
         if (record->ownsRendererClaim)
             TraceFramePresent(swapChain, FrameTraceKind::nativePresent, {syncInterval, flags});
         if (!PrepareOwnedPresent(*record, flags))

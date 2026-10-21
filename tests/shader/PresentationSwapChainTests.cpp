@@ -551,6 +551,29 @@ void VerifyNativeFacadeReacquisitionFailure(Device& device)
     CheckDebugMessages(device);
 }
 
+HRESULT STDMETHODCALLTYPE ForeignPresent(IDXGISwapChain*, UINT, UINT) { return S_OK; }
+
+// DearModdingUI writes its Present hook into the table of a chain Community
+// Shaders hands it; on the private chain that runs before final composition.
+void VerifyForeignPresentHook(Device& device)
+{
+    NativeFacadeFixture fixture(device);
+    auto* chain = fixture.native.Get();
+    auto& record = *fixture.record;
+    FO4HDR_WARP_CHECK(!ForeignPresentHookAbove(record, chain));
+    auto& slot = record.shadow[kSwapChainPresent];
+    auto* const owned = slot;
+    slot = reinterpret_cast<void*>(&ForeignPresent);
+    FO4HDR_WARP_CHECK(ForeignPresentHookAbove(record, chain));
+    slot = owned;
+    // Another table installed over the shadow also dispatches before this hook.
+    auto** object = reinterpret_cast<void***>(chain);
+    *object = record.originalVtable;
+    FO4HDR_WARP_CHECK(ForeignPresentHookAbove(record, chain));
+    *object = record.shadow.data();
+    FO4HDR_WARP_CHECK(!ForeignPresentHookAbove(record, chain));
+}
+
 void VerifyFacadeApplicationFormat(Device& device, IDXGISwapChain& facade,
     IDXGISwapChain& nativeChain)
 {
@@ -592,6 +615,7 @@ void VerifyPresentationSwapChain(Device& device)
     VerifyNativeFacadeProxyLifetime(device);
     VerifyNativeFacadeForeignBinding(device);
     VerifyNativeFacadeReacquisitionFailure(device);
+    VerifyForeignPresentHook(device);
     PresentationWindow window;
     auto native = CreatePresentationChain(device, window.handle, 16, 8);
     VerifyFacadeCreationGates(device, *native.Get());

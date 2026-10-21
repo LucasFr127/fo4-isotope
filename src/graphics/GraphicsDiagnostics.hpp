@@ -36,6 +36,10 @@ struct AtomicEvidence
     std::atomic<std::uint8_t> hdrCandidateDecision{};
     std::atomic<std::uint32_t> candidateSwapEffect{};
     std::atomic<std::uint32_t> candidateSwapChainFlags{};
+    std::atomic<bool> presentHookConflict{};
+    std::atomic<std::uint8_t> hdrCandidateRejection{};
+    std::atomic<std::int32_t> candidateCreateResult{};
+    std::atomic<std::uint32_t> candidateCreatedFormat{};
     std::atomic<std::uint32_t> failure{};
     std::atomic<std::uint64_t> deviceCreateCount{};
     std::atomic<std::uint64_t> deviceNextCallCount{};
@@ -92,6 +96,12 @@ struct AtomicEvidence
 extern AtomicEvidence g_evidence;
 void RecordFailure(GraphicsObservationFailure value) noexcept;
 void RecordAbiException() noexcept;
+// The caller's descriptor fields let a skipped-candidate warning name its blocker.
+void RecordHdrCandidateDecision(HdrCandidateDecision decision,
+    const DXGI_SWAP_CHAIN_DESC& description) noexcept;
+// The created format names a lower layer that replaced the requested R10 chain.
+void RecordHdrCandidateRejection(HdrCandidateRejection rejection, HRESULT result,
+    IDXGISwapChain* swapChain) noexcept;
 
 struct PipboyScreenViewObservation
 {

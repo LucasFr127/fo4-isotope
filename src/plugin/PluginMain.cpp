@@ -38,6 +38,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -260,19 +261,15 @@ void WarnOnce(std::atomic<bool>& reported, const char* message) noexcept
     }
 }
 
-// The fields name the requesting mod's setting, such as High FPS Physics Fix
-// sequential SwapEffect values or flip in exclusive fullscreen.
-void WarnUnsupportedSwapChain(std::atomic<bool>& reported,
-    const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
+// Formats one renderer warning per process; logging failures are contained.
+template <class... Arguments>
+void WarnOnceFormatted(std::atomic<bool>& reported,
+    std::format_string<Arguments...> message, Arguments&&... arguments) noexcept
 {
     if (reported.exchange(true, std::memory_order_acq_rel)) return;
     try
     {
-        REX::WARN("renderer hdr_active=false reason=swapchain-descriptor-unsupported "
-                  "swap_effect={} windowed={} flags={:#x} "
-                  "hint=use-windowed-flip-discard-or-discard-swap-effect",
-            graphics.candidateSwapEffect, graphics.candidateWindowed,
-            graphics.candidateSwapChainFlags);
+        REX::WARN(message, std::forward<Arguments>(arguments)...);
     }
     catch (...)
     {
@@ -281,6 +278,8 @@ void WarnUnsupportedSwapChain(std::atomic<bool>& reported,
 }
 
 // Creation skips an HDR candidate it already knows would be rejected; name why.
+// Descriptor fields name the requesting mod's setting, such as High FPS Physics
+// Fix sequential SwapEffect values or flip in exclusive fullscreen.
 void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
 {
     static std::atomic<bool> enbReported{};
@@ -297,19 +296,27 @@ void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphi
                                   "hint=enable-windows-hdr-before-starting-the-game");
         break;
     case fo4hdr::HdrCandidateDecision::descriptorUnsupported:
-        WarnUnsupportedSwapChain(descriptorReported, graphics);
+        WarnOnceFormatted(descriptorReported,
+            "renderer hdr_active=false reason=swapchain-descriptor-unsupported "
+            "swap_effect={} windowed={} flags={:#x} "
+            "hint=use-windowed-flip-discard-or-discard-swap-effect",
+            graphics.candidateSwapEffect, graphics.candidateWindowed,
+            graphics.candidateSwapChainFlags);
         break;
     case fo4hdr::HdrCandidateDecision::attempt:
         break;
     }
 }
 
-// Names the otherwise silent cases that keep HDR off because of another mod:
+// Names the otherwise silent cases that keep HDR off or hide another mod's UI:
 // a higher import interposer, such as Community Shaders upscaling or frame
-// generation, created the device itself, or creation skipped the HDR candidate.
+// generation, created the device itself; creation skipped or released the HDR
+// candidate; or a foreign Present hook draws before final composition.
 void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
 {
     static std::atomic<bool> bypassReported{};
+    static std::atomic<bool> rejectionReported{};
+    static std::atomic<bool> hookConflictReported{};
     const auto graphics = fo4hdr::ReadGraphicsObservation();
     const bool engineDeviceReady =
         snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
@@ -320,6 +327,21 @@ void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexce
                                  "hint=disable-community-shaders-upscaling-and-frame-generation");
     }
     ReportSkippedHdrCandidate(graphics);
+    // A created format other than R10 names a lower layer that replaced the chain.
+    if (graphics.hdrCandidateRejection != fo4hdr::HdrCandidateRejection::none)
+    {
+        WarnOnceFormatted(rejectionReported,
+            "renderer hdr_active=false reason=hdr-candidate-rejected stage={} "
+            "result={:#x} created_format={} hint=see-ki-0005",
+            fo4hdr::HdrCandidateRejectionName(graphics.hdrCandidateRejection),
+            static_cast<std::uint32_t>(graphics.candidateCreateResult),
+            graphics.candidateCreatedFormat);
+    }
+    if (graphics.presentHookConflict)
+    {
+        WarnOnce(hookConflictReported, "renderer present_hook_conflict=true "
+                                       "reason=foreign-hook-before-hdr-composition hint=see-ki-0002");
+    }
 }
 
 void ReportLifecycleGraphics(const fo4hdr::GameHdrSnapshot& snapshot) noexcept

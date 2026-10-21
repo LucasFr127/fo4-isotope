@@ -21,6 +21,7 @@ void VerifyPublicPresentationOutput(Device& device);
 
 void VerifyPresentationResize(Device& device);
 void VerifyLoadedModuleExports();
+void VerifyHdrCandidateRejection(Device& device);
 
 void VerifyPresentationSwapChain(Device& device);
 

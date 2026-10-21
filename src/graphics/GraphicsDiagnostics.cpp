@@ -27,6 +27,27 @@ void RecordAbiException() noexcept
     RecordFailure(GraphicsObservationFailure::abiException);
 }
 
+void RecordHdrCandidateDecision(HdrCandidateDecision decision,
+    const DXGI_SWAP_CHAIN_DESC& description) noexcept
+{
+    g_evidence.candidateWindowed.store(description.Windowed != FALSE, std::memory_order_relaxed);
+    g_evidence.candidateSwapEffect.store(description.SwapEffect, std::memory_order_relaxed);
+    g_evidence.candidateSwapChainFlags.store(description.Flags, std::memory_order_relaxed);
+    g_evidence.hdrCandidateDecision.store(static_cast<std::uint8_t>(decision),
+        std::memory_order_release);
+}
+
+void RecordHdrCandidateRejection(HdrCandidateRejection rejection, HRESULT result,
+    IDXGISwapChain* swapChain) noexcept
+{
+    DXGI_SWAP_CHAIN_DESC created{};
+    if (swapChain != nullptr) (void)swapChain->GetDesc(&created);
+    g_evidence.candidateCreateResult.store(result, std::memory_order_relaxed);
+    g_evidence.candidateCreatedFormat.store(created.BufferDesc.Format, std::memory_order_relaxed);
+    g_evidence.hdrCandidateRejection.store(static_cast<std::uint8_t>(rejection),
+        std::memory_order_release);
+}
+
 
 namespace
 {
@@ -61,6 +82,11 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
     snapshot.candidateWindowed = g_evidence.candidateWindowed.load();
     snapshot.candidateSwapEffect = g_evidence.candidateSwapEffect.load();
     snapshot.candidateSwapChainFlags = g_evidence.candidateSwapChainFlags.load();
+    snapshot.hdrCandidateRejection =
+        static_cast<HdrCandidateRejection>(g_evidence.hdrCandidateRejection.load());
+    snapshot.candidateCreateResult = g_evidence.candidateCreateResult.load();
+    snapshot.candidateCreatedFormat = g_evidence.candidateCreatedFormat.load();
+    snapshot.presentHookConflict = g_evidence.presentHookConflict.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();
     snapshot.qualifiedDrawThreadId = g_observedQualifiedDrawThread.load();
     snapshot.presentThreadId = g_observedPresentThread.load();
@@ -182,6 +208,20 @@ const char* GraphicsObservationFailureName(GraphicsObservationFailure value) noe
         std::pair{GraphicsObservationFailure::deviceLost, "device-lost"}
     };
     const auto found = std::ranges::find(names, value, &decltype(names)::value_type::first);
+    return found == names.end() ? "unknown" : found->second;
+}
+
+const char* HdrCandidateRejectionName(HdrCandidateRejection rejection) noexcept
+{
+    constexpr std::array names{
+        std::pair{HdrCandidateRejection::none, "none"},
+        std::pair{HdrCandidateRejection::creationFailed, "creation"},
+        std::pair{HdrCandidateRejection::descriptorChanged, "descriptor"},
+        std::pair{HdrCandidateRejection::outputUnavailable, "output"},
+        std::pair{HdrCandidateRejection::colorSpaceRejected, "color-space"},
+        std::pair{HdrCandidateRejection::shadersUnavailable, "shaders"}
+    };
+    const auto found = std::ranges::find(names, rejection, &decltype(names)::value_type::first);
     return found == names.end() ? "unknown" : found->second;
 }
 

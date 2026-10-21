@@ -51,6 +51,10 @@ void RetireApplicationPresentationBuffer(IDXGISwapChain*) noexcept;
 // True when any loaded module exports `symbol`; several may share a file name.
 [[nodiscard]] bool LoadedModuleExports(const char* symbol) noexcept;
 
+// The first post-creation check that a created HDR candidate fails, or none.
+[[nodiscard]] HdrCandidateRejection ClassifyCreatedHdrCandidate(
+    IDXGISwapChain* swapChain, ID3D11Device* device) noexcept;
+
 HRESULT WINAPI HookD3dCreate(
     IDXGIAdapter* adapter, D3D_DRIVER_TYPE driverType, HMODULE software,
     UINT flags, const D3D_FEATURE_LEVEL* levels, UINT levelCount,

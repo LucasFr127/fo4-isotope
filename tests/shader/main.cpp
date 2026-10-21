@@ -94,6 +94,7 @@ struct ShippingShaderRun
         RunSection(options.filter, "presentation-proxy", [&] {
             VerifyPresentationProxy(device);
             VerifyPresentationSwapChain(device);
+            VerifyHdrCandidateRejection(device);
         });
         RunSection(options.filter, "direct-presentation", [&] { VerifyDirectPresentation(device); });
         RunSection(options.filter, "shared-ui-composition", [&] { VerifySharedUiComposition(device); });

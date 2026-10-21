@@ -6,6 +6,13 @@
 
 namespace fo4hdr {
 
+struct SwapChainRecord;
+
+// A hook written into this chain's shadow table, or a table installed over it,
+// runs before final HDR composition, which then overwrites what it drew.
+[[nodiscard]] bool ForeignPresentHookAbove(
+    const SwapChainRecord& record, IDXGISwapChain* swapChain) noexcept;
+
 ULONG STDMETHODCALLTYPE HookSwapChainRelease(IDXGISwapChain* swapChain) noexcept;
 
 HRESULT STDMETHODCALLTYPE HookResizeBuffers(

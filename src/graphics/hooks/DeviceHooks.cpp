@@ -677,13 +677,15 @@ struct HdrCandidateValidation
     }
 };
 
-[[nodiscard]] bool ValidateCreatedHdrCandidate(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
+HdrCandidateRejection ClassifyCreatedHdrCandidate(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
 {
-    if (swapChain == nullptr || device == nullptr) return false;
-    if (!ValidCreatedHdrDescriptor(swapChain)) return false;
+    if (swapChain == nullptr || device == nullptr) return HdrCandidateRejection::creationFailed;
+    if (!ValidCreatedHdrDescriptor(swapChain)) return HdrCandidateRejection::descriptorChanged;
     HdrCandidateValidation validation;
-    return validation.AcquireOutput(swapChain, device) && validation.ValidateDisplay(swapChain) &&
-        validation.ValidateTransitions();
+    if (!validation.AcquireOutput(swapChain, device)) return HdrCandidateRejection::outputUnavailable;
+    if (!validation.ValidateDisplay(swapChain) || !validation.ValidateTransitions())
+        return HdrCandidateRejection::colorSpaceRejected;
+    return HdrCandidateRejection::none;
 }
 
 bool LoadedModuleExports(const char* symbol) noexcept
@@ -696,17 +698,6 @@ bool LoadedModuleExports(const char* symbol) noexcept
     const auto count = std::min<std::size_t>(needed / sizeof(HMODULE), modules.size());
     return std::any_of(modules.begin(), modules.begin() + count,
         [symbol](HMODULE module) { return module != nullptr && GetProcAddress(module, symbol) != nullptr; });
-}
-
-// The descriptor fields let the skipped-candidate warning name its blocker.
-static void RecordCandidateDecision(HdrCandidateDecision decision,
-    const DXGI_SWAP_CHAIN_DESC& description) noexcept
-{
-    g_evidence.candidateWindowed.store(description.Windowed != FALSE, std::memory_order_relaxed);
-    g_evidence.candidateSwapEffect.store(description.SwapEffect, std::memory_order_relaxed);
-    g_evidence.candidateSwapChainFlags.store(description.Flags, std::memory_order_relaxed);
-    g_evidence.hdrCandidateDecision.store(static_cast<std::uint8_t>(decision),
-        std::memory_order_release);
 }
 
 struct D3dCreationRequest
@@ -816,16 +807,20 @@ private:    void ReleaseFailedCreationClaim()
             .displayHdr10 = DisplayHdr10(description.OutputWindow),
             .facadeRequired = g_configuration.productionRequested,
             .facadeDescriptorSupported = PresentationFacadeDescriptorSupported(description)});
-        RecordCandidateDecision(decision, description);
+        RecordHdrCandidateDecision(decision, description);
         return decision == HdrCandidateDecision::attempt;
     }
 
-    [[nodiscard]] bool CandidateUsable()
+    [[nodiscard]] HdrCandidateRejection CandidateRejection()
     {
-        return SUCCEEDED(result_) && HasCreatedObject(request_.swapChain) &&
-            HasCreatedObject(request_.device) &&
-            ValidateCreatedHdrCandidate(*request_.swapChain, *request_.device) &&
-            BuildReplacementShaders(*request_.device);
+        if (FAILED(result_)) return HdrCandidateRejection::creationFailed;
+        // Classification rejects a missing output as a failed creation.
+        const auto rejection = ClassifyCreatedHdrCandidate(
+            HasCreatedObject(request_.swapChain) ? *request_.swapChain : nullptr,
+            HasCreatedObject(request_.device) ? *request_.device : nullptr);
+        if (rejection != HdrCandidateRejection::none) return rejection;
+        return BuildReplacementShaders(*request_.device) ? HdrCandidateRejection::none :
+            HdrCandidateRejection::shadersUnavailable;
     }
 
     void RetryOriginalDescriptor()
@@ -847,9 +842,11 @@ private:    void ReleaseFailedCreationClaim()
         modified.SampleDesc.Quality = 0;
         modified.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         if (!g_configuration.forceHdrSwapChainFailure) result_ = request_.Invoke(&modified);
-        if (!CandidateUsable())
+        if (const auto rejection = CandidateRejection(); rejection != HdrCandidateRejection::none)
         {
             if (SUCCEEDED(result_)) RecordFailure(GraphicsObservationFailure::hdrAttemptFailed);
+            RecordHdrCandidateRejection(rejection, result_,
+                HasCreatedObject(request_.swapChain) ? *request_.swapChain : nullptr);
             ResetReplacementShaders();
             request_.ClearOutputs();
             RetryOriginalDescriptor();
