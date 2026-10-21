@@ -439,7 +439,14 @@ struct KeyGesture
     return consumed;
 }
 
-[[nodiscard]] bool ProcessShortcut(const KeyGesture& key, bool windowOpen) noexcept
+[[nodiscard]] bool InteractionOwnsInput() noexcept
+{
+    const auto state = ReadHdrSettingsInteractionState();
+    return state == HdrSettingsInteractionState::opening ||
+        state == HdrSettingsInteractionState::active;
+}
+
+[[nodiscard]] bool ProcessShortcut(const KeyGesture& key) noexcept
 {
     bool consumed{};
     if (key.down)
@@ -447,7 +454,9 @@ struct KeyGesture
             UnpackHotkey(g_toggleHotkey.load(std::memory_order_acquire)),
             key.key, CurrentModifiers(), key.repeat);
     const auto toggle = key.up && g_shortcutLatch.KeyUp(key.key);
-    if (toggle && RequestHdrSettingsInteraction(!windowOpen))
+    // Follow input ownership, not the drawn window: frames that skip the
+    // settings draw must still let the shortcut release what it acquired.
+    if (toggle && RequestHdrSettingsInteraction(!InteractionOwnsInput()))
         g_toggleCount.fetch_add(1, std::memory_order_release);
     return consumed;
 }
@@ -458,9 +467,11 @@ struct KeyGesture
         message == WM_SETFOCUS || message == WM_KILLFOCUS;
 }
 
-void LoseInputFocus(bool windowOpen) noexcept
+void LoseInputFocus() noexcept
 {
-    if (windowOpen) (void)RequestHdrSettingsInteraction(false);
+    CloseInteractionIfPending();
+    // Toggles queued while no frame drew the window must not reopen it later.
+    g_toggleCount.store(0, std::memory_order_release);
     g_resetRequested.store(true, std::memory_order_release);
     g_windowOpen.store(false, std::memory_order_release);
     g_focusLoss.store(true, std::memory_order_release);
@@ -517,12 +528,12 @@ struct GestureConsumption
     ApplyShortcutReset();
     const auto key = ReadKeyGesture(input);
     const auto capture = windowOpen && g_hotkeyCapture.load(std::memory_order_acquire);
-    const auto shortcutConsumed = capture ? CaptureShortcut(key) : ProcessShortcut(key, windowOpen);
+    const auto shortcutConsumed = capture ? CaptureShortcut(key) : ProcessShortcut(key);
     const auto uiInput = windowOpen && IsUiInput(input.message);
     const auto capturedGesture = g_capturedGestureFilter.Suppress(input.message,
         key.key, static_cast<std::uintptr_t>(input.lParam), {key.down && shortcutConsumed, capture});
     if (uiInput && !capturedGesture) (void)Enqueue(input.message, input.wParam, input.lParam);
-    if (input.message == WM_KILLFOCUS) LoseInputFocus(windowOpen);
+    if (input.message == WM_KILLFOCUS) LoseInputFocus();
     return ConsumeGameInput(input.message, windowOpen, key, {shortcutConsumed, capturedGesture});
 }
 
@@ -768,14 +779,8 @@ void DrainHdrSettingsInput() noexcept
 
 bool ConsumeHdrSettingsToggle() noexcept
 {
-    auto count = g_toggleCount.load(std::memory_order_acquire);
-    while (count != 0)
-    {
-        if (g_toggleCount.compare_exchange_weak(count, count - 1U,
-                std::memory_order_acq_rel, std::memory_order_acquire))
-            return true;
-    }
-    return false;
+    // Paired toggles between drawn frames cancel instead of replaying open-then-close.
+    return (g_toggleCount.exchange(0, std::memory_order_acq_rel) & 1U) != 0;
 }
 
 bool ConsumeHdrSettingsFocusLoss() noexcept

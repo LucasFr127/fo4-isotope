@@ -245,6 +245,39 @@ void TestFunctionKeyShortcut(HWND window)
     FO4HDR_CHECK(!ConsumeHdrSettingsToggle());
 }
 
+void PressFunctionKeyShortcut(HWND window)
+{
+    constexpr LPARAM f10Scan = 0x44U << 16U;
+    FO4HDR_CHECK(SendMessageW(window, WM_SYSKEYDOWN, VK_F10, f10Scan) == 0);
+    FO4HDR_CHECK(SendMessageW(window, WM_SYSKEYUP, VK_F10, f10Scan | (3ULL << 30U)) == 0);
+}
+
+void TestUndrawnShortcutOwnership(HWND window)
+{
+    if (!ConfigureShortcutModifiers(false)) return;
+    RegisterHdrSettingsInteractionRequestHandler(&RecordShortcutInteraction);
+    SetHdrSettingsHotkey({VK_F10, 0U});
+    // No frame draws the window, so it never reports itself open.
+    SetHdrSettingsInputCapture(false, false, false);
+    const auto openRequests = g_shortcutOpenRequests;
+    const auto closeRequests = g_shortcutCloseRequests;
+    PressFunctionKeyShortcut(window);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    PressFunctionKeyShortcut(window);
+    FO4HDR_CHECK(g_shortcutOpenRequests == openRequests + 1);
+    FO4HDR_CHECK(g_shortcutCloseRequests == closeRequests + 1);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::inactive);
+    FO4HDR_CHECK(!ConsumeHdrSettingsToggle());
+
+    PressFunctionKeyShortcut(window);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::active);
+    SendMessageW(window, WM_KILLFOCUS, 0, 0);
+    FO4HDR_CHECK(g_shortcutCloseRequests == closeRequests + 2);
+    FO4HDR_CHECK(ReadHdrSettingsInteractionState() == HdrSettingsInteractionState::inactive);
+    FO4HDR_CHECK(!ConsumeHdrSettingsToggle());
+    FO4HDR_CHECK(ConsumeHdrSettingsFocusLoss());
+}
+
 void TestUnownedShortcutForwarding(HWND window)
 {
     if (!ConfigureShortcutModifiers(false)) return;
@@ -394,6 +427,7 @@ void RunHdrShortcutWindowProcedureTest()
         if (!TestShortcutChord(window, alt)) return;
 
     TestFunctionKeyShortcut(window);
+    TestUndrawnShortcutOwnership(window);
     TestUnownedShortcutForwarding(window);
     TestNativeMenuInteraction(window);
     TestHdrSubclassReactivation(window);
