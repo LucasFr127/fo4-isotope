@@ -23,7 +23,7 @@ $savedEnvironment = Get-DeploymentEnvironment
 
 function Assert-DeployRejected {
     param([string]$Reason)
-    try { & $deploy -Runtime '1.10.163' -Confirm:$false }
+    try { & $deploy -Confirm:$false }
     catch {
         if ($_.Exception.Message.Contains($Reason, [StringComparison]::Ordinal)) { return }
         throw
@@ -32,11 +32,9 @@ function Assert-DeployRejected {
 }
 
 function Test-DeploymentRejections {
-    & $deploy -Runtime '1.10.163' -WhatIf
-    $validationComplete = (Test-Path (Join-Path $project 'runtime-checked')) -and
-        (Test-Path (Join-Path $project 'metadata-checked'))
-    if ((Test-Path $destination) -or -not $validationComplete) {
-        throw 'WhatIf must validate the runtime and metadata without creating a deployment.'
+    & $deploy -WhatIf
+    if ((Test-Path $destination) -or -not (Test-Path (Join-Path $project 'metadata-checked'))) {
+        throw 'WhatIf must validate metadata without creating a deployment.'
     }
     $extraFile = Join-Path $stage 'unexpected.txt'
     [IO.File]::WriteAllText($extraFile, 'extra')
@@ -89,7 +87,7 @@ function Test-DeploymentOwnedFiles {
     $ownedManifest = Join-Path $destination '.fo4isotope-owned-files.json'
     [IO.File]::WriteAllText($ownedManifest,
         '{"files":["obsolete.txt","F4SE/Plugins/FO4Isotope/Personal.ini","F4SE\\Plugins\\FO4Isotope\\Default.ini","F4SE/Plugins/FO4Isotope/Weather.ini"]}')
-    & $deploy -Runtime '1.10.163' -Confirm:$false
+    & $deploy -Confirm:$false
     Assert-PreservedDeploymentFiles
     Assert-DeployedFiles $ownedManifest
 }
@@ -177,11 +175,9 @@ function Copy-DeploymentScripts {
 
 function Write-RuntimeValidationStub {
     # Game/PE/toolchain checks are stubbed; cleanup, stage validation and copying use the real scripts.
-    [IO.File]::WriteAllText((Join-Path $project 'scripts/validate-runtime.ps1'), @"
-param([string]`$Runtime)
-if (`$Runtime -cne '1.10.163') { throw 'Unexpected runtime validation request.' }
-[IO.File]::WriteAllText((Join-Path `$PSScriptRoot '../runtime-checked'), 'checked')
-"@)
+    # Deployment must not depend on the exact-hash runtime audit.
+    [IO.File]::WriteAllText((Join-Path $project 'scripts/validate-runtime.ps1'),
+        "throw 'Deployment ran the exact-hash runtime audit.'")
 }
 
 function Write-MetadataValidationStub {

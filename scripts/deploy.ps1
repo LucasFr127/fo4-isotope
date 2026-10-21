@@ -1,18 +1,14 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = "High")]
 param(
-    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
-    [string]$Runtime = $env:FO4HDR_RUNTIME,
-
     [switch]$AllowUnconventionalDestination
 )
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
-& (Join-Path $PSScriptRoot "validate-runtime.ps1") `
-    -Runtime $Runtime
-
+# Deployment checks only the staged universal DLL; exact game, F4SE and
+# Address Library identity is validate-runtime.ps1's separate audit.
 if (-not $env:FO4_MOD_ROOT) {
     throw "FO4_MOD_ROOT is not set."
 }
@@ -107,7 +103,7 @@ $obsolete = @(
 
 if ($PSCmdlet.ShouldProcess(
     $destination,
-    "Deploy FO4Isotope $Runtime"
+    "Deploy FO4Isotope"
 )) {
     New-Item -ItemType Directory -Force $destination |
         Out-Null
@@ -135,7 +131,6 @@ if ($PSCmdlet.ShouldProcess(
 
     [ordered]@{
         schemaVersion = 1
-        runtime = $Runtime
         deployedAtUtc = [DateTime]::UtcNow.ToString("o")
         files = $newRelativeFiles
     } | ConvertTo-Json -Depth 8 |
