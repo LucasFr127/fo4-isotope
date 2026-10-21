@@ -448,6 +448,7 @@ HdrSettingsInteractionState UpdateSettingsWindowInteraction() noexcept
 void BeginSettingsFrame(ImGuiIO& io) noexcept
 {
     io.MouseDrawCursor = true;
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
     DrainHdrSettingsInput();
     if (g_state.interfaceStylePending)
     {
@@ -526,9 +527,11 @@ bool DrawClosedSettingsOverlay() noexcept
     SetHdrSettingsInputCapture(false, false, false);
     if (g_view->developerMode && ExposureLockVisible())
     {
-        // Visible during gameplay without taking cursor or input ownership.
+        // Visible during gameplay without taking cursor or input ownership;
+        // the Win32 backend would otherwise show the OS arrow over the game.
         ImGuiIO& io = ImGui::GetIO();
         io.MouseDrawCursor = false;
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
         ImGui_ImplWin32_NewFrame();
         ImGui_ImplDX11_NewFrame();
         ImGui::NewFrame();
