@@ -283,19 +283,21 @@ struct ObservedRuntimeIdentity
     return hash.empty() ? "unavailable" : hash;
 }
 
-void ReportStartupException(const std::exception* error) noexcept
+// After admission the plugin stays loaded, so its state is reported as resident.
+void ReportStartupException(const std::exception* error, bool resident) noexcept
 {
     try
     {
+        const auto state = resident ? "resident=true" : "active=false";
         if (error != nullptr)
         {
             REX::CRITICAL(
-                "plugin active=false reason=startup-exception detail={}",
-                error->what());
+                "plugin {} reason=startup-exception detail={}",
+                state, error->what());
         }
         else
         {
-            REX::CRITICAL("plugin active=false reason=startup-exception");
+            REX::CRITICAL("plugin {} reason=startup-exception", state);
         }
     }
     catch (...)
@@ -746,12 +748,12 @@ F4SE_PLUGIN_PRELOAD(const F4SE::PreLoadInterface* a_f4se) noexcept
     }
     catch (const std::exception& error)
     {
-        ReportStartupException(&error);
+        ReportStartupException(&error, StartupPrepared());
         return StartupPrepared();
     }
     catch (...)
     {
-        ReportStartupException(nullptr);
+        ReportStartupException(nullptr, StartupPrepared());
         return StartupPrepared();
     }
 }
@@ -776,11 +778,11 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se) noexcept
     }
     catch (const std::exception& error)
     {
-        ReportStartupException(&error);
+        ReportStartupException(&error, StartupPrepared());
     }
     catch (...)
     {
-        ReportStartupException(nullptr);
+        ReportStartupException(nullptr, StartupPrepared());
     }
     // An admitted startup has published callbacks, so F4SE must not unload it.
     const auto resident = StartupPrepared();
