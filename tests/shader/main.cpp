@@ -88,6 +88,7 @@ struct ShippingShaderRun
                 *device.device.Get(), *device.context.Get(), false);
         });
         RunSection(options.filter, "context-query-safety", VerifyContextQuerySafety);
+        RunSection(options.filter, "module-exports", VerifyLoadedModuleExports);
 #if !defined(FO4HDR_DISABLE_FRAME_TRACE)
         RunSection(options.filter, "frame-trace", [&] { VerifyFrameTrace(device); });
 #endif

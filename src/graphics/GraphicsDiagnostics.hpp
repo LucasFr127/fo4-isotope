@@ -32,6 +32,7 @@ struct AtomicEvidence
     std::atomic<bool> performanceGpuComplete{};
     std::atomic<bool> performanceCpuBudgetPassed{};
     std::atomic<bool> performanceGpuBudgetPassed{};
+    std::atomic<bool> enbDetected{};
     std::atomic<std::uint32_t> failure{};
     std::atomic<std::uint64_t> deviceCreateCount{};
     std::atomic<std::uint64_t> deviceNextCallCount{};

@@ -31,6 +31,7 @@
 
 #include <wrl/client.h>
 #include <Windows.h>
+#include <Psapi.h>
 #include <intrin.h>
 #include <algorithm>
 #include <array>
@@ -680,6 +681,27 @@ struct HdrCandidateValidation
         validation.ValidateTransitions();
 }
 
+bool LoadedModuleExports(const char* symbol) noexcept
+{
+    std::array<HMODULE, 1024> modules{};
+    DWORD needed{};
+    if (symbol == nullptr || !K32EnumProcessModules(GetCurrentProcess(), modules.data(),
+            static_cast<DWORD>(sizeof(modules)), &needed))
+        return false;
+    const auto count = std::min<std::size_t>(needed / sizeof(HMODULE), modules.size());
+    return std::any_of(modules.begin(), modules.begin() + count,
+        [symbol](HMODULE module) { return module != nullptr && GetProcAddress(module, symbol) != nullptr; });
+}
+
+// ENB ships as a d3d11.dll proxy exporting its SDK. Its SDR post-processing
+// runs beneath this hook and would regrade the HDR10 output, so keep SDR.
+[[nodiscard]] static bool EnbBlocksHdr() noexcept
+{
+    if (!LoadedModuleExports("ENBGetSDKVersion")) return false;
+    g_evidence.enbDetected.store(true, std::memory_order_release);
+    return true;
+}
+
 struct D3dCreationRequest
 {
     IDXGIAdapter* adapter{};
@@ -739,7 +761,7 @@ public:
     {
         g_evidence.deviceCreateCount.fetch_add(1, std::memory_order_relaxed);
         owner_ = ClaimRenderer();
-        attemptHdr_ = owner_ && HdrPathRequested();
+        attemptHdr_ = owner_ && HdrPathRequested() && !EnbBlocksHdr();
         if (attemptHdr_) CreateHdrCandidate();
         else result_ = request_.Invoke(request_.description);
         g_evidence.lastDeviceResult.store(result_, std::memory_order_release);

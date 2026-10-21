@@ -2,6 +2,7 @@
 
 #include "ShaderTestSuite.hpp"
 #include "hooks/ContextHooks.hpp"
+#include "hooks/DeviceHooks.hpp"
 #include "hooks/HookRecords.hpp"
 #include "hooks/SwapChainHooks.hpp"
 #include "LiveSettings.hpp"
@@ -105,6 +106,15 @@ struct PresentationResizeHookScope
         g_referenceHealthy = referenceHealthy;
     }
 };
+
+void VerifyLoadedModuleExports()
+{
+    FO4HDR_WARP_CHECK(LoadedModuleExports("GetProcAddress"));
+    FO4HDR_WARP_CHECK(!LoadedModuleExports("FO4IsotopeNoSuchExport"));
+    FO4HDR_WARP_CHECK(!LoadedModuleExports(nullptr));
+    // The suite's HDR coverage depends on running without the ENB SDK export.
+    FO4HDR_WARP_CHECK(!LoadedModuleExports("ENBGetSDKVersion"));
+}
 
 void VerifyPresentationResize(Device& device)
 {

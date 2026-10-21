@@ -60,6 +60,7 @@ struct GraphicsObservationSnapshot
     bool performanceGpuBudgetPassed{};
     bool d3dIatOwned{};
     bool d3dIatDisplaced{};
+    bool enbDetected{};
     bool liveSettingsThreadCompatible{};
     std::uint32_t qualifiedDrawThreadId{};
     std::uint32_t presentThreadId{};

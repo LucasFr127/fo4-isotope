@@ -20,6 +20,7 @@ void VerifyDirectPresentation(Device& device);
 void VerifyPublicPresentationOutput(Device& device);
 
 void VerifyPresentationResize(Device& device);
+void VerifyLoadedModuleExports();
 
 void VerifyPresentationSwapChain(Device& device);
 

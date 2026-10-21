@@ -312,35 +312,47 @@ void WriteGraphicsDiagnostic(std::string_view message)
     REX::INFO("{}", message);
 }
 
-// Names the otherwise silent case where a higher import interposer, such as
-// Community Shaders upscaling or frame generation, creates the device itself.
-void ReportBypassedDeviceCreation(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
+// Logs one renderer warning per process; logging failures are contained.
+void WarnOnce(std::atomic<bool>& reported, const char* message) noexcept
 {
-    static std::atomic<bool> reported{};
-    const auto graphics = fo4hdr::ReadGraphicsObservation();
-    const bool engineDeviceReady =
-        snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
-    if (!fo4hdr::DeviceCreationBypassed(
-            graphics.initialized, graphics.deviceCreateCount, engineDeviceReady) ||
-        reported.exchange(true, std::memory_order_acq_rel))
-    {
-        return;
-    }
+    if (reported.exchange(true, std::memory_order_acq_rel)) return;
     try
     {
-        REX::WARN("renderer active=false reason=device-creation-bypassed "
-                  "hint=disable-community-shaders-upscaling-and-frame-generation");
+        REX::WARN("{}", message);
     }
     catch (...)
     {
-        ::OutputDebugStringA("FO4Isotope: device-creation bypass logging failed.\n");
+        ::OutputDebugStringA("FO4Isotope: renderer warning logging failed.\n");
+    }
+}
+
+// Names the otherwise silent cases that keep HDR off because of another mod:
+// a higher import interposer, such as Community Shaders upscaling or frame
+// generation, created the device itself, or ENB would post-process in SDR.
+void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
+{
+    static std::atomic<bool> bypassReported{};
+    static std::atomic<bool> enbReported{};
+    const auto graphics = fo4hdr::ReadGraphicsObservation();
+    const bool engineDeviceReady =
+        snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
+    if (fo4hdr::DeviceCreationBypassed(
+            graphics.initialized, graphics.deviceCreateCount, engineDeviceReady))
+    {
+        WarnOnce(bypassReported, "renderer active=false reason=device-creation-bypassed "
+                                 "hint=disable-community-shaders-upscaling-and-frame-generation");
+    }
+    if (graphics.enbDetected)
+    {
+        WarnOnce(enbReported, "renderer hdr_active=false reason=enb-detected "
+                              "hint=remove-enb-to-enable-hdr");
     }
 }
 
 void ReportLifecycleGraphics(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
 {
     fo4hdr::ReportGraphicsLifecycle(&WriteGraphicsDiagnostic);
-    ReportBypassedDeviceCreation(snapshot);
+    ReportRendererCompatibility(snapshot);
 }
 
 }  // namespace
