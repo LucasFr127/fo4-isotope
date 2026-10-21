@@ -222,70 +222,42 @@ void ScreenUiSubmitHook(RE::UI* ui) noexcept
         g_screenObserver.installed.store(false, std::memory_order_release);
     }
 }
-struct RendererKeyIdentity
-{
-    std::uint64_t storageId{};
-    std::uintptr_t storageRva{};
-    std::uint64_t codeId{};
-    std::uintptr_t codeRva{};
-    std::span<const std::uint8_t> codeBytes;
-};
+// Pinned RVAs give each call's offset inside its caller; IDs locate everything.
 template<std::size_t N>
 struct BoundaryIdentity
 {
-    std::uintptr_t targetRva{};
     std::uint64_t targetId{};
-    std::span<const std::uint8_t> targetBytes;
     std::array<std::uintptr_t, N> callerRvas{};
     std::array<std::uint64_t, N> callerIds{};
     std::array<std::uintptr_t, N> callRvas{};
-    std::array<detail::CallBytes, N> callBytes{};
-    const std::array<RendererKeyIdentity, 5>* rendererKeys{};
+    const std::array<std::uint64_t, 5>* rendererKeyIds{};
 };
 namespace og {
 using namespace fo4hdr::generated::og;
-constexpr std::array<RendererKeyIdentity, 5> kKeys{{
-    {kHudUiKeyStorageId, kHudUiKeyStorageRva, kHudUiKeyGetterId, kHudUiKeyGetterRva, kHudUiKeyGetterBytes},
-    {kFlatUiKeyStorageId, kFlatUiKeyStorageRva, kFlatUiKeyGetterId, kFlatUiKeyGetterRva, kFlatUiKeyGetterBytes},
-    {kArmorUiKeyStorageId, kArmorUiKeyStorageRva, kArmorUiKeyGetterId, kArmorUiKeyGetterRva, kArmorUiKeyGetterBytes},
-    {kRainUiKeyStorageId, kRainUiKeyStorageRva, kRainUiKeyGetterId, kRainUiKeyGetterRva, kRainUiKeyGetterBytes},
-    {kWorkshopUiKeyStorageId, kWorkshopUiKeyStorageRva, kWorkshopUiKeyInitializerId,
-        kWorkshopUiKeyInitializerRva, kWorkshopUiKeyInitializerBytes}
-}};
-constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetRva, kArmorUiTargetId,
-    kArmorUiTargetBytes, kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, kArmorUiCallBytes, &kKeys};
-constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetRva, kScreenUiTargetId,
-    kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas, kScreenUiCallBytes};
+constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
+    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
+    kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
+constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
+    kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
 }
 namespace ng {
 using namespace fo4hdr::generated::ng;
-constexpr std::array<RendererKeyIdentity, 5> kKeys{{
-    {kHudUiKeyStorageId, kHudUiKeyStorageRva, kHudUiKeyGetterId, kHudUiKeyGetterRva, kHudUiKeyGetterBytes},
-    {kFlatUiKeyStorageId, kFlatUiKeyStorageRva, kFlatUiKeyGetterId, kFlatUiKeyGetterRva, kFlatUiKeyGetterBytes},
-    {kArmorUiKeyStorageId, kArmorUiKeyStorageRva, kArmorUiKeyGetterId, kArmorUiKeyGetterRva, kArmorUiKeyGetterBytes},
-    {kRainUiKeyStorageId, kRainUiKeyStorageRva, kRainUiKeyGetterId, kRainUiKeyGetterRva, kRainUiKeyGetterBytes},
-    {kWorkshopUiKeyStorageId, kWorkshopUiKeyStorageRva, kWorkshopUiKeyInitializerId,
-        kWorkshopUiKeyInitializerRva, kWorkshopUiKeyInitializerBytes}
-}};
-constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetRva, kArmorUiTargetId,
-    kArmorUiTargetBytes, kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, kArmorUiCallBytes, &kKeys};
-constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetRva, kScreenUiTargetId,
-    kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas, kScreenUiCallBytes};
+constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
+    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
+    kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
+constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
+    kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
 }
 namespace ae {
 using namespace fo4hdr::generated::ae;
-constexpr std::array<RendererKeyIdentity, 5> kKeys{{
-    {kHudUiKeyStorageId, kHudUiKeyStorageRva, kHudUiKeyGetterId, kHudUiKeyGetterRva, kHudUiKeyGetterBytes},
-    {kFlatUiKeyStorageId, kFlatUiKeyStorageRva, kFlatUiKeyGetterId, kFlatUiKeyGetterRva, kFlatUiKeyGetterBytes},
-    {kArmorUiKeyStorageId, kArmorUiKeyStorageRva, kArmorUiKeyGetterId, kArmorUiKeyGetterRva, kArmorUiKeyGetterBytes},
-    {kRainUiKeyStorageId, kRainUiKeyStorageRva, kRainUiKeyGetterId, kRainUiKeyGetterRva, kRainUiKeyGetterBytes},
-    {kWorkshopUiKeyStorageId, kWorkshopUiKeyStorageRva, kWorkshopUiKeyInitializerId,
-        kWorkshopUiKeyInitializerRva, kWorkshopUiKeyInitializerBytes}
-}};
-constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetRva, kArmorUiTargetId,
-    kArmorUiTargetBytes, kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, kArmorUiCallBytes, &kKeys};
-constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetRva, kScreenUiTargetId,
-    kScreenUiTargetBytes, kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas, kScreenUiCallBytes};
+constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
+    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
+    kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
+constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
+    kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
 }
 template<std::size_t N, class Submit>
 class ObserverInstallation
@@ -307,17 +279,13 @@ class ObserverInstallation
         return ContainsBytes(text_.GetAddress(), text_.GetSize(), address, size) &&
             Executable(reinterpret_cast<void*>(address), size, reinterpret_cast<void*>(base_));
     }
-    bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    { return detail::MatchesMapping(mappings_, base_, id, rva); }
-    bool Target() const
+    std::uintptr_t Resolve(std::uint64_t id) const
+    { return detail::ResolveMapping(mappings_, base_, id); }
+    bool Target()
     {
-        return Mapping(identity_.targetId, identity_.targetRva) && target_ != hook_ &&
-            Code(target_, identity_.targetBytes.size()) && MatchesBytes(target_, identity_.targetBytes);
-    }
-    bool MatchesRuntime() const
-    {
-        const auto* profile = fo4hdr::ActiveRuntimeProfile();
-        return base_ && profile && module_.GetFileVersion().pack() == profile->runtimeVersion;
+        const auto rva = Resolve(identity_.targetId);
+        target_ = rva ? base_ + rva : 0;
+        return target_ && target_ != hook_ && Code(target_, 1);
     }
     bool KeyStorage(std::uintptr_t rva) const
     {
@@ -333,17 +301,15 @@ class ObserverInstallation
             ReadableDataProtection(info.Protect) &&
             Read(reinterpret_cast<void*>(address), &entry, sizeof(entry));
     }
-    bool RendererKey(const RendererKeyIdentity& key) const
+    bool RendererKey(std::uint64_t id, std::uintptr_t& rva) const
     {
-        return Mapping(key.storageId, key.storageRva) &&
-            Mapping(key.codeId, key.codeRva) && KeyStorage(key.storageRva) &&
-            Code(base_ + key.codeRva, key.codeBytes.size()) &&
-            MatchesBytes(base_ + key.codeRva, key.codeBytes);
+        rva = Resolve(id);
+        return rva && KeyStorage(rva);
     }
-    bool OptionalKey(const RendererKeyIdentity& key) const noexcept
+    bool OptionalKey(std::uint64_t id, std::uintptr_t& rva) const noexcept
     {
         try {
-            return RendererKey(key);
+            return RendererKey(id, rva);
         } catch (...) { return false; }
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
@@ -353,15 +319,15 @@ class ObserverInstallation
     }
     bool PrepareSite(std::size_t i)
     {
-        const auto address = base_ + identity_.callRvas[i];
+        const auto caller = Resolve(identity_.callerIds[i]);
+        const auto address = base_ + caller + (identity_.callRvas[i] - identity_.callerRvas[i]);
+        detail::CallBytes original{};
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = Mapping(identity_.callerIds[i], identity_.callerRvas[i]) &&
-            Code(base_ + identity_.callerRvas[i], 1) && Code(address, 5) &&
-            MatchesBytes(address, identity_.callBytes[i]) &&
-            detail::CallTarget(address, identity_.callBytes[i]) == target_ &&
+        const bool valid = caller && Code(base_ + caller, 1) && Code(address, 5) &&
+            detail::ReadCallTo(address, target_, original, Read) &&
             Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites_[i] = {address, identity_.callBytes[i], {}, info.Protect};
+        sites_[i] = {address, original, {}, info.Protect};
         return true;
     }
     bool PrepareRelay(detail::Site& site, std::uint32_t handle)
@@ -391,7 +357,6 @@ class ObserverInstallation
     }
     bool Publish()
     {
-        if (!MatchesBytes(target_, identity_.targetBytes)) return false;
         state_.next.store(reinterpret_cast<Submit>(target_), std::memory_order_release);
         PatchBackend backend;
         if (!detail::InstallPair(sites_, backend)) return false;
@@ -400,30 +365,27 @@ class ObserverInstallation
     }
     bool RendererKeys()
     {
-        const auto& keys = *identity_.rendererKeys;
-        if (!RendererKey(keys[0])) return false;
-        for (std::size_t index = 0; index < keys.size(); ++index)
-            g_keyRvas[index] = keys[index].storageRva;
-        g_flatKeyReady = OptionalKey(keys[1]);
-        g_armorKeyReady = OptionalKey(keys[2]);
-        g_rainKeyReady = OptionalKey(keys[3]);
-        g_workshopKeyReady = OptionalKey(keys[4]);
+        const auto& ids = *identity_.rendererKeyIds;
+        if (!RendererKey(ids[0], g_keyRvas[0])) return false;
+        g_flatKeyReady = OptionalKey(ids[1], g_keyRvas[1]);
+        g_armorKeyReady = OptionalKey(ids[2], g_keyRvas[2]);
+        g_rainKeyReady = OptionalKey(ids[3], g_keyRvas[3]);
+        g_workshopKeyReady = OptionalKey(ids[4], g_keyRvas[4]);
         return true;
     }
 public:
     ObserverInstallation(const BoundaryIdentity<N>& identity, ObserverState<Submit>& state, Submit hook) :
-        identity_(identity), state_(state), target_(base_ + identity.targetRva),
-        hook_(reinterpret_cast<std::uintptr_t>(hook)) {}
+        identity_(identity), state_(state), hook_(reinterpret_cast<std::uintptr_t>(hook)) {}
 
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        if (!MatchesRuntime()) return false;
+        if (!base_ || !fo4hdr::ActiveRuntimeProfile()) return false;
         text_ = module_.GetSection(".text");
         // The pinned ID lookup terminates on a missing ID. Its public inverse
         // container permits recoverable verification without a second parser.
         mappings_.load_v2();
         if (!Target() || !Allocator(allocatorInterface, handle)) return false;
-        if (identity_.rendererKeys && !RendererKeys()) return false;
+        if (identity_.rendererKeyIds && !RendererKeys()) return false;
         return PrepareSites(handle) && Publish();
     }
 };

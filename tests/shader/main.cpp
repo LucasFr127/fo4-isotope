@@ -72,8 +72,9 @@ struct ShippingShaderRun
     bool InitializeRuntime() const
     {
         if (options.ngRuntime)
-            return fo4hdr::InitializeRuntimeProfile(0x010A3D80U);
-        return fo4hdr::InitializeRuntimeProfile(options.aeRuntime ? 0x010B0F00U : 0x010A0A30U);
+            return fo4hdr::InitializeRuntimeProfile(fo4hdr::RuntimeFamily::ng);
+        return fo4hdr::InitializeRuntimeProfile(
+            options.aeRuntime ? fo4hdr::RuntimeFamily::ae : fo4hdr::RuntimeFamily::og);
     }
     bool KnownFilter() const
     {

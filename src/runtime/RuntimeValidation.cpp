@@ -85,60 +85,6 @@ RuntimeValidationResult ValidateRuntimeIdentity(
     return { true, RuntimeValidationReason::Valid };
 }
 
-RuntimeValidationResult ValidateRuntimeLoadGate(
-    const RuntimeIdentity& expected,
-    const RuntimeIdentity& observed) noexcept
-{
-    if (!IsInitialized(expected))
-    {
-        return Invalid(RuntimeValidationReason::ProfileUninitialized);
-    }
-    // CommonLib terminates the process without the database; every other
-    // identity, including the executable, is audit evidence.
-    if (observed.addressLibrarySha256.empty())
-    {
-        return Invalid(RuntimeValidationReason::AddressLibraryUnavailable);
-    }
-    return { true, RuntimeValidationReason::Valid };
-}
-
-RuntimeActionResult ValidateRuntimeAction(
-    std::string_view status,
-    RuntimeAction action) noexcept
-{
-    constexpr std::pair<std::string_view, bool> statuses[]{
-        {"runtime-pinned-unvalidated", true},
-        {"capture-complete", true},
-        {"release-approved", true},
-        {"primary-uninitialized", false},
-        {"planned", false}
-    };
-    const auto found = std::find_if(std::begin(statuses), std::end(statuses),
-        [status](const auto& entry) noexcept { return entry.first == status; });
-    if (found == std::end(statuses))
-    {
-        return { false, RuntimeActionReason::UnknownStatus };
-    }
-
-    bool allowed{};
-    switch (action)
-    {
-    case RuntimeAction::MilestoneValidation:
-        allowed = found->second;
-        break;
-    case RuntimeAction::ReleasePackaging:
-        allowed = status == "release-approved";
-        break;
-    default:
-        return { false, RuntimeActionReason::UnknownAction };
-    }
-    return {
-        allowed,
-        allowed ? RuntimeActionReason::Allowed :
-                  RuntimeActionReason::StatusNotAuthorized
-    };
-}
-
 std::string_view ToString(RuntimeValidationReason reason) noexcept
 {
     constexpr std::pair<RuntimeValidationReason, std::string_view> names[]{
@@ -159,34 +105,6 @@ std::string_view ToString(RuntimeValidationReason reason) noexcept
     const auto found = std::find_if(std::begin(names), std::end(names),
         [reason](const auto& entry) noexcept { return entry.first == reason; });
     return found == std::end(names) ? "unknown-validation-reason" : found->second;
-}
-
-std::string_view ToString(RuntimeAction action) noexcept
-{
-    switch (action)
-    {
-    case RuntimeAction::MilestoneValidation:
-        return "milestone-validation";
-    case RuntimeAction::ReleasePackaging:
-        return "release-packaging";
-    }
-    return "unknown-runtime-action";
-}
-
-std::string_view ToString(RuntimeActionReason reason) noexcept
-{
-    switch (reason)
-    {
-    case RuntimeActionReason::Allowed:
-        return "allowed";
-    case RuntimeActionReason::UnknownStatus:
-        return "unknown-status";
-    case RuntimeActionReason::UnknownAction:
-        return "unknown-action";
-    case RuntimeActionReason::StatusNotAuthorized:
-        return "status-not-authorized";
-    }
-    return "unknown-runtime-action-reason";
 }
 
 }  // namespace fo4hdr

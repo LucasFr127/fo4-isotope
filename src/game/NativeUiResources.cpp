@@ -253,32 +253,31 @@ class NativeUiInstallation
         return ContainsBytes(text_.GetAddress(), text_.GetSize(), address, size) &&
             Executable(reinterpret_cast<void*>(address), size, reinterpret_cast<void*>(base_));
     }
-    bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    { return patch::MatchesMapping(mappings_, base_, id, rva); }
-    bool Target() const
+    std::uintptr_t Resolve(std::uint64_t id) const
+    { return patch::ResolveMapping(mappings_, base_, id); }
+    bool Target()
     {
-        return target_ != hook_ && Mapping(identity_.targetId, identity_.targetRva) &&
-            Code(target_, identity_.targetBytes.size()) && MatchesBytes(target_, identity_.targetBytes);
+        const auto rva = Resolve(identity_.targetId);
+        target_ = rva ? base_ + rva : 0;
+        return target_ && target_ != hook_ && Code(target_, 1);
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
     {
         return Read(allocatorInterface, &allocator_, sizeof(allocator_)) && allocator_.version == 1 &&
             handle != UINT32_MAX && Executable(reinterpret_cast<void*>(allocator_.branch), 1);
     }
-    bool SiteMatches(std::size_t index) const
-    {
-        const auto address = base_ + identity_.callRvas[index];
-        return Mapping(identity_.callerIds[index], identity_.callerRvas[index]) &&
-            Code(base_ + identity_.callerRvas[index], 1) && Code(address, 5) &&
-            MatchesBytes(address, identity_.callBytes[index]) &&
-            patch::CallTarget(address, identity_.callBytes[index]) == target_;
-    }
     bool PrepareSite(std::size_t index)
     {
-        const auto address = base_ + identity_.callRvas[index];
+        const auto caller = Resolve(identity_.callerIds[index]);
+        const auto address = base_ + caller +
+            (identity_.callRvas[index] - identity_.callerRvas[index]);
+        patch::CallBytes original{};
         MEMORY_BASIC_INFORMATION info{};
-        if (!SiteMatches(index) || !Region(reinterpret_cast<void*>(address), 5, info)) return false;
-        sites_[index] = {address, identity_.callBytes[index], {}, info.Protect};
+        const bool valid = caller && Code(base_ + caller, 1) && Code(address, 5) &&
+            patch::ReadCallTo(address, target_, original, Read) &&
+            Region(reinterpret_cast<void*>(address), 5, info);
+        if (!valid) return false;
+        sites_[index] = {address, original, {}, info.Protect};
         return true;
     }
     bool PrepareRelay(patch::Site& site, std::uint32_t handle)
@@ -305,7 +304,6 @@ class NativeUiInstallation
     }
     bool Publish()
     {
-        if (!MatchesBytes(target_, identity_.targetBytes)) return false;
         // Failed rollback may leave a relay reachable. Its exact native predecessor
         // must remain callable even when admission was never published.
         g_next.store(reinterpret_cast<RegisterTarget>(target_), std::memory_order_release);
@@ -324,13 +322,11 @@ class NativeUiInstallation
     }
 public:
     explicit NativeUiInstallation(const fo4hdr::NativeUiRuntimeProfile& identity) :
-        identity_(identity), target_(base_ + identity.targetRva) {}
+        identity_(identity) {}
 
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        const auto* profile = fo4hdr::ActiveRuntimeProfile();
-        if (!base_ || !profile) return false;
-        if (module_.GetFileVersion().pack() != profile->runtimeVersion) return false;
+        if (!base_ || !fo4hdr::ActiveRuntimeProfile()) return false;
         text_ = module_.GetSection(".text");
         mappings_.load_v2();
         return Target() && Globals() && Allocator(allocatorInterface, handle) && PrepareSites(handle) && Publish();

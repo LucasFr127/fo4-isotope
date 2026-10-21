@@ -14,8 +14,8 @@ namespace fo4hdr::tests {
 namespace {
 void TestSharedRuntimeSelection()
 {
-    const auto* og = FindRuntimeProfile(0x010A0A30);
-    const auto* ae = FindRuntimeProfile(0x010B0F00);
+    const auto* og = FindRuntimeProfile(RuntimeFamily::og);
+    const auto* ae = FindRuntimeProfile(RuntimeFamily::ae);
     FO4HDR_CHECK(og && ae && og != ae);
     FO4HDR_CHECK(og->key == "1.10.163" && ae->key == "1.11.240");
     FO4HDR_CHECK(og->hasNativeSceneComposite && ae->hasNativeSceneComposite);
@@ -24,54 +24,32 @@ void TestSharedRuntimeSelection()
     FO4HDR_CHECK(ValidateRuntimeIdentity(og->identity, og->identity).valid);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ae->identity, ae->identity).valid);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ae->identity).valid);
-    FO4HDR_CHECK(!InitializeRuntimeProfile(0));
-    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30));
-    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30));
-    FO4HDR_CHECK(!InitializeRuntimeProfile(0x010B0F00));
+    FO4HDR_CHECK(!FindRuntimeProfile(static_cast<RuntimeFamily>(3)));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(static_cast<RuntimeFamily>(3)));
+    FO4HDR_CHECK(InitializeRuntimeProfile(RuntimeFamily::og));
+    FO4HDR_CHECK(InitializeRuntimeProfile(RuntimeFamily::og));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(RuntimeFamily::ae));
     FO4HDR_CHECK(ActiveRuntimeProfile() == og && IsOriginalRuntime());
 }
 
 void TestNextGenerationRuntimeSelection()
 {
-    const auto* ng = FindRuntimeProfile(0x010A3D80);
+    const auto* ng = FindRuntimeProfile(RuntimeFamily::ng);
     FO4HDR_CHECK(ng);
     if (!ng) return;
     FO4HDR_CHECK(ng->key == "1.10.984");
     FO4HDR_CHECK(ng->hasNativeSceneComposite);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ng->identity, ng->identity).valid);
-    const auto* og = FindRuntimeProfile(0x010A0A30);
+    const auto* og = FindRuntimeProfile(RuntimeFamily::og);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ng->identity).valid);
-    // NG 1.10.980 shares the NG family profile.
-    FO4HDR_CHECK(FindRuntimeProfile(0x010A3D40) == ng);
-}
-
-void TestRuntimeSelectionGate()
-{
-    const auto* ae = FindRuntimeProfile(0x010B0F00);
-    // Every AE build CommonLibF4 supports shares the AE family profile.
-    for (const auto runtime : {0x010B0890U, 0x010B09F0U, 0x010B0A90U, 0x010B0BF0U, 0x010B0DD0U})
-    {
-        const auto selection = SelectRuntimeProfile(runtime);
-        FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::Selected && selection.profile == ae);
-    }
-    // CommonLibF4 terminates on anything else: OG 1.10.162, NG 1.10.985,
-    // AE 1.11.241 and FO4VR 1.2.72 stay rejected.
-    for (const auto runtime : {0x010A0A20U, 0x010A3D90U, 0x010B0F10U, 0x01020480U, 0U})
-    {
-        const auto selection = SelectRuntimeProfile(runtime);
-        FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::UnsupportedRuntime && !selection.profile);
-    }
-    FO4HDR_CHECK(ToString(RuntimeSelectionReason::Selected) == "selected");
-    FO4HDR_CHECK(ToString(RuntimeSelectionReason::UnsupportedRuntime) == "unsupported-runtime");
-    FO4HDR_CHECK(ToString(static_cast<RuntimeSelectionReason>(-1)) == "unknown-selection-reason");
 }
 
 void TestCompiledRuntimeProvenance()
 {
     for (const auto* profile : {
-             FindRuntimeProfile(0x010A0A30),
-             FindRuntimeProfile(0x010A3D80),
-             FindRuntimeProfile(0x010B0F00)})
+             FindRuntimeProfile(RuntimeFamily::og),
+             FindRuntimeProfile(RuntimeFamily::ng),
+             FindRuntimeProfile(RuntimeFamily::ae)})
     {
         FO4HDR_CHECK(profile);
         if (!profile) continue;
@@ -205,58 +183,6 @@ void TestAddressLibraryIdentity()
         fo4hdr::RuntimeValidationReason::AddressLibraryHashMismatch);
 }
 
-void TestLoadGate()
-{
-    // F4SE identity is audit evidence: point releases and missing loaders load.
-    auto observed = expected;
-    observed.f4seVersion = "0.6.24";
-    observed.f4seRuntimeSha256 = hashA;
-    observed.f4seLoaderSha256 = {};
-    FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, observed).valid);
-    FO4HDR_CHECK(ValidateRuntimeIdentity(expected, observed).reason ==
-        RuntimeValidationReason::F4seVersionMismatch);
-
-    // A re-released Address Library loads; only the exact audit rejects it.
-    auto rereleased = expected;
-    rereleased.addressLibrarySha256 = hashA;
-    FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, rereleased).valid);
-    FO4HDR_CHECK(ValidateRuntimeIdentity(expected, rereleased).reason ==
-        RuntimeValidationReason::AddressLibraryHashMismatch);
-
-    // Another family build, storefront or unreadable executable is audit
-    // evidence too; only the audit reports it.
-    const struct
-    {
-        std::string_view RuntimeIdentity::* field;
-        std::string_view value;
-        RuntimeValidationReason reason;
-    } audited[]{
-        {&RuntimeIdentity::runtimeVersion, "1.11.191.0", RuntimeValidationReason::RuntimeVersionMismatch},
-        {&RuntimeIdentity::executableSha256, hashB, RuntimeValidationReason::ExecutableHashMismatch},
-        {&RuntimeIdentity::executableSha256, {}, RuntimeValidationReason::ExecutableUnavailable},
-        {&RuntimeIdentity::addressLibraryFile, "version-1-11-191-0.bin",
-            RuntimeValidationReason::AddressLibraryFileMismatch}};
-    for (const auto& entry : audited)
-    {
-        auto candidate = expected;
-        candidate.*entry.field = entry.value;
-        FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, candidate).valid);
-        FO4HDR_CHECK(ValidateRuntimeIdentity(expected, candidate).reason == entry.reason);
-    }
-
-    // CommonLib terminates without the database, so its absence rejects.
-    auto missing = observed;
-    missing.addressLibrarySha256 = {};
-    const auto result = ValidateRuntimeLoadGate(expected, missing);
-    FO4HDR_CHECK(!result.valid &&
-        result.reason == RuntimeValidationReason::AddressLibraryUnavailable);
-
-    auto uninitialized = expected;
-    uninitialized.f4seLoaderSha256 = "UNVALIDATED";
-    FO4HDR_CHECK(ValidateRuntimeLoadGate(uninitialized, expected).reason ==
-        RuntimeValidationReason::ProfileUninitialized);
-}
-
 void TestUninitializedProfile()
 {
     RuntimeValidationResult result;
@@ -328,84 +254,19 @@ void TestReasonNames()
     }
 }
 
-void TestMilestoneAuthorization()
-{
-    for (const auto status : {
-             std::string_view{"runtime-pinned-unvalidated"},
-             std::string_view{"capture-complete"},
-             std::string_view{"release-approved"} })
-    {
-        const auto authorization = fo4hdr::ValidateRuntimeAction(
-            status,
-            fo4hdr::RuntimeAction::MilestoneValidation);
-        FO4HDR_CHECK(authorization.allowed);
-        FO4HDR_CHECK(
-            authorization.reason == fo4hdr::RuntimeActionReason::Allowed);
-    }
-}
-
-void TestReleaseAuthorization()
-{
-    for (const auto status : {
-             std::string_view{"primary-uninitialized"},
-             std::string_view{"planned"},
-             std::string_view{"runtime-pinned-unvalidated"},
-             std::string_view{"capture-complete"} })
-    {
-        const auto authorization = fo4hdr::ValidateRuntimeAction(
-            status,
-            fo4hdr::RuntimeAction::ReleasePackaging);
-        FO4HDR_CHECK(!authorization.allowed);
-        FO4HDR_CHECK(
-            authorization.reason ==
-            fo4hdr::RuntimeActionReason::StatusNotAuthorized);
-    }
-    FO4HDR_CHECK(fo4hdr::ValidateRuntimeAction(
-        "release-approved",
-        fo4hdr::RuntimeAction::ReleasePackaging).allowed);
-}
-
-void TestUnknownAuthorization()
-{
-    const auto unknownAuthorization = fo4hdr::ValidateRuntimeAction(
-        "captured",
-        fo4hdr::RuntimeAction::MilestoneValidation);
-    FO4HDR_CHECK(!unknownAuthorization.allowed);
-    FO4HDR_CHECK(
-        unknownAuthorization.reason ==
-        fo4hdr::RuntimeActionReason::UnknownStatus);
-    FO4HDR_CHECK(
-        fo4hdr::ToString(fo4hdr::RuntimeAction::MilestoneValidation) ==
-        "milestone-validation");
-    FO4HDR_CHECK(
-        fo4hdr::ToString(
-            fo4hdr::RuntimeActionReason::StatusNotAuthorized) ==
-        "status-not-authorized");
-    const auto unknownAction = fo4hdr::ValidateRuntimeAction(
-        "release-approved",
-        static_cast<fo4hdr::RuntimeAction>(0xFF));
-    FO4HDR_CHECK(!unknownAction.allowed);
-    FO4HDR_CHECK(
-        unknownAction.reason == fo4hdr::RuntimeActionReason::UnknownAction);
-}
 }  // namespace
 
 void RunRuntimeValidationTests()
 {
     TestSharedRuntimeSelection();
     TestNextGenerationRuntimeSelection();
-    TestRuntimeSelectionGate();
     TestCompiledRuntimeProvenance();
     TestMatchingIdentity();
     TestExecutableIdentity();
     TestRuntimeAndF4seIdentity();
     TestAddressLibraryIdentity();
-    TestLoadGate();
     TestUninitializedProfile();
     TestFailurePrecedence();
     TestReasonNames();
-    TestMilestoneAuthorization();
-    TestReleaseAuthorization();
-    TestUnknownAuthorization();
 }
 }  // namespace fo4hdr::tests

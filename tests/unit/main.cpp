@@ -82,7 +82,6 @@ constexpr Section kSections[]{
     {"menu-drain-evidence", fo4hdr::tests::RunMenuDrainEvidenceTests},
     {"owned-task-transfer", fo4hdr::tests::RunOwnedTaskTransferTests},
     {"runtime-validation", fo4hdr::tests::RunRuntimeValidationTests},
-    {"runtime-identity-files", fo4hdr::tests::RunRuntimeIdentityFilesTests},
     {"shader-runner-options", fo4hdr::tests::RunShaderTestOptionsTests},
 };
 

@@ -177,21 +177,54 @@ void RunSiteMismatchTests()
         std::equal(memory.begin(), memory.end(), mismatch.observed.begin()));
     FO4HDR_CHECK(!hook::TakeSiteMismatch().recorded);
 
+    // IDs resolve to whatever RVA the running build maps; only absence rejects.
     struct Mapping { std::uint64_t id; std::uintptr_t offset; };
-    const std::array<Mapping, 2> mappings{{{7, 0x70}, {9, 0x90}}};
-    FO4HDR_CHECK(hook::MatchesMapping(mappings, 0x1000, 7, 0x70));
-    FO4HDR_CHECK(!hook::MatchesMapping(mappings, 0x1000, 9, 0x80));
+    const std::array<Mapping, 3> mappings{{{7, 0x70}, {9, 0x90}, {13, 0}}};
+    FO4HDR_CHECK(hook::ResolveMapping(mappings, 0x1000, 7) == 0x70);
+    FO4HDR_CHECK(hook::ResolveMapping(mappings, 0x1000, 9) == 0x90);
+    FO4HDR_CHECK(!hook::TakeSiteMismatch().recorded);
+    FO4HDR_CHECK(hook::ResolveMapping(mappings, 0x1000, 11) == 0);
     mismatch = hook::TakeSiteMismatch();
-    FO4HDR_CHECK(mismatch.address == 0x1080 && mismatch.id == 9 && mismatch.mappedRva == 0x90 &&
+    FO4HDR_CHECK(mismatch.address == 0x1000 && mismatch.id == 11 && mismatch.mappedRva == 0 &&
         mismatch.observedSize == 0);
-    FO4HDR_CHECK(!hook::MatchesMapping(mappings, 0x1000, 11, 0xB0));
-    mismatch = hook::TakeSiteMismatch();
-    FO4HDR_CHECK(mismatch.id == 11 && mismatch.mappedRva == 0);
+    FO4HDR_CHECK(hook::ResolveMapping(mappings, 0x1000, 13) == 0);
+    FO4HDR_CHECK(hook::TakeSiteMismatch().id == 13);
+}
+void RunCallQualificationTests()
+{
+    (void)hook::TakeSiteMismatch();
+    const auto read = [](const void* source, void* destination, std::size_t size) noexcept {
+        std::memcpy(destination, source, size);
+        return true;
+    };
+    std::array<std::uint8_t, 5> code{};
+    const auto site = reinterpret_cast<std::uintptr_t>(code.data());
+    const auto target = site + 5 + 0x1234;
+    FO4HDR_CHECK(hook::EncodeCall(site, target, code));
+    hook::CallBytes observed{};
+    // The live call to the resolved target qualifies, whatever its displacement.
+    FO4HDR_CHECK(hook::ReadCallTo(site, target, observed, read) && observed == code);
+    FO4HDR_CHECK(!hook::TakeSiteMismatch().recorded);
+    // A call elsewhere, a non-call, an unreadable site or no target rejects.
+    FO4HDR_CHECK(!hook::ReadCallTo(site, target + 1, observed, read));
+    auto mismatch = hook::TakeSiteMismatch();
+    FO4HDR_CHECK(mismatch.address == site && mismatch.observedSize == code.size() &&
+        std::equal(code.begin(), code.end(), mismatch.observed.begin()));
+    code[0] = 0xE9;
+    FO4HDR_CHECK(!hook::ReadCallTo(site, target, observed, read));
+    (void)hook::TakeSiteMismatch();
+    code[0] = 0xE8;
+    FO4HDR_CHECK(!hook::ReadCallTo(site, 0, observed, read));
+    (void)hook::TakeSiteMismatch();
+    const auto unreadable = [](const void*, void*, std::size_t) noexcept { return false; };
+    FO4HDR_CHECK(!hook::ReadCallTo(site, target, observed, unreadable));
+    FO4HDR_CHECK(hook::TakeSiteMismatch().observedSize == 0);
 }
 void RunDirectCallPatchTests()
 {
     RunCallPatchOwnershipTests();
     RunCallForwardingTests();
     RunSiteMismatchTests();
+    RunCallQualificationTests();
 }
 }

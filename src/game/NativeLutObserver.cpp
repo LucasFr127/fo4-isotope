@@ -191,20 +191,15 @@ bool InSection(const REX::FModule& module, const char* name,
 
 struct LutIdentity
 {
-    std::uintptr_t renderRva{};
     std::uint64_t renderId{};
     std::size_t subobjectOffset{};
-    std::array<std::uint8_t, 25> renderBytes{};
 };
-constexpr LutIdentity kOgLut{fo4hdr::generated::og::kNativeLutRenderRva,
-    fo4hdr::generated::og::kNativeLutRenderId, fo4hdr::generated::og::kNativeLutEffectSubobjectOffset,
-    fo4hdr::generated::og::kNativeLutRenderBytes};
-constexpr LutIdentity kAeLut{fo4hdr::generated::ae::kNativeLutRenderRva,
-    fo4hdr::generated::ae::kNativeLutRenderId, fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset,
-    fo4hdr::generated::ae::kNativeLutRenderBytes};
-constexpr LutIdentity kNgLut{fo4hdr::generated::ng::kNativeLutRenderRva,
-    fo4hdr::generated::ng::kNativeLutRenderId, fo4hdr::generated::ng::kNativeLutEffectSubobjectOffset,
-    fo4hdr::generated::ng::kNativeLutRenderBytes};
+constexpr LutIdentity kOgLut{fo4hdr::generated::og::kNativeLutRenderId,
+    fo4hdr::generated::og::kNativeLutEffectSubobjectOffset};
+constexpr LutIdentity kAeLut{fo4hdr::generated::ae::kNativeLutRenderId,
+    fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset};
+constexpr LutIdentity kNgLut{fo4hdr::generated::ng::kNativeLutRenderId,
+    fo4hdr::generated::ng::kNativeLutEffectSubobjectOffset};
 
 const LutIdentity& RuntimeLutIdentity(const fo4hdr::RuntimeProfile& profile) noexcept
 {
@@ -213,20 +208,13 @@ const LutIdentity& RuntimeLutIdentity(const fo4hdr::RuntimeProfile& profile) noe
     return kAeLut;
 }
 
-bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target, const LutIdentity& identity)
+// The installed slot must still hold this ID's function; see InstallQualifiedTarget.
+bool ValidRenderTarget(const REX::FModule& module, std::uintptr_t target)
 {
-    namespace patch = fo4hdr::game::direct_call_patch;
-    const auto base = module.GetBaseAddress();
-    const auto size = identity.renderBytes.size();
-    if (target != base + identity.renderRva) {
-        patch::RecordSiteMismatch(base + identity.renderRva, {}, identity.renderId, target ? target - base : 0);
-        return false;
-    }
-    if (!InSection(module, ".text", target, size)) return false;
+    if (!target || !InSection(module, ".text", target, 1)) return false;
     MEMORY_BASIC_INFORMATION codeInfo{};
-    if (!Region(reinterpret_cast<void*>(target), size, codeInfo)) return false;
-    if ((codeInfo.Protect & 0xFF) != PAGE_EXECUTE_READ) return false;
-    return patch::MatchesNativeCode(target, identity.renderBytes, Read);
+    if (!Region(reinterpret_cast<void*>(target), 1, codeInfo)) return false;
+    return (codeInfo.Protect & 0xFF) == PAGE_EXECUTE_READ;
 }
 
 bool ValidLocator(const REX::FModule& module, std::uintptr_t table, const LutIdentity& identity)
@@ -299,10 +287,12 @@ bool ResolveAndInstall(const REX::FModule& module, const LutIdentity& identity)
     mappings.load_v2();
     const auto table = Resolve(mappings, base, RE::VTABLE::BSImagespaceShaderGammaCorrectLUT[2].id());
     const auto manager = RE::ID::ImageSpaceManager::Singleton.address();
-    const auto target = Resolve(mappings, base, identity.renderId);
+    const auto targetRva = fo4hdr::game::direct_call_patch::ResolveMapping(
+        mappings, base, identity.renderId);
+    const auto target = targetRva ? base + targetRva : 0;
     if (!InSection(module, ".rdata", table - sizeof(void*), 3 * sizeof(void*))) return false;
     if (!InSection(module, ".data", manager, sizeof(void*))) return false;
-    if (!ValidRenderTarget(module, target, identity)) return false;
+    if (!ValidRenderTarget(module, target)) return false;
     if (!ValidLocator(module, table, identity)) return false;
     return InstallQualifiedTarget(table, manager, target);
 }
@@ -319,8 +309,7 @@ bool InitializeNativeLutObserver(bool requested) noexcept
         const auto* profile = ActiveRuntimeProfile();
         if (!profile) return false;
         const auto module = REX::FModule::GetExecutingModule();
-        const auto base = module.GetBaseAddress();
-        if (!base || module.GetFileVersion().pack() != profile->runtimeVersion) return false;
+        if (!module.GetBaseAddress()) return false;
         SetNativeLutObserverStatus(Status::invalidTarget);
         return ResolveAndInstall(module, RuntimeLutIdentity(*profile));
     } catch (...) { return false; }

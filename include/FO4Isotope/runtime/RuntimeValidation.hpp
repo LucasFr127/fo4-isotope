@@ -39,49 +39,13 @@ struct RuntimeValidationResult
     RuntimeValidationReason reason;
 };
 
-enum class RuntimeAction
-{
-    MilestoneValidation,
-    ReleasePackaging
-};
-
-enum class RuntimeActionReason
-{
-    Allowed,
-    UnknownStatus,
-    UnknownAction,
-    StatusNotAuthorized
-};
-
-struct RuntimeActionResult
-{
-    bool allowed;
-    RuntimeActionReason reason;
-};
-
-// Exact audit of every pinned identity, required for release evidence.
+// Exact comparison of compiled pinned identities; startup no longer observes
+// installed files, so release validation owns the observed side.
 [[nodiscard]] RuntimeValidationResult ValidateRuntimeIdentity(
-    const RuntimeIdentity& expected,
-    const RuntimeIdentity& observed) noexcept;
-
-// Startup gate: an initialized profile and a present Address Library only.
-// Selection admits the executable version; every hash and the F4SE version
-// are audit evidence.
-[[nodiscard]] RuntimeValidationResult ValidateRuntimeLoadGate(
     const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept;
 
 [[nodiscard]] std::string_view ToString(
     RuntimeValidationReason reason) noexcept;
-
-[[nodiscard]] RuntimeActionResult ValidateRuntimeAction(
-    std::string_view status,
-    RuntimeAction action) noexcept;
-
-[[nodiscard]] std::string_view ToString(
-    RuntimeAction action) noexcept;
-
-[[nodiscard]] std::string_view ToString(
-    RuntimeActionReason reason) noexcept;
 
 }  // namespace fo4hdr

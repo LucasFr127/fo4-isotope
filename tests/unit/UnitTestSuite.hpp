@@ -32,7 +32,6 @@ void RunHdrCoreTests();
 void RunNativeLutObservationTests();
 void RunPerformanceTests();
 void RunPipelineContractTests();
-void RunRuntimeIdentityFilesTests();
 void RunRuntimeValidationTests();
 void RunAgxTests();
 void RunGt7Tests();

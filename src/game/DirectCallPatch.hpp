@@ -55,15 +55,16 @@ bool MatchesNativeCode(std::uintptr_t address, std::span<const std::uint8_t> exp
     return false;
 }
 
+// The ID's RVA on the running build, or zero after recording the absent ID.
 template <class Mappings>
-bool MatchesMapping(const Mappings& mappings, std::uintptr_t base, std::uint64_t id,
-    std::uintptr_t rva) noexcept
+std::uintptr_t ResolveMapping(const Mappings& mappings, std::uintptr_t base,
+    std::uint64_t id) noexcept
 {
     const auto found = std::find_if(mappings.begin(), mappings.end(),
         [id](const auto& entry) { return entry.id == id; });
-    if (found != mappings.end() && found->offset == rva) return true;
-    RecordSiteMismatch(base + rva, {}, id, found != mappings.end() ? found->offset : 0);
-    return false;
+    if (found != mappings.end() && found->offset != 0) return found->offset;
+    RecordSiteMismatch(base, {}, id);
+    return 0;
 }
 
 inline bool ValidCallSite(std::uintptr_t site) noexcept
@@ -95,6 +96,22 @@ inline std::uintptr_t CallTarget(std::uintptr_t site, const CallBytes& bytes) no
         return distance <= next ? next - distance : 0;
     }
     return next <= UINTPTR_MAX - displacement ? next + displacement : 0;
+}
+
+// A call keeps its pinned offset inside its caller on every build of a family;
+// only a live rel32 call to the resolved target qualifies the site.
+template <class Reader>
+bool ReadCallTo(std::uintptr_t site, std::uintptr_t target, CallBytes& bytes,
+    Reader read) noexcept
+{
+    if (!ValidCallSite(site) ||
+        !read(reinterpret_cast<const void*>(site), bytes.data(), bytes.size())) {
+        RecordSiteMismatch(site, {});
+        return false;
+    }
+    if (target != 0 && CallTarget(site, bytes) == target) return true;
+    RecordSiteMismatch(site, bytes);
+    return false;
 }
 
 struct Site

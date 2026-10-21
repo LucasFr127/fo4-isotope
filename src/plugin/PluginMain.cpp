@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "PluginPch.hpp"
-#include "FO4Isotope/runtime/RuntimeValidation.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
@@ -13,9 +12,9 @@
 #include "../game/NativeUiResources.hpp"
 #include "../game/ImageSpaceObserver.hpp"
 #include "../game/DirectCallPatch.hpp"
-#include "../runtime/RuntimeIdentityFiles.hpp"
 
 #include <F4SE/F4SE.h>
+#include <REX/FModule.h>
 #include <REX/W32/OLE32.h>
 #include <REX/W32/SHELL32.h>
 
@@ -198,29 +197,6 @@ void InitializeProjectLogging() noexcept
     return std::filesystem::path(buffer.data(), buffer.data() + size);
 }
 
-[[nodiscard]] std::optional<std::filesystem::path> LoadedModulePath(
-    std::string_view moduleName)
-{
-    const std::string nullTerminatedName(moduleName);
-    const auto module =
-        REX::W32::GetModuleHandleA(nullTerminatedName.c_str());
-    if (module == nullptr)
-    {
-        return std::nullopt;
-    }
-
-    std::array<wchar_t, 32768> buffer{};
-    const auto size = REX::W32::GetModuleFileNameW(
-        module,
-        buffer.data(),
-        static_cast<std::uint32_t>(buffer.size()));
-    if (size == 0 || size >= buffer.size())
-    {
-        return std::nullopt;
-    }
-    return std::filesystem::path(buffer.data(), buffer.data() + size);
-}
-
 [[nodiscard]] std::string Version3(const REL::Version& version)
 {
     return std::to_string(version.major()) + "." +
@@ -228,61 +204,17 @@ void InitializeProjectLogging() noexcept
            std::to_string(version.patch());
 }
 
-struct ObservedRuntimeIdentity
+[[nodiscard]] fo4hdr::RuntimeFamily ActiveRuntimeFamily() noexcept
 {
-    std::string runtimeVersion;
-    std::string executableHash;
-    std::string f4seVersion;
-    std::string loaderHash;
-    std::string runtimeHash;
-    std::string addressFile;
-    std::string addressHash;
-
-    [[nodiscard]] fo4hdr::RuntimeIdentity View() const noexcept
+    switch (REX::FModule::GetRuntimeIndex())
     {
-        return {
-            .runtimeVersion = runtimeVersion,
-            .executableSha256 = executableHash,
-            .f4seVersion = f4seVersion,
-            .f4seLoaderSha256 = loaderHash,
-            .f4seRuntimeSha256 = runtimeHash,
-            .addressLibraryFile = addressFile,
-            .addressLibrarySha256 = addressHash
-        };
+    case REX::FModule::Runtime::kOG:
+        return fo4hdr::RuntimeFamily::og;
+    case REX::FModule::Runtime::kNG:
+        return fo4hdr::RuntimeFamily::ng;
+    default:
+        return fo4hdr::RuntimeFamily::ae;
     }
-};
-
-[[nodiscard]] ObservedRuntimeIdentity ObserveIdentity(const F4SE::QueryInterface* f4se)
-{
-    ObservedRuntimeIdentity observed;
-    observed.runtimeVersion = f4se->RuntimeVersion().string();
-    observed.f4seVersion = Version3(f4se->F4SEVersion());
-    // The database CommonLib opens for this executable, not the profile's pin.
-    observed.addressFile = "version-" + f4se->RuntimeVersion().string("-") + ".bin";
-
-    if (const auto executable = ExecutablePath())
-    {
-        const auto root = executable->parent_path();
-        observed.executableHash = fo4hdr::Sha256File(*executable).value_or("");
-        observed.loaderHash =
-            fo4hdr::Sha256File(root / L"f4se_loader.exe").value_or("");
-        if (const auto runtimeModule = LoadedModulePath(
-                fo4hdr::ActiveRuntimeProfile()->f4seRuntimeFile))
-        {
-            observed.runtimeHash = fo4hdr::Sha256File(*runtimeModule).value_or("");
-        }
-        observed.addressHash = fo4hdr::Sha256File(
-            root / L"Data" / L"F4SE" / L"Plugins" /
-            std::filesystem::path(observed.addressFile))
-                          .value_or("");
-    }
-
-    return observed;
-}
-
-[[nodiscard]] std::string_view DisplayHash(std::string_view hash) noexcept
-{
-    return hash.empty() ? "unavailable" : hash;
 }
 
 // After admission the plugin stays loaded, so its state is reported as resident.
@@ -397,90 +329,17 @@ namespace
         return false;
     }
 
-    // CommonLib terminates on an executable it does not support, so this gate
-    // runs before any relocation.
-    const auto selection = fo4hdr::SelectRuntimeProfile(runtime.pack());
-    if (selection.reason != fo4hdr::RuntimeSelectionReason::Selected)
-    {
-        REX::CRITICAL("plugin active=false reason={} executable={} f4se={}",
-            fo4hdr::ToString(selection.reason), runtime.string(), Version3(f4se));
-        return false;
-    }
-    if (!fo4hdr::InitializeRuntimeProfile(runtime.pack()))
+    // CommonLib reports and terminates on an unsupported executable, and later
+    // on a missing or invalid Address Library, before any relocation resolves.
+    if (!fo4hdr::InitializeRuntimeProfile(ActiveRuntimeFamily()))
     {
         REX::CRITICAL("plugin active=false reason=runtime-profile-conflict");
         return false;
     }
-    // Native hooks install only on the profile's pinned build.
-    REX::INFO("runtime profile={} native_hooks={}", selection.profile->key,
-        runtime.pack() == selection.profile->runtimeVersion ? "eligible" : "disabled");
-    return true;
-}
-
-[[nodiscard]] bool ValidatePluginIdentity(const F4SE::QueryInterface* a_f4se)
-{
     const auto& profile = *fo4hdr::ActiveRuntimeProfile();
-    const auto& expected = profile.identity;
-    const auto identity = ObserveIdentity(a_f4se);
-    const auto observed = identity.View();
-
-    REX::INFO("identity runtime={} executable_sha256={}",
-        observed.runtimeVersion,
-        DisplayHash(observed.executableSha256));
-    REX::INFO("identity f4se={} loader_sha256={} runtime_dll_sha256={}",
-        observed.f4seVersion,
-        DisplayHash(observed.f4seLoaderSha256),
-        DisplayHash(observed.f4seRuntimeSha256));
-    REX::INFO("identity address_library={} sha256={}",
-        observed.addressLibraryFile,
-        DisplayHash(observed.addressLibrarySha256));
-    REX::INFO("provenance compiled_runtime_manifest_sha256={}",
-        profile.manifestSha256);
-    REX::INFO(
-        "identity commonlibf4_commit={}", profile.commonLibCommit);
-
-    // CommonLib terminates on a missing database, so it may not reach CommonLib.
-    const auto gate = fo4hdr::ValidateRuntimeLoadGate(expected, observed);
-    if (!gate.valid)
-    {
-        REX::CRITICAL("plugin active=false reason={} executable={} address_library={}",
-            fo4hdr::ToString(gate.reason), observed.runtimeVersion, observed.addressLibraryFile);
-        return false;
-    }
-    // Executable, F4SE and Address Library identity is release evidence: other
-    // family builds, storefronts, re-released databases and loaders all load.
-    const auto audit = fo4hdr::ValidateRuntimeIdentity(expected, observed);
-    if (audit.valid)
-    {
-        REX::INFO("identity audit=exact-match");
-    }
-    else
-    {
-        REX::WARN("identity audit={} pinned_f4se={} gate=false",
-            fo4hdr::ToString(audit.reason), expected.f4seVersion);
-    }
-
-    constexpr auto runtimeAction = fo4hdr::RuntimeAction::MilestoneValidation;
-    const auto actionAuthorization = fo4hdr::ValidateRuntimeAction(
-        profile.status, runtimeAction);
-    const auto packagingAuthorization =
-        fo4hdr::ValidateRuntimeAction(profile.status,
-            fo4hdr::RuntimeAction::ReleasePackaging);
-    REX::INFO("identity runtime_status={} action={} authorized={} "
-              "release_packaging_eligible={}",
-        profile.status,
-        fo4hdr::ToString(runtimeAction),
-        actionAuthorization.allowed,
-        packagingAuthorization.allowed);
-    if (!actionAuthorization.allowed)
-    {
-        REX::CRITICAL("plugin active=false reason={} runtime_status={}",
-            fo4hdr::ToString(actionAuthorization.reason),
-            profile.status);
-        return false;
-    }
-    REX::INFO("plugin active=true reason={}",
-        audit.valid ? "exact-runtime-identity-matched" : "runtime-version-admitted");
+    REX::INFO("runtime profile={} compiled_runtime_manifest_sha256={} commonlibf4_commit={}",
+        profile.key, profile.manifestSha256, profile.commonLibCommit);
+    REX::INFO("plugin active=true reason=runtime-admitted");
     return true;
 }
 
@@ -717,7 +576,7 @@ void PrepareAdmittedStartup() noexcept
     }
     InitializeProjectLogging();
     REX::INFO("startup stage={}", ToString(stage));
-    if (!SelectRuntime(a_f4se) || !ValidatePluginIdentity(a_f4se))
+    if (!SelectRuntime(a_f4se))
     {
         g_startupState.store(StartupState::rejected, std::memory_order_release);
         return nullptr;

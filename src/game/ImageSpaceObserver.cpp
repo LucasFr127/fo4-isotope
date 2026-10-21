@@ -414,6 +414,8 @@ class ImageSpaceInstallation
     REL::Offset2ID mappings;
     TrampolineInterface allocator{};
     std::array<patch::Site, 11> sites{};
+    std::array<std::uintptr_t, 4> targets{};
+    std::uintptr_t globalLut{}, globalBase{};
     const std::array<std::uintptr_t, 6> hooks{
         reinterpret_cast<std::uintptr_t>(&WeatherHook),
         reinterpret_cast<std::uintptr_t>(&AccumulateHook),
@@ -430,51 +432,51 @@ class ImageSpaceInstallation
             Region(reinterpret_cast<void*>(address), size, info) &&
             info.AllocationBase == reinterpret_cast<void*>(base) && info.Type == MEM_IMAGE;
     }
-    bool Mapping(std::uint64_t id, std::uintptr_t rva) const
-    { return patch::MatchesMapping(mappings, base, id, rva); }
-    bool TargetValid(std::size_t i) const
+    std::uintptr_t Resolve(std::uint64_t id) const
     {
-        return Mapping(identity.targetIds[i], identity.targetRvas[i]) &&
-            InSection(".text", base + identity.targetRvas[i], identity.targetBytes[i].size()) &&
-            Executable(reinterpret_cast<void*>(base + identity.targetRvas[i]), identity.targetBytes[i].size()) &&
-            MatchesBytes(base + identity.targetRvas[i], identity.targetBytes[i]) &&
-            std::find(hooks.begin(), hooks.end(), base + identity.targetRvas[i]) == hooks.end();
+        const auto rva = patch::ResolveMapping(mappings, base, id);
+        return rva ? base + rva : 0;
     }
-    bool ValidateTargets() const
+    bool TargetValid(std::size_t i)
     {
-        for (std::size_t i = 0; i < identity.targetRvas.size(); ++i)
+        targets[i] = Resolve(identity.targetIds[i]);
+        return targets[i] && InSection(".text", targets[i], 1) &&
+            Executable(reinterpret_cast<void*>(targets[i]), 1) &&
+            std::find(hooks.begin(), hooks.end(), targets[i]) == hooks.end();
+    }
+    bool ValidateTargets()
+    {
+        for (std::size_t i = 0; i < targets.size(); ++i)
             if (!TargetValid(i)) return false;
         return true;
     }
-    bool GlobalsValid() const
+    bool GlobalsValid()
     {
-        return Mapping(identity.globalLutId, identity.globalLutRva) &&
-            Mapping(identity.globalBaseId, identity.globalBaseRva) &&
-            InSection(".data", base + identity.globalLutRva, sizeof(RE::ImageSpaceLUTData)) &&
-            InSection(".data", base + identity.globalBaseRva, sizeof(RE::ImageSpaceBaseData));
+        globalLut = Resolve(identity.globalLutId);
+        globalBase = Resolve(identity.globalBaseId);
+        return globalLut && globalBase &&
+            InSection(".data", globalLut, sizeof(RE::ImageSpaceLUTData)) &&
+            InSection(".data", globalBase, sizeof(RE::ImageSpaceBaseData));
     }
     bool ReadAllocator(const void* allocatorInterface, std::uint32_t handle)
     {
         return Read(allocatorInterface, &allocator, sizeof(allocator)) && allocator.version == 1 &&
             handle != UINT32_MAX && Executable(reinterpret_cast<void*>(allocator.branch), 1);
     }
-    bool CallMatches(std::size_t i, std::uintptr_t address) const
-    {
-        return MatchesBytes(address, identity.callBytes[i]) &&
-            identity.callTargetIndices[i] < identity.targetRvas.size() &&
-            patch::CallTarget(address, identity.callBytes[i]) ==
-                base + identity.targetRvas[identity.callTargetIndices[i]];
-    }
     bool PrepareSite(std::size_t i)
     {
-        const auto address = base + identity.callRvas[i];
+        const auto caller = Resolve(identity.callerIds[i]);
+        const auto address = caller + (identity.callRvas[i] - identity.callerRvas[i]);
+        const auto target = identity.callTargetIndices[i] < targets.size() ?
+            targets[identity.callTargetIndices[i]] : 0;
+        patch::CallBytes original{};
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = Mapping(identity.callerIds[i], identity.callerRvas[i]) &&
-            InSection(".text", base + identity.callerRvas[i], 1) &&
+        const bool valid = caller && InSection(".text", caller, 1) &&
             InSection(".text", address, 5) && Executable(reinterpret_cast<void*>(address), 5) &&
-            CallMatches(i, address) && Region(reinterpret_cast<void*>(address), 5, info);
+            patch::ReadCallTo(address, target, original, Read) &&
+            Region(reinterpret_cast<void*>(address), 5, info);
         if (!valid) return false;
-        sites[i] = {address, identity.callBytes[i], {}, info.Protect};
+        sites[i] = {address, original, {}, info.Protect};
         return true;
     }
     bool PrepareSites()
@@ -502,22 +504,16 @@ class ImageSpaceInstallation
             if (!PrepareRelay(i, handle)) return false;
         return true;
     }
-    bool TargetsUnchanged() const
-    {
-        for (std::size_t i = 0; i < identity.targetRvas.size(); ++i)
-            if (!MatchesBytes(base + identity.targetRvas[i], identity.targetBytes[i])) return false;
-        return true;
-    }
     bool Publish()
     {
-        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(base + identity.globalLutRva);
-        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(base + identity.globalBaseRva);
+        g_globalLut = reinterpret_cast<RE::ImageSpaceLUTData*>(globalLut);
+        g_globalBase = reinterpret_cast<RE::ImageSpaceBaseData*>(globalBase);
         // All relays and forwarding targets outlive rollback, including a
         // protection failure that leaves an owned CALL reachable at shutdown.
-        g_weather.store(reinterpret_cast<Weather>(base + identity.targetRvas[0]), std::memory_order_release);
-        g_accumulate.store(reinterpret_cast<Accumulate>(base + identity.targetRvas[1]), std::memory_order_release);
-        g_blend.store(reinterpret_cast<Blend>(base + identity.targetRvas[2]), std::memory_order_release);
-        g_setLut.store(reinterpret_cast<SetLut>(base + identity.targetRvas[3]), std::memory_order_release);
+        g_weather.store(reinterpret_cast<Weather>(targets[0]), std::memory_order_release);
+        g_accumulate.store(reinterpret_cast<Accumulate>(targets[1]), std::memory_order_release);
+        g_blend.store(reinterpret_cast<Blend>(targets[2]), std::memory_order_release);
+        g_setLut.store(reinterpret_cast<SetLut>(targets[3]), std::memory_order_release);
         PatchBackend backend;
         if (!patch::InstallPair(sites, backend)) return false;
         fo4hdr::SetImageSpaceObservationReady(true);
@@ -534,13 +530,9 @@ public:
     }
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        const auto* profile = fo4hdr::ActiveRuntimeProfile();
-        if (!base || !profile) return false;
-        if (module.GetFileVersion().pack() != profile->runtimeVersion) return false;
+        if (!base || !fo4hdr::ActiveRuntimeProfile()) return false;
         mappings.load_v2();
-        if (!Prepare(allocatorInterface, handle)) return false;
-        if (!TargetsUnchanged()) return false;
-        return Publish();
+        return Prepare(allocatorInterface, handle) && Publish();
     }
 };
 }

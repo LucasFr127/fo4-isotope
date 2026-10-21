@@ -43,7 +43,7 @@ struct RuntimeProfile
     std::string_view status;
     std::string_view f4seRuntimeFile;
     std::string_view commonLibCommit;
-    // Pinned build; project-owned native hooks install only on exactly this one.
+    // Pinned build whose evidence produced the profile's facts.
     std::uint32_t runtimeVersion{};
     // Pinned F4SE release; audit evidence, not a load requirement.
     std::uint32_t f4seVersion{};
@@ -55,25 +55,17 @@ struct RuntimeProfile
     const ImageSpaceRuntimeProfile* imageSpace{};
 };
 
-enum class RuntimeSelectionReason
+// CommonLibF4's runtime families; every build it supports shares one profile.
+enum class RuntimeFamily : std::uint8_t
 {
-    Selected,
-    UnsupportedRuntime
+    og,
+    ng,
+    ae
 };
 
-struct RuntimeSelection
-{
-    const RuntimeProfile* profile{};
-    RuntimeSelectionReason reason{RuntimeSelectionReason::UnsupportedRuntime};
-};
-
-// Any packed executable version CommonLibF4 supports selects its OG, NG or AE
-// family profile. ValidateRuntimeLoadGate then requires the Address Library.
-[[nodiscard]] RuntimeSelection SelectRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
-[[nodiscard]] std::string_view ToString(RuntimeSelectionReason reason) noexcept;
-[[nodiscard]] const RuntimeProfile* FindRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
+[[nodiscard]] const RuntimeProfile* FindRuntimeProfile(RuntimeFamily family) noexcept;
 // Startup selects one immutable profile before publishing any callbacks.
-[[nodiscard]] bool InitializeRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
+[[nodiscard]] bool InitializeRuntimeProfile(RuntimeFamily family) noexcept;
 [[nodiscard]] const RuntimeProfile* ActiveRuntimeProfile() noexcept;
 [[nodiscard]] bool IsOriginalRuntime() noexcept;
 }  // namespace fo4hdr

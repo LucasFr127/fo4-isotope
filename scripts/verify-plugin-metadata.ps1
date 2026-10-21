@@ -15,14 +15,11 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
-# Every build pinned CommonLibF4 supports, in declaration order.
-$compatibleRuntimes = @(
-    '1.10.163', '1.10.980', '1.10.984',
-    '1.11.137', '1.11.159', '1.11.169', '1.11.191', '1.11.221', '1.11.240'
-)
+# Pinned CommonLibF4's RUNTIME_LATEST; the layout bits cover the other builds.
+$compatibleRuntimes = @('1.11.240')
 
 function Assert-Fo4HdrPluginVersion {
-    param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
+    param([IntPtr]$Version, [string]$Runtime)
     $dataVersion =
         [Runtime.InteropServices.Marshal]::ReadInt32($version, 0x000)
     $pluginName =
@@ -41,11 +38,11 @@ function Assert-Fo4HdrPluginVersion {
         throw "The exported Address Library/layout flags are invalid."
     }
 
-    Assert-Fo4HdrPluginVersionRequirements $Version $Runtime $F4seVersion
+    Assert-Fo4HdrPluginVersionRequirements $Version
 }
 
 function Assert-Fo4HdrPluginVersionRequirements {
-    param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
+    param([IntPtr]$Version)
     $expectedPacked = @($compatibleRuntimes | ForEach-Object { ConvertTo-Fo4HdrPackedPluginVersion $_ })
     for ($index = 0; $index -lt 16; ++$index) {
         $actual = [uint32][Runtime.InteropServices.Marshal]::ReadInt32(
@@ -64,9 +61,8 @@ function Assert-Fo4HdrPluginVersionRequirements {
         [uint32][Runtime.InteropServices.Marshal]::ReadInt32(
             $version,
             0x250)
-    $expectedF4se = ConvertTo-Fo4HdrPackedPluginVersion $F4seVersion
-    if ($minimumF4se -ne $expectedF4se) {
-        throw "PluginVersion does not require exactly F4SE $F4seVersion."
+    if ($minimumF4se -ne 0) {
+        throw "PluginVersion must not require a minimum F4SE."
     }
 }
 
@@ -84,7 +80,7 @@ function Assert-Fo4HdrCorruptPluginMetadataRejected {
 }
 
 function Assert-Fo4HdrPluginMetadataFixture {
-    param($Fixture, $Lock)
+    param($Fixture)
     # The buffer and offsets follow the pinned F4SE::PluginVersionData ABI.
     $version = [Runtime.InteropServices.Marshal]::AllocHGlobal(0x45C)
     try {
@@ -98,11 +94,9 @@ function Assert-Fo4HdrPluginMetadataFixture {
             [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x210 + ($index * 4),
                 (ConvertTo-Fo4HdrPackedPluginVersion $compatibleRuntimes[$index]))
         }
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x250, $Fixture.Minimum)
         $arguments = @{
             Version = $version
             Runtime = $Fixture.Runtime
-            F4seVersion = $Lock.runtimes.'1.10.163'.f4seVersion
         }
         Assert-Fo4HdrPluginVersion @arguments
         $invalidFields = @(
@@ -117,15 +111,11 @@ function Assert-Fo4HdrPluginMetadataFixture {
             @{ Offset = 0x210; Value = 0 },
             @{ Offset = 0x210; Value = $Fixture.Packed + 16 },
             @{ Offset = 0x214; Value = $Fixture.Packed },
-            @{ Offset = 0x214; Value = 0x010B0F00 },
-            @{ Offset = 0x218; Value = 0 },
-            @{ Offset = 0x230; Value = 0 },
+            @{ Offset = 0x214; Value = 0x010A0A30 },
             @{ Offset = 0x230; Value = 0x010B0F10 },
-            @{ Offset = 0x234; Value = $Fixture.Packed },
             @{ Offset = 0x24C; Value = $Fixture.Packed },
-            @{ Offset = 0x250; Value = 0 },
-            @{ Offset = 0x250; Value = $Fixture.Minimum - 16 },
-            @{ Offset = 0x250; Value = $Fixture.Minimum + 16 }
+            @{ Offset = 0x250; Value = 0x00060170 },
+            @{ Offset = 0x250; Value = 0x00070090 }
         )
         foreach ($field in $invalidFields) {
             Assert-Fo4HdrCorruptPluginMetadataRejected $arguments $field.Offset $field.Value
@@ -137,13 +127,12 @@ function Assert-Fo4HdrPluginMetadataFixture {
 }
 
 function Invoke-Fo4HdrPluginMetadataSelfTest {
-    param($Lock)
     foreach ($fixture in @(
-        @{ Runtime = '1.10.163'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 },
-        @{ Runtime = '1.10.984'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 },
-        @{ Runtime = '1.11.240'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 }
+        @{ Runtime = '1.10.163'; Packed = 0x010B0F00; Flags = 6 },
+        @{ Runtime = '1.10.984'; Packed = 0x010B0F00; Flags = 6 },
+        @{ Runtime = '1.11.240'; Packed = 0x010B0F00; Flags = 6 }
     )) {
-        Assert-Fo4HdrPluginMetadataFixture $fixture $Lock
+        Assert-Fo4HdrPluginMetadataFixture $fixture
     }
     Write-Host "Shared OG/NG/AE plugin metadata self-tests passed."
 }
@@ -176,7 +165,7 @@ $lock = Get-Content (
     Join-Path $repoRoot "versions.lock.json"
 ) -Raw | ConvertFrom-Json
 if ($SelfTest) {
-    Invoke-Fo4HdrPluginMetadataSelfTest -Lock $lock
+    Invoke-Fo4HdrPluginMetadataSelfTest
     return
 }
 $entry = $lock.runtimes.$Runtime
@@ -239,7 +228,7 @@ try {
     }
     $version = $exports["F4SEPlugin_Version"]
 
-    Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime -F4seVersion $lock.runtimes.'1.10.163'.f4seVersion
+    Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime
 }
 finally {
     [void][Fo4Hdr.NativeMethods]::FreeLibrary($module)
