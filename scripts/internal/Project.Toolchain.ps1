@@ -18,15 +18,18 @@ function Assert-Fo4HdrToolchainValue {
         [string]::IsNullOrWhiteSpace($Expected)) {
         throw "$Key is not pinned. Run scripts/pin-toolchain.ps1."
     }
+    # PowerShell and Git run the scripts but shape no build output, so every
+    # policy accepts their servicing updates.
+    $compatible = $policy -eq "hosted-ci" -or $Key -in @("powerShell", "git")
     $family = $null
-    if ($policy -eq "hosted-ci") {
+    if ($compatible) {
         $family = $Lock.toolchain.hostedCi.servicingFamilies.PSObject.Properties[$Key]
     }
     if ($null -ne $family) {
         Assert-Fo4HdrServicingVersion -Key $Key -Expected $Expected -Actual $Actual -Family $family.Value
         return
     }
-    if ($policy -eq "hosted-ci" -and $Key -eq "git") {
+    if ($compatible -and $Key -eq "git") {
         Assert-Fo4HdrAvailableGit -Actual $Actual -Requirement $Lock.toolchain.hostedCi.git
         return
     }

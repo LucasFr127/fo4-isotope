@@ -50,7 +50,7 @@ try {
             if ($version.Revision -ge 0) { $newer += '.' + $version.Revision }
             $older = '{0}.{1}.{2}' -f $version.Major, $version.Minor, ($version.Build - 1)
             Assert-ToolchainResult $case.Key $case.Expected $case.Expected $true
-            Assert-ToolchainResult $case.Key $case.Expected $newer ($policy -eq 'hosted-ci')
+            Assert-ToolchainResult $case.Key $case.Expected $newer ($policy -eq 'hosted-ci' -or $case.Key -eq 'powerShell')
             Assert-ToolchainResult $case.Key $case.Expected $older $false
             Assert-ToolchainResult $case.Key $case.Expected '99.0.0' $false
             Assert-ToolchainResult $case.Key $case.Expected '0.0.0' $false
@@ -60,7 +60,7 @@ try {
         Assert-ToolchainResult 'powerShell' $pinned.powerShell '7.7.0' $false
         Assert-ToolchainResult 'msvcCompiler' $pinned.msvc.compilerVersion '19.52.0' $false
         Assert-ToolchainResult 'msvcTools' $pinned.msvc.toolsVersion '14.52.0' $false
-        Assert-ToolchainResult 'git' $pinned.git '2.55.0.windows.99' ($policy -eq 'hosted-ci')
+        Assert-ToolchainResult 'git' $pinned.git '2.55.0.windows.99' $true
         Assert-ToolchainResult 'git' $pinned.git 'unknown' $false
         foreach ($case in @(
             @{ Key = 'windowsSdk'; Expected = $pinned.windowsSdk.version },
@@ -102,4 +102,4 @@ finally {
     $env:FO4HDR_TOOLCHAIN_POLICY = $savedPolicy
     $env:VCToolsVersion = $savedToolset
 }
-Write-Host 'Pinned and hosted-CI toolchain acceptance, family rejection, and x64 checks passed.'
+Write-Host 'Pinned and hosted-CI toolchain acceptance, script-tool servicing, family rejection, and x64 checks passed.'
