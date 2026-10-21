@@ -220,7 +220,14 @@ void TestLoadGate()
     FO4HDR_CHECK(ValidateRuntimeIdentity(expected, observed).reason ==
         RuntimeValidationReason::F4seVersionMismatch);
 
-    // The executable and Address Library are exact address identity.
+    // A re-released Address Library loads; only the exact audit rejects it.
+    auto rereleased = expected;
+    rereleased.addressLibrarySha256 = hashA;
+    FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, rereleased).valid);
+    FO4HDR_CHECK(ValidateRuntimeIdentity(expected, rereleased).reason ==
+        RuntimeValidationReason::AddressLibraryHashMismatch);
+
+    // The executable is exact address identity; the Address Library must exist.
     const struct
     {
         std::string_view RuntimeIdentity::* field;
@@ -230,7 +237,6 @@ void TestLoadGate()
         {&RuntimeIdentity::runtimeVersion, "1.10.984.0", RuntimeValidationReason::RuntimeVersionMismatch},
         {&RuntimeIdentity::executableSha256, hashB, RuntimeValidationReason::ExecutableHashMismatch},
         {&RuntimeIdentity::executableSha256, {}, RuntimeValidationReason::ExecutableUnavailable},
-        {&RuntimeIdentity::addressLibrarySha256, hashA, RuntimeValidationReason::AddressLibraryHashMismatch},
         {&RuntimeIdentity::addressLibrarySha256, {}, RuntimeValidationReason::AddressLibraryUnavailable},
         {&RuntimeIdentity::addressLibraryFile, "version-1-10-984-0.bin",
             RuntimeValidationReason::AddressLibraryFileMismatch}};

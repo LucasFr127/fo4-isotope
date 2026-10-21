@@ -64,9 +64,9 @@ struct RuntimeActionResult
     const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept;
 
-// Startup gate: executable version, executable hash and Address Library file
-// and hash only. F4SE version and hashes are excluded; selection enforces the
-// minimum F4SE release.
+// Startup gate: executable version and hash, and Address Library file presence
+// only. Address Library and F4SE hashes and the F4SE version are excluded;
+// selection enforces the minimum F4SE release.
 [[nodiscard]] RuntimeValidationResult ValidateRuntimeLoadGate(
     const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept;

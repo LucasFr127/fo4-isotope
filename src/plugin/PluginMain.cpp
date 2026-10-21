@@ -437,8 +437,8 @@ namespace
     REX::INFO(
         "identity commonlibf4_commit={}", profile.commonLibCommit);
 
-    // Every relocation depends on the exact executable and Address Library;
-    // CommonLib terminates on a bad database, so neither may reach it unchecked.
+    // Every relocation depends on the exact executable, and CommonLib terminates
+    // on a missing database, so neither may reach it unchecked.
     const auto gate = fo4hdr::ValidateRuntimeLoadGate(expected, observed);
     if (!gate.valid)
     {
@@ -446,7 +446,8 @@ namespace
             fo4hdr::ToString(gate.reason), observed.runtimeVersion, expected.addressLibraryFile);
         return false;
     }
-    // F4SE identity is release evidence; newer point releases and missing loaders load.
+    // F4SE and Address Library hashes are release evidence; newer point
+    // releases, re-released databases and missing loaders load.
     const auto audit = fo4hdr::ValidateRuntimeIdentity(expected, observed);
     if (audit.valid)
     {
