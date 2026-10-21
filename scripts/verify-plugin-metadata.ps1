@@ -15,6 +15,12 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
+# Every build pinned CommonLibF4 supports, in declaration order.
+$compatibleRuntimes = @(
+    '1.10.163', '1.10.980', '1.10.984',
+    '1.11.137', '1.11.159', '1.11.169', '1.11.191', '1.11.221', '1.11.240'
+)
+
 function Assert-Fo4HdrPluginVersion {
     param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
     $dataVersion =
@@ -30,7 +36,8 @@ function Assert-Fo4HdrPluginVersion {
     if ($dataVersion -ne 1 -or $pluginName -ne "FO4Isotope") {
         throw "The exported F4SE plugin identity is invalid."
     }
-    if ($addressIndependence -ne 4 -or $structureIndependence -ne 0) {
+    # NG (1.10.980) and AE (1.11.137) Address Library and layout bits.
+    if ($addressIndependence -ne 6 -or $structureIndependence -ne 6) {
         throw "The exported Address Library/layout flags are invalid."
     }
 
@@ -39,11 +46,7 @@ function Assert-Fo4HdrPluginVersion {
 
 function Assert-Fo4HdrPluginVersionRequirements {
     param([IntPtr]$Version, [string]$Runtime, [string]$F4seVersion)
-    $expectedPacked = @(
-        (ConvertTo-Fo4HdrPackedPluginVersion '1.10.163'),
-        (ConvertTo-Fo4HdrPackedPluginVersion '1.10.984'),
-        (ConvertTo-Fo4HdrPackedPluginVersion '1.11.240')
-    )
+    $expectedPacked = @($compatibleRuntimes | ForEach-Object { ConvertTo-Fo4HdrPackedPluginVersion $_ })
     for ($index = 0; $index -lt 16; ++$index) {
         $actual = [uint32][Runtime.InteropServices.Marshal]::ReadInt32(
             $version,
@@ -52,7 +55,7 @@ function Assert-Fo4HdrPluginVersionRequirements {
         if ($actual -ne $expected) {
             throw (
                 "PluginVersion compatible runtimes are not exactly " +
-                "OG 1.10.163, NG 1.10.984 and AE 1.11.240 followed by zero terminators."
+                "$($compatibleRuntimes -join ', ') followed by zero terminators."
             )
         }
     }
@@ -90,10 +93,11 @@ function Assert-Fo4HdrPluginMetadataFixture {
         [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $version, $bytes.Length)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x000, 1)
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x208, $Fixture.Flags)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x20C, 0)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x210, $Fixture.Packed)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x214, 0x010A3D80)
-        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x218, 0x010B0F00)
+        [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x20C, $Fixture.Flags)
+        for ($index = 0; $index -lt $compatibleRuntimes.Count; ++$index) {
+            [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x210 + ($index * 4),
+                (ConvertTo-Fo4HdrPackedPluginVersion $compatibleRuntimes[$index]))
+        }
         [Runtime.InteropServices.Marshal]::WriteInt32($version, 0x250, $Fixture.Minimum)
         $arguments = @{
             Version = $version
@@ -105,19 +109,19 @@ function Assert-Fo4HdrPluginMetadataFixture {
             @{ Offset = 0x000; Value = 2 },
             @{ Offset = 0x008; Value = 0 },
             @{ Offset = 0x208; Value = 0 },
-            @{ Offset = 0x208; Value = 6 },
-            @{ Offset = 0x208; Value = 6 - $Fixture.Flags },
+            @{ Offset = 0x208; Value = 2 },
+            @{ Offset = 0x208; Value = 4 },
+            @{ Offset = 0x20C; Value = 0 },
+            @{ Offset = 0x20C; Value = 2 },
             @{ Offset = 0x20C; Value = 4 },
-            @{ Offset = 0x20C; Value = 6 },
-            @{ Offset = 0x20C; Value = 6 - $Fixture.Flags },
             @{ Offset = 0x210; Value = 0 },
             @{ Offset = 0x210; Value = $Fixture.Packed + 16 },
             @{ Offset = 0x214; Value = $Fixture.Packed },
             @{ Offset = 0x214; Value = 0x010B0F00 },
-            @{ Offset = 0x214; Value = 0x010B0DD0 },
-            @{ Offset = 0x218; Value = $Fixture.Packed },
             @{ Offset = 0x218; Value = 0 },
-            @{ Offset = 0x21C; Value = $Fixture.Packed },
+            @{ Offset = 0x230; Value = 0 },
+            @{ Offset = 0x230; Value = 0x010B0F10 },
+            @{ Offset = 0x234; Value = $Fixture.Packed },
             @{ Offset = 0x24C; Value = $Fixture.Packed },
             @{ Offset = 0x250; Value = 0 },
             @{ Offset = 0x250; Value = $Fixture.Minimum - 16 },
@@ -135,9 +139,9 @@ function Assert-Fo4HdrPluginMetadataFixture {
 function Invoke-Fo4HdrPluginMetadataSelfTest {
     param($Lock)
     foreach ($fixture in @(
-        @{ Runtime = '1.10.163'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 },
-        @{ Runtime = '1.10.984'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 },
-        @{ Runtime = '1.11.240'; Packed = 0x010A0A30; Flags = 4; Minimum = 0x00060170 }
+        @{ Runtime = '1.10.163'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 },
+        @{ Runtime = '1.10.984'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 },
+        @{ Runtime = '1.11.240'; Packed = 0x010A0A30; Flags = 6; Minimum = 0x00060170 }
     )) {
         Assert-Fo4HdrPluginMetadataFixture $fixture $Lock
     }

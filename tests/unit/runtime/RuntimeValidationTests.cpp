@@ -14,8 +14,8 @@ namespace fo4hdr::tests {
 namespace {
 void TestSharedRuntimeSelection()
 {
-    const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
-    const auto* ae = FindRuntimeProfile(0x010B0F00, 0x00070090);
+    const auto* og = FindRuntimeProfile(0x010A0A30);
+    const auto* ae = FindRuntimeProfile(0x010B0F00);
     FO4HDR_CHECK(og && ae && og != ae);
     FO4HDR_CHECK(og->key == "1.10.163" && ae->key == "1.11.240");
     FO4HDR_CHECK(og->hasNativeSceneComposite && ae->hasNativeSceneComposite);
@@ -24,58 +24,54 @@ void TestSharedRuntimeSelection()
     FO4HDR_CHECK(ValidateRuntimeIdentity(og->identity, og->identity).valid);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ae->identity, ae->identity).valid);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ae->identity).valid);
-    FO4HDR_CHECK(FindRuntimeProfile(0x010A0A30, 0x00070090) == og);
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00060170));
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00070020));
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0DD0, 0x00070080));
-    FO4HDR_CHECK(!InitializeRuntimeProfile(0, 0));
-    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
-    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30, 0x00060170));
-    FO4HDR_CHECK(!InitializeRuntimeProfile(0x010B0F00, 0x00070090));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(0));
+    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30));
+    FO4HDR_CHECK(InitializeRuntimeProfile(0x010A0A30));
+    FO4HDR_CHECK(!InitializeRuntimeProfile(0x010B0F00));
     FO4HDR_CHECK(ActiveRuntimeProfile() == og && IsOriginalRuntime());
 }
 
 void TestNextGenerationRuntimeSelection()
 {
-    const auto* ng = FindRuntimeProfile(0x010A3D80, 0x00070020);
+    const auto* ng = FindRuntimeProfile(0x010A3D80);
     FO4HDR_CHECK(ng);
     if (!ng) return;
     FO4HDR_CHECK(ng->key == "1.10.984");
     FO4HDR_CHECK(ng->hasNativeSceneComposite);
     FO4HDR_CHECK(ValidateRuntimeIdentity(ng->identity, ng->identity).valid);
-    const auto* og = FindRuntimeProfile(0x010A0A30, 0x00060170);
+    const auto* og = FindRuntimeProfile(0x010A0A30);
     FO4HDR_CHECK(!ValidateRuntimeIdentity(og->identity, ng->identity).valid);
-    FO4HDR_CHECK(FindRuntimeProfile(0x010A3D80, 0x00070090) == ng);
+    // NG 1.10.980 shares the NG family profile.
+    FO4HDR_CHECK(FindRuntimeProfile(0x010A3D40) == ng);
 }
 
 void TestRuntimeSelectionGate()
 {
-    const auto* ae = FindRuntimeProfile(0x010B0F00, 0x00070090);
-    // A newer F4SE point release for the exact runtime is admitted.
-    auto selection = SelectRuntimeProfile(0x010B0F00, 0x000700A0);
-    FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::Selected && selection.profile == ae);
-    // An older F4SE names the exact-runtime candidate but is rejected.
-    selection = SelectRuntimeProfile(0x010B0F00, 0x00070080);
-    FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::F4seBelowMinimum && selection.profile == ae);
-    FO4HDR_CHECK(!FindRuntimeProfile(0x010B0F00, 0x00070080));
-    // Other AE executables and FO4VR 1.2.72 never borrow a compiled profile.
-    for (const auto runtime : {0x010B0A90U, 0x010B0BF0U, 0x010B0DD0U, 0x010B0F10U, 0x01020480U})
+    const auto* ae = FindRuntimeProfile(0x010B0F00);
+    // Every AE build CommonLibF4 supports shares the AE family profile.
+    for (const auto runtime : {0x010B0890U, 0x010B09F0U, 0x010B0A90U, 0x010B0BF0U, 0x010B0DD0U})
     {
-        selection = SelectRuntimeProfile(runtime, 0x00070090);
+        const auto selection = SelectRuntimeProfile(runtime);
+        FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::Selected && selection.profile == ae);
+    }
+    // CommonLibF4 terminates on anything else: OG 1.10.162, NG 1.10.985,
+    // AE 1.11.241 and FO4VR 1.2.72 stay rejected.
+    for (const auto runtime : {0x010A0A20U, 0x010A3D90U, 0x010B0F10U, 0x01020480U, 0U})
+    {
+        const auto selection = SelectRuntimeProfile(runtime);
         FO4HDR_CHECK(selection.reason == RuntimeSelectionReason::UnsupportedRuntime && !selection.profile);
     }
     FO4HDR_CHECK(ToString(RuntimeSelectionReason::Selected) == "selected");
     FO4HDR_CHECK(ToString(RuntimeSelectionReason::UnsupportedRuntime) == "unsupported-runtime");
-    FO4HDR_CHECK(ToString(RuntimeSelectionReason::F4seBelowMinimum) == "f4se-below-minimum");
     FO4HDR_CHECK(ToString(static_cast<RuntimeSelectionReason>(-1)) == "unknown-selection-reason");
 }
 
 void TestCompiledRuntimeProvenance()
 {
     for (const auto* profile : {
-             FindRuntimeProfile(0x010A0A30, 0x00060170),
-             FindRuntimeProfile(0x010A3D80, 0x00070020),
-             FindRuntimeProfile(0x010B0F00, 0x00070090)})
+             FindRuntimeProfile(0x010A0A30),
+             FindRuntimeProfile(0x010A3D80),
+             FindRuntimeProfile(0x010B0F00)})
     {
         FO4HDR_CHECK(profile);
         if (!profile) continue;
@@ -227,26 +223,33 @@ void TestLoadGate()
     FO4HDR_CHECK(ValidateRuntimeIdentity(expected, rereleased).reason ==
         RuntimeValidationReason::AddressLibraryHashMismatch);
 
-    // The executable is exact address identity; the Address Library must exist.
+    // Another family build, storefront or unreadable executable is audit
+    // evidence too; only the audit reports it.
     const struct
     {
         std::string_view RuntimeIdentity::* field;
         std::string_view value;
         RuntimeValidationReason reason;
-    } rejected[]{
-        {&RuntimeIdentity::runtimeVersion, "1.10.984.0", RuntimeValidationReason::RuntimeVersionMismatch},
+    } audited[]{
+        {&RuntimeIdentity::runtimeVersion, "1.11.191.0", RuntimeValidationReason::RuntimeVersionMismatch},
         {&RuntimeIdentity::executableSha256, hashB, RuntimeValidationReason::ExecutableHashMismatch},
         {&RuntimeIdentity::executableSha256, {}, RuntimeValidationReason::ExecutableUnavailable},
-        {&RuntimeIdentity::addressLibrarySha256, {}, RuntimeValidationReason::AddressLibraryUnavailable},
-        {&RuntimeIdentity::addressLibraryFile, "version-1-10-984-0.bin",
+        {&RuntimeIdentity::addressLibraryFile, "version-1-11-191-0.bin",
             RuntimeValidationReason::AddressLibraryFileMismatch}};
-    for (const auto& entry : rejected)
+    for (const auto& entry : audited)
     {
-        auto candidate = observed;
+        auto candidate = expected;
         candidate.*entry.field = entry.value;
-        const auto result = ValidateRuntimeLoadGate(expected, candidate);
-        FO4HDR_CHECK(!result.valid && result.reason == entry.reason);
+        FO4HDR_CHECK(ValidateRuntimeLoadGate(expected, candidate).valid);
+        FO4HDR_CHECK(ValidateRuntimeIdentity(expected, candidate).reason == entry.reason);
     }
+
+    // CommonLib terminates without the database, so its absence rejects.
+    auto missing = observed;
+    missing.addressLibrarySha256 = {};
+    const auto result = ValidateRuntimeLoadGate(expected, missing);
+    FO4HDR_CHECK(!result.valid &&
+        result.reason == RuntimeValidationReason::AddressLibraryUnavailable);
 
     auto uninitialized = expected;
     uninitialized.f4seLoaderSha256 = "UNVALIDATED";

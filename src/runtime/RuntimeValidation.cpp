@@ -21,39 +21,28 @@ namespace {
     return { false, reason };
 }
 
-// How much of a field the startup gate enforces; the full audit enforces all.
-enum class LoadGate
-{
-    None,
-    Presence,
-    Exact
-};
-
 struct IdentityCheck
 {
     std::string_view RuntimeIdentity::* field;
     RuntimeValidationReason unavailable;
     RuntimeValidationReason mismatch;
-    // The executable gates exactly; CommonLib terminates on a missing Address
-    // Library, so it must exist, but its hash and F4SE identity are evidence.
-    LoadGate loadGate;
 };
 
 constexpr IdentityCheck kIdentityChecks[]{
     {&RuntimeIdentity::runtimeVersion, RuntimeValidationReason::Valid,
-     RuntimeValidationReason::RuntimeVersionMismatch, LoadGate::Exact},
+     RuntimeValidationReason::RuntimeVersionMismatch},
     {&RuntimeIdentity::executableSha256, RuntimeValidationReason::ExecutableUnavailable,
-     RuntimeValidationReason::ExecutableHashMismatch, LoadGate::Exact},
+     RuntimeValidationReason::ExecutableHashMismatch},
     {&RuntimeIdentity::f4seVersion, RuntimeValidationReason::Valid,
-     RuntimeValidationReason::F4seVersionMismatch, LoadGate::None},
+     RuntimeValidationReason::F4seVersionMismatch},
     {&RuntimeIdentity::f4seLoaderSha256, RuntimeValidationReason::F4seLoaderUnavailable,
-     RuntimeValidationReason::F4seLoaderHashMismatch, LoadGate::None},
+     RuntimeValidationReason::F4seLoaderHashMismatch},
     {&RuntimeIdentity::f4seRuntimeSha256, RuntimeValidationReason::F4seRuntimeUnavailable,
-     RuntimeValidationReason::F4seRuntimeHashMismatch, LoadGate::None},
+     RuntimeValidationReason::F4seRuntimeHashMismatch},
     {&RuntimeIdentity::addressLibraryFile, RuntimeValidationReason::Valid,
-     RuntimeValidationReason::AddressLibraryFileMismatch, LoadGate::Exact},
+     RuntimeValidationReason::AddressLibraryFileMismatch},
     {&RuntimeIdentity::addressLibrarySha256, RuntimeValidationReason::AddressLibraryUnavailable,
-     RuntimeValidationReason::AddressLibraryHashMismatch, LoadGate::Presence}
+     RuntimeValidationReason::AddressLibraryHashMismatch}
 };
 
 [[nodiscard]] bool IsInitialized(const RuntimeIdentity& identity) noexcept
@@ -75,15 +64,11 @@ constexpr IdentityCheck kIdentityChecks[]{
     return value == expected.*check.field ? RuntimeValidationReason::Valid : check.mismatch;
 }
 
-[[nodiscard]] bool LoadGateAdmits(const IdentityCheck& check,
-    RuntimeValidationReason reason) noexcept
-{
-    return check.loadGate == LoadGate::None ||
-        (check.loadGate == LoadGate::Presence && reason == check.mismatch);
-}
+}  // namespace
 
-[[nodiscard]] RuntimeValidationResult Validate(const RuntimeIdentity& expected,
-    const RuntimeIdentity& observed, bool loadGateOnly) noexcept
+RuntimeValidationResult ValidateRuntimeIdentity(
+    const RuntimeIdentity& expected,
+    const RuntimeIdentity& observed) noexcept
 {
     if (!IsInitialized(expected))
     {
@@ -92,29 +77,29 @@ constexpr IdentityCheck kIdentityChecks[]{
 
     for (const auto& check : kIdentityChecks)
     {
-        const auto reason = CheckField(check, expected, observed);
-        if (reason == RuntimeValidationReason::Valid) continue;
-        if (!loadGateOnly || !LoadGateAdmits(check, reason))
+        if (const auto reason = CheckField(check, expected, observed);
+            reason != RuntimeValidationReason::Valid)
             return Invalid(reason);
     }
 
     return { true, RuntimeValidationReason::Valid };
 }
 
-}  // namespace
-
-RuntimeValidationResult ValidateRuntimeIdentity(
-    const RuntimeIdentity& expected,
-    const RuntimeIdentity& observed) noexcept
-{
-    return Validate(expected, observed, false);
-}
-
 RuntimeValidationResult ValidateRuntimeLoadGate(
     const RuntimeIdentity& expected,
     const RuntimeIdentity& observed) noexcept
 {
-    return Validate(expected, observed, true);
+    if (!IsInitialized(expected))
+    {
+        return Invalid(RuntimeValidationReason::ProfileUninitialized);
+    }
+    // CommonLib terminates the process without the database; every other
+    // identity, including the executable, is audit evidence.
+    if (observed.addressLibrarySha256.empty())
+    {
+        return Invalid(RuntimeValidationReason::AddressLibraryUnavailable);
+    }
+    return { true, RuntimeValidationReason::Valid };
 }
 
 RuntimeActionResult ValidateRuntimeAction(

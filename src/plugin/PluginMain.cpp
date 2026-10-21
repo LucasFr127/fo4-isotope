@@ -235,9 +235,10 @@ struct ObservedRuntimeIdentity
     std::string f4seVersion;
     std::string loaderHash;
     std::string runtimeHash;
+    std::string addressFile;
     std::string addressHash;
 
-    [[nodiscard]] fo4hdr::RuntimeIdentity View(std::string_view addressLibraryFile) const noexcept
+    [[nodiscard]] fo4hdr::RuntimeIdentity View() const noexcept
     {
         return {
             .runtimeVersion = runtimeVersion,
@@ -245,18 +246,19 @@ struct ObservedRuntimeIdentity
             .f4seVersion = f4seVersion,
             .f4seLoaderSha256 = loaderHash,
             .f4seRuntimeSha256 = runtimeHash,
-            .addressLibraryFile = addressLibraryFile,
+            .addressLibraryFile = addressFile,
             .addressLibrarySha256 = addressHash
         };
     }
 };
 
-[[nodiscard]] ObservedRuntimeIdentity ObserveIdentity(
-    const F4SE::QueryInterface* f4se, const fo4hdr::RuntimeIdentity& expected)
+[[nodiscard]] ObservedRuntimeIdentity ObserveIdentity(const F4SE::QueryInterface* f4se)
 {
     ObservedRuntimeIdentity observed;
     observed.runtimeVersion = f4se->RuntimeVersion().string();
     observed.f4seVersion = Version3(f4se->F4SEVersion());
+    // The database CommonLib opens for this executable, not the profile's pin.
+    observed.addressFile = "version-" + f4se->RuntimeVersion().string("-") + ".bin";
 
     if (const auto executable = ExecutablePath())
     {
@@ -271,7 +273,7 @@ struct ObservedRuntimeIdentity
         }
         observed.addressHash = fo4hdr::Sha256File(
             root / L"Data" / L"F4SE" / L"Plugins" /
-            std::filesystem::path(expected.addressLibraryFile))
+            std::filesystem::path(observed.addressFile))
                           .value_or("");
     }
 
@@ -395,23 +397,23 @@ namespace
         return false;
     }
 
-    const auto selection = fo4hdr::SelectRuntimeProfile(runtime.pack(), f4se.pack());
+    // CommonLib terminates on an executable it does not support, so this gate
+    // runs before any relocation.
+    const auto selection = fo4hdr::SelectRuntimeProfile(runtime.pack());
     if (selection.reason != fo4hdr::RuntimeSelectionReason::Selected)
     {
-        REX::CRITICAL("plugin active=false reason={} executable={} f4se={} "
-                      "profile={} minimum_f4se={}",
-            fo4hdr::ToString(selection.reason), runtime.string(), Version3(f4se),
-            selection.profile ? selection.profile->key : "none",
-            selection.profile ? selection.profile->identity.f4seVersion : "none");
+        REX::CRITICAL("plugin active=false reason={} executable={} f4se={}",
+            fo4hdr::ToString(selection.reason), runtime.string(), Version3(f4se));
         return false;
     }
-    if (!fo4hdr::InitializeRuntimeProfile(runtime.pack(), f4se.pack()))
+    if (!fo4hdr::InitializeRuntimeProfile(runtime.pack()))
     {
         REX::CRITICAL("plugin active=false reason=runtime-profile-conflict");
         return false;
     }
-    REX::INFO("runtime profile={} minimum_f4se={}",
-        selection.profile->key, selection.profile->identity.f4seVersion);
+    // Native hooks install only on the profile's pinned build.
+    REX::INFO("runtime profile={} native_hooks={}", selection.profile->key,
+        runtime.pack() == selection.profile->runtimeVersion ? "eligible" : "disabled");
     return true;
 }
 
@@ -419,8 +421,8 @@ namespace
 {
     const auto& profile = *fo4hdr::ActiveRuntimeProfile();
     const auto& expected = profile.identity;
-    const auto identity = ObserveIdentity(a_f4se, expected);
-    const auto observed = identity.View(expected.addressLibraryFile);
+    const auto identity = ObserveIdentity(a_f4se);
+    const auto observed = identity.View();
 
     REX::INFO("identity runtime={} executable_sha256={}",
         observed.runtimeVersion,
@@ -437,17 +439,16 @@ namespace
     REX::INFO(
         "identity commonlibf4_commit={}", profile.commonLibCommit);
 
-    // Every relocation depends on the exact executable, and CommonLib terminates
-    // on a missing database, so neither may reach it unchecked.
+    // CommonLib terminates on a missing database, so it may not reach CommonLib.
     const auto gate = fo4hdr::ValidateRuntimeLoadGate(expected, observed);
     if (!gate.valid)
     {
         REX::CRITICAL("plugin active=false reason={} executable={} address_library={}",
-            fo4hdr::ToString(gate.reason), observed.runtimeVersion, expected.addressLibraryFile);
+            fo4hdr::ToString(gate.reason), observed.runtimeVersion, observed.addressLibraryFile);
         return false;
     }
-    // F4SE and Address Library hashes are release evidence; newer point
-    // releases, re-released databases and missing loaders load.
+    // Executable, F4SE and Address Library identity is release evidence: other
+    // family builds, storefronts, re-released databases and loaders all load.
     const auto audit = fo4hdr::ValidateRuntimeIdentity(expected, observed);
     if (audit.valid)
     {

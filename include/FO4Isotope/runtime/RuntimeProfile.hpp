@@ -43,8 +43,9 @@ struct RuntimeProfile
     std::string_view status;
     std::string_view f4seRuntimeFile;
     std::string_view commonLibCommit;
+    // Pinned build; project-owned native hooks install only on exactly this one.
     std::uint32_t runtimeVersion{};
-    // Pinned F4SE release; also the minimum admitted for this runtime.
+    // Pinned F4SE release; audit evidence, not a load requirement.
     std::uint32_t f4seVersion{};
     bool hasNativeSceneComposite{};
     std::array<std::uint32_t, 4> nativeSceneCompositeHash{};
@@ -57,27 +58,22 @@ struct RuntimeProfile
 enum class RuntimeSelectionReason
 {
     Selected,
-    UnsupportedRuntime,
-    F4seBelowMinimum
+    UnsupportedRuntime
 };
 
 struct RuntimeSelection
 {
-    // The exact-runtime candidate, also reported when its F4SE is too old.
     const RuntimeProfile* profile{};
     RuntimeSelectionReason reason{RuntimeSelectionReason::UnsupportedRuntime};
 };
 
-// Packed executable version must match exactly; packed F4SE must be at least
-// the profile's pinned release. ValidateRuntimeLoadGate then checks hashes.
-[[nodiscard]] RuntimeSelection SelectRuntimeProfile(
-    std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept;
+// Any packed executable version CommonLibF4 supports selects its OG, NG or AE
+// family profile. ValidateRuntimeLoadGate then requires the Address Library.
+[[nodiscard]] RuntimeSelection SelectRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
 [[nodiscard]] std::string_view ToString(RuntimeSelectionReason reason) noexcept;
-[[nodiscard]] const RuntimeProfile* FindRuntimeProfile(
-    std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept;
+[[nodiscard]] const RuntimeProfile* FindRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
 // Startup selects one immutable profile before publishing any callbacks.
-[[nodiscard]] bool InitializeRuntimeProfile(
-    std::uint32_t runtimeVersion, std::uint32_t f4seVersion) noexcept;
+[[nodiscard]] bool InitializeRuntimeProfile(std::uint32_t runtimeVersion) noexcept;
 [[nodiscard]] const RuntimeProfile* ActiveRuntimeProfile() noexcept;
 [[nodiscard]] bool IsOriginalRuntime() noexcept;
 }  // namespace fo4hdr
