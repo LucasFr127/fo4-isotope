@@ -131,7 +131,7 @@ void PublishRenderer(GameSnapshotStore& store, const GameHdrSnapshot& observed, 
 void ReportRenderer(const GameHdrSnapshot& observed, std::string_view trigger, bool targetManagerAvailable)
 {
     REX::INFO(
-        "m2 renderer available=true trigger={} thread={} initialized={} "
+        "renderer available=true trigger={} thread={} initialized={} "
         "device_present={} context_present={} windows={} "
         "borderless={} vsync={}",
         trigger,
@@ -143,7 +143,7 @@ void ReportRenderer(const GameHdrSnapshot& observed, std::string_view trigger, b
         observed.rendererBorderless,
         observed.rendererVsync);
     REX::INFO(
-        "m2 render_targets available={} render_populated={} "
+        "render_targets available={} render_populated={} "
         "depth_populated={} cube_populated={} resource_slots=101/13/2 "
         "manager_present={} manager_metadata_observed=false "
         "semantic_mapping=unvalidated reason=manager-ownership-unproven",

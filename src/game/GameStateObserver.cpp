@@ -73,7 +73,7 @@ bool AcquireInputLayer(RE::BSTSmartPointer<RE::BSInputEnableLayer>& inputLayer, 
     if (inputManager == nullptr)
     {
         REX::WARN(
-            "m14 settings_interaction active=true applied=false "
+            "settings_interaction active=true applied=false "
             "reason=input-enable-manager-unavailable");
         return false;
     }
@@ -83,7 +83,7 @@ bool AcquireInputLayer(RE::BSTSmartPointer<RE::BSInputEnableLayer>& inputLayer, 
         !inputLayer)
     {
         REX::WARN(
-            "m14 settings_interaction active=true applied=false "
+            "settings_interaction active=true applied=false "
             "reason=input-layer-allocation-failed");
         return false;
     }
@@ -103,7 +103,7 @@ bool AcquireInputLayer(RE::BSTSmartPointer<RE::BSInputEnableLayer>& inputLayer, 
     {
         inputLayer.reset();
         REX::WARN(
-            "m14 settings_interaction active=true applied=false "
+            "settings_interaction active=true applied=false "
             "reason=input-layer-configuration-failed layer={}",
             layerID);
         return false;
@@ -127,7 +127,7 @@ bool SetInteraction(bool open, RE::MenuCursor& cursor, std::uint32_t& layerID)
         !g_settingsInteractionInputLayer)
     {
         REX::WARN(
-            "m14 settings_interaction active=false applied=false "
+            "settings_interaction active=false applied=false "
             "reason=input-ownership-inconsistent");
         return false;
     }
@@ -152,7 +152,7 @@ bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, st
     if (!VerifiedInteractionThread(currentThread, expectedThread, collectorThread))
     {
         REX::WARN(
-            "m14 settings_interaction applied=false "
+            "settings_interaction applied=false "
             "reason=unverified-window-game-thread current_thread={} "
             "window_thread={} collector_thread={}",
             currentThread,
@@ -172,7 +172,7 @@ bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, st
         if (cursor == nullptr)
         {
             REX::WARN(
-                "m14 settings_interaction active={} applied=false "
+                "settings_interaction active={} applied=false "
                 "reason=menu-cursor-unavailable",
                 open);
             return false;
@@ -182,7 +182,7 @@ bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, st
 
         if (!SetInteraction(open, *cursor, layerID)) return false;
         REX::INFO(
-            "m14 settings_interaction active={} applied=true thread={} "
+            "settings_interaction active={} applied=true thread={} "
             "layer={} cursor_owners_before={} cursor_owners_after={}",
             open,
             REX::W32::GetCurrentThreadId(),
@@ -196,9 +196,9 @@ bool VerifiedInteractionThread(std::uint32_t current, std::uint32_t expected, st
         const auto applied = open == g_settingsInteractionApplied;
         ::OutputDebugStringA(
             applied ?
-                "FO4Isotope: M14 input logging failed after a completed "
+                "FO4Isotope: input logging failed after a completed "
                 "interaction transition.\n" :
-                "FO4Isotope: M14 input interaction failed before a complete "
+                "FO4Isotope: input interaction failed before a complete "
                 "transition.\n");
         return applied;
     }
@@ -328,7 +328,7 @@ void ReportMessagingAvailable(
     try
     {
         REX::INFO(
-            "m2 messaging available=true interface_version={} thread={} "
+            "messaging available=true interface_version={} thread={} "
             "commonlib_mappings=pinned task_interface_v2={}",
             interfaceVersion,
             REX::W32::GetCurrentThreadId(),
@@ -375,8 +375,8 @@ void ReportMenuDrain(const fo4hdr::MenuDrainEvidence& evidence,
     {
         const auto& detail = detailed[index];
         const auto menu = static_cast<fo4hdr::MenuCode>(detail.code);
-        REX::INFO(
-            "m2 menu transition={} name={} sequence={} source_thread={} "
+        REX::DEBUG(
+            "menu transition={} name={} sequence={} source_thread={} "
             "drain_thread={}",
             detail.opening ? "open" : "close",
             fo4hdr::MenuName(menu),
@@ -385,8 +385,8 @@ void ReportMenuDrain(const fo4hdr::MenuDrainEvidence& evidence,
             REX::W32::GetCurrentThreadId());
     }
     const auto published = g_snapshotStore.Read();
-    REX::INFO(
-        "m2 menu drain complete=true processed={} details_omitted={} "
+    REX::DEBUG(
+        "menu drain complete=true processed={} details_omitted={} "
         "events_dropped={} cumulative_dropped={} open_mask=0x{:X} "
         "last_sequence={} published_sequence={} caught_up={} "
         "history_complete={} state_synchronized={}",
@@ -400,8 +400,8 @@ void ReportMenuDrain(const fo4hdr::MenuDrainEvidence& evidence,
         evidence.caughtUp,
         published.menuHistoryComplete,
         published.menuStateSynchronized);
-    REX::INFO(
-        "m2 menu witness valid={} pause_open_sequence={} "
+    REX::DEBUG(
+        "menu witness valid={} pause_open_sequence={} "
         "pause_close_sequence={} pause_complete={} "
         "pipboy_open_sequence={} pipboy_close_sequence={} "
         "pipboy_complete={}",
@@ -462,6 +462,11 @@ void DrainMenuEvents()
         });
 
     ReportMenuDrain(evidence, detailed);
+    // The applied evidence already failed the UI feature; the drain detail is debug-only.
+    if (evidence.dropped != 0)
+    {
+        ReportFeatureFailure(fo4hdr::GameSnapshotFeature::Ui, "ui", "menu-events-dropped");
+    }
 }
 
 class MenuEventSink final :
@@ -539,7 +544,7 @@ void PublishUiRegistration()
             snapshot.menuStateSynchronized = false;
         });
     REX::INFO(
-        "m2 ui available=false menu_sink_registered=true "
+        "ui available=false menu_sink_registered=true "
         "reason=awaiting-post-load-sync thread={}",
         REX::W32::GetCurrentThreadId());
 }
@@ -651,8 +656,8 @@ void ReportWindowDetails(const fo4hdr::GameHdrSnapshot& snapshot)
         {
             if (window.present)
             {
-                REX::INFO(
-                    "m2 renderer_window index={} hwnd_present={} "
+                REX::DEBUG(
+                    "renderer_window index={} hwnd_present={} "
                     "swap_chain_present={} position={}x{} size={}x{}",
                     window.arrayIndex,
                     window.windowIdentity != 0,
@@ -678,8 +683,8 @@ void ReportTargetDetails(const fo4hdr::GameHdrSnapshot& snapshot)
         {
             if (target.resourcePresent)
             {
-                REX::INFO(
-                    "m2 render_target index={} resource_present=true "
+                REX::DEBUG(
+                    "render_target index={} resource_present=true "
                     "metadata_observed={} metadata_correlated={} "
                     "engine_id={} size={}x{} format_numeric={} "
                     "multisample={}",
@@ -711,8 +716,8 @@ void ReportPublishedObservation()
         return;
     }
 
-    REX::INFO(
-        "m2 observation generation={} report_thread={}",
+    REX::DEBUG(
+        "observation generation={} report_thread={}",
         observation,
         REX::W32::GetCurrentThreadId());
     fo4hdr::game::observation::ReportImageSpaceDetails(snapshot);
@@ -788,7 +793,7 @@ void SynchronizeCollectedMenu(fo4hdr::GameLifecycleEvent event, bool allowMenuSy
                         fo4hdr::GameSnapshotFeature::Ui);
                 });
             REX::INFO(
-                "m2 ui available=true menu_state_synchronized=true "
+                "ui available=true menu_state_synchronized=true "
                 "boundary={}",
                 LifecycleName(event));
         }
@@ -805,7 +810,7 @@ bool VerifyCollectorThread(const ObservationRequest& request)
     if (!fo4hdr::TryClaimGameObservationThread(g_collectorThread, executeThread, readsEngine))
     {
         REX::WARN(
-            "m2 collector request={} source_thread={} "
+            "collector request={} source_thread={} "
             "execute_thread={} expected_thread={} stable=false",
             requestGeneration,
             sourceThread,
@@ -815,8 +820,8 @@ bool VerifyCollectorThread(const ObservationRequest& request)
         return false;
     }
 
-    REX::INFO(
-        "m2 collector request={} event={} source_thread={} "
+    REX::DEBUG(
+        "collector request={} event={} source_thread={} "
         "execute_thread={} engine_read={} collector_thread={} accepted=true",
         requestGeneration,
         LifecycleName(event),
@@ -936,8 +941,8 @@ void ScheduleCollectedRequest(
         return;
     }
 
-    REX::INFO(
-        "m2 collector requested={} event={} source_thread={} "
+    REX::DEBUG(
+        "collector requested={} event={} source_thread={} "
         "enqueue_attempt=true",
         requestGeneration,
         LifecycleName(event),
@@ -1005,7 +1010,7 @@ void ActivateSettingsInput(std::string_view name)
     const auto activation =
         fo4hdr::TryActivateGraphicsSettingsInputOnCurrentThread();
     REX::INFO(
-        "m14 settings_input event={} ready={} active={} "
+        "settings_input event={} ready={} active={} "
         "current_thread={} window_thread={}",
         name,
         activation.ready,
@@ -1087,7 +1092,7 @@ void ObserveLifecycleImpl(F4SE::MessagingInterface::Message* message)
         reinterpret_cast<std::uintptr_t>(message->data) != 0;
     PublishLifecycleTransition(event, succeeded);
     REX::INFO(
-        "m2 lifecycle event={} type={} outcome={} thread={}",
+        "lifecycle event={} type={} outcome={} thread={}",
         name,
         message->type,
         hasOutcome ? (succeeded ? "success" : "false-or-failed") :
@@ -1184,7 +1189,7 @@ namespace {
     catch (...)
     {
         ::OutputDebugStringA(
-            "FO4Isotope: post-registration M2 status logging failed.\n");
+            "FO4Isotope: post-registration status logging failed.\n");
     }
     return true;
 }

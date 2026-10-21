@@ -120,10 +120,15 @@ template <class T>
         reinterpret_cast<std::uintptr_t>(object) % alignof(T) == 0 &&
         IsReadableMemory(object, objectSize, false);
 
-    REX::INFO(
-        "m6 commonlib_mapping symbol={} object_valid={}",
-        symbol,
-        objectValid);
+    // Rejections stay at info level because not every caller reports its own failure.
+    if (objectValid)
+    {
+        REX::DEBUG("commonlib_mapping symbol={} object_valid=true", symbol);
+    }
+    else
+    {
+        REX::INFO("commonlib_mapping symbol={} object_valid=false", symbol);
+    }
     return objectValid ? object : nullptr;
 }
 
@@ -148,7 +153,7 @@ inline void ReportFeatureFailure(
     try
     {
         REX::WARN(
-            "m2 feature={} available=false reason={}",
+            "feature={} available=false reason={}",
             name,
             reason);
     }

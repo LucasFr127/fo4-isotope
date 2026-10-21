@@ -849,7 +849,7 @@ class ImageSpaceCollector
         if (!effectListValid)
         {
             REX::WARN(
-                "m2 image_space_effect_list valid=false capacity={} size={} "
+                "image_space_effect_list valid=false capacity={} size={} "
                 "free_index={} storage_present={} required_top_level_prefix={}",
                 effectCapacity,
                 effectSize,
@@ -1020,7 +1020,7 @@ class ImageSpaceCollector
     void Report(std::string_view trigger)
     {
         REX::INFO(
-            "m2 image_space available=true trigger={} thread={} ready=true "
+            "image_space available=true trigger={} thread={} ready=true "
             "override={} effect_capacity={} effect_size={} effect_free_index={} "
             "top_level_effect_count={} effects={} active_luts={} "
             "effect_semantics=pinned-commonlib active_field_names=commonlib "
@@ -1079,7 +1079,7 @@ void ReportImageSpaceSemanticProfile()
     const auto* profile = ActiveRuntimeProfile();
     if (!profile) return;
     REX::INFO(
-        "m2 image_space_profile layout_exact=true effect_table_exact=true "
+        "image_space_profile layout_exact=true effect_table_exact=true "
         "effects={} commonlib_source_commit={} "
         "xedit_alias_behavior=unverified",
         kImageSpaceTopLevelEffectCount,
@@ -1087,16 +1087,16 @@ void ReportImageSpaceSemanticProfile()
     for (const auto& semantic :
          kImageSpaceEffectSemantics)
     {
-        REX::INFO(
-            "m2 image_space_profile_effect index={} symbol={}",
+        REX::DEBUG(
+            "image_space_profile_effect index={} symbol={}",
             static_cast<std::uint16_t>(semantic.effect),
             semantic.symbol);
     }
     for (std::size_t index = 0; index < kImageSpaceActiveDataOffsets.size(); ++index)
     {
         const auto& semantic = fo4hdr::generated::og::kImageSpaceActiveDataSemantics[index];
-        REX::INFO(
-            "m2 image_space_profile_active_field field={} offset={} "
+        REX::DEBUG(
+            "image_space_profile_active_field field={} offset={} "
             "xedit_alias=\"{}\" alias_behavior=unverified",
             semantic.field,
             kImageSpaceActiveDataOffsets[index],
@@ -1118,8 +1118,8 @@ void ReportImageSpaceDetails(const fo4hdr::GameHdrSnapshot& snapshot)
             const auto& effect = snapshot.imageSpaceEffects[index];
             const auto& semantic =
                 kImageSpaceEffectSemantics[index];
-            REX::INFO(
-                "m2 image_space_effect index={} symbol={} present={} "
+            REX::DEBUG(
+                "image_space_effect index={} symbol={} present={} "
                 "stored_active={} semantic_mapping=pinned-commonlib",
                 static_cast<std::uint16_t>(semantic.effect),
                 semantic.symbol,

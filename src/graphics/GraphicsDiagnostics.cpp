@@ -519,7 +519,7 @@ namespace {
     const fo4hdr::GraphicsObservationSnapshot& graphics)
 {
     return std::format(
-        "m6 renderer compiled_in={} requested={} reference_requested={} initialized={} gameplay_ready={} "
+        "renderer compiled_in={} requested={} reference_requested={} initialized={} gameplay_ready={} "
         "hdr_active={} hdr_color_space={} heartbeat={} paused={} failure={} d3d_iat_owned={} d3d_iat_displaced={} "
         "device_calls={} device_next_calls={} device_successes={} device_shadows={} device_retires={} "
         "shadow_failures={} pixel_shader_calls={} known={} unknown={} known_mask={:#x} last_known_crc32={:#010x} "
@@ -624,7 +624,7 @@ void ReportRendererStatus(const fo4hdr::GraphicsObservationSnapshot& graphics, G
     sink(std::format("{}{}{}", FormatRendererDeviceStatus(graphics),
         FormatRendererFrameStatus(graphics), FormatRendererPerformanceStatus(graphics)));
     sink(std::format(
-        "m14 live_settings thread_compatible={} "
+        "live_settings thread_compatible={} "
         "qualified_draw_thread={} present_thread={}",
         graphics.liveSettingsThreadCompatible,
         graphics.qualifiedDrawThreadId,
@@ -644,7 +644,7 @@ void ReportNewShaders(const fo4hdr::GraphicsObservationSnapshot& graphics, Graph
         if ((newlyObserved & fo4hdr::RenoDxShaderBit(descriptor.pass)) != 0)
         {
             sink(std::format(
-                "m6 known_shader pass={} crc32={:#010x} "
+                "known_shader pass={} crc32={:#010x} "
                 "scene_input_slot={} domain=renodx-raw-dxbc-crc32",
                 descriptor.name,
                 descriptor.crc32,
@@ -669,7 +669,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
     }
     catch (...)
     {
-        ::OutputDebugStringA("FO4Isotope: M6 lifecycle diagnostics failed.\n");
+        ::OutputDebugStringA("FO4Isotope: lifecycle diagnostics failed.\n");
     }
 }
 

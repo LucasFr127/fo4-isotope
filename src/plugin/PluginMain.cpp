@@ -422,7 +422,7 @@ namespace
             (void)fo4hdr::InitializeSettingsPersistence(*settingsPath);
     }
     REX::INFO(
-        "m6 diagnostics_configuration valid={} error={} line={} "
+        "diagnostics_configuration valid={} error={} line={} "
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
         "overlay={} forced_failure={} enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
@@ -451,7 +451,7 @@ void ReportGameObserverStatus(bool observerActive) noexcept
 {
     try
     {
-        REX::INFO("m2 observer active={} reason={}",
+        REX::INFO("observer active={} reason={}",
             observerActive,
             observerActive ? "messaging-listener-registered"
                            : "messaging-unavailable");
@@ -459,7 +459,7 @@ void ReportGameObserverStatus(bool observerActive) noexcept
     catch (...)
     {
         ::OutputDebugStringA(
-            "FO4Isotope: M2 observer status logging failed.\n");
+            "FO4Isotope: observer status logging failed.\n");
     }
 }
 
@@ -613,6 +613,12 @@ void PrepareAdmittedStartup() noexcept
     {
         g_startup.executable = ExecutablePath();
         g_startup.configuration = LoadDiagnosticsConfiguration(g_startup.executable);
+        // Non-Debug builds log per-item lifecycle detail only in developer mode.
+        if (g_startup.configuration.valid && g_startup.configuration.value.developerMode)
+        {
+            spdlog::set_level(spdlog::level::debug);
+            spdlog::flush_on(spdlog::level::debug);
+        }
         g_startup.graphicsActive = fo4hdr::InitializeGraphicsObservation(
             g_startup.configuration.valid ? g_startup.configuration.value :
                 fo4hdr::PluginConfiguration{});
