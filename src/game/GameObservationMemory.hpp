@@ -113,9 +113,8 @@ template <class T>
     std::size_t objectSize,
     std::string_view symbol)
 {
-    // PluginMain accepts the exact executable and pinned Address Library
-    // hashes before registering this observer. CommonLib therefore owns IDDB
-    // resolution; this boundary validates only the resulting live object.
+    // CommonLib admits the runtime and owns IDDB resolution before this
+    // observer registers; this boundary validates only the resulting live object.
     const auto objectValid =
         object != nullptr &&
         reinterpret_cast<std::uintptr_t>(object) % alignof(T) == 0 &&

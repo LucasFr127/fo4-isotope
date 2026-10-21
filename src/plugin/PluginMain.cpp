@@ -331,6 +331,7 @@ namespace
 
     // CommonLib reports and terminates on an unsupported executable, and later
     // on a missing or invalid Address Library, before any relocation resolves.
+    // NG and AE F4SE skip the plugin before Preload when the database is absent.
     if (!fo4hdr::InitializeRuntimeProfile(ActiveRuntimeFamily()))
     {
         REX::CRITICAL("plugin active=false reason=runtime-profile-conflict");
