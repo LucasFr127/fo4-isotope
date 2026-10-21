@@ -11,10 +11,30 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace fo4hdr {
 
 inline constexpr std::size_t kMaximumVtableSlots = 512;
+// Compilers read RTTI just before the table (MSVC at [-1]; Itanium/DXVK also the
+// offset-to-top at [-2]), so a wrapper's dynamic_cast or typeid on a shadowed
+// object must find the original values there.
+inline constexpr std::size_t kShadowHeaderSlots = 2;
+
+struct ShadowVtable
+{
+    std::array<void*, kShadowHeaderSlots> header{};
+    std::array<void*, kMaximumVtableSlots> table{};
+
+    [[nodiscard]] void** data() noexcept { return table.data(); }
+    [[nodiscard]] void* const* data() const noexcept { return table.data(); }
+    [[nodiscard]] void*& operator[](std::size_t index) noexcept { return table[index]; }
+    [[nodiscard]] void* operator[](std::size_t index) const noexcept { return table[index]; }
+    [[nodiscard]] auto begin() noexcept { return table.begin(); }
+};
+
+static_assert(std::is_standard_layout_v<ShadowVtable>);
+static_assert(offsetof(ShadowVtable, table) == sizeof(ShadowVtable::header));
 
 inline constexpr std::size_t kDeviceCreateTexture2D = 5;
 inline constexpr std::size_t kRelease = 2;
@@ -109,7 +129,7 @@ struct DeviceRecord
     CreateUnorderedAccessView nextCreateUav{};
     CreateRenderTargetView nextCreateRtv{};
     CreatePixelShader nextCreatePixelShader{};
-    std::array<void*, kMaximumVtableSlots> shadow{};
+    ShadowVtable shadow{};
 };
 
 struct ContextRecord : DrawObservation
@@ -134,7 +154,7 @@ struct ContextRecord : DrawObservation
     ClearUnorderedAccessViewFloat nextClearUnorderedAccessViewFloat{};
     OmSetRenderTargets nextOmSetRenderTargets{};
     OmSetRenderTargetsAndUavs nextOmSetRenderTargetsAndUavs{};
-    std::array<void*, kMaximumVtableSlots> shadow{};
+    ShadowVtable shadow{};
 };
 
 struct SwapChainRecord
@@ -147,7 +167,7 @@ struct SwapChainRecord
     void** originalVtable{};
     SwapChainRelease nextRelease{};
     ResizeBuffers nextResizeBuffers{};
-    std::array<void*, kMaximumVtableSlots> shadow{};
+    ShadowVtable shadow{};
 };
 
 inline constexpr std::size_t kMaximumHookObjects = 4;

@@ -5,6 +5,8 @@
 #include "FrameTrace.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "FO4Isotope/TestShaders.generated.hpp"
+#include <array>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 
@@ -93,10 +95,17 @@ void PresentationContextFixture::PrepareResources()
 
 void PresentationContextFixture::InstallHooks()
 {
+    // RTTI reads just before the shadow table must see the pre-install slots;
+    // the D3D11 context embeds its table, so read them before the vptr moves.
+    const auto original = reinterpret_cast<std::uintptr_t>(*reinterpret_cast<void***>(device.context.Get()));
+    std::array<void*, kShadowHeaderSlots> header{};
+    for (std::size_t index = 0; index < header.size(); ++index)
+        header[index] = *reinterpret_cast<void* const*>(original - (header.size() - index) * sizeof(void*));
     FO4HDR_WARP_CHECK(InstallContextShadow(device.context.Get()));
     record = FindContext(device.context.Get());
     if (!record) throw std::runtime_error("Context hook test did not publish a record");
     FO4HDR_WARP_CHECK(*reinterpret_cast<void***>(device.context.Get()) == record->shadow.data());
+    FO4HDR_WARP_CHECK(record->shadow.header == header);
     if (!g_configuration.productionRequested)
     {
         for (const auto slot : {kContextDispatch, kContextDispatchIndirect,

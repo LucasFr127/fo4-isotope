@@ -299,9 +299,22 @@ template <class Record, std::size_t Count>
     return next != nullptr && next != hook && IsExecutableAddress(next);
 }
 
+// An unreadable slot before the live table stays null.
+void CopyShadowHeader(void** current, ShadowVtable& shadow) noexcept
+{
+    const auto table = reinterpret_cast<std::uintptr_t>(current);
+    for (std::size_t index = 0; index < kShadowHeaderSlots; ++index)
+    {
+        const auto* slot = reinterpret_cast<void* const*>(
+            table - (kShadowHeaderSlots - index) * sizeof(void*));
+        shadow.header[index] = IsReadable(slot, sizeof(void*)) ? AtomicPointerLoad(slot) : nullptr;
+    }
+}
+
 template <class Object, class Record>
 [[nodiscard]] bool PublishObjectShadow(Object* object, Record& record, void** current) noexcept
 {
+    CopyShadowHeader(current, record.shadow);
     const auto generation = g_objectGeneration.fetch_add(1, std::memory_order_relaxed) + 1;
     if constexpr (std::is_same_v<Record, ContextRecord>) record.generation = generation;
     if (!record.identity.Publish(object, generation)) return false;
