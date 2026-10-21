@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
-    [string]$Runtime = "1.10.163",
-
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
 
@@ -19,7 +16,7 @@ $ErrorActionPreference = "Stop"
 $compatibleRuntimes = @('1.11.240')
 
 function Assert-Fo4HdrPluginVersion {
-    param([IntPtr]$Version, [string]$Runtime)
+    param([IntPtr]$Version)
     $dataVersion =
         [Runtime.InteropServices.Marshal]::ReadInt32($version, 0x000)
     $pluginName =
@@ -168,7 +165,6 @@ if ($SelfTest) {
     Invoke-Fo4HdrPluginMetadataSelfTest
     return
 }
-$entry = $lock.runtimes.$Runtime
 $stageRoot = Join-Path $repoRoot "dist"
 $builtDll =
     Join-Path $repoRoot "build\windows\x64\$Mode\FO4Isotope.dll"
@@ -228,7 +224,7 @@ try {
     }
     $version = $exports["F4SEPlugin_Version"]
 
-    Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime
+    Assert-Fo4HdrPluginVersion -Version $version
 }
 finally {
     [void][Fo4Hdr.NativeMethods]::FreeLibrary($module)

@@ -145,7 +145,7 @@ function Test-BuildStageRetirement {
         }
         $global:LASTEXITCODE = 0
     }
-    & (Join-Path $project 'scripts/build.ps1') -Runtime '1.10.163' -Mode debug
+    & (Join-Path $project 'scripts/build.ps1') -Mode debug
     if ((Test-Path -LiteralPath (@($default) + $manifests)) -contains $true -or
         [IO.File]::ReadAllText($userDefault) -cne 'keep user data') {
         throw 'Build cleanup must affect only the retired generated stage files.'
@@ -186,8 +186,7 @@ if (`$Runtime -cne '1.10.163') { throw 'Unexpected runtime validation request.' 
 
 function Write-MetadataValidationStub {
     [IO.File]::WriteAllText((Join-Path $project 'scripts/verify-plugin-metadata.ps1'), @"
-param([string]`$Runtime, [string]`$Mode, [switch]`$StageOnly)
-if (`$Runtime -cne '1.10.163') { throw 'Unexpected metadata runtime.' }
+param([string]`$Mode, [switch]`$StageOnly)
 if (-not `$StageOnly -and `$Mode -cne 'debug') { throw 'Expected stage-only or fixture build metadata verification.' }
 if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture metadata rejection.' }
 [IO.File]::WriteAllText((Join-Path `$PSScriptRoot '../metadata-checked'), 'checked')
@@ -196,8 +195,8 @@ if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture 
 
 function Write-BuildConfigurationStub {
     [IO.File]::WriteAllText((Join-Path $project 'scripts/configure.ps1'), @'
-param([string]$Runtime, [string]$Mode)
-if ($Runtime -cne '1.10.163' -or $Mode -cne 'debug') { throw 'Unexpected fixture build configuration.' }
+param([string]$Mode)
+if ($Mode -cne 'debug') { throw 'Unexpected fixture build configuration.' }
 '@)
 }
 

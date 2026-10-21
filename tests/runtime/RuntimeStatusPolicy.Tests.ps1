@@ -90,13 +90,14 @@ Assert-Rejected {
 
 $savedRuntime = $env:FO4HDR_RUNTIME
 try {
-    $env:FO4HDR_RUNTIME = $null
+    # Parameter defaults bypass ValidateSet, so an unknown environment runtime reaches the script guard.
+    $env:FO4HDR_RUNTIME = '0.0.0'
     $message = ''
     try {
         & (Join-Path $repoRoot 'scripts/test.ps1') -Mode debug -SkipConfigure -Scope compiled
     } catch { $message = $_.Exception.Message }
     if ($message -notlike 'Specify -Runtime or set FO4HDR_RUNTIME*') {
-        throw "Compiled tests did not reject an unspecified runtime before execution: $message"
+        throw "Compiled tests did not reject an unknown runtime before execution: $message"
     }
 } finally { $env:FO4HDR_RUNTIME = $savedRuntime }
 

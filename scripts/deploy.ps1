@@ -28,7 +28,6 @@ if (-not (Test-Path $source)) {
 }
 
 & (Join-Path $PSScriptRoot "verify-plugin-metadata.ps1") `
-    -Runtime $Runtime `
     -StageOnly
 
 $expectedRelativeFiles = @(

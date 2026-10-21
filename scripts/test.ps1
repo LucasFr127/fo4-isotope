@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
-    [string]$Runtime = $env:FO4HDR_RUNTIME,
+    [string]$Runtime = $(if ($env:FO4HDR_RUNTIME) { $env:FO4HDR_RUNTIME } else { "1.10.163" }),
 
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
@@ -89,7 +89,6 @@ if ($runCompiled) {
         Assert-Fo4HdrConfiguredMsvc -Lock $lock
     } else {
         & (Join-Path $PSScriptRoot "configure.ps1") `
-            -Runtime $Runtime `
             -Mode $Mode `
             -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
             -DisableFrameTrace:$DisableFrameTrace

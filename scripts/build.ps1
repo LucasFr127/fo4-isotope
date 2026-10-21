@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 [CmdletBinding()]
 param(
-    [ValidateSet("1.10.163", "1.10.984", "1.11.240")]
-    [string]$Runtime = $env:FO4HDR_RUNTIME,
-
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
 
@@ -18,7 +15,6 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "internal/Project.Common.ps1")
 
 & (Join-Path $PSScriptRoot "configure.ps1") `
-    -Runtime $Runtime `
     -Mode $Mode `
     -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
     -DisablePch:$DisablePch `
@@ -56,5 +52,4 @@ finally {
 }
 
 & (Join-Path $PSScriptRoot "verify-plugin-metadata.ps1") `
-    -Runtime $Runtime `
     -Mode $Mode

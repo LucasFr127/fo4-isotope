@@ -123,7 +123,7 @@ jobs:
         run: .\scripts\test.ps1 -Runtime $env:FO4HDR_RUNTIME -Scope repository
 
       - name: Build plugin and test executables
-        run: .\scripts\build.ps1 -Runtime $env:FO4HDR_RUNTIME -Mode $env:FO4HDR_BUILD_MODE -DisableFrameTrace
+        run: .\scripts\build.ps1 -Mode $env:FO4HDR_BUILD_MODE -DisableFrameTrace
 
       - name: Run shared CPU and OG WARP tests
         run: >-
