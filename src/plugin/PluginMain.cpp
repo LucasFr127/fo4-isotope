@@ -251,7 +251,7 @@ struct ObservedRuntimeIdentity
 };
 
 [[nodiscard]] ObservedRuntimeIdentity ObserveIdentity(
-    const F4SE::LoadInterface* f4se, const fo4hdr::RuntimeIdentity& expected)
+    const F4SE::QueryInterface* f4se, const fo4hdr::RuntimeIdentity& expected)
 {
     ObservedRuntimeIdentity observed;
     observed.runtimeVersion = f4se->RuntimeVersion().string();
@@ -342,7 +342,7 @@ F4SE_EXPORT bool F4SEPlugin_Query(
 namespace
 {
 
-[[nodiscard]] bool SelectRuntime(const F4SE::LoadInterface* a_f4se)
+[[nodiscard]] bool SelectRuntime(const F4SE::QueryInterface* a_f4se)
 {
     const auto runtime = a_f4se->RuntimeVersion();
     const auto f4se = a_f4se->F4SEVersion();
@@ -374,7 +374,7 @@ namespace
     return true;
 }
 
-[[nodiscard]] bool ValidatePluginIdentity(const F4SE::LoadInterface* a_f4se)
+[[nodiscard]] bool ValidatePluginIdentity(const F4SE::QueryInterface* a_f4se)
 {
     const auto& profile = *fo4hdr::ActiveRuntimeProfile();
     const auto& expected = profile.identity;
@@ -607,36 +607,127 @@ void ReportInitializedRenderer(
     }
 }
 
+enum class StartupStage : std::uint8_t
+{
+    preload,
+    load
+};
+
+[[nodiscard]] constexpr std::string_view ToString(StartupStage stage) noexcept
+{
+    return stage == StartupStage::preload ? "preload" : "load";
+}
+
+enum class StartupState : std::uint8_t
+{
+    notStarted,
+    preparing,
+    rejected,
+    prepared
+};
+
+struct PreparedStartup
+{
+    std::optional<std::filesystem::path> executable;
+    fo4hdr::PluginConfigurationResult configuration;
+    bool graphicsActive{};
+};
+
+std::atomic<StartupState> g_startupState{StartupState::notStarted};
+PreparedStartup g_startup;
+
+[[nodiscard]] bool StartupPrepared() noexcept
+{
+    return g_startupState.load(std::memory_order_acquire) == StartupState::prepared;
+}
+
+// Worker threads and the IAT hook outlive every later failure, so each step
+// after admission contains its own errors and the plugin stays loaded.
+void PrepareAdmittedStartup() noexcept
+{
+    try
+    {
+        g_startup.executable = ExecutablePath();
+        g_startup.configuration = LoadDiagnosticsConfiguration(g_startup.executable);
+        g_startup.graphicsActive = fo4hdr::InitializeGraphicsObservation(
+            g_startup.configuration.valid ? g_startup.configuration.value :
+                fo4hdr::PluginConfiguration{});
+        if (g_startup.graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: admitted startup step failed.\n");
+    }
+}
+
+// The first F4SE entry point admits the runtime and installs the D3D11 import:
+// Preload on NG/AE, so later Load-stage interposers chain above it; Load on OG.
+// Rejection precedes every side effect, so that caller may still fail and unload.
+[[nodiscard]] const PreparedStartup* PrepareStartup(
+    const F4SE::QueryInterface* a_f4se, StartupStage stage)
+{
+    auto expected = StartupState::notStarted;
+    if (!g_startupState.compare_exchange_strong(expected, StartupState::preparing,
+            std::memory_order_acq_rel))
+    {
+        return expected == StartupState::prepared ? &g_startup : nullptr;
+    }
+    InitializeProjectLogging();
+    REX::INFO("startup stage={}", ToString(stage));
+    if (!SelectRuntime(a_f4se) || !ValidatePluginIdentity(a_f4se))
+    {
+        g_startupState.store(StartupState::rejected, std::memory_order_release);
+        return nullptr;
+    }
+    PrepareAdmittedStartup();
+    g_startupState.store(StartupState::prepared, std::memory_order_release);
+    return &g_startup;
+}
+
 [[nodiscard]] bool LoadPluginImpl(const F4SE::LoadInterface* a_f4se)
 {
     if (a_f4se == nullptr) return false;
-    InitializeProjectLogging();
-    if (!SelectRuntime(a_f4se) || !ValidatePluginIdentity(a_f4se)) return false;
+    const auto* startup = PrepareStartup(a_f4se, StartupStage::load);
+    if (startup == nullptr) return false;
     const auto services = QueryF4seServices(a_f4se);
-    const auto executable = ExecutablePath();
-    const auto diagnosticsConfiguration = LoadDiagnosticsConfiguration(executable);
     const auto observerActive =
-        executable.has_value() &&
+        startup->executable.has_value() &&
         fo4hdr::game::InitializeGameStateObserver(
             services.messaging,
             services.task,
             services.pluginHandle,
             &ReportLifecycleGraphics);
     ReportGameObserverStatus(observerActive);
-    const auto graphicsActive = fo4hdr::InitializeGraphicsObservation(
-        diagnosticsConfiguration.valid ? diagnosticsConfiguration.value :
-            fo4hdr::PluginConfiguration{});
-    if (graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
-    InitializeObserverBoundaries(observerActive, graphicsActive, diagnosticsConfiguration, services);
-    ReportInitializedRenderer(diagnosticsConfiguration, graphicsActive);
+    InitializeObserverBoundaries(
+        observerActive, startup->graphicsActive, startup->configuration, services);
+    ReportInitializedRenderer(startup->configuration, startup->graphicsActive);
     // Listener registration and IAT installation publish process-lifetime
-    // callbacks into F4SE/the executable. From the observer call onward,
-    // every operation contains its own failures and load must succeed so
-    // F4SE cannot unload code still referenced by those callbacks.
+    // callbacks into F4SE/the executable. From admission onward, every
+    // operation contains its own failures and load must succeed so F4SE
+    // cannot unload code still referenced by those callbacks.
     return true;
 }
 
 }  // namespace
+
+F4SE_PLUGIN_PRELOAD(const F4SE::PreLoadInterface* a_f4se) noexcept
+{
+    // F4SE unloads the plugin on false, which is safe only before admission.
+    try
+    {
+        return a_f4se != nullptr && PrepareStartup(a_f4se, StartupStage::preload) != nullptr;
+    }
+    catch (const std::exception& error)
+    {
+        ReportStartupException(&error);
+        return StartupPrepared();
+    }
+    catch (...)
+    {
+        ReportStartupException(nullptr);
+        return StartupPrepared();
+    }
+}
 
 F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se) noexcept
 {
@@ -658,16 +749,16 @@ F4SE_PLUGIN_LOAD(const F4SE::LoadInterface* a_f4se) noexcept
     }
     catch (const std::exception& error)
     {
-        g_pluginLoadState.store(
-            PluginLoadState::failed, std::memory_order_release);
         ReportStartupException(&error);
-        return false;
     }
     catch (...)
     {
-        g_pluginLoadState.store(
-            PluginLoadState::failed, std::memory_order_release);
         ReportStartupException(nullptr);
-        return false;
     }
+    // An admitted startup has published callbacks, so F4SE must not unload it.
+    const auto resident = StartupPrepared();
+    g_pluginLoadState.store(
+        resident ? PluginLoadState::active : PluginLoadState::failed,
+        std::memory_order_release);
+    return resident;
 }

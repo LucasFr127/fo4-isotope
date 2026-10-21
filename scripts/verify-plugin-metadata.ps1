@@ -225,20 +225,15 @@ if ($module -eq [IntPtr]::Zero) {
 }
 
 try {
-    $query = [Fo4Hdr.NativeMethods]::GetProcAddress(
-        $module,
-        "F4SEPlugin_Query")
-    $load = [Fo4Hdr.NativeMethods]::GetProcAddress(
-        $module,
-        "F4SEPlugin_Load")
-    $version = [Fo4Hdr.NativeMethods]::GetProcAddress(
-        $module,
-        "F4SEPlugin_Version")
-    if ($query -eq [IntPtr]::Zero -or
-        $load -eq [IntPtr]::Zero -or
-        $version -eq [IntPtr]::Zero) {
+    # NG/AE install the D3D11 import at Preload, ahead of Load-stage interposers.
+    $exports = @{}
+    foreach ($name in @("F4SEPlugin_Query", "F4SEPlugin_Load", "F4SEPlugin_Version", "F4SEPlugin_Preload")) {
+        $exports[$name] = [Fo4Hdr.NativeMethods]::GetProcAddress($module, $name)
+    }
+    if ($exports.Values -contains [IntPtr]::Zero) {
         throw "The plugin does not export the required F4SE entry points."
     }
+    $version = $exports["F4SEPlugin_Version"]
 
     Assert-Fo4HdrPluginVersion -Version $version -Runtime $Runtime -F4seVersion $lock.runtimes.'1.10.163'.f4seVersion
 }
