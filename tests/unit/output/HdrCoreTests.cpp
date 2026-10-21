@@ -614,6 +614,15 @@ void TestActivationCapabilityRequirements()
         decision.reason == HdrActivationReason::insufficientBufferCount);
 }
 
+void TestDeviceCreationBypass()
+{
+    FO4HDR_CHECK(DeviceCreationBypassed(true, 0, true));
+    // Before the engine owns a device, no creation is expected yet.
+    FO4HDR_CHECK(!DeviceCreationBypassed(true, 0, false));
+    FO4HDR_CHECK(!DeviceCreationBypassed(true, 1, true));
+    FO4HDR_CHECK(!DeviceCreationBypassed(false, 0, true));
+}
+
 void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)
 {
     heartbeat.BeginFrame(1, 2);
@@ -996,6 +1005,7 @@ void RunHdrCoreTests()
     TestPromotionCallerImage();
     TestActivationPolicy();
     TestActivationCapabilityRequirements();
+    TestDeviceCreationBypass();
     TestOrderedHeartbeat();
     TestRendererLifecycleStress();
     TestGraphicsLifecyclePublication();

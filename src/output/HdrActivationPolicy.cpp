@@ -73,6 +73,12 @@ HdrActivationDecision DecideHdrActivation(
     };
 }
 
+bool DeviceCreationBypassed(bool importHookInstalled,
+    std::uint64_t deviceCreateCount, bool engineDeviceReady) noexcept
+{
+    return importHookInstalled && engineDeviceReady && deviceCreateCount == 0;
+}
+
 namespace {
 
 [[nodiscard]] bool IsPresentingState(HdrRendererState state) noexcept

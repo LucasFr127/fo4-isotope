@@ -4,6 +4,7 @@
 #include "FO4Isotope/runtime/RuntimeValidation.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "FO4Isotope/config/SettingsPersistence.hpp"
 #include "../game/GameStateObserver.hpp"
@@ -309,9 +310,35 @@ void WriteGraphicsDiagnostic(std::string_view message)
     REX::INFO("{}", message);
 }
 
-void ReportLifecycleGraphics(const fo4hdr::GameHdrSnapshot&) noexcept
+// Names the otherwise silent case where a higher import interposer, such as
+// Community Shaders upscaling or frame generation, creates the device itself.
+void ReportBypassedDeviceCreation(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
+{
+    static std::atomic<bool> reported{};
+    const auto graphics = fo4hdr::ReadGraphicsObservation();
+    const bool engineDeviceReady =
+        snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
+    if (!fo4hdr::DeviceCreationBypassed(
+            graphics.initialized, graphics.deviceCreateCount, engineDeviceReady) ||
+        reported.exchange(true, std::memory_order_acq_rel))
+    {
+        return;
+    }
+    try
+    {
+        REX::WARN("renderer active=false reason=device-creation-bypassed "
+                  "hint=disable-community-shaders-upscaling-and-frame-generation");
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: device-creation bypass logging failed.\n");
+    }
+}
+
+void ReportLifecycleGraphics(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
 {
     fo4hdr::ReportGraphicsLifecycle(&WriteGraphicsDiagnostic);
+    ReportBypassedDeviceCreation(snapshot);
 }
 
 }  // namespace

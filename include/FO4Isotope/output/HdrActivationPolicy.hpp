@@ -65,6 +65,12 @@ struct HdrActivationDecision
     const HdrActivationRequest& request,
     const HdrPathCapabilities& capabilities) noexcept;
 
+// The import hook is installed and the engine already holds a device, yet no
+// creation call reached the hook: a higher interposer created the device
+// without calling lower hooks, so FO4Isotope stays inactive.
+[[nodiscard]] bool DeviceCreationBypassed(bool importHookInstalled,
+    std::uint64_t deviceCreateCount, bool engineDeviceReady) noexcept;
+
 enum class HdrRendererState : std::uint8_t
 {
     detached,
