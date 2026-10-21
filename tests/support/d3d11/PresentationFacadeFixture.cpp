@@ -39,6 +39,7 @@ ComPtr<IDXGISwapChain> CreateFacade(IDXGISwapChain& nativeChain)
 {
     DXGI_SWAP_CHAIN_DESC application{};
     CheckHresult(nativeChain.GetDesc(&application), "Read native descriptor for facade");
+    application.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     application.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
     application.BufferCount = 1;
     ComPtr<ID3D11Texture2D> buffer;

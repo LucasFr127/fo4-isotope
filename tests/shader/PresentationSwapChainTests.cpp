@@ -543,6 +543,39 @@ void VerifyNativeFacadeReacquisitionFailure(Device& device)
     CheckDebugMessages(device);
 }
 
+void VerifyFacadeApplicationFormat(Device& device, IDXGISwapChain& facade,
+    IDXGISwapChain& nativeChain)
+{
+    CheckHresult(facade.ResizeBuffers(0, 16, 8, DXGI_FORMAT_R8G8B8A8_UNORM, 0),
+        "Resize facade with the application's creation format");
+    DXGI_SWAP_CHAIN_DESC application{}, native{};
+    CheckHresult(facade.GetDesc(&application), "Read facade after creation-format resize");
+    CheckHresult(nativeChain.GetDesc(&native), "Read native after creation-format resize");
+    FO4HDR_WARP_CHECK(application.BufferDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    FO4HDR_WARP_CHECK(native.BufferDesc.Format == DXGI_FORMAT_R10G10B10A2_UNORM);
+    D3D11_TEXTURE2D_DESC buffer{};
+    FacadeBuffer(facade)->GetDesc(&buffer);
+    FO4HDR_WARP_CHECK(buffer.Format == DXGI_FORMAT_R16G16B16A16_FLOAT);
+    FO4HDR_WARP_CHECK(buffer.Width == 16 && buffer.Height == 8);
+    for (const auto format : {DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM})
+        FO4HDR_WARP_CHECK(facade.ResizeBuffers(0, 16, 8, format, 0) == DXGI_ERROR_INVALID_CALL);
+    FO4HDR_WARP_CHECK(FacadeBuffer(facade) != nullptr);
+
+    DXGI_MODE_DESC mode{};
+    mode.Width = 16;
+    mode.Height = 8;
+    const auto forwarded = nativeChain.ResizeTarget(&mode);
+    mode.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    FO4HDR_WARP_CHECK(facade.ResizeTarget(&mode) == forwarded);
+    for (const auto format : {DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM})
+    {
+        mode.Format = format;
+        FO4HDR_WARP_CHECK(facade.ResizeTarget(&mode) == DXGI_ERROR_INVALID_CALL);
+    }
+    FO4HDR_WARP_CHECK(facade.ResizeTarget(nullptr) == DXGI_ERROR_INVALID_CALL);
+    CheckDebugMessages(device);
+}
+
 }  // namespace
 
 void VerifyPresentationSwapChain(Device& device)
@@ -559,8 +592,7 @@ void VerifyPresentationSwapChain(Device& device)
     VerifyDescriptorFilteredBackground(device, *facade.Get());
     VerifyFacadeResizeReferences(device, *facade.Get());
     VerifyFacadeSuccessfulResize(device, *facade.Get(), *native.Get());
-    FO4HDR_WARP_CHECK(facade->ResizeBuffers(0, 16, 8, DXGI_FORMAT_R8G8B8A8_UNORM, 0) == DXGI_ERROR_INVALID_CALL);
-    FO4HDR_WARP_CHECK(FacadeBuffer(*facade.Get()) != nullptr);
+    VerifyFacadeApplicationFormat(device, *facade.Get(), *native.Get());
     const auto tested = native->Present(0, DXGI_PRESENT_TEST);
     FO4HDR_WARP_CHECK(facade->Present(0, DXGI_PRESENT_TEST) == tested);
     auto survivor = FacadeBuffer(*facade.Get());

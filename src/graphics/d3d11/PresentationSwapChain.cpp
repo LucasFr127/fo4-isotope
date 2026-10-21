@@ -143,7 +143,8 @@ public:
         : nativeChain_(creation.nativeChain), buffer_(creation.buffer),
           acquireBuffer_(creation.acquireBuffer), retireBuffer_(creation.retireBuffer),
           bufferCount_(creation.applicationDescription.BufferCount),
-          bufferUsage_(BufferUsage(*creation.buffer)), nativeTearingFlag_(nativeTearingFlag)
+          bufferUsage_(BufferUsage(*creation.buffer)), nativeTearingFlag_(nativeTearingFlag),
+          applicationFormat_(creation.applicationDescription.BufferDesc.Format)
     {}
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) noexcept override
@@ -240,8 +241,7 @@ public:
     HRESULT STDMETHODCALLTYPE ResizeBuffers(UINT count, UINT width, UINT height,
         DXGI_FORMAT format, UINT flags) noexcept override
     {
-        if ((format != DXGI_FORMAT_UNKNOWN && format != DXGI_FORMAT_R16G16B16A16_FLOAT) ||
-            count > DXGI_MAX_SWAP_CHAIN_BUFFERS || (flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE) != 0 ||
+        if (!PublicFormat(format) || count > DXGI_MAX_SWAP_CHAIN_BUFFERS || (flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE) != 0 ||
             ((flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0 && nativeTearingFlag_ == 0))
             return DXGI_ERROR_INVALID_CALL;
         const auto lock = buffersLock_.TryLockExclusive();
@@ -271,8 +271,7 @@ public:
     {
         if (target == nullptr) return DXGI_ERROR_INVALID_CALL;
         auto nativeTarget = *target;
-        if (target->Format != DXGI_FORMAT_UNKNOWN && target->Format != DXGI_FORMAT_R16G16B16A16_FLOAT)
-            return DXGI_ERROR_INVALID_CALL;
+        if (!PublicFormat(target->Format)) return DXGI_ERROR_INVALID_CALL;
         nativeTarget.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
         return nativeChain_->ResizeTarget(&nativeTarget);
     }
@@ -293,6 +292,13 @@ public:
     }
 
 private:
+    // The application may restate its creation format; the public buffer stays FP16.
+    bool PublicFormat(DXGI_FORMAT format) const noexcept
+    {
+        return format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
+            format == applicationFormat_;
+    }
+
     HRESULT RetireFailedBuffer(HRESULT failure) noexcept
     {
         if (retireBuffer_) retireBuffer_(nativeChain_.Get());
@@ -308,6 +314,7 @@ private:
     UINT bufferCount_;
     UINT bufferUsage_;
     const UINT nativeTearingFlag_;
+    const DXGI_FORMAT applicationFormat_;
 };
 
 }  // namespace
