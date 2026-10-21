@@ -5,8 +5,9 @@ $env:FO4_ROOT = "D:\SteamLibrary\steamapps\common\Fallout 4"
 $env:FO4_MOD_ROOT = "D:\Modding\MO2-FO4HDR\mods\FO4Isotope Development"
 $env:FO4_CAPTURE_ROOT = "D:\Captures\FO4Isotope"
 
-# Set this to the physical database path when Address Library is installed
-# through MO2. Leave it empty to fall back to FO4_ROOT\Data\F4SE\Plugins.
+# Set this to a database in the MO2 Address Library folder; scripts read the
+# selected runtime's database from that folder. Leave it empty to fall back to
+# FO4_ROOT\Data\F4SE\Plugins.
 $env:FO4_ADDRESS_LIBRARY_FILE = ""
 # Example:
 # $env:FO4_ADDRESS_LIBRARY_FILE =

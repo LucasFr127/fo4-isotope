@@ -209,10 +209,13 @@ function Get-Fo4AddressLibraryPath {
         [string]$FileName
     )
 
+    # The override may name another runtime's database; read the requested
+    # database from the same Address Library folder.
     if ($env:FO4_ADDRESS_LIBRARY_FILE) {
-        return [IO.Path]::GetFullPath(
+        $directory = Split-Path -Parent ([IO.Path]::GetFullPath(
             $env:FO4_ADDRESS_LIBRARY_FILE
-        )
+        ))
+        return Join-Path $directory $FileName
     }
 
     if (-not $env:FO4_ROOT) {

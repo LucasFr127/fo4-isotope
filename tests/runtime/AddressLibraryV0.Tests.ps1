@@ -301,7 +301,18 @@ try {
             Out-Null
     } "A zero offset was not rejected."
 
-
+    $savedOverride = $env:FO4_ADDRESS_LIBRARY_FILE
+    try {
+        $env:FO4_ADDRESS_LIBRARY_FILE =
+            Join-Path $tempRoot "version-1-10-163-0.bin"
+        Assert-Equal `
+            (Get-Fo4AddressLibraryPath "version-1-11-240-0.bin") `
+            (Join-Path $tempRoot "version-1-11-240-0.bin") `
+            "The override did not resolve the requested runtime's database."
+    }
+    finally {
+        $env:FO4_ADDRESS_LIBRARY_FILE = $savedOverride
+    }
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {
