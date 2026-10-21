@@ -79,6 +79,16 @@ bool DeviceCreationBypassed(bool importHookInstalled,
     return importHookInstalled && engineDeviceReady && deviceCreateCount == 0;
 }
 
+HdrCandidateDecision DecideHdrCandidate(const HdrCandidateInputs& inputs) noexcept
+{
+    if (inputs.enbDetected) return HdrCandidateDecision::enbDetected;
+    if (!inputs.displayHdr10) return HdrCandidateDecision::displayNotHdr10;
+    // The developer reference path presents without the application facade.
+    if (inputs.facadeRequired && !inputs.facadeDescriptorSupported)
+        return HdrCandidateDecision::descriptorUnsupported;
+    return HdrCandidateDecision::attempt;
+}
+
 namespace {
 
 [[nodiscard]] bool IsPresentingState(HdrRendererState state) noexcept

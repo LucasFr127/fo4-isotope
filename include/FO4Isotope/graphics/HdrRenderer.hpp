@@ -2,6 +2,7 @@
 #pragma once
 
 #include "FO4Isotope/config/PluginConfiguration.hpp"
+#include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 
 #include <cstdint>
@@ -60,7 +61,11 @@ struct GraphicsObservationSnapshot
     bool performanceGpuBudgetPassed{};
     bool d3dIatOwned{};
     bool d3dIatDisplaced{};
-    bool enbDetected{};
+    // The owner creation's skipped-candidate reason and its descriptor fields.
+    HdrCandidateDecision hdrCandidateDecision{HdrCandidateDecision::attempt};
+    bool candidateWindowed{};
+    std::uint32_t candidateSwapEffect{};
+    std::uint32_t candidateSwapChainFlags{};
     bool liveSettingsThreadCompatible{};
     std::uint32_t qualifiedDrawThreadId{};
     std::uint32_t presentThreadId{};

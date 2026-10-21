@@ -21,6 +21,7 @@
 #include "../resources/ReplacementShaders.hpp"
 #include "FO4Isotope/ui/SettingsWindow.hpp"
 #include "FO4Isotope/hooks/PeIat.hpp"
+#include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
 #include "../RendererLifetime.hpp"
@@ -628,6 +629,12 @@ void ClearCreationOutputs(
         (description.BufferUsage & DXGI_USAGE_RENDER_TARGET_OUTPUT) != 0;
 }
 
+[[nodiscard]] static bool DisplayHdr10(HWND window) noexcept
+{
+    return RefreshDisplayCapabilities(window) &&
+        CurrentDisplayCapabilities().description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+}
+
 struct HdrCandidateValidation
 {
     ComPtr<ID3D11Texture2D> backBuffer;
@@ -659,9 +666,7 @@ struct HdrCandidateValidation
         if (FAILED(swapChain->QueryInterface(IID_PPV_ARGS(&chain3)))) return false;
         if (!SupportsColor(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)) return false;
         DXGI_SWAP_CHAIN_DESC description{};
-        return SUCCEEDED(swapChain->GetDesc(&description)) &&
-            RefreshDisplayCapabilities(description.OutputWindow) &&
-            CurrentDisplayCapabilities().description.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+        return SUCCEEDED(swapChain->GetDesc(&description)) && DisplayHdr10(description.OutputWindow);
     }
 
     [[nodiscard]] bool ValidateTransitions() noexcept
@@ -693,13 +698,15 @@ bool LoadedModuleExports(const char* symbol) noexcept
         [symbol](HMODULE module) { return module != nullptr && GetProcAddress(module, symbol) != nullptr; });
 }
 
-// ENB ships as a d3d11.dll proxy exporting its SDK. Its SDR post-processing
-// runs beneath this hook and would regrade the HDR10 output, so keep SDR.
-[[nodiscard]] static bool EnbBlocksHdr() noexcept
+// The descriptor fields let the skipped-candidate warning name its blocker.
+static void RecordCandidateDecision(HdrCandidateDecision decision,
+    const DXGI_SWAP_CHAIN_DESC& description) noexcept
 {
-    if (!LoadedModuleExports("ENBGetSDKVersion")) return false;
-    g_evidence.enbDetected.store(true, std::memory_order_release);
-    return true;
+    g_evidence.candidateWindowed.store(description.Windowed != FALSE, std::memory_order_relaxed);
+    g_evidence.candidateSwapEffect.store(description.SwapEffect, std::memory_order_relaxed);
+    g_evidence.candidateSwapChainFlags.store(description.Flags, std::memory_order_relaxed);
+    g_evidence.hdrCandidateDecision.store(static_cast<std::uint8_t>(decision),
+        std::memory_order_release);
 }
 
 struct D3dCreationRequest
@@ -761,7 +768,7 @@ public:
     {
         g_evidence.deviceCreateCount.fetch_add(1, std::memory_order_relaxed);
         owner_ = ClaimRenderer();
-        attemptHdr_ = owner_ && HdrPathRequested() && !EnbBlocksHdr();
+        attemptHdr_ = owner_ && HdrPathRequested() && CandidateAllowed();
         if (attemptHdr_) CreateHdrCandidate();
         else result_ = request_.Invoke(request_.description);
         g_evidence.lastDeviceResult.store(result_, std::memory_order_release);
@@ -796,6 +803,21 @@ private:    void ReleaseFailedCreationClaim()
         if (request_.description == nullptr || request_.description->OutputWindow == nullptr) return false;
         bool expected{};
         return g_rendererCreationClaimed.compare_exchange_strong(expected, true, std::memory_order_acq_rel);
+    }
+
+    // ENB ships as a d3d11.dll proxy exporting its SDK; its SDR post-processing
+    // would regrade the HDR10 output beneath this hook. The display and facade
+    // inputs repeat checks that would otherwise reject a created candidate.
+    [[nodiscard]] bool CandidateAllowed() const
+    {
+        const auto& description = *request_.description;
+        const auto decision = DecideHdrCandidate({
+            .enbDetected = LoadedModuleExports("ENBGetSDKVersion"),
+            .displayHdr10 = DisplayHdr10(description.OutputWindow),
+            .facadeRequired = g_configuration.productionRequested,
+            .facadeDescriptorSupported = PresentationFacadeDescriptorSupported(description)});
+        RecordCandidateDecision(decision, description);
+        return decision == HdrCandidateDecision::attempt;
     }
 
     [[nodiscard]] bool CandidateUsable()

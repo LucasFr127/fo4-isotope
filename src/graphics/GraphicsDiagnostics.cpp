@@ -56,7 +56,11 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
 {
     snapshot.d3dIatOwned = health == HookOwnershipState::owned;
     snapshot.d3dIatDisplaced = health == HookOwnershipState::ownershipLost;
-    snapshot.enbDetected = g_evidence.enbDetected.load();
+    snapshot.hdrCandidateDecision =
+        static_cast<HdrCandidateDecision>(g_evidence.hdrCandidateDecision.load());
+    snapshot.candidateWindowed = g_evidence.candidateWindowed.load();
+    snapshot.candidateSwapEffect = g_evidence.candidateSwapEffect.load();
+    snapshot.candidateSwapChainFlags = g_evidence.candidateSwapChainFlags.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();
     snapshot.qualifiedDrawThreadId = g_observedQualifiedDrawThread.load();
     snapshot.presentThreadId = g_observedPresentThread.load();

@@ -237,18 +237,21 @@ void VerifyRejectedFlipPreferences(IDXGISwapChain& nativeChain, ID3D11Texture2D&
     DXGI_SWAP_CHAIN_DESC application{};
     CheckHresult(nativeChain.GetDesc(&application), "Read rejected transport baseline");
     application.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-    struct FlipCase { BOOL windowed; UINT count, flags, quality; };
+    // Only the tearing request is an admitted descriptor; this native chain lacks tearing.
+    struct FlipCase { BOOL windowed; UINT count, flags, quality; bool admitted{}; };
     for (const auto test : {FlipCase{FALSE, 3, 0, 0}, {TRUE, 1, 0, 0}, {TRUE, 0, 0, 0},
              {TRUE, DXGI_MAX_SWAP_CHAIN_BUFFERS + 1, 0, 0}, {TRUE, 3, 0, 1},
              {TRUE, 3, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT, 0},
              {TRUE, 3, DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE, 0},
              {TRUE, 3, DXGI_SWAP_CHAIN_FLAG_HW_PROTECTED, 0},
-             {TRUE, 3, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, 0}})
+             {TRUE, 3, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING, 0, true}})
     {
         application.Windowed = test.windowed;
         application.BufferCount = test.count;
         application.Flags = test.flags;
         application.SampleDesc.Quality = test.quality;
+        // Device creation uses this predicate to skip a candidate the facade would reject.
+        FO4HDR_WARP_CHECK(PresentationFacadeDescriptorSupported(application) == test.admitted);
         ComPtr<IDXGISwapChain> rejected;
         FO4HDR_WARP_CHECK(CreatePresentationSwapChain(
             {&nativeChain, &buffer, application, AcquireFacadeBuffer}, &rejected) == DXGI_ERROR_INVALID_CALL);
@@ -268,16 +271,20 @@ void VerifyFacadeCreationGates(Device& device, IDXGISwapChain& nativeChain)
     FO4HDR_WARP_CHECK(AcquireFacadeBuffer(nullptr, &missing) == E_POINTER);
     FO4HDR_WARP_CHECK(missing == nullptr);
     application.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+    FO4HDR_WARP_CHECK(!PresentationFacadeDescriptorSupported(application));
     ComPtr<IDXGISwapChain> rejected;
     FO4HDR_WARP_CHECK(CreatePresentationSwapChain(
         {&nativeChain, buffer.Get(), application, AcquireFacadeBuffer}, &rejected) == DXGI_ERROR_INVALID_CALL);
     FO4HDR_WARP_CHECK(!rejected);
     application.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
     application.SampleDesc.Count = 4;
+    FO4HDR_WARP_CHECK(!PresentationFacadeDescriptorSupported(application));
     FO4HDR_WARP_CHECK(CreatePresentationSwapChain(
         {&nativeChain, buffer.Get(), application, AcquireFacadeBuffer}, &rejected) == DXGI_ERROR_INVALID_CALL);
     FO4HDR_WARP_CHECK(!rejected);
     application.SampleDesc.Count = 1;
+    // The descriptor alone qualifies; the foreign-device buffer below does not.
+    FO4HDR_WARP_CHECK(PresentationFacadeDescriptorSupported(application));
     auto foreign = CreateDevice(false);
     D3D11_TEXTURE2D_DESC description{};
     buffer->GetDesc(&description);
@@ -376,6 +383,7 @@ struct NativeFacadeFixture
             application.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
             application.BufferCount = 1;
         }
+        FO4HDR_WARP_CHECK(PresentationFacadeDescriptorSupported(application));
         CheckHresult(CreatePresentationSwapChain({native.Get(),
             g_presentation.presentationProxy.Get(), application,
             acquire, RetireApplicationPresentationBuffer}, &facade),

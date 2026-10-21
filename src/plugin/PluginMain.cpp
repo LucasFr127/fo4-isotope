@@ -260,13 +260,56 @@ void WarnOnce(std::atomic<bool>& reported, const char* message) noexcept
     }
 }
 
+// The fields name the requesting mod's setting, such as High FPS Physics Fix
+// sequential SwapEffect values or flip in exclusive fullscreen.
+void WarnUnsupportedSwapChain(std::atomic<bool>& reported,
+    const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
+{
+    if (reported.exchange(true, std::memory_order_acq_rel)) return;
+    try
+    {
+        REX::WARN("renderer hdr_active=false reason=swapchain-descriptor-unsupported "
+                  "swap_effect={} windowed={} flags={:#x} "
+                  "hint=use-windowed-flip-discard-or-discard-swap-effect",
+            graphics.candidateSwapEffect, graphics.candidateWindowed,
+            graphics.candidateSwapChainFlags);
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: renderer warning logging failed.\n");
+    }
+}
+
+// Creation skips an HDR candidate it already knows would be rejected; name why.
+void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
+{
+    static std::atomic<bool> enbReported{};
+    static std::atomic<bool> displayReported{};
+    static std::atomic<bool> descriptorReported{};
+    switch (graphics.hdrCandidateDecision)
+    {
+    case fo4hdr::HdrCandidateDecision::enbDetected:
+        WarnOnce(enbReported, "renderer hdr_active=false reason=enb-detected "
+                              "hint=remove-enb-to-enable-hdr");
+        break;
+    case fo4hdr::HdrCandidateDecision::displayNotHdr10:
+        WarnOnce(displayReported, "renderer hdr_active=false reason=display-not-hdr10 "
+                                  "hint=enable-windows-hdr-before-starting-the-game");
+        break;
+    case fo4hdr::HdrCandidateDecision::descriptorUnsupported:
+        WarnUnsupportedSwapChain(descriptorReported, graphics);
+        break;
+    case fo4hdr::HdrCandidateDecision::attempt:
+        break;
+    }
+}
+
 // Names the otherwise silent cases that keep HDR off because of another mod:
 // a higher import interposer, such as Community Shaders upscaling or frame
-// generation, created the device itself, or ENB would post-process in SDR.
+// generation, created the device itself, or creation skipped the HDR candidate.
 void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
 {
     static std::atomic<bool> bypassReported{};
-    static std::atomic<bool> enbReported{};
     const auto graphics = fo4hdr::ReadGraphicsObservation();
     const bool engineDeviceReady =
         snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
@@ -276,11 +319,7 @@ void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexce
         WarnOnce(bypassReported, "renderer active=false reason=device-creation-bypassed "
                                  "hint=disable-community-shaders-upscaling-and-frame-generation");
     }
-    if (graphics.enbDetected)
-    {
-        WarnOnce(enbReported, "renderer hdr_active=false reason=enb-detected "
-                              "hint=remove-enb-to-enable-hdr");
-    }
+    ReportSkippedHdrCandidate(graphics);
 }
 
 void ReportLifecycleGraphics(const fo4hdr::GameHdrSnapshot& snapshot) noexcept

@@ -26,4 +26,8 @@ struct PresentationSwapChainCreation
 HRESULT CreatePresentationSwapChain(
     const PresentationSwapChainCreation& creation, IDXGISwapChain** result) noexcept;
 
+// The application descriptors that CreatePresentationSwapChain accepts.
+[[nodiscard]] bool PresentationFacadeDescriptorSupported(
+    const DXGI_SWAP_CHAIN_DESC& description) noexcept;
+
 } // namespace fo4hdr

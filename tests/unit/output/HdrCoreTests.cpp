@@ -623,6 +623,30 @@ void TestDeviceCreationBypass()
     FO4HDR_CHECK(!DeviceCreationBypassed(false, 0, true));
 }
 
+void TestHdrCandidateDecision()
+{
+    constexpr HdrCandidateInputs accepted{.displayHdr10 = true, .facadeRequired = true,
+        .facadeDescriptorSupported = true};
+    FO4HDR_CHECK(DecideHdrCandidate(accepted) == HdrCandidateDecision::attempt);
+    // An SDR or undiscovered display fails the post-creation check, so no candidate is made.
+    auto inputs = accepted;
+    inputs.displayHdr10 = false;
+    FO4HDR_CHECK(DecideHdrCandidate(inputs) == HdrCandidateDecision::displayNotHdr10);
+    inputs = accepted;
+    inputs.facadeDescriptorSupported = false;
+    FO4HDR_CHECK(DecideHdrCandidate(inputs) == HdrCandidateDecision::descriptorUnsupported);
+    // The developer reference path presents without the application facade.
+    inputs.facadeRequired = false;
+    FO4HDR_CHECK(DecideHdrCandidate(inputs) == HdrCandidateDecision::attempt);
+    // ENB keeps SDR whatever the display or descriptor allow.
+    inputs = accepted;
+    inputs.enbDetected = true;
+    FO4HDR_CHECK(DecideHdrCandidate(inputs) == HdrCandidateDecision::enbDetected);
+    FO4HDR_CHECK(DecideHdrCandidate({.enbDetected = true}) == HdrCandidateDecision::enbDetected);
+    FO4HDR_CHECK(DecideHdrCandidate({.facadeRequired = true}) ==
+        HdrCandidateDecision::displayNotHdr10);
+}
+
 void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)
 {
     heartbeat.BeginFrame(1, 2);
@@ -1006,6 +1030,7 @@ void RunHdrCoreTests()
     TestActivationPolicy();
     TestActivationCapabilityRequirements();
     TestDeviceCreationBypass();
+    TestHdrCandidateDecision();
     TestOrderedHeartbeat();
     TestRendererLifecycleStress();
     TestGraphicsLifecyclePublication();

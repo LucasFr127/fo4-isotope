@@ -91,7 +91,9 @@ bool ApplicationSwapEffectSupported(const DXGI_SWAP_CHAIN_DESC& description) noe
         description.BufferCount >= 2 && (description.Flags & ~transportFlags) == 0;
 }
 
-bool ApplicationDescriptorSupported(const DXGI_SWAP_CHAIN_DESC& description) noexcept
+}  // namespace
+
+bool PresentationFacadeDescriptorSupported(const DXGI_SWAP_CHAIN_DESC& description) noexcept
 {
     return ApplicationSwapEffectSupported(description) &&
         description.SampleDesc.Count == 1 && description.SampleDesc.Quality == 0 &&
@@ -99,11 +101,13 @@ bool ApplicationDescriptorSupported(const DXGI_SWAP_CHAIN_DESC& description) noe
         (description.Flags & DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE) == 0;
 }
 
+namespace {
+
 bool CreationInputsSupported(const PresentationSwapChainCreation& creation) noexcept
 {
     return creation.nativeChain != nullptr && creation.buffer != nullptr &&
         creation.acquireBuffer != nullptr &&
-        ApplicationDescriptorSupported(creation.applicationDescription);
+        PresentationFacadeDescriptorSupported(creation.applicationDescription);
 }
 
 bool NativeDescriptorSupported(const DXGI_SWAP_CHAIN_DESC& description) noexcept

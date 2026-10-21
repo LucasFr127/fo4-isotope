@@ -71,6 +71,28 @@ struct HdrActivationDecision
 [[nodiscard]] bool DeviceCreationBypassed(bool importHookInstalled,
     std::uint64_t deviceCreateCount, bool engineDeviceReady) noexcept;
 
+// Lower creation layers may bind to the first device they observe, such as
+// Community Shaders' one-time bootstrap on OG. Creation therefore never makes
+// an HDR candidate that its post-creation checks are already known to reject.
+enum class HdrCandidateDecision : std::uint8_t
+{
+    attempt,
+    enbDetected,
+    displayNotHdr10,
+    descriptorUnsupported
+};
+
+struct HdrCandidateInputs
+{
+    bool enbDetected{};
+    bool displayHdr10{};
+    bool facadeRequired{};
+    bool facadeDescriptorSupported{};
+};
+
+[[nodiscard]] HdrCandidateDecision DecideHdrCandidate(
+    const HdrCandidateInputs& inputs) noexcept;
+
 enum class HdrRendererState : std::uint8_t
 {
     detached,
