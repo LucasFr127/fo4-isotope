@@ -25,6 +25,19 @@ function Assert-Rejected {
     throw "Image-space profile regression was accepted: $Case"
 }
 
+# Test-Json reports some nested schema failures only through its result, so
+# rejection is the false result rather than an error record.
+function Assert-SchemaRejected {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Manifest,
+        [Parameter(Mandatory = $true)][string]$Case
+    )
+    if ($Manifest | ConvertTo-Json -Depth 30 |
+        Test-Json -SchemaFile $manifestSchema -ErrorAction SilentlyContinue) {
+        throw "Image-space profile regression was accepted: $Case"
+    }
+}
+
 $manifest = Get-Content (
     Join-Path $repoRoot "runtime\1.10.163\manifest.json"
 ) -Raw | ConvertFrom-Json
@@ -42,10 +55,7 @@ foreach ($case in @('sunlightColorIndex', 'glareColorIndex', 'rgbByteShifts')) {
     } else {
         $invalidWeather.imageSpaceObserver.weatherGrade.$case = 0
     }
-    Assert-Rejected {
-        $null = $invalidWeather | ConvertTo-Json -Depth 30 |
-            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-    } "unqualified weather color mapping: $case"
+    Assert-SchemaRejected $invalidWeather "unqualified weather color mapping: $case"
 }
 
 $retiredWeatherFields = [ordered]@{
@@ -61,10 +71,7 @@ foreach ($case in $retiredWeatherFields.Keys) {
     $retiredWeather = Copy-Profile $manifest
     $retiredWeather.imageSpaceObserver.weatherGrade |
         Add-Member -NotePropertyName $case -NotePropertyValue $retiredWeatherFields[$case]
-    Assert-Rejected {
-        $null = $retiredWeather | ConvertTo-Json -Depth 30 |
-            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-    } "retired weather metadata: $case"
+    Assert-SchemaRejected $retiredWeather "retired weather metadata: $case"
 }
 
 $retiredAliasSource = Copy-Profile $manifest
@@ -74,45 +81,30 @@ $retiredAliasSource.commonlibObservation.imageSpaceProfile.sources |
         commit = 'ca51ca1b67c2e84965c56d9163cec2acf20d6722'
         path = 'wbDefinitionsFO4.pas'
     }
-Assert-Rejected {
-    $null = $retiredAliasSource | ConvertTo-Json -Depth 30 |
-        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-} 'retired xEdit source metadata'
+Assert-SchemaRejected $retiredAliasSource 'retired xEdit source metadata'
 
 foreach ($case in @('managerSize', 'currentEofDataOffset', 'topLevelEffectCount', 'effects')) {
     $retired = Copy-Profile $manifest
     $retired.commonlibObservation.imageSpaceProfile |
         Add-Member -NotePropertyName $case -NotePropertyValue 0
-    Assert-Rejected {
-        $null = $retired | ConvertTo-Json -Depth 30 |
-            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-    } "duplicated CommonLib profile fact: $case"
+    Assert-SchemaRejected $retired "duplicated CommonLib profile fact: $case"
 }
 foreach ($case in @('manager', 'effect', 'lut')) {
     $retired = Copy-Profile $manifest
     $retired.commonlibObservation.imageSpaceProfile.layout |
         Add-Member -NotePropertyName $case -NotePropertyValue @{}
-    Assert-Rejected {
-        $null = $retired | ConvertTo-Json -Depth 30 |
-            Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-    } "duplicated CommonLib public layout: $case"
+    Assert-SchemaRejected $retired "duplicated CommonLib public layout: $case"
 }
 
 $retiredOffset = Copy-Profile $manifest
 $retiredOffset.commonlibObservation.imageSpaceProfile.activeData[0] |
     Add-Member -NotePropertyName 'offset' -NotePropertyValue 128
-Assert-Rejected {
-    $null = $retiredOffset | ConvertTo-Json -Depth 30 |
-        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-} 'duplicated CommonLib active-data offset'
+Assert-SchemaRejected $retiredOffset 'duplicated CommonLib active-data offset'
 
 $retiredTextureOffset = Copy-Profile $manifest
 $retiredTextureOffset.nativeLutObserver |
     Add-Member -NotePropertyName 'textureSrvOffset' -NotePropertyValue 0
-Assert-Rejected {
-    $null = $retiredTextureOffset | ConvertTo-Json -Depth 30 |
-        Test-Json -SchemaFile $manifestSchema -ErrorAction Stop
-} 'duplicated CommonLib texture SRV offset'
+Assert-SchemaRejected $retiredTextureOffset 'duplicated CommonLib texture SRV offset'
 
 $missing = Copy-Profile $profile
 $missing.activeData = @($missing.activeData | Select-Object -First 11)
