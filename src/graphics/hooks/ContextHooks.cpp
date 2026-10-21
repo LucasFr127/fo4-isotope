@@ -372,8 +372,16 @@ bool CanRedirectPresentation(ID3D11RenderTargetView* view) noexcept
     return std::ranges::all_of(ready, [](bool value) { return value; });
 }
 
+// The armor bridge declares its gamma 2.2 interval; only its decode restores the label.
+bool ArmorBridgeEncoded() noexcept
+{
+    return g_armor.armorEncodedActive &&
+        g_presentation.presentationProxyDomain == LinearColorDomain::encodedGamma22Bt709UiRelative;
+}
+
 bool AcceptPresentationDomain() noexcept
 {
+    if (ArmorBridgeEncoded()) return true;
     if (g_presentation.presentationProxyDomain != LinearColorDomain::unknown &&
         g_presentation.presentationProxyDomain != g_scene.currentSceneDomain)
     {
@@ -386,7 +394,7 @@ bool AcceptPresentationDomain() noexcept
 
 ID3D11RenderTargetView* PublishPresentationRedirect(ID3D11RenderTargetView* view) noexcept
 {
-    g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
+    if (!ArmorBridgeEncoded()) g_presentation.presentationProxyDomain = g_scene.currentSceneDomain;
     g_presentation.presentationRedirectedThisFrame = true;
     g_evidence.presentationRedirectCount.fetch_add(1, std::memory_order_relaxed);
     return view;

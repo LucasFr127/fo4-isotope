@@ -422,6 +422,7 @@ struct SharedUiContextFixture : SharedPresentationContextFixture
             g_scene.temporalSceneReady = temporal;
             SetSharedUiPauseResourcesReady(false);
             BindHud();
+            const auto mismatches = g_evidence.colorDomainMismatchCount.load();
             {
                 const ArmorUiScope scope({.owner = ArmorUiOwner::powerArmor,
                     .threadId = GetCurrentThreadId(), .postAa = true, .hasRoot = true});
@@ -432,6 +433,8 @@ struct SharedUiContextFixture : SharedPresentationContextFixture
                 CheckUnrelatedArmorWork();
                 if (write) device.context->Draw(3, 0);
             }
+            // Native armor binds of the gamma 2.2 proxy are the bridge, not a domain conflict.
+            FO4HDR_WARP_CHECK(g_evidence.colorDomainMismatchCount.load() == mismatches);
             FO4HDR_WARP_CHECK(!g_armor.armorEncodedActive && !g_armor.armorEncodedFailed);
             FO4HDR_WARP_CHECK(SharedUiFrameReady() && SharedUiFrameEncoded());
             DrawHud(write);
