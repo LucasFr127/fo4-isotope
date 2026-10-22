@@ -32,16 +32,24 @@ private:
     ComPtr<ID3D11Texture2D> buffer_;
 };
 
-bool SameDevice(ID3D11Texture2D& buffer, IDXGISwapChain& nativeChain) noexcept
+ComPtr<ID3D11Device> BufferDevice(ID3D11Texture2D& buffer) noexcept
 {
-    ComPtr<ID3D11Device> device, nativeDevice;
-    ComPtr<IUnknown> bufferDevice, chainDevice;
+    ComPtr<ID3D11Device> device;
     buffer.GetDevice(&device);
-    // Acquire both through D3D11 so an interceptor exposes the same device layer.
-    return device && SUCCEEDED(device.As(&bufferDevice)) &&
-        SUCCEEDED(nativeChain.GetDevice(IID_PPV_ARGS(&nativeDevice))) &&
-        SUCCEEDED(nativeDevice.As(&chainDevice)) &&
-        bufferDevice.Get() == chainDevice.Get();
+    return device;
+}
+
+bool SameDevice(ID3D11Texture2D& buffer, ID3D11Texture2D& nativeBuffer) noexcept
+{
+    const auto device = BufferDevice(buffer);
+    const auto nativeDevice = BufferDevice(nativeBuffer);
+    ComPtr<IUnknown> bufferDevice, nativeBufferDevice;
+    // Compare the buffers' own devices through D3D11 so an interceptor exposes the same
+    // layer; a lower chain wrapper such as NVIDIA Smooth Motion's reports another
+    // device from IDXGISwapChain::GetDevice while its buffers stay on the game's device.
+    return device && nativeDevice && SUCCEEDED(device.As(&bufferDevice)) &&
+        SUCCEEDED(nativeDevice.As(&nativeBufferDevice)) &&
+        bufferDevice.Get() == nativeBufferDevice.Get();
 }
 
 bool Fp16BufferDescriptorSupported(const D3D11_TEXTURE2D_DESC& description) noexcept
@@ -72,7 +80,7 @@ HRESULT AnchorBuffer(IDXGISwapChain& nativeChain, ID3D11Texture2D& buffer) noexc
     D3D11_TEXTURE2D_DESC actual{}, native{};
     buffer.GetDesc(&actual);
     nativeBuffer->GetDesc(&native);
-    if (!MatchingBufferDescriptions(actual, native) || !SameDevice(buffer, nativeChain))
+    if (!MatchingBufferDescriptions(actual, native) || !SameDevice(buffer, *nativeBuffer.Get()))
         return DXGI_ERROR_INVALID_CALL;
     auto lifetime = Make<NativeBufferLifetime>(nativeBuffer.Get());
     if (!lifetime) return E_OUTOFMEMORY;
@@ -127,13 +135,10 @@ UINT BufferUsage(ID3D11Texture2D& buffer) noexcept
     return usage;
 }
 
-HRESULT FlushRetiredBuffer(IDXGISwapChain& nativeChain) noexcept
+HRESULT FlushRetiredBuffer(ID3D11Device& device) noexcept
 {
-    ComPtr<ID3D11Device> device;
-    const auto result = nativeChain.GetDevice(IID_PPV_ARGS(&device));
-    if (FAILED(result)) return result;
     ComPtr<ID3D11DeviceContext> context;
-    device->GetImmediateContext(&context);
+    device.GetImmediateContext(&context);
     if (!context) return E_FAIL;
     // Standalone textures defer destruction; flush releases their retired native anchors.
     context->Flush();
@@ -145,6 +150,7 @@ class PresentationSwapChain final : public IDXGISwapChain
 public:
     PresentationSwapChain(const PresentationSwapChainCreation& creation, UINT nativeTearingFlag) noexcept
         : nativeChain_(creation.nativeChain), buffer_(creation.buffer),
+          device_(BufferDevice(*creation.buffer)),
           acquireBuffer_(creation.acquireBuffer), retireBuffer_(creation.retireBuffer),
           bufferCount_(creation.applicationDescription.BufferCount),
           bufferUsage_(BufferUsage(*creation.buffer)), nativeTearingFlag_(nativeTearingFlag),
@@ -200,7 +206,8 @@ public:
 
     HRESULT STDMETHODCALLTYPE GetDevice(REFIID iid, void** device) noexcept override
     {
-        return nativeChain_->GetDevice(iid, device);
+        // The game's device, not whatever a lower chain wrapper reports as its own.
+        return device_->QueryInterface(iid, device);
     }
 
     HRESULT STDMETHODCALLTYPE Present(UINT interval, UINT flags) noexcept override
@@ -252,7 +259,7 @@ public:
         if (!lock.IsLocked()) return DXGI_ERROR_INVALID_CALL;
         buffer_.Reset();
         if (retireBuffer_) retireBuffer_(nativeChain_.Get());
-        const auto flushed = FlushRetiredBuffer(*nativeChain_.Get());
+        const auto flushed = FlushRetiredBuffer(*device_.Get());
         if (FAILED(flushed)) return flushed;
         const auto nativeCount = count == 0 ? 0 : std::max<UINT>(2, count);
         // Public descriptor flags omit the private flip chain's immutable tearing bit.
@@ -312,6 +319,7 @@ private:
     std::atomic<ULONG> references_{1};
     ComPtr<IDXGISwapChain> nativeChain_;
     ComPtr<ID3D11Texture2D> buffer_;
+    const ComPtr<ID3D11Device> device_;
     AcquirePresentationBuffer acquireBuffer_;
     RetirePresentationBuffer retireBuffer_;
     Microsoft::WRL::Wrappers::SRWLock buffersLock_;

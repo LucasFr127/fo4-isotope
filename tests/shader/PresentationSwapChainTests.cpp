@@ -341,6 +341,160 @@ void VerifyFacadeSuccessfulResize(Device& device, IDXGISwapChain& facade,
     CheckDebugMessages(device);
 }
 
+// Forwards to a real chain but reports another device, as NVIDIA Smooth Motion's
+// wrapper does while the buffers it hands out stay on the game's device.
+class ForeignDeviceSwapChain final : public IDXGISwapChain
+{
+public:
+    ForeignDeviceSwapChain(IDXGISwapChain& inner, ID3D11Device& reported) noexcept
+        : inner_(&inner), reported_(&reported)
+    {}
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) noexcept override
+    {
+        if (object == nullptr) return E_POINTER;
+        *object = nullptr;
+        if (iid != __uuidof(IUnknown) && iid != __uuidof(IDXGIObject) &&
+            iid != __uuidof(IDXGIDeviceSubObject) && iid != __uuidof(IDXGISwapChain))
+            return E_NOINTERFACE;
+        *object = static_cast<IDXGISwapChain*>(this);
+        AddRef();
+        return S_OK;
+    }
+
+    ULONG STDMETHODCALLTYPE AddRef() noexcept override
+    {
+        return references_.fetch_add(1) + 1;
+    }
+
+    ULONG STDMETHODCALLTYPE Release() noexcept override
+    {
+        const auto remaining = references_.fetch_sub(1) - 1;
+        if (remaining == 0) delete this;
+        return remaining;
+    }
+
+    HRESULT STDMETHODCALLTYPE SetPrivateData(
+        REFGUID name, UINT size, const void* data) noexcept override
+    {
+        return inner_->SetPrivateData(name, size, data);
+    }
+
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(
+        REFGUID name, const IUnknown* object) noexcept override
+    {
+        return inner_->SetPrivateDataInterface(name, object);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetPrivateData(
+        REFGUID name, UINT* size, void* data) noexcept override
+    {
+        return inner_->GetPrivateData(name, size, data);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetParent(REFIID iid, void** parent) noexcept override
+    {
+        return inner_->GetParent(iid, parent);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetDevice(REFIID iid, void** device) noexcept override
+    {
+        return reported_->QueryInterface(iid, device);
+    }
+
+    HRESULT STDMETHODCALLTYPE Present(UINT interval, UINT flags) noexcept override
+    {
+        return inner_->Present(interval, flags);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetBuffer(UINT index, REFIID iid, void** surface) noexcept override
+    {
+        return inner_->GetBuffer(index, iid, surface);
+    }
+
+    HRESULT STDMETHODCALLTYPE SetFullscreenState(BOOL fullscreen, IDXGIOutput* output) noexcept override
+    {
+        return inner_->SetFullscreenState(fullscreen, output);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetFullscreenState(BOOL* fullscreen, IDXGIOutput** output) noexcept override
+    {
+        return inner_->GetFullscreenState(fullscreen, output);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetDesc(DXGI_SWAP_CHAIN_DESC* description) noexcept override
+    {
+        return inner_->GetDesc(description);
+    }
+
+    HRESULT STDMETHODCALLTYPE ResizeBuffers(UINT count, UINT width, UINT height,
+        DXGI_FORMAT format, UINT flags) noexcept override
+    {
+        return inner_->ResizeBuffers(count, width, height, format, flags);
+    }
+
+    HRESULT STDMETHODCALLTYPE ResizeTarget(const DXGI_MODE_DESC* target) noexcept override
+    {
+        return inner_->ResizeTarget(target);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetContainingOutput(IDXGIOutput** output) noexcept override
+    {
+        return inner_->GetContainingOutput(output);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetFrameStatistics(DXGI_FRAME_STATISTICS* statistics) noexcept override
+    {
+        return inner_->GetFrameStatistics(statistics);
+    }
+
+    HRESULT STDMETHODCALLTYPE GetLastPresentCount(UINT* count) noexcept override
+    {
+        return inner_->GetLastPresentCount(count);
+    }
+
+private:
+    std::atomic<ULONG> references_{1};
+    ComPtr<IDXGISwapChain> inner_;
+    ComPtr<ID3D11Device> reported_;
+};
+
+void VerifyForeignReportedDevice(Device& device)
+{
+    PresentationWindow window;
+    auto native = CreatePresentationChain(device, window.handle, 16, 8);
+    auto foreign = CreateDevice(false);
+    ComPtr<IDXGISwapChain> wrapped;
+    wrapped.Attach(new ForeignDeviceSwapChain(*native.Get(), *foreign.device.Get()));
+    ComPtr<ID3D11Device> reported;
+    CheckHresult(wrapped->GetDevice(IID_PPV_ARGS(&reported)), "Read the wrapper's reported device");
+    FO4HDR_WARP_CHECK(reported.Get() == foreign.device.Get());
+    reported.Reset();
+    DXGI_SWAP_CHAIN_DESC application{};
+    CheckHresult(wrapped->GetDesc(&application), "Read wrapped native descriptor");
+    application.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+    application.BufferCount = 1;
+    ComPtr<ID3D11Texture2D> buffer, reportedBuffer;
+    CheckHresult(AcquireFacadeBuffer(wrapped.Get(), &buffer),
+        "Create facade texture beside a wrapper");
+    D3D11_TEXTURE2D_DESC description{};
+    buffer->GetDesc(&description);
+    CheckHresult(foreign.device->CreateTexture2D(&description, nullptr, &reportedBuffer),
+        "Create matching texture on the wrapper's reported device");
+    // The reported device does not own the chain's buffers, so its texture stays foreign.
+    ComPtr<IDXGISwapChain> rejected;
+    FO4HDR_WARP_CHECK(CreatePresentationSwapChain(
+        {wrapped.Get(), reportedBuffer.Get(), application, AcquireFacadeBuffer}, &rejected) ==
+        DXGI_ERROR_INVALID_CALL);
+    FO4HDR_WARP_CHECK(!rejected);
+    buffer.Reset();
+    reportedBuffer.Reset();
+    auto facade = CreateFacade(*wrapped.Get());
+    VerifyFacadeIdentity(device, *facade.Get(), *wrapped.Get());
+    VerifyFacadeSuccessfulResize(device, *facade.Get(), *wrapped.Get());
+    CheckDebugMessages(device);
+}
+
 struct NativeFacadeFixture
 {
     Device& device;
@@ -616,6 +770,7 @@ void VerifyPresentationSwapChain(Device& device)
     VerifyNativeFacadeForeignBinding(device);
     VerifyNativeFacadeReacquisitionFailure(device);
     VerifyForeignPresentHook(device);
+    VerifyForeignReportedDevice(device);
     PresentationWindow window;
     auto native = CreatePresentationChain(device, window.handle, 16, 8);
     VerifyFacadeCreationGates(device, *native.Get());

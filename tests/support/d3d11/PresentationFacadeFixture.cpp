@@ -11,11 +11,14 @@ HRESULT AcquireFacadeBuffer(IDXGISwapChain* nativeChain, ID3D11Texture2D** buffe
     *buffer = nullptr;
     if (nativeChain == nullptr) return E_POINTER;
     DXGI_SWAP_CHAIN_DESC description{};
+    ComPtr<ID3D11Texture2D> nativeBuffer;
     ComPtr<ID3D11Device> device;
     auto result = nativeChain->GetDesc(&description);
     if (FAILED(result)) return result;
-    result = nativeChain->GetDevice(IID_PPV_ARGS(&device));
+    // The buffer must share the back buffer's device; a chain wrapper can report another.
+    result = nativeChain->GetBuffer(0, IID_PPV_ARGS(&nativeBuffer));
     if (FAILED(result)) return result;
+    nativeBuffer->GetDevice(&device);
     D3D11_TEXTURE2D_DESC texture{};
     texture.Width = description.BufferDesc.Width;
     texture.Height = description.BufferDesc.Height;
