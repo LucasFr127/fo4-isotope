@@ -432,6 +432,15 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         Bind();
     }
 
+    // F4R on OG draws the composite into a proxy target smaller than the presentation.
+    void CheckReducedTarget()
+    {
+        const auto width = g_presentation.width;
+        g_presentation.width = width * 2;
+        CheckClearWith(0);
+        g_presentation.width = width;
+    }
+
     void CheckReducedViewport()
     {
         CheckReducedDraw();
@@ -472,6 +481,7 @@ void VerifyNativeSceneInitialization(Device& device)
     fixture.CheckRejections();
     fixture.CheckReducedViewport();
     fixture.CheckCompositePassShader();
+    fixture.CheckReducedTarget();
 }
 
 } // namespace fo4hdr::tests::gpu

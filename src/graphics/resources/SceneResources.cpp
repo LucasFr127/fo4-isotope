@@ -300,10 +300,11 @@ bool NativeSceneViewportMatches(ID3D11DeviceContext* context) noexcept
     return count == 1 && AnchoredSceneScissor(scissor);
 }
 
+// F4R Upscaling on OG draws the composite into its own reduced-size proxy targets.
 bool NativeSceneTargetLayout(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
     const std::array matches{SceneTextureLayoutMatches(description), description.MipLevels == 1,
-        description.Width == g_presentation.width, description.Height == g_presentation.height};
+        description.Width <= g_presentation.width, description.Height <= g_presentation.height};
     return std::ranges::all_of(matches, [](bool value) { return value; });
 }
 
