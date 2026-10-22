@@ -248,20 +248,21 @@ bool NativeSceneDrawStateMatches(ID3D11DeviceContext* context) noexcept
     return std::ranges::all_of(matches, [](bool value) { return value; });
 }
 
-bool FullSceneViewport(const D3D11_VIEWPORT& viewport) noexcept
+// Engine dynamic resolution renders the scene into a top-left region of the full-size target.
+bool AnchoredSceneViewport(const D3D11_VIEWPORT& viewport) noexcept
 {
     const std::array matches{viewport.TopLeftX == 0, viewport.TopLeftY == 0,
-        viewport.Width == static_cast<float>(g_presentation.width),
-        viewport.Height == static_cast<float>(g_presentation.height),
+        viewport.Width > 0, viewport.Width <= static_cast<float>(g_presentation.width),
+        viewport.Height > 0, viewport.Height <= static_cast<float>(g_presentation.height),
         viewport.MinDepth >= 0, viewport.MinDepth < 1, viewport.MaxDepth == 1};
     return std::ranges::all_of(matches, [](bool value) { return value; });
 }
 
-bool FullSceneScissor(const D3D11_RECT& scissor) noexcept
+bool AnchoredSceneScissor(const D3D11_RECT& scissor) noexcept
 {
     const std::array matches{scissor.left == 0, scissor.top == 0,
-        scissor.right == static_cast<LONG>(g_presentation.width),
-        scissor.bottom == static_cast<LONG>(g_presentation.height)};
+        scissor.right > 0, scissor.right <= static_cast<LONG>(g_presentation.width),
+        scissor.bottom > 0, scissor.bottom <= static_cast<LONG>(g_presentation.height)};
     return std::ranges::all_of(matches, [](bool value) { return value; });
 }
 
@@ -273,7 +274,7 @@ bool NativeSceneViewportMatches(ID3D11DeviceContext* context) noexcept
     if (topology != D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST) return false;
     D3D11_VIEWPORT viewport{};
     context->RSGetViewports(&count, &viewport);
-    if (count != 1 || !FullSceneViewport(viewport)) return false;
+    if (count != 1 || !AnchoredSceneViewport(viewport)) return false;
     ComPtr<ID3D11RasterizerState> rasterizer;
     context->RSGetState(&rasterizer);
     if (!rasterizer) return true;
@@ -285,7 +286,7 @@ bool NativeSceneViewportMatches(ID3D11DeviceContext* context) noexcept
     if (!description.ScissorEnable) return true;
     D3D11_RECT scissor{};
     context->RSGetScissorRects(&count, &scissor);
-    return count == 1 && FullSceneScissor(scissor);
+    return count == 1 && AnchoredSceneScissor(scissor);
 }
 
 bool NativeSceneTargetLayout(const D3D11_TEXTURE2D_DESC& description) noexcept

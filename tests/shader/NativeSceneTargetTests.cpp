@@ -142,7 +142,7 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         device.context->ClearRenderTargetView(target.rtv.Get(), stale);
     }
 
-    void CheckPixels(Texture& target, float rejected, bool drawn)
+    std::array<std::array<std::uint16_t, 4>, kWidth> ReadPixels(Texture& target)
     {
         device.context->CopyResource(target.staging.Get(), target.texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -151,6 +151,12 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         std::array<std::array<std::uint16_t, 4>, kWidth> pixels{};
         std::memcpy(pixels.data(), mapped.pData, sizeof(pixels));
         device.context->Unmap(target.staging.Get(), 0);
+        return pixels;
+    }
+
+    void CheckPixels(Texture& target, float rejected, bool drawn)
+    {
+        const auto pixels = ReadPixels(target);
         FO4HDR_WARP_CHECK(Binary16ToFloat(pixels[1][0]) == rejected);
         if (drawn)
             for (const UINT index : {0U, 2U, 3U, 4U, 5U, 6U, 7U})
@@ -362,6 +368,56 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         g_presentation.width = width;
         CheckPixels(scene, stale[0], false);
     }
+
+    // Engine dynamic resolution draws the scene into a top-left region of the full-size target.
+    static constexpr D3D11_VIEWPORT reducedViewport{0, 0, kWidth / 2, kHeight, 0.01F, 1};
+
+    void CheckReducedDraw()
+    {
+        ResetSceneTargetInitialization();
+        Seed(scene);
+        device.context->RSSetViewports(1, &reducedViewport);
+        device.context->DrawIndexed(3, 0, 0);
+        const auto pixels = ReadPixels(scene);
+        for (UINT index = 0; index < kWidth; ++index)
+        {
+            const bool drawn = index < kWidth / 2 && index != 1;
+            FO4HDR_WARP_CHECK(Binary16ToFloat(pixels[index][0]) == (drawn ? 0.25F : 0.0F));
+        }
+        Bind();
+    }
+
+    void CheckRegion(const D3D11_VIEWPORT& viewport, const D3D11_RECT* scissor, bool cleared)
+    {
+        ResetSceneTargetInitialization();
+        Seed(scene);
+        device.context->RSSetViewports(1, &viewport);
+        ComPtr<ID3D11RasterizerState> scissored;
+        if (scissor)
+        {
+            D3D11_RASTERIZER_DESC description{};
+            g_presentation.presentRasterizer->GetDesc(&description);
+            description.ScissorEnable = TRUE;
+            CheckHresult(device.device->CreateRasterizerState(&description, &scissored),
+                "Create scissored scene state");
+            device.context->RSSetState(scissored.Get());
+            device.context->RSSetScissorRects(1, scissor);
+        }
+        ObserveOnly();
+        CheckPixels(scene, cleared ? 0.0F : stale[0], false);
+        Bind();
+    }
+
+    void CheckReducedViewport()
+    {
+        CheckReducedDraw();
+        CheckRegion({1, 0, kWidth - 1, kHeight, 0.01F, 1}, nullptr, false);
+        CheckRegion({0, 0, kWidth * 2, kHeight, 0.01F, 1}, nullptr, false);
+        constexpr D3D11_RECT reduced{0, 0, kWidth / 2, kHeight};
+        constexpr D3D11_RECT offset{1, 0, kWidth / 2, kHeight};
+        CheckRegion(reducedViewport, &reduced, true);
+        CheckRegion(reducedViewport, &offset, false);
+    }
 };
 
 void CheckNativeSceneShaderIdentity(std::array<std::uint32_t, 5> header, bool expected)
@@ -390,6 +446,7 @@ void VerifyNativeSceneInitialization(Device& device)
     NativeSceneInitializationFixture fixture(device);
     fixture.CheckInitialization();
     fixture.CheckRejections();
+    fixture.CheckReducedViewport();
 }
 
 } // namespace fo4hdr::tests::gpu
