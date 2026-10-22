@@ -649,6 +649,12 @@ void RejectProtectedMutation(ID3D11Resource* destination, bool publicDestination
     Reject(SharedUiRejection::mutation);
 }
 
+// An upscaler's copy-back keeps the assumed linear scene; seeding it fixes later UI blending.
+bool SeedablePublicCopy(bool publicDestination, ID3D11Resource* source) noexcept
+{
+    return publicDestination && source && !g_content.seeded && PublicLinearSceneReady();
+}
+
 } // namespace
 
 bool ObserveSharedUiDraw(const DrawObservation& observation) noexcept
@@ -676,7 +682,8 @@ bool ObserveSharedUiCopy(ID3D11Resource* destination, ID3D11Resource* source) no
     ObserveSharedSdrCopy(destination);
     const bool publicDestination = ObservePublicMutation(destination, false);
     if (!ObserveMutationThread(destination, publicDestination)) return false;
-    RejectProtectedMutation(destination, publicDestination);
+    if (!SeedablePublicCopy(publicDestination, source))
+        RejectProtectedMutation(destination, publicDestination);
     if (ForeignArmorScope() && ProtectedSceneResource(source)) Reject(SharedUiRejection::mutation);
     return g_content.rejected;
 }

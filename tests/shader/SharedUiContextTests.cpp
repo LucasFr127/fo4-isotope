@@ -843,8 +843,10 @@ struct SharedUiContextFixture : SharedPresentationContextFixture
         device.context->CopyResource(proxy.staging.Get(), proxy.texture.Get());
         device.context->CopyResource(aliased.Get(), proxy.staging.Get());
         DrawFlatMenu(0, owner);
-        FO4HDR_WARP_CHECK(!SharedUiFrameReady() && SharedUiPresentationForOutput()->assumed);
-        PresentReadable(0.5);
+        // A pre-seed copy keeps the seed, so the menu composes encoded but stays assumed.
+        FO4HDR_WARP_CHECK(SharedUiFrameEncoded() && !SharedUiFrameReady() &&
+            SharedUiPresentationForOutput()->assumed);
+        PresentReadable(std::pow((0.5 + 0.055) / 1.055, 2.4));
         PrepareFlatScene();
         BindHud();
         auto* target = alias.Get();

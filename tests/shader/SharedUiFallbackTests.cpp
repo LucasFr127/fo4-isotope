@@ -177,6 +177,12 @@ struct SharedUiFallbackFixture : SharedPresentationContextFixture
             };
             if (foreign) std::thread(clear).join();
             else clear();
+            if (domain == LinearColorDomain::linearBt2020UiRelative)
+            {
+                // Unlike a pre-seed copy, a compute write keeps the shared seed rejected.
+                DrawHud(false);
+                FO4HDR_WARP_CHECK(!SharedUiFrameEncoded());
+            }
             CheckAssumedPresentation(domain);
             g_activeSettings.uiPaperWhiteNits = 406;
             PresentReadable(DecodeFallbackCode(0.25, domain));
@@ -947,12 +953,32 @@ struct SharedUiFallbackFixture : SharedPresentationContextFixture
         CheckFrozenWhitePresentation();
     }
 
-    void CheckPreSeedMutations()
+    // F4R Upscaling turns the game's TAA off and copies its result back before UI.
+    void CopyUpscaledScene()
     {
         PrepareScene();
+        g_scene.temporalPassObserved = false;
+        g_scene.temporalSceneReady = false;
         device.context->CopyResource(proxy.staging.Get(), proxy.texture.Get());
         device.context->CopyResource(proxy.texture.Get(), proxy.staging.Get());
-        CheckMutationRejectionAndRecovery(0.5);
+    }
+
+    // The copy keeps the seed under the assumed linear interpretation; the frame stays unqualified.
+    void CheckPreSeedPublicCopy()
+    {
+        for (const bool write : {false, true})
+        {
+            CopyUpscaledScene();
+            DrawHud(write);
+            FO4HDR_WARP_CHECK(SharedUiFrameEncoded());
+            CheckAssumedPresentation(LinearColorDomain::encodedSrgbBt709UiRelative);
+            PresentReadable(write ? std::pow((0.5 + 0.055) / 1.055, 2.4) : 0.5);
+        }
+        CheckFrozenWhitePresentation();
+    }
+
+    void CheckPreSeedMutations()
+    {
         PrepareScene();
         constexpr float white[4]{1, 1, 1, 1};
         device.context->ClearRenderTargetView(proxy.rtv.Get(), white);
@@ -1020,6 +1046,7 @@ void VerifySharedUiFallback(Device& device)
     fixture.CheckLaterSceneDraws();
     fixture.CheckKnownReadSlots();
     fixture.CheckPreSeedMutations();
+    fixture.CheckPreSeedPublicCopy();
     for (const auto contents : {FallbackCommand::empty, FallbackCommand::publicRead,
              FallbackCommand::offscreenClear, FallbackCommand::publicClear})
         fixture.CheckCommandListMutation(contents);
