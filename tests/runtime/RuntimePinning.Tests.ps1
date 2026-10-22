@@ -214,6 +214,19 @@ try {
         param($profile) $profile.target.expectedBytes = @($profile.target.expectedBytes[0..30])
     }
 
+    Assert-ManifestProfileRejected $fixture 'sceneCompositeObserver' 'scene composite ABI changed' {
+        param($profile) $profile.abi = 'void(BSRenderPass*,uint32_t)'
+    }
+    Assert-ManifestProfileRejected $fixture 'sceneCompositeObserver' 'scene composite missing offset' {
+        param($profile) $profile.call.PSObject.Properties.Remove('offset')
+    }
+    Assert-ManifestProfileRejected $fixture 'sceneCompositeObserver' 'scene composite zero offset' {
+        param($profile) $profile.call.offset = '0x0000'
+    }
+    Assert-ManifestProfileRejected $fixture 'sceneCompositeObserver' 'scene composite not a CALL' {
+        param($profile) $profile.call.expectedBytes[0] = 233
+    }
+
     $fixtureLock = Join-Path $fixture "versions.lock.json"
     $invalidLock = Get-Content -LiteralPath $fixtureLock -Raw |
         ConvertFrom-Json

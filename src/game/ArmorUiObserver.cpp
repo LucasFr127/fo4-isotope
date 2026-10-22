@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "ArmorUiObserver.hpp"
 #include "DirectCallPatch.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/output/ArmorUiComposition.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
@@ -18,6 +19,7 @@ namespace {
 namespace detail = fo4hdr::game::direct_call_patch;
 using ScreenSubmit = void (*)(RE::Interface3D::Renderer*, std::uint32_t);
 using ScreenUiSubmit = void (*)(RE::UI*);
+using CompositePass = void (*)(RE::BSRenderPass*, std::uint32_t, bool);
 template<class Submit>
 struct ObserverState
 {
@@ -38,6 +40,7 @@ static_assert(offsetof(RE::Interface3D::Renderer, screenAttachedElementRoot) == 
 static_assert(sizeof(RE::BSFixedString) == sizeof(void*));
 ObserverState<ScreenSubmit> g_armorObserver;
 ObserverState<ScreenUiSubmit> g_screenObserver;
+ObserverState<CompositePass> g_compositeObserver;
 // Written once before installation's release; ObserveScope acquires before reading.
 bool g_flatKeyReady{}, g_armorKeyReady{}, g_rainKeyReady{}, g_workshopKeyReady{};
 std::array<std::uintptr_t, 5> g_keyRvas{};
@@ -222,6 +225,32 @@ void ScreenUiSubmitHook(RE::UI* ui) noexcept
         g_screenObserver.installed.store(false, std::memory_order_release);
     }
 }
+
+class CompositePassScope
+{
+public:
+    CompositePassScope() noexcept { fo4hdr::EnterNativeSceneCompositePass(); }
+    ~CompositePassScope() { fo4hdr::ExitNativeSceneCompositePass(); }
+    CompositePassScope(const CompositePassScope&) = delete;
+    CompositePassScope& operator=(const CompositePassScope&) = delete;
+};
+
+void CompositePassHook(RE::BSRenderPass* pass, std::uint32_t argument, bool flag) noexcept
+{
+    const auto next = g_compositeObserver.next.load(std::memory_order_acquire);
+    if (!next || next == &CompositePassHook) return;
+    try {
+        if (g_compositeObserver.installed.load(std::memory_order_acquire)) {
+            // Marks the native composite pass whatever pixel shader another plugin binds.
+            const CompositePassScope scope;
+            next(pass, argument, flag);
+        } else {
+            next(pass, argument, flag);
+        }
+    } catch (...) {
+        g_compositeObserver.installed.store(false, std::memory_order_release);
+    }
+}
 // Pinned RVAs give each call's offset inside its caller; IDs locate everything.
 template<std::size_t N>
 struct BoundaryIdentity
@@ -231,7 +260,17 @@ struct BoundaryIdentity
     std::array<std::uint64_t, N> callerIds{};
     std::array<std::uintptr_t, N> callRvas{};
     const std::array<std::uint64_t, 5>* rendererKeyIds{};
+    // Pinned CommonLibF4 mappings, when present, locate the target and callers instead.
+    const REL::VariantID* targetMapping{};
+    const REL::VariantID* callerMapping{};
 };
+// Each runtime supplies only the composite call's offset inside DeferredComposite.
+constexpr BoundaryIdentity<1> CompositeBoundary(std::uintptr_t callOffset) noexcept
+{
+    return {.callRvas = {callOffset},
+        .targetMapping = &RE::ID::BSBatchRenderer::RenderPassImmediately,
+        .callerMapping = &RE::ID::DrawWorld::DeferredComposite};
+}
 namespace og {
 using namespace fo4hdr::generated::og;
 constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
@@ -240,6 +279,7 @@ constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
     kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
+constexpr auto kComposite = CompositeBoundary(kSceneCompositeCallOffset);
 }
 namespace ng {
 using namespace fo4hdr::generated::ng;
@@ -249,6 +289,7 @@ constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
     kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
+constexpr auto kComposite = CompositeBoundary(kSceneCompositeCallOffset);
 }
 namespace ae {
 using namespace fo4hdr::generated::ae;
@@ -258,6 +299,7 @@ constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
     kScreenUiCallerRvas, kScreenUiCallerIds, kScreenUiCallRvas};
+constexpr auto kComposite = CompositeBoundary(kSceneCompositeCallOffset);
 }
 template<std::size_t N, class Submit>
 class ObserverInstallation
@@ -281,9 +323,19 @@ class ObserverInstallation
     }
     std::uintptr_t Resolve(std::uint64_t id) const
     { return detail::ResolveMapping(mappings_, base_, id); }
+    std::uintptr_t TargetRva() const
+    {
+        const auto* mapping = identity_.targetMapping;
+        return mapping ? mapping->offset() : Resolve(identity_.targetId);
+    }
+    std::uintptr_t CallerRva(std::size_t i) const
+    {
+        const auto* mapping = identity_.callerMapping;
+        return mapping ? mapping->offset() : Resolve(identity_.callerIds[i]);
+    }
     bool Target()
     {
-        const auto rva = Resolve(identity_.targetId);
+        const auto rva = TargetRva();
         target_ = rva ? base_ + rva : 0;
         return target_ && target_ != hook_ && Code(target_, 1);
     }
@@ -319,7 +371,7 @@ class ObserverInstallation
     }
     bool PrepareSite(std::size_t i)
     {
-        const auto caller = Resolve(identity_.callerIds[i]);
+        const auto caller = CallerRva(i);
         const auto address = base_ + caller + (identity_.callRvas[i] - identity_.callerRvas[i]);
         detail::CallBytes original{};
         MEMORY_BASIC_INFORMATION info{};
@@ -425,6 +477,22 @@ bool InitializeScreenUiObserver(bool requested, const void* trampolineInterface,
             (profile->key == "1.10.984" ? ng::kScreen : ae::kScreen);
         ObserverInstallation installation(boundary, g_screenObserver,
             static_cast<ScreenUiSubmit>(&ScreenUiSubmitHook));
+        return installation.Install(trampolineInterface, pluginHandle);
+    } catch (...) { return false; }
+}
+bool InitializeSceneCompositeObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept
+{
+    if (g_compositeObserver.attempted.exchange(true, std::memory_order_acq_rel))
+        return g_compositeObserver.installed.load(std::memory_order_acquire);
+    if (!requested) return false;
+    try {
+        const auto* profile = ActiveRuntimeProfile();
+        if (!profile) return false;
+        const auto& boundary = IsOriginalRuntime() ? og::kComposite :
+            (profile->key == "1.10.984" ? ng::kComposite : ae::kComposite);
+        ObserverInstallation installation(boundary, g_compositeObserver,
+            static_cast<CompositePass>(&CompositePassHook));
         return installation.Install(trampolineInterface, pluginHandle);
     } catch (...) { return false; }
 }

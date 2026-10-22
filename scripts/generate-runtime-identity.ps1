@@ -291,6 +291,18 @@ foreach ($call in $screenUi.calls) {
 }
 $screenUiLines += '}};'
 
+$composite = $manifest.sceneCompositeObserver
+if ($composite.status -ne 'unvalidated' -or
+    $composite.scope -ne 'deferred-scene-composite-pass' -or
+    $composite.abi -ne 'void(BSRenderPass*,uint32_t,bool)' -or
+    @($composite.call.expectedBytes).Count -ne 5 -or $composite.call.expectedBytes[0] -ne 232) {
+    throw 'The deferred scene composite pass contract is incomplete.'
+}
+# Pinned CommonLibF4 maps the caller and target; only the call's offset is a runtime fact.
+$compositeLines = @(
+    "inline constexpr std::uintptr_t kSceneCompositeCallOffset = $($composite.call.offset);"
+)
+
 $nativeUiLines = @()
 $nativeUiProfile = 'nullptr'
 if ($null -ne $manifest.PSObject.Properties['nativeUiResources']) {
@@ -455,6 +467,7 @@ $lines = @(
     "namespace fo4hdr::generated::$profileNamespace {",
     ($armorLines -join "`n"),
     ($screenUiLines -join "`n"),
+    ($compositeLines -join "`n"),
     ($nativeUiLines -join "`n"),
     ($lutLines -join "`n"),
     ($imageSpaceLines -join "`n"),

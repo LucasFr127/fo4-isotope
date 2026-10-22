@@ -52,6 +52,25 @@
       { "callerAddressLibraryId": 1118299, "callerRva": "0x02896680", "rva": "0x02896E97", "slot": 25, "expectedBytes": [232, 244, 159, 73, 255] }
     ]
   },
+  "sceneCompositeObserver": {
+    "status": "unvalidated",
+    "scope": "deferred-scene-composite-pass",
+    "abi": "void(BSRenderPass*,uint32_t,bool)",
+    "authorityGap": "Pinned CommonLibF4 maps DrawWorld::DeferredComposite and BSBatchRenderer::RenderPassImmediately but has no call-site mapping or typed method for the composite pass submission.",
+    "evidenceQualification": "The exact OG 1.10.163 executable's code is encrypted on disk and no decoded text was retained. +0x8DC is the composite submission that Community Shaders 0.4.0 uses on this runtime; the fingerprint is derived from the version-1-10-163-0 Address Library RVAs of DrawWorld::DeferredComposite (0x02855E60) and BSBatchRenderer::RenderPassImmediately (0x0287F770). Only the live call check before mutation verifies it; native gameplay validation remains pending.",
+    "lifetime": "The callee renders the caller's stack-local pass immediately and returns. The shim forwards all three arguments once and retains no engine pointer.",
+    "thread": "Synchronous on the calling render thread inside DrawWorld::DeferredComposite. Graphics independently requires the active immediate context and the observed Present thread before initializing a scene target.",
+    "call": {
+      "offset": "0x08DC",
+      "expectedBytes": [
+        232,
+        47,
+        144,
+        2,
+        0
+      ]
+    }
+  },
   "experimentalArmorUiObserver": {
     "status": "unvalidated",
     "scope": "power-armor-encoded-peak-composition",
@@ -626,6 +645,20 @@
         "rva": 28373728,
         "kind": "function",
         "commonlibSymbol": "RE::ID::MemoryManager::Deallocate"
+      },
+      {
+        "provider": "deferred-scene-composite",
+        "id": 728427,
+        "rva": 42294880,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::DrawWorld::DeferredComposite"
+      },
+      {
+        "provider": "deferred-composite-render-pass",
+        "id": 244233,
+        "rva": 42465136,
+        "kind": "function",
+        "commonlibSymbol": "RE::ID::BSBatchRenderer::RenderPassImmediately"
       }
     ]
   },

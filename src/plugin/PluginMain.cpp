@@ -468,6 +468,13 @@ void ReportGameObserverStatus(bool observerActive) noexcept
     return configuration.valid && configuration.value.enabled && configuration.value.productionRequested;
 }
 
+// Matches the renderer's HDR path request, which gates scene-target initialization.
+[[nodiscard]] bool HdrPathRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
+{
+    return ProductionRequested(configuration) || (configuration.valid &&
+        configuration.value.enabled && configuration.value.developerHdr10Reference);
+}
+
 [[nodiscard]] std::string FormatBytes(const fo4hdr::game::direct_call_patch::SiteMismatch& mismatch)
 {
     std::string text;
@@ -544,6 +551,9 @@ void InitializeObserverBoundaries(bool observerActive,
     (void)ReportBoundary("native screen-space UI",
         fo4hdr::game::InitializeScreenUiObserver(
             sharedUiRequested, services.trampoline, services.pluginHandle));
+    (void)ReportBoundary("deferred scene composite",
+        fo4hdr::game::InitializeSceneCompositeObserver(HdrPathRequested(diagnosticsConfiguration),
+            services.trampoline, services.pluginHandle));
 }
 
 void ReportInitializedRenderer(

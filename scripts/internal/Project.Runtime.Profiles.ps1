@@ -61,6 +61,16 @@ function Get-Fo4HdrRequiredRelocationProfile {
             Provider = "ui-event-memory-deallocate"
             Kind = "function"
             Symbol = "RE::ID::MemoryManager::Deallocate"
+        },
+        [pscustomobject]@{
+            Provider = "deferred-scene-composite"
+            Kind = "function"
+            Symbol = "RE::ID::DrawWorld::DeferredComposite"
+        },
+        [pscustomobject]@{
+            Provider = "deferred-composite-render-pass"
+            Kind = "function"
+            Symbol = "RE::ID::BSBatchRenderer::RenderPassImmediately"
         }
     )
 }
@@ -120,7 +130,7 @@ function Assert-Fo4HdrCommonLibRelocationProfile {
     $expected = @(Get-Fo4HdrRequiredRelocationProfile)
     $actual = @($Observation.relocations)
     if ($actual.Count -ne $expected.Count) {
-        throw "CommonLib relocation profile must contain exactly eight rows."
+        throw "CommonLib relocation profile must contain exactly ten rows."
     }
 
     $providers = [Collections.Generic.HashSet[string]]::new(

@@ -62,6 +62,31 @@
       },
       "additionalProperties": false
     },
+    "sceneCompositeObserver": {
+      "type": "object",
+      "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "call"],
+      "properties": {
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "deferred-scene-composite-pass" },
+        "abi": { "const": "void(BSRenderPass*,uint32_t,bool)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "evidenceQualification": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
+        "call": {
+          "type": "object", "required": ["offset", "expectedBytes"],
+          "properties": {
+            "offset": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{4}$" },
+            "expectedBytes": {
+              "type": "array", "minItems": 5, "maxItems": 5,
+              "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "nativeUiResources": {
       "type": "object",
       "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "propertiesSize", "formatOffset", "sourceFormat", "promotedFormat", "mode", "target", "calls"],
@@ -497,8 +522,8 @@
         },
         "relocations": {
           "type": "array",
-          "minItems": 8,
-          "maxItems": 8,
+          "minItems": 10,
+          "maxItems": 10,
           "uniqueItems": true,
           "items": {
             "type": "object",
@@ -591,6 +616,24 @@
                   "kind": { "const": "function" },
                   "commonlibSymbol": {
                     "const": "RE::ID::MemoryManager::Deallocate"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "deferred-scene-composite" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::DrawWorld::DeferredComposite"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "provider": { "const": "deferred-composite-render-pass" },
+                  "kind": { "const": "function" },
+                  "commonlibSymbol": {
+                    "const": "RE::ID::BSBatchRenderer::RenderPassImmediately"
                   }
                 }
               }

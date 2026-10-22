@@ -92,7 +92,7 @@
       "f4seRuntimeDllSha256": "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd",
       "addressLibraryFile": "version-1-10-163-0.bin",
       "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
-      "runtimeManifestCanonicalSha256": "2bf0b5ea4a37b966a6d32c00d68d9416e3d5112570cd37195f73165203ff4b0a",
+      "runtimeManifestCanonicalSha256": "caaecff6e14b8b0c037c5d89ec3af288b3c3ee12ed2ac2e5a576796fe518b560",
       "shaderManifestSha256": "FILL_AFTER_CAPTURE",
       "observedAtUtc": "2026-08-09T21:33:23.9297903Z"
     },
@@ -107,7 +107,7 @@
       "addressLibrarySha256": "c13545f2dab806b7d19c5aa83a0d7524337b5afc89af79460f9915020e049d75",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-10-15T22:48:01.8026044Z",
-      "runtimeManifestCanonicalSha256": "7f51b662f7f0323154f36a3ccc2e7e9f3d403ca0f048155708e58730ff7a2ecb"
+      "runtimeManifestCanonicalSha256": "43f60d3fcb9568e676b404167ed3718ada0e9f505d7ab5fd7fcba8902e8d656c"
     },
     "1.11.240": {
       "status": "runtime-pinned-unvalidated",
@@ -120,7 +120,7 @@
       "addressLibrarySha256": "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-10-15T16:13:06.5613276Z",
-      "runtimeManifestCanonicalSha256": "4368f97b8f0236f658cec3b8836d3e6a5e21cc51a5a077b8f4f09b3fa1eb1b2c"
+      "runtimeManifestCanonicalSha256": "488f1cc48ec119d9074edccffe5826a335b8d616b77c884d9dd8c7f10e05abff"
     }
   },
   "aces2": {

@@ -36,13 +36,13 @@ $null = Assert-Fo4HdrCommonLibRelocationProfile `
     -CommonLibLock $lock.commonlib
 
 $missing = Copy-Observation $observation
-$missing.relocations = @($missing.relocations | Select-Object -First 7)
+$missing.relocations = @($missing.relocations | Select-Object -First 9)
 Assert-Rejected {
     $null = Assert-Fo4HdrCommonLibRelocationProfile $missing $lock.commonlib
 } "missing row"
 
 $extra = Copy-Observation $observation
-$extra.relocations = @($extra.relocations) + @($extra.relocations[7])
+$extra.relocations = @($extra.relocations) + @($extra.relocations[9])
 Assert-Rejected {
     $null = Assert-Fo4HdrCommonLibRelocationProfile $extra $lock.commonlib
 } "extra row"

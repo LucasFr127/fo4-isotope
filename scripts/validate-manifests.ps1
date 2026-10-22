@@ -201,6 +201,24 @@ function Assert-ScreenUiRuntime {
     }
 }
 
+function Test-SceneCompositeCall {
+    param($Call)
+    # The schema fixes the five-byte shape; the site needs an offset and a rel32 CALL opcode.
+    return [Convert]::ToInt64($Call.offset.Substring(2), 16) -gt 0 -and $Call.expectedBytes[0] -eq 232
+}
+
+function Assert-SceneCompositeRuntime {
+    param([string]$Runtime, $Manifest)
+    $profileProperty = $Manifest.PSObject.Properties['sceneCompositeObserver']
+    if ($null -eq $profileProperty) { return }
+    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
+        throw 'The deferred scene composite pass has no qualified profile for this runtime.'
+    }
+    if (-not (Test-SceneCompositeCall $profileProperty.Value.call)) {
+        throw 'Deferred scene composite CALL offset or fingerprint is invalid.'
+    }
+}
+
 function Assert-ArmorUiContract {
     param([string]$Runtime, $Armor)
     $validStatus = $armor.status -eq 'unvalidated' -and
@@ -288,5 +306,6 @@ foreach ($runtime in @(
     Assert-ImageSpaceRuntime $runtime $manifest
     Assert-NativeUiResourcesRuntime $runtime $manifest
     Assert-ScreenUiRuntime $runtime $manifest
+    Assert-SceneCompositeRuntime $runtime $manifest
     Assert-ArmorUiRuntime $runtime $manifest
 }

@@ -11,6 +11,7 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "SceneResources.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "PresentationResources.hpp"
 #include "HdrResourcePolicy.hpp"
 #include "../DrawObservation.hpp"
@@ -25,6 +26,16 @@ namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
 
 SceneResources g_scene;
+namespace {
+thread_local std::uint32_t g_sceneCompositePassDepth{};
+}
+
+void EnterNativeSceneCompositePass() noexcept { ++g_sceneCompositePassDepth; }
+
+void ExitNativeSceneCompositePass() noexcept
+{
+    if (g_sceneCompositePassDepth != 0) --g_sceneCompositePassDepth;
+}
 
 bool SceneTextureLayoutMatches(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
@@ -347,8 +358,9 @@ ComPtr<ID3D11RenderTargetView> QualifiedNativeSceneTarget(
     if (!NativeSceneContextReady(context, record)) return nullptr;
     ComPtr<ID3D11PixelShader> actual;
     context->PSGetShader(&actual, nullptr, nullptr);
-    if (actual.Get() != record.expectedBoundShader || !IsNativeSceneCompositeShader(actual.Get()))
-        return nullptr;
+    const bool composite =
+        g_sceneCompositePassDepth != 0 || IsNativeSceneCompositeShader(actual.Get());
+    if (actual.Get() != record.expectedBoundShader || !composite) return nullptr;
     const std::array ready{
         NativeSceneDrawStateMatches(context), NativeSceneViewportMatches(context)};
     if (!std::ranges::all_of(ready, [](bool value) { return value; })) return nullptr;

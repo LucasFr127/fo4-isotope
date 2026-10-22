@@ -10,6 +10,7 @@
 #include "RendererLifetime.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/TestShaders.generated.hpp"
 #include "FO4Isotope/runtime/RuntimeProfile.hpp"
 
@@ -408,6 +409,29 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         Bind();
     }
 
+    void CheckClearWith(float expected)
+    {
+        ResetSceneTargetInitialization();
+        Seed(scene);
+        ObserveOnly();
+        CheckPixels(scene, expected, false);
+    }
+
+    // Community Shaders binds its own composite shader inside the engine's composite pass.
+    void CheckCompositePassShader()
+    {
+        device.context->PSSetShader(g_presentation.presentShader.Get(), nullptr, 0);
+        CheckClearWith(stale[0]);
+        EnterNativeSceneCompositePass();
+        EnterNativeSceneCompositePass();
+        ExitNativeSceneCompositePass();
+        CheckClearWith(0);
+        ExitNativeSceneCompositePass();
+        ExitNativeSceneCompositePass();
+        CheckClearWith(stale[0]);
+        Bind();
+    }
+
     void CheckReducedViewport()
     {
         CheckReducedDraw();
@@ -447,6 +471,7 @@ void VerifyNativeSceneInitialization(Device& device)
     fixture.CheckInitialization();
     fixture.CheckRejections();
     fixture.CheckReducedViewport();
+    fixture.CheckCompositePassShader();
 }
 
 } // namespace fo4hdr::tests::gpu

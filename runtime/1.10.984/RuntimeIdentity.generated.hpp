@@ -55,6 +55,7 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 4> kScreenUiCallBytes{{
     {{ 232, 176, 44, 219, 0 }},
     {{ 232, 51, 85, 152, 0 }},
 }};
+inline constexpr std::uintptr_t kSceneCompositeCallOffset = 0x0915;
 inline constexpr std::uintptr_t kNativeUiTargetRva = 0x0171DE10;
 inline constexpr std::uint64_t kNativeUiTargetId = 2277176;
 inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ 64, 87, 65, 86, 65, 87, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254 }};
@@ -128,7 +129,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_984.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "39f9134f6ec80adac731103dff1c84febf621ff58d0ccaafed7f39a2362e5cfe";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-984-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "c13545f2dab806b7d19c5aa83a0d7524337b5afc89af79460f9915020e049d75";
-inline constexpr std::string_view kManifestSha256 = "7f51b662f7f0323154f36a3ccc2e7e9f3d403ca0f048155708e58730ff7a2ecb";
+inline constexpr std::string_view kManifestSha256 = "43f60d3fcb9568e676b404167ed3718ada0e9f505d7ab5fd7fcba8902e8d656c";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{

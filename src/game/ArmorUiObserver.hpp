@@ -19,4 +19,7 @@ bool InitializeArmorUiObserver(bool requested, const void* trampolineInterface,
     std::uint32_t pluginHandle) noexcept;
 bool InitializeScreenUiObserver(bool requested, const void* trampolineInterface,
     std::uint32_t pluginHandle) noexcept;
+// Brackets the native deferred composite pass for scene-target initialization.
+bool InitializeSceneCompositeObserver(bool requested, const void* trampolineInterface,
+    std::uint32_t pluginHandle) noexcept;
 }

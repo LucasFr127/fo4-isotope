@@ -153,6 +153,11 @@ struct GraphicsSettingsInputActivation
     const PluginConfiguration& configuration) noexcept;
 void SetSharedUiPauseResourcesReady(bool ready) noexcept;
 void DisableSharedUiPauseResources() noexcept;
+// The game observer brackets the native deferred scene composite pass on its
+// calling thread. Scene-target initialization inside it accepts any bound pixel
+// shader, such as a Community Shaders replacement, under its other checks.
+void EnterNativeSceneCompositePass() noexcept;
+void ExitNativeSceneCompositePass() noexcept;
 // Initial Win32 subclass installation must run on the exact HWND owner thread.
 // F4SE lifecycle callbacks provide bounded, D3D-free retry opportunities after
 // the render thread has published the initialized ImGui window. The input

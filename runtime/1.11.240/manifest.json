@@ -189,6 +189,25 @@
       }
     ]
   },
+  "sceneCompositeObserver": {
+    "status": "unvalidated",
+    "scope": "deferred-scene-composite-pass",
+    "abi": "void(BSRenderPass*,uint32_t,bool)",
+    "authorityGap": "Pinned CommonLibF4 maps DrawWorld::DeferredComposite and BSBatchRenderer::RenderPassImmediately but has no call-site mapping or typed method for the composite pass submission.",
+    "evidenceQualification": "Static review of the exact on-disk Fallout4.exe 1.11.240.0 and its version-1-11-240-0 Address Library. DrawWorld::DeferredComposite (RVA0x021F82A0) makes three direct calls to BSBatchRenderer::RenderPassImmediately (RVA0x0221FB60), at +0x1F5, +0x915 and +0x9DE. Each passes a stack-local render pass in RCX, a 32-bit value in EDX and zero in R8D, and the caller ignores RAX; the callee prologue consumes RCX, EDX and R8B. Community Shaders 0.4.0 identifies +0x915 as the BSDFComposite pass. The live call is rechecked before mutation; native gameplay validation remains pending.",
+    "lifetime": "The callee renders the caller's stack-local pass immediately and returns. The shim forwards all three arguments once and retains no engine pointer.",
+    "thread": "Synchronous on the calling render thread inside DrawWorld::DeferredComposite. Graphics independently requires the active immediate context and the observed Present thread before initializing a scene target.",
+    "call": {
+      "offset": "0x0915",
+      "expectedBytes": [
+        232,
+        166,
+        111,
+        2,
+        0
+      ]
+    }
+  },
   "experimentalArmorUiObserver": {
     "status": "unvalidated",
     "scope": "power-armor-encoded-peak-composition",
