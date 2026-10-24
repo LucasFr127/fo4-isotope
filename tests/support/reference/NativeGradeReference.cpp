@@ -65,7 +65,7 @@ struct RadialSrgbTerms
 {
     NativeGradeRgb above{};
     NativeGradeRgb blackLight{};
-    double ratio{1.0};
+    double ratio{};
 };
 
 [[nodiscard]] RadialSrgbTerms RadialSrgbTransferTerms(const NativeGradeRgb& source,

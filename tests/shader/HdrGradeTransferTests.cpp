@@ -156,6 +156,32 @@ struct HdrGradeTransferTarget
     return pixel;
 }
 
+void VerifyHdrGradeBlackContinuity(const HdrGradeTransferTarget& target)
+{
+    // Checked against the contract rather than the oracle: a lifted-black look
+    // returns its black, decoded by the selected curve and divided by s, at
+    // exact black, and never falls as the scene rises from black. sRGB adds no
+    // step above black; the gamma-2.2 lookup's onset is steep but continuous.
+    constexpr double blackCode = 0.03;
+    for (const std::uint32_t curve : {kHdrGradeCurveGamma22, kHdrGradeCurveSrgb}) {
+        std::vector<double> values;
+        for (const double scene : {0.0, 6.0e-8, 1.0e-7, 1.0e-6, 1.0e-5, 1.0e-4}) {
+            const double code = blackCode +
+                (1.0 - blackCode) * std::pow(scene * NativeGradeScale(scene), 1.0 / 2.2);
+            HdrGradeTransferCase test{{scene, scene, scene}, {code, code, code},
+                {blackCode, blackCode, blackCode}};
+            values.push_back(DispatchHdrGradeTransfer(target, test, {1.0, 0, 0, curve}).green);
+        }
+        const double blackLight = curve == kHdrGradeCurveSrgb ?
+            NativeGradeSrgbDecode(blackCode) : std::pow(blackCode, 2.2);
+        const double expectedBlack = blackLight / NativeGradeScale(0.0);
+        FO4HDR_WARP_CHECK(std::abs(values.front() - expectedBlack) <= 1.0e-5 * expectedBlack);
+        FO4HDR_WARP_CHECK(std::is_sorted(values.begin(), values.end()));
+        if (curve == kHdrGradeCurveSrgb)
+            FO4HDR_WARP_CHECK(values[2] - values[0] <= 1.0e-3 * values[0]);
+    }
+}
+
 void VerifyHdrGradeTransferMath(Device& device)
 {
     const double nan = std::numeric_limits<float>::quiet_NaN();
@@ -175,6 +201,7 @@ void VerifyHdrGradeTransferMath(Device& device)
             CheckHdrGradeTransferMath(pixel, test, sample);
         }
     }
+    VerifyHdrGradeBlackContinuity({device, *shader.Get(), output});
 }
 
 struct HdrGradeIntegrationSample

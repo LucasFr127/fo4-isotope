@@ -39,6 +39,7 @@ namespace fo4hdr::tests::gpu {
         return {gray, gray, gray, 1};
     }
     if (kind == 5) return {0.8F * r, 0.8F * g, 0.8F * b, 1};
+    if (kind == 6) return {0.03F + 0.97F * r, 0.03F + 0.97F * g, 0.03F + 0.97F * b, 1};
     return {0.03F + 0.6F * r + 0.1F * g * b,
         0.02F + 0.7F * g + 0.05F * r * b, 0.01F + 0.8F * b + 0.08F * r * g, 1};
 }
@@ -268,9 +269,9 @@ void PrepareNativeReferenceLook(Device& device, ID3D11ShaderResourceView* look,
     unsigned kind, const NativeReferencePreparation& preparation)
 {
     LutConstants weights{};
-    constexpr std::array<Float4, 6> mixtures{{
+    constexpr std::array<Float4, 7> mixtures{{
         {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1},
-        {0.125F, 0.25F, 0.125F, 0.5F}, {1, 0, 0, 0}}};
+        {0.125F, 0.25F, 0.125F, 0.5F}, {1, 0, 0, 0}, {1, 0, 0, 0}}};
     weights.values[1] = mixtures[kind];
     const auto constants = CreateConstantBuffer(*device.device.Get(), weights);
     auto* cb = constants.Get();
@@ -377,6 +378,38 @@ void CheckNativeReferenceMatchesRadial(const std::array<Float4, kWidth>& nativeR
     }
 }
 
+void CheckNativeReferenceLiftedBlack(const std::array<Float4, kWidth>& nativeReference,
+    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+{
+    // Native Reference adds the look's decoded black once; Radial divides it by
+    // the radial scale s. Without those black terms both responses agree at
+    // exact black and on neutral 0.18 for either grading curve.
+    const double black = curve == 1U ? DecodeSrgb(0.03F) : std::pow(static_cast<double>(0.03F), 2.2);
+    for (const std::size_t pixel : {std::size_t{0}, std::size_t{2}}) {
+        const auto& native = nativeReference[pixel];
+        const auto& graded = radial[pixel];
+        const double radialBlack = black / NativeGradeScale(kReferenceGradeCorpus[pixel].green);
+        for (const auto [nativeValue, radialValue] : {std::pair{native.red, graded.red},
+                std::pair{native.green, graded.green}, std::pair{native.blue, graded.blue}}) {
+            const double nativeAbove = nativeValue - black;
+            const double radialAbove = radialValue - radialBlack;
+            const bool agrees = std::abs(nativeAbove - radialAbove) <=
+                3.0e-3 * std::abs(nativeAbove) + 1.0e-5 * black;
+            if (!agrees) std::cerr << "Native Reference/Radial lifted black curve=" << curve
+                << " pixel=" << pixel << " native_above=" << nativeAbove
+                << " radial_above=" << radialAbove << '\n';
+            FO4HDR_WARP_CHECK(agrees);
+        }
+    }
+}
+
+void CheckNativeReferenceAgainstRadial(unsigned kind, const std::array<Float4, kWidth>& nativeReference,
+    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+{
+    if (kind == 6) CheckNativeReferenceLiftedBlack(nativeReference, radial, curve);
+    else CheckNativeReferenceMatchesRadial(nativeReference, radial, curve);
+}
+
 void VerifyNativeReferenceGrade(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sceneSampler)
 {
@@ -406,7 +439,7 @@ void VerifyNativeReferenceGrade(Device& device,
         return ReadNativeReferenceOutput(*device.context.Get(), output);
     };
     for (const std::uint32_t curve : {0U, 1U})
-    for (unsigned kind = 0; kind < 6; ++kind) {
+    for (unsigned kind = 0; kind < 7; ++kind) {
         ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
         settings.colorGradingCurve = curve;
         NativeReferenceLook fixture(*device.device.Get(), desc, kind);
@@ -422,8 +455,8 @@ void VerifyNativeReferenceGrade(Device& device,
 
         const auto full = VerifyNativeReferenceStrength(render, shader.Get(), settings, kind);
 
-        if (kind == 5)
-            CheckNativeReferenceMatchesRadial(full, RenderRadialReference(device, output,
+        if (kind >= 5)
+            CheckNativeReferenceAgainstRadial(kind, full, RenderRadialReference(device, output,
                 {vertexShader, sceneSampler, linear.Get(), radial.Get(), look.srv.Get()}, settings), curve);
         if (kind != 4) continue;
         VerifyNativeReferenceOperators(device, render, settings,

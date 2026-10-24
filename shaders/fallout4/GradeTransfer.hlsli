@@ -156,10 +156,12 @@ float3 Fo4HdrTransferRadialGradeSrgb(float3 input, float3 weightedCodes,
     const float response = dot(abs(above), Fo4HdrGradeLuma);
     const float reference = dot(Fo4HdrGradeDecode(
         Fo4HdrRadialCoordinates(scene), Fo4HdrGradeCurveSrgb), Fo4HdrGradeLuma);
+    // The above-black term vanishes as the scene approaches black, so exact
+    // black keeps only the look's black even if its codes differ from texel 0.
     const float tonalRatio = response > 0.0f && reference > 0.0f
         ? dot(abs(Fo4HdrGradeDecode(codes, Fo4HdrGradeCurveSrgb) - blackLight), Fo4HdrGradeLuma) /
             response * (dot(scene * scale, Fo4HdrGradeLuma) / reference)
-        : 1.0f;
+        : 0.0f;
     // A channel graded below the look's black could otherwise turn negative.
     const float3 restored = max(above * tonalRatio + blackLight, 0.0f) / scale;
     const float3 endpoint = min(restored * min(1.0f,
