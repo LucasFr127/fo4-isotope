@@ -51,6 +51,65 @@ namespace fo4hdr::tests::gpu {
     return graded;
 }
 
+[[nodiscard]] double NativeGradeSrgbDecode(double code)
+{
+    return code <= 0.04045 ? code / 12.92 : std::pow((code + 0.055) / 1.055, 2.4);
+}
+
+[[nodiscard]] double NativeGradeLuma(const NativeGradeRgb& rgb)
+{
+    return rgb[0] * 0.212500006 + rgb[1] * 0.715399981 + rgb[2] * 0.0720999986;
+}
+
+struct RadialSrgbTerms
+{
+    NativeGradeRgb above{};
+    NativeGradeRgb blackLight{};
+    double ratio{1.0};
+};
+
+[[nodiscard]] RadialSrgbTerms RadialSrgbTransferTerms(const NativeGradeRgb& source,
+    double scale, const NativeGradeRgb& graded, const NativeGradeRgb& black)
+{
+    // Independent double-precision form of the sRGB radial rule: the gamma-2.2
+    // response above the look's black, one luminance tonal ratio, sRGB black.
+    RadialSrgbTerms terms{};
+    NativeGradeRgb aboveMagnitude{}, srgbMagnitude{}, linearGuide{}, srgbGuide{};
+    for (std::size_t c = 0; c < 3; ++c) {
+        const double code = NativeGradeClean(graded[c]);
+        const double blackCode = NativeGradeClean(black[c]);
+        terms.above[c] = std::pow(code, 2.2) - std::pow(blackCode, 2.2);
+        aboveMagnitude[c] = std::abs(terms.above[c]);
+        terms.blackLight[c] = NativeGradeSrgbDecode(blackCode);
+        srgbMagnitude[c] = std::abs(NativeGradeSrgbDecode(code) - terms.blackLight[c]);
+        linearGuide[c] = source[c] * scale;
+        srgbGuide[c] = NativeGradeSrgbDecode(std::pow(std::clamp(linearGuide[c], 0.0, 1.0), 1.0 / 2.2));
+    }
+    const double response = NativeGradeLuma(aboveMagnitude);
+    const double reference = NativeGradeLuma(srgbGuide);
+    if (response > 0 && reference > 0)
+        terms.ratio = NativeGradeLuma(srgbMagnitude) / response * (NativeGradeLuma(linearGuide) / reference);
+    return terms;
+}
+
+[[nodiscard]] NativeGradeRgb TransferRadialSrgbGrade(
+    NativeGradeRgb source, NativeGradeRgb graded, NativeGradeRgb black, double strength)
+{
+    for (double& channel : source) channel = NativeGradeClean(channel);
+    strength = std::isnan(strength) ? 0.0 : std::clamp(strength, 0.0, 1.0);
+    if (strength == 0) return source;
+    const double scale = NativeGradeScale(*std::max_element(source.begin(), source.end()));
+    const auto terms = RadialSrgbTransferTerms(source, scale, graded, black);
+    NativeGradeRgb restored{};
+    for (std::size_t c = 0; c < 3; ++c)
+        restored[c] = std::max(terms.above[c] * terms.ratio + terms.blackLight[c], 0.0) / scale;
+    const double bound = std::min(1.0, 65504.0 /
+        std::max(65504.0, *std::max_element(restored.begin(), restored.end())));
+    for (std::size_t c = 0; c < 3; ++c)
+        restored[c] = source[c] + strength * (std::min(65504.0, restored[c] * bound) - source[c]);
+    return restored;
+}
+
 [[nodiscard]] NativeGradeRgb SampleSyntheticNativeGrade(
     const NativeGradeRgb& source, const std::array<float, 4>& weights)
 {

@@ -303,6 +303,17 @@ bool ValidateToneMapperParameters(
 
 namespace {
 
+HdrSettingsValidationError ValidateColorGrading(const HdrSettings& settings) noexcept
+{
+    constexpr std::array methods{ColorGradingMethod::radial, ColorGradingMethod::nativeReference};
+    if (std::ranges::find(methods, settings.colorGradingMethod) == methods.end())
+        return HdrSettingsValidationError::unsupportedColorGradingMethod;
+    constexpr std::array curves{ColorGradingCurve::gamma22, ColorGradingCurve::srgb};
+    if (std::ranges::find(curves, settings.colorGradingCurve) == curves.end())
+        return HdrSettingsValidationError::unsupportedColorGradingCurve;
+    return HdrSettingsValidationError::none;
+}
+
 HdrSettingsValidationError ValidateHdrAlgorithms(const HdrSettings& settings) noexcept
 {
 
@@ -314,15 +325,7 @@ HdrSettingsValidationError ValidateHdrAlgorithms(const HdrSettings& settings) no
             return ValidateToneMapperParameters(algorithm, settings.toneMapperParameters);
         }))
         return HdrSettingsValidationError::toneMapperParametersOutOfRange;
-    switch (settings.colorGradingMethod)
-    {
-    case ColorGradingMethod::radial:
-    case ColorGradingMethod::nativeReference:
-        break;
-    default:
-        return HdrSettingsValidationError::unsupportedColorGradingMethod;
-    }
-    return HdrSettingsValidationError::none;
+    return ValidateColorGrading(settings);
 }
 
 struct HdrNumericRule

@@ -36,6 +36,13 @@ enum class ColorGradingMethod : std::uint8_t
     nativeReference
 };
 
+// Display curve both grading methods use to read native LUT codes.
+enum class ColorGradingCurve : std::uint8_t
+{
+    gamma22,
+    srgb
+};
+
 inline constexpr double kMinimumSceneExposureEv{-4.0};
 inline constexpr double kMaximumSceneExposureEv{4.0};
 inline constexpr double kDefaultProductionSceneExposureEv{0.0};
@@ -198,6 +205,7 @@ struct HdrSettings
     double tint{};
     SelectiveColorSettings selectiveColor{};
     ColorGradingMethod colorGradingMethod{ColorGradingMethod::radial};
+    ColorGradingCurve colorGradingCurve{ColorGradingCurve::gamma22};
     double vanillaColorGradingStrengthPercent{100.0};
     double vanillaGradeLuminancePercent{67.0};
     double vanillaGradeColorPercent{67.0};
@@ -226,6 +234,7 @@ enum class HdrSettingsValidationError : std::uint8_t
     none,
     unsupportedAlgorithm,
     unsupportedColorGradingMethod,
+    unsupportedColorGradingCurve,
     displayPeakOutOfRange,
     uiPaperWhiteOutOfRange,
     videoWhiteOutOfRange,

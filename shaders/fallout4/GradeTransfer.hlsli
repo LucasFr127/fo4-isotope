@@ -6,6 +6,26 @@
 
 float Fo4HdrLargestGradeChannel(float3 rgb) { return max(rgb.x, max(rgb.y, rgb.z)); }
 
+// Display curve used to read native LUT codes. Lookups stay gamma-2.2 encoded.
+static const uint Fo4HdrGradeCurveGamma22 = 0u;
+static const uint Fo4HdrGradeCurveSrgb = 1u;
+static const float3 Fo4HdrGradeLuma = float3(0.212500006f, 0.715399981f, 0.0720999986f);
+
+float3 Fo4HdrGradeDecode(float3 codes, uint curve)
+{
+    if (curve == Fo4HdrGradeCurveSrgb)
+        return codes <= 0.04045f ? codes / 12.92f : pow(max((codes + 0.055f) / 1.055f, 0.0f), 2.4f);
+    return pow(max(codes, 0.0f), 2.2f);
+}
+
+float3 Fo4HdrGradeEncode(float3 value, uint curve)
+{
+    if (curve == Fo4HdrGradeCurveSrgb)
+        return value <= 0.0031308f ? value * 12.92f :
+            1.055f * pow(max(value, 0.0f), 1.0f / 2.4f) - 0.055f;
+    return pow(max(value, 0.0f), 1.0f / 2.2f);
+}
+
 float3 Fo4HdrGradeCleanScene(float3 rgb)
 {
     [unroll] for (uint channel = 0; channel < 3; ++channel)
@@ -110,6 +130,38 @@ float3 Fo4HdrTransferRadialGrade(float3 input, float3 weightedCodes, float stren
     const float3 decoded = pow(Fo4HdrGradeCleanScene(weightedCodes), 2.2f);
     const float3 restored = decoded / Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
     // Uniform scaling can round its maximum one FP32 ULP above the FP16 limit.
+    const float3 endpoint = min(restored * min(1.0f,
+        65504.0f / max(Fo4HdrLargestGradeChannel(restored), 65504.0f)), 65504.0f);
+    return lerp(scene, endpoint, amount);
+}
+
+float3 Fo4HdrTransferRadialGradeSrgb(float3 input, float3 weightedCodes,
+    float3 blackCodes, float strength)
+{
+    const float3 scene = Fo4HdrGradeCleanScene(input);
+    const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
+        ? 0.0f : saturate(strength);
+    if (!(amount > 0.0f)) return scene;
+
+    // The sRGB toe cannot cancel the gamma-2.2 lookup scale per channel: that
+    // ratio collapses near black and erases lift and cross-channel grading.
+    // Keep the gamma-2.2 response above the look's black, rescale it by one
+    // luminance tonal ratio, and add the sRGB-decoded black separately.
+    const float scale = Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
+    const float3 codes = Fo4HdrGradeCleanScene(weightedCodes);
+    const float3 black = Fo4HdrGradeCleanScene(blackCodes);
+    const float3 above = Fo4HdrGradeDecode(codes, Fo4HdrGradeCurveGamma22) -
+        Fo4HdrGradeDecode(black, Fo4HdrGradeCurveGamma22);
+    const float3 blackLight = Fo4HdrGradeDecode(black, Fo4HdrGradeCurveSrgb);
+    const float response = dot(abs(above), Fo4HdrGradeLuma);
+    const float reference = dot(Fo4HdrGradeDecode(
+        Fo4HdrRadialCoordinates(scene), Fo4HdrGradeCurveSrgb), Fo4HdrGradeLuma);
+    const float tonalRatio = response > 0.0f && reference > 0.0f
+        ? dot(abs(Fo4HdrGradeDecode(codes, Fo4HdrGradeCurveSrgb) - blackLight), Fo4HdrGradeLuma) /
+            response * (dot(scene * scale, Fo4HdrGradeLuma) / reference)
+        : 1.0f;
+    // A channel graded below the look's black could otherwise turn negative.
+    const float3 restored = max(above * tonalRatio + blackLight, 0.0f) / scale;
     const float3 endpoint = min(restored * min(1.0f,
         65504.0f / max(Fo4HdrLargestGradeChannel(restored), 65504.0f)), 65504.0f);
     return lerp(scene, endpoint, amount);

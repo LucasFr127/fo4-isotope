@@ -211,7 +211,7 @@ void PublishReplacementConfiguration(
     bypass.saturationScale = 1.0F;
     bypass.liveSettingsReserved = 0U;
     bypass.blacksStrength = 0.0F;
-    bypass.liveSettingsReserved1 = 0U;
+    bypass.colorGradingCurve = 0U;
     bypass.colorBalanceRow0 = {1.0F, 0.0F, 0.0F, 0.0F};
     bypass.colorBalanceRow1 = {0.0F, 1.0F, 0.0F, 0.0F};
     bypass.colorBalanceRow2 = {0.0F, 0.0F, 1.0F, 0.0F};

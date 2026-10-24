@@ -367,7 +367,7 @@ namespace {
         .colorBalanceRow2 = OperatorColorVector(math.colorBalanceBt709[6],
             math.colorBalanceBt709[7], math.colorBalanceBt709[8]),
         .selectiveColorActive = selective.effectiveActive ? 1U : 0U,
-        .liveSettingsReserved1 = 0U,
+        .colorGradingCurve = static_cast<std::uint32_t>(values.colorGradingCurve),
         .operatorShaperParameters = {shaper[2], shaper[3]},
         .selectiveColorPlaneA = OperatorColorVector(
             selective.planeA[0], selective.planeA[1], selective.planeA[2]),

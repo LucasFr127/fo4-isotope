@@ -5,7 +5,8 @@
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 // Adapted for FO4Isotope from that shader and
 // src/shaders/tonemap.hlsl. Modification: retain Fallout 4's four weighted LUT
-// look through a project-owned radial HDR extension, and insert the selected
+// look through a project-owned radial HDR extension read with a selectable
+// gamma-2.2 or sRGB grading curve, and insert the selected
 // production operator exactly once before TAA. Apply a project-authored
 // grade-strength blend and BT.709 image controls
 // before that operator. ACES 2, AgX, and GT7 use a device-scoped
@@ -53,6 +54,17 @@ float3 Fo4HdrSampleWeightedGrade(float3 scene)
     return mul(cb2[1], samples);
 }
 
+float3 Fo4HdrSampleWeightedBlack()
+{
+    // Texel (0,0,0) is the code every look returns at exact black.
+    const float4x3 samples = float4x3(
+        Lut0.Load(int4(0, 0, 0, 0)).rgb,
+        Lut1.Load(int4(0, 0, 0, 0)).rgb,
+        Lut2.Load(int4(0, 0, 0, 0)).rgb,
+        Lut3.Load(int4(0, 0, 0, 0)).rgb);
+    return mul(cb2[1], samples);
+}
+
 void main(
     float4 position : SV_POSITION0,
     float2 texcoord : TEXCOORD0,
@@ -67,8 +79,13 @@ void main(
     float3 result = hdrLinear;
     if (Fo4HdrVanillaGradeStrength > 0.0f)
     {
-        result = Fo4HdrTransferRadialGrade(hdrLinear,
-            Fo4HdrSampleWeightedGrade(hdrLinear), Fo4HdrVanillaGradeStrength);
+        [branch] if (Fo4HdrColorGradingCurve == Fo4HdrGradeCurveSrgb)
+            result = Fo4HdrTransferRadialGradeSrgb(hdrLinear,
+                Fo4HdrSampleWeightedGrade(hdrLinear), Fo4HdrSampleWeightedBlack(),
+                Fo4HdrVanillaGradeStrength);
+        else
+            result = Fo4HdrTransferRadialGrade(hdrLinear,
+                Fo4HdrSampleWeightedGrade(hdrLinear), Fo4HdrVanillaGradeStrength);
     }
     float luminanceRemoval;
     float colorRemoval;

@@ -214,7 +214,7 @@ struct ToneMapConstants
     Float4 colorAdaptationRow1{0.0F, 1.0F, 0.0F, 0.0F};
     Float4 colorAdaptationRow2{0.0F, 0.0F, 1.0F, 0.0F};
     std::uint32_t selectiveColorActive{};
-    std::uint32_t liveSettingsReserved1{};
+    std::uint32_t colorGradingCurve{};
     std::array<float, 2> operatorShaperParameters{};
     std::array<Float4, 7> selectiveColorRegions{};
     Float4 selectiveColorPlaneA{};
@@ -226,7 +226,7 @@ struct ToneMapConstants
 };
 static_assert(sizeof(ToneMapConstants) == 320);
 static_assert(offsetof(ToneMapConstants, blacksStrength) == 60);
-static_assert(offsetof(ToneMapConstants, liveSettingsReserved1) == 116);
+static_assert(offsetof(ToneMapConstants, colorGradingCurve) == 116);
 static_assert(offsetof(ToneMapConstants, selectiveColorPlaneA) == 240);
 static_assert(offsetof(ToneMapConstants, selectiveColorPlaneA) +
     offsetof(Float4, alpha) == 252);

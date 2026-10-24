@@ -39,9 +39,10 @@ cbuffer Fo4HdrToneMapConstants : register(b13)
     float4 Fo4HdrColorAdaptationRow1;
     float4 Fo4HdrColorAdaptationRow2;
 
-    // c7: activity, reserved state and prepared shaper center/logarithmic gain.
+    // c7: activity, grading curve and prepared shaper center/logarithmic gain.
     uint Fo4HdrSelectiveColorActive;
-    uint Fo4HdrLiveSettingsReserved1;
+    // 0 reads native LUT codes as gamma 2.2 (default), 1 as sRGB.
+    uint Fo4HdrColorGradingCurve;
     float2 Fo4HdrOperatorShaperParameters;
 
     // c8-c14: hue radians, saturation multiplier, gain stops, padding.

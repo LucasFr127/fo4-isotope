@@ -16,6 +16,11 @@ using NativeGradeRgb = std::array<double, 3>;
 [[nodiscard]] NativeGradeRgb DecodeAndTransferNativeGrade(
     NativeGradeRgb source, NativeGradeRgb graded, double strength);
 
+[[nodiscard]] double NativeGradeSrgbDecode(double code);
+
+[[nodiscard]] NativeGradeRgb TransferRadialSrgbGrade(
+    NativeGradeRgb source, NativeGradeRgb graded, NativeGradeRgb black, double strength);
+
 [[nodiscard]] NativeGradeRgb SampleSyntheticNativeGrade(
     const NativeGradeRgb& source, const std::array<float, 4>& weights);
 

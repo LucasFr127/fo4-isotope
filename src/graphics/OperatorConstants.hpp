@@ -37,7 +37,7 @@ struct alignas(16) OperatorConstants
     std::array<float, 4> colorBalanceRow1{0.0F, 1.0F, 0.0F, 0.0F};
     std::array<float, 4> colorBalanceRow2{0.0F, 0.0F, 1.0F, 0.0F};
     std::uint32_t selectiveColorActive{};
-    std::uint32_t liveSettingsReserved1{};
+    std::uint32_t colorGradingCurve{}; // ColorGradingCurve; 0 is gamma 2.2.
     std::array<float, 2> operatorShaperParameters{};
     std::array<std::array<float, 4>, kSelectiveColorRegionCount>
         selectiveColorRegions{};
@@ -58,7 +58,7 @@ static_assert(offsetof(OperatorConstants, colorBalanceRow0) == 64);
 static_assert(offsetof(OperatorConstants, colorBalanceRow1) == 80);
 static_assert(offsetof(OperatorConstants, colorBalanceRow2) == 96);
 static_assert(offsetof(OperatorConstants, selectiveColorActive) == 112);
-static_assert(offsetof(OperatorConstants, liveSettingsReserved1) == 116);
+static_assert(offsetof(OperatorConstants, colorGradingCurve) == 116);
 static_assert(offsetof(OperatorConstants, operatorShaperParameters) == 120);
 static_assert(offsetof(OperatorConstants, selectiveColorRegions) == 128);
 static_assert(offsetof(OperatorConstants, selectiveColorPlaneA) == 240);
@@ -70,6 +70,9 @@ static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) +
 static_assert(offsetof(OperatorConstants, lutProfileLuminanceRemoval) == 272);
 static_assert(offsetof(OperatorConstants, lutProfileColorRemoval) == 288);
 static_assert(offsetof(OperatorConstants, lutProfilesActive) == 304);
+// b13 publishes ColorGradingCurve directly; GradeTransfer.hlsli uses these values.
+static_assert(static_cast<std::uint32_t>(ColorGradingCurve::gamma22) == 0U);
+static_assert(static_cast<std::uint32_t>(ColorGradingCurve::srgb) == 1U);
 
 
 } // namespace fo4hdr

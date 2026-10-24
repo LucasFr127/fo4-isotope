@@ -143,6 +143,7 @@ void TestDefaultSettingsMath()
 {
     const HdrSettings defaults{};
     FO4HDR_CHECK(defaults.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(defaults.colorGradingCurve == ColorGradingCurve::gamma22);
     FO4HDR_CHECK(defaults.displayPeakNits == 1000.0);
     FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
     FO4HDR_CHECK(defaults.videoWhiteNits == 203.0);
@@ -325,6 +326,21 @@ void TestColorBalanceEndpoints()
     }
 }
 
+void TestColorGradingValidation()
+{
+    HdrSettings value{};
+    value.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
+    FO4HDR_CHECK(ValidateHdrSettings(value) ==
+        HdrSettingsValidationError::unsupportedColorGradingMethod);
+    value.colorGradingMethod = ColorGradingMethod::nativeReference;
+    FO4HDR_CHECK(ValidateHdrSettings(value) == HdrSettingsValidationError::none);
+    value.colorGradingCurve = static_cast<ColorGradingCurve>(0xFF);
+    FO4HDR_CHECK(ValidateHdrSettings(value) ==
+        HdrSettingsValidationError::unsupportedColorGradingCurve);
+    value.colorGradingCurve = ColorGradingCurve::srgb;
+    FO4HDR_CHECK(ValidateHdrSettings(value) == HdrSettingsValidationError::none);
+}
+
 void TestSettingsValidation()
 {
     HdrSettings value{};
@@ -347,12 +363,7 @@ void TestSettingsValidation()
     FO4HDR_CHECK(ValidateHdrSettings(value) ==
         HdrSettingsValidationError::none);
     TestToneMapperParameterRanges();
-    value = {};
-    value.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
-    FO4HDR_CHECK(ValidateHdrSettings(value) ==
-        HdrSettingsValidationError::unsupportedColorGradingMethod);
-    value.colorGradingMethod = ColorGradingMethod::nativeReference;
-    FO4HDR_CHECK(ValidateHdrSettings(value) == HdrSettingsValidationError::none);
+    TestColorGradingValidation();
     value = {};
     check(&HdrSettings::displayPeakNits, 399.0,
         HdrSettingsValidationError::displayPeakOutOfRange);
