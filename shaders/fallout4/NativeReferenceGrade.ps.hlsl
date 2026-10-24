@@ -19,8 +19,15 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
 {
     const float4 source = SceneTexture.Sample(SceneSampler, uv);
     const float3 hdrLinear = Fo4HdrGradeCleanScene(source.rgb);
-    float3 result = Fo4HdrNativeReferenceGrade(
-        hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrColorGradingCurve);
+    // Branch once with a literal curve per arm. Passing the uniform curve into
+    // the decode helpers compiles every decode to both curves and a select.
+    float3 result;
+    [branch] if (Fo4HdrColorGradingCurve == Fo4HdrGradeCurveSrgb)
+        result = Fo4HdrNativeReferenceGrade(
+            hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrGradeCurveSrgb);
+    else
+        result = Fo4HdrNativeReferenceGrade(
+            hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrGradeCurveGamma22);
     float luminanceRemoval;
     float colorRemoval;
     Fo4HdrResolveVanillaGradeRemoval(cb2[1], Fo4HdrLutProfilesActive,
