@@ -20,7 +20,7 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
     const float4 source = SceneTexture.Sample(SceneSampler, uv);
     const float3 hdrLinear = Fo4HdrGradeCleanScene(source.rgb);
     float3 result = Fo4HdrNativeReferenceGrade(
-        hdrLinear, Fo4HdrVanillaGradeStrength);
+        hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrColorGradingCurve);
     float luminanceRemoval;
     float colorRemoval;
     Fo4HdrResolveVanillaGradeRemoval(cb2[1], Fo4HdrLutProfilesActive,

@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "FO4Isotope/TestShaders.generated.hpp"
 #include "FO4Isotope/tonemap/Aces2.hpp"
@@ -37,6 +38,7 @@ namespace fo4hdr::tests::gpu {
         const float gray = 0.2125F * r + 0.7154F * g + 0.0721F * b;
         return {gray, gray, gray, 1};
     }
+    if (kind == 5) return {0.8F * r, 0.8F * g, 0.8F * b, 1};
     return {0.03F + 0.6F * r + 0.1F * g * b,
         0.02F + 0.7F * g + 0.05F * r * b, 0.01F + 0.8F * b + 0.08F * r * g, 1};
 }
@@ -83,10 +85,6 @@ void CheckNativeReferenceNeutralCoefficients(ID3D11DeviceContext& context,
             for (unsigned channel = 0; channel < 3; ++channel)
                 FO4HDR_WARP_CHECK(std::abs(actual[channel] - expected[channel]) <= 2.0e-6);
         }
-    const auto black = nodeAt(16, 15);
-    FO4HDR_WARP_CHECK(std::abs(black.red - DecodeSrgb(nodes[0].red)) < 1.0e-6);
-    FO4HDR_WARP_CHECK(std::abs(black.green - DecodeSrgb(nodes[0].green)) < 1.0e-6);
-    FO4HDR_WARP_CHECK(std::abs(black.blue - DecodeSrgb(nodes[0].blue)) < 1.0e-6);
     context.Unmap(&readback, 0);
 }
 
@@ -169,6 +167,7 @@ struct NativeReferenceStrengthSample
 {
     unsigned kind;
     float strength;
+    std::uint32_t curve;
 };
 
 void CheckNativeReferenceKind(double value, double input, unsigned c,
@@ -177,8 +176,11 @@ void CheckNativeReferenceKind(double value, double input, unsigned c,
     if (sample.kind == 0) FO4HDR_WARP_CHECK(std::abs(value - input) <= 0.0001 + 0.0001 * input);
     if (sample.strength != 1) return;
     if (sample.kind == 1) FO4HDR_WARP_CHECK(value == 0);
-    if (sample.kind == 2)
-        FO4HDR_WARP_CHECK(std::abs(value - DecodeSrgb(0.04F * (c + 1))) < 1.0e-4);
+    if (sample.kind != 2) return;
+    // A constant look returns its own black, decoded with the selected curve.
+    const double code = 0.04F * (c + 1);
+    const double black = sample.curve == 1 ? DecodeSrgb(static_cast<float>(code)) : std::pow(code, 2.2);
+    FO4HDR_WARP_CHECK(std::abs(value - black) < 1.0e-4);
 }
 
 void CheckNativeReferenceStrength(const std::array<Float4, kWidth>& actual,
@@ -209,7 +211,7 @@ std::array<Float4, kWidth> VerifyNativeReferenceStrength(const Render& render,
     for (const float strength : {0.0F, 0.5F, 1.0F}) {
         settings.vanillaGradeStrength = strength;
         const auto actual = render(shader, kReferenceGradeCorpus, settings, nullptr);
-        CheckNativeReferenceStrength(actual, full, {kind, strength});
+        CheckNativeReferenceStrength(actual, full, {kind, strength, settings.colorGradingCurve});
     }
     return full;
 }
@@ -266,9 +268,9 @@ void PrepareNativeReferenceLook(Device& device, ID3D11ShaderResourceView* look,
     unsigned kind, const NativeReferencePreparation& preparation)
 {
     LutConstants weights{};
-    constexpr std::array<Float4, 5> mixtures{{
+    constexpr std::array<Float4, 6> mixtures{{
         {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1},
-        {0.125F, 0.25F, 0.125F, 0.5F}}};
+        {0.125F, 0.25F, 0.125F, 0.5F}, {1, 0, 0, 0}}};
     weights.values[1] = mixtures[kind];
     const auto constants = CreateConstantBuffer(*device.device.Get(), weights);
     auto* cb = constants.Get();
@@ -327,6 +329,54 @@ std::array<Float4, kWidth> ReadNativeReferenceOutput(ID3D11DeviceContext& contex
     return values;
 }
 
+struct RadialReferenceDraw
+{
+    ID3D11VertexShader* vertexShader;
+    ID3D11SamplerState* sceneSampler;
+    ID3D11SamplerState* lutSampler;
+    ID3D11PixelShader* radial;
+    ID3D11ShaderResourceView* look;
+};
+
+[[nodiscard]] std::array<Float4, kWidth> RenderRadialReference(Device& device,
+    Texture& output, const RadialReferenceDraw& draw, const ToneMapConstants& settings)
+{
+    D3D11_SUBRESOURCE_DATA data{kReferenceGradeCorpus.data(), sizeof(kReferenceGradeCorpus), 0};
+    auto input = CreateTexture(*device.device.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT,
+        D3D11_BIND_SHADER_RESOURCE, &data);
+    LutConstants weights{};
+    weights.values[1] = {1, 0, 0, 0};
+    const auto lutConstants = CreateConstantBuffer(*device.device.Get(), weights);
+    const auto constants = CreateConstantBuffer(*device.device.Get(), settings);
+    std::array<ID3D11ShaderResourceView*, 8> resources{input.srv.Get(), nullptr, nullptr,
+        draw.look, draw.look, draw.look, draw.look, nullptr};
+    std::array<ID3D11SamplerState*, 8> samplers{draw.sceneSampler, nullptr, nullptr,
+        draw.lutSampler, draw.lutSampler, draw.lutSampler, draw.lutSampler, nullptr};
+    auto* target = output.rtv.Get();
+    DrawFullscreen(*device.context.Get(), {draw.vertexShader, draw.radial, lutConstants.Get(),
+        constants.Get(), resources.data(), 8, samplers.data(), 8, &target, 1});
+    return ReadNativeReferenceOutput(*device.context.Get(), output);
+}
+
+void CheckNativeReferenceMatchesRadial(const std::array<Float4, kWidth>& nativeReference,
+    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+{
+    // On neutral input both methods transfer the same tonal response for each
+    // grading curve. This look has no lifted black, whose scaling differs by design.
+    // Hardware filtering can quantize Radial's fixed-function lookup by one 8-bit
+    // subtexel step, while Native Reference interpolates its nodes in FP32.
+    const auto& native = nativeReference[2];
+    const auto& expected = radial[2];
+    for (const auto [actual, reference] : {std::pair{native.red, expected.red},
+            std::pair{native.green, expected.green}, std::pair{native.blue, expected.blue}}) {
+        const bool agrees = std::abs(actual - reference) <= 3.0e-3F * reference;
+        if (!agrees) std::cerr << "Native Reference/Radial neutral curve=" << curve
+            << " native=" << actual << " radial=" << reference
+            << " relative=" << std::abs(actual - reference) / reference << '\n';
+        FO4HDR_WARP_CHECK(agrees);
+    }
+}
+
 void VerifyNativeReferenceGrade(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sceneSampler)
 {
@@ -355,8 +405,10 @@ void VerifyNativeReferenceGrade(Device& device,
             resources.data(), 8, samplers.data(), 8, &target, 1});
         return ReadNativeReferenceOutput(*device.context.Get(), output);
     };
-    ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
-    for (unsigned kind = 0; kind < 5; ++kind) {
+    for (const std::uint32_t curve : {0U, 1U})
+    for (unsigned kind = 0; kind < 6; ++kind) {
+        ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
+        settings.colorGradingCurve = curve;
         NativeReferenceLook fixture(*device.device.Get(), desc, kind);
         const auto& look = fixture.look;
         const auto& nodes = fixture.nodes;
@@ -370,6 +422,9 @@ void VerifyNativeReferenceGrade(Device& device,
 
         const auto full = VerifyNativeReferenceStrength(render, shader.Get(), settings, kind);
 
+        if (kind == 5)
+            CheckNativeReferenceMatchesRadial(full, RenderRadialReference(device, output,
+                {vertexShader, sceneSampler, linear.Get(), radial.Get(), look.srv.Get()}, settings), curve);
         if (kind != 4) continue;
         VerifyNativeReferenceOperators(device, render, settings,
             {shader.Get(), radial.Get(), full});

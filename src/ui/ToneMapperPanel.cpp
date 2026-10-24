@@ -369,6 +369,31 @@ struct ColorSettingsTabs
             ImGui::TextWrapped("%s", view.nativeReferenceStatus);
     }
 
+    void DrawColorGradingCurve() noexcept
+    {
+        const HdrSettings defaults{};
+        const char* gradingCurves[]{"Gamma 2.2", "sRGB"};
+        int gradingCurve = settings.colorGradingCurve == ColorGradingCurve::srgb ? 1 : 0;
+        DrawSettingsControlLabel("Color Grading Curve");
+        bool curveChanged = ImGui::Combo("##color-grading-curve", &gradingCurve,
+            gradingCurves, static_cast<int>(std::size(gradingCurves)));
+        ImGui::SetItemTooltip("How both methods read the game's LUT colors.\n"
+            "Gamma 2.2 matches most SDR monitors and keeps the look's deeper shadows.\n"
+            "sRGB uses the piecewise standard curve and lifts graded shadows.");
+        if (DrawRestoreDefaultButton("color-grading-curve",
+                settings.colorGradingCurve != defaults.colorGradingCurve))
+        {
+            gradingCurve = 0;
+            curveChanged = true;
+        }
+        if (curveChanged)
+        {
+            settings.colorGradingCurve = gradingCurve == 1 ?
+                ColorGradingCurve::srgb : ColorGradingCurve::gamma22;
+            commitRequested = true;
+        }
+    }
+
     void DrawOutputSettingsTab() noexcept
     {
         if (ImGui::BeginTabItem("Output"))
@@ -502,6 +527,7 @@ struct ColorSettingsTabs
                     "100% applies it fully, including grade response adjustments."}}))
                 commitRequested = true;
             DrawColorGradingMethod();
+            DrawColorGradingCurve();
             if (DrawVanillaGradePanel(settings))
                 commitRequested = true;
             if (ImGui::CollapsingHeader("Automatic Weather LUT Response"))

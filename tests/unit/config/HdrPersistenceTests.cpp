@@ -41,6 +41,8 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
         std::string::npos);
     FO4HDR_CHECK(rewritten.find("ColorGradingMethod=NativeReference\r\n") !=
         std::string::npos);
+    FO4HDR_CHECK(rewritten.find("ColorGradingCurve=sRGB\r\n") !=
+        std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "[ToneMapper]\r\nAlgorithm=ACES2\r\n") !=
         std::string::npos);
@@ -74,6 +76,7 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(reloadedRewrite.value.toneMapperParameters ==
         settings.toneMapperParameters);
     FO4HDR_CHECK(reloadedRewrite.value.colorGradingMethod == settings.colorGradingMethod);
+    FO4HDR_CHECK(reloadedRewrite.value.colorGradingCurve == settings.colorGradingCurve);
     FO4HDR_CHECK(test::Approx(reloadedRewrite.value.sceneExposureMultiplier,
         std::exp2(settings.exposureEv), 1.0e-15));
     FO4HDR_CHECK(reloadedRewrite.value.blacks == settings.blacks);
@@ -136,6 +139,8 @@ void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfac
     FO4HDR_CHECK(positionOnly.find("ExposureEV=0.25\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("ColorGradingMethod=NativeReference\r\n") !=
         std::string::npos);
+    FO4HDR_CHECK(positionOnly.find("ColorGradingCurve=sRGB\r\n") !=
+        std::string::npos);
     FO4HDR_CHECK(RewriteHdrWindowPositionIni("[Interface]\nToggleKey=F10\n", 1, 2)
         .find("ToggleKey=F10\n") != std::string::npos);
     for (const auto invalid : {-2.0, -0.5, 65536.0,
@@ -179,6 +184,7 @@ void TestSettingsPersistenceRewrite()
         .gt7ShoulderStart = 0.52,
         .gt7ColorBlend = 0.3};
     settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingCurve = ColorGradingCurve::srgb;
     settings.displayPeakNits = 430.0;
     settings.uiPaperWhiteNits = 180.0;
     settings.videoWhiteNits = 220.0;
@@ -215,6 +221,10 @@ void TestSettingsPersistenceRewrite()
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         original, settings, interfaceSettings) == original);
     settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingCurve = static_cast<ColorGradingCurve>(0xFF);
+    FO4HDR_CHECK(RewriteHdrSettingsIni(
+        original, settings, interfaceSettings) == original);
+    settings.colorGradingCurve = ColorGradingCurve::srgb;
     settings.displayPeakNits = 399.0;
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         original, settings, interfaceSettings) == original);
@@ -334,6 +344,7 @@ PersistenceFixture CreatePersistenceFixture()
         .gt7ShoulderStart = 0.5,
         .gt7ColorBlend = 0.2};
     settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingCurve = ColorGradingCurve::srgb;
     HdrInterfaceSettings interfaceSettings{};
     interfaceSettings.scale = 1.5;
     return {root, path, profileDirectory, personalPath, settings, interfaceSettings};
@@ -396,6 +407,8 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(reloaded.value.toneMapperParameters ==
         settings.toneMapperParameters);
     FO4HDR_CHECK(reloaded.value.colorGradingMethod == settings.colorGradingMethod);
+    FO4HDR_CHECK(persisted.find("ColorGradingCurve=sRGB\n") != std::string::npos);
+    FO4HDR_CHECK(reloaded.value.colorGradingCurve == settings.colorGradingCurve);
     input.close();
 }
 

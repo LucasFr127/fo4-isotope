@@ -55,9 +55,11 @@ struct PersistedKey
     double WeatherGradeChannel::*weatherNumber{};
     std::size_t weatherCoefficient{4};
     bool weatherEnabled{};
+    // Last, so earlier positional rows are unaffected.
+    bool colorGradingCurve{};
 };
 
-constexpr std::array<PersistedKey, 50> kPersistedKeys{{
+constexpr std::array<PersistedKey, 51> kPersistedKeys{{
     {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
         &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
@@ -124,6 +126,7 @@ constexpr std::array<PersistedKey, 50> kPersistedKeys{{
     {"Image", "Temperature", &HdrSettings::temperature},
     {"Image", "Tint", &HdrSettings::tint},
     {"Image", "ColorGradingMethod", nullptr, nullptr, false, false, true},
+    {.section = "Image", .key = "ColorGradingCurve", .colorGradingCurve = true},
     {"Effects", "VanillaColorGradingStrength",
         &HdrSettings::vanillaColorGradingStrengthPercent},
     {"Effects", "VanillaGradeLuminanceStrength",
@@ -302,6 +305,8 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
         result.append(FormatHdrSettingsHotkey(interfaceSettings.toggleKey).data());
     else if (key.colorGradingMethod)
         result.append(ToString(settings.colorGradingMethod));
+    else if (key.colorGradingCurve)
+        result.append(ToString(settings.colorGradingCurve));
     else if (key.interfaceNumber != nullptr)
         result.append(FormatNumber(interfaceSettings.*key.interfaceNumber));
     else if (key.toneMapperNumber != nullptr)

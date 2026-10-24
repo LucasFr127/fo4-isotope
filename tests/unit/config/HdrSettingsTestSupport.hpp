@@ -39,6 +39,7 @@ Saturation=125
 Temperature=20
 Tint=-30
 ColorGradingMethod=NativeReference
+ColorGradingCurve=sRGB
 GradeTransfer=PreserveHDRColor
 [Effects]
 VanillaColorGradingStrength=60

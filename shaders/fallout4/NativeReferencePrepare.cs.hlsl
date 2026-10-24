@@ -12,16 +12,6 @@ cbuffer NativeLookConstants : register(b2)
 
 RWTexture3D<float4> PreparedLook : register(u0);
 
-float3 CleanBlack(float3 value)
-{
-    return (asuint(value) & 0x7fffffffu) > 0x7f800000u ? 0.0f : clamp(value, 0.0f, 65504.0f);
-}
-
-float3 DecodeBlack(float3 codes)
-{
-    return codes <= 0.04045f ? codes / 12.92f : pow(max((codes + 0.055f) / 1.055f, 0.0f), 2.4f);
-}
-
 float3 WeightedNode(int3 coordinate)
 {
     float3 value = 0.0f;
@@ -62,11 +52,6 @@ void main(uint3 coordinate : SV_DispatchThreadID)
         const float3 d = WeightedNode(cell + 1);
         const float3 coefficient = coordinate.x == 0 ? a : coordinate.x == 1 ? b - 3.0f * a : coordinate.x == 2 ? 3.0f * a - 2.0f * b + c : d - c + b - a;
         PreparedLook[uint3(coordinate.x + 16, coordinate.y, 0)] = float4(coefficient, 0.0f);
-    }
-    if (coordinate.x == 0 && coordinate.y == 15 && coordinate.z == 0)
-    {
-        const float3 black = CleanBlack(DecodeBlack(CleanBlack(WeightedNode(int3(0, 0, 0)))));
-        PreparedLook[uint3(16, 15, 0)] = float4(black, 0.0f);
     }
     PreparedLook[coordinate] = encoded;
 }

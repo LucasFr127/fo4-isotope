@@ -185,6 +185,7 @@ enum class RequiredKey : std::size_t
     vanillaGradeLuminance,
     vanillaGradeColor,
     colorGradingMethod,
+    colorGradingCurve,
     bloomStrength,
     toggleKey,
     interfaceScale,
@@ -285,6 +286,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Image", "Temperature", RequiredKey::temperature},
     {"Image", "Tint", RequiredKey::tint},
     {"Image", "ColorGradingMethod", RequiredKey::colorGradingMethod},
+    {"Image", "ColorGradingCurve", RequiredKey::colorGradingCurve},
     {"SelectiveColor", "Enabled", RequiredKey::selectiveColorEnabled},
     {"SelectiveColor", "Amount", RequiredKey::selectiveColorAmount},
     {"Effects", "VanillaColorGradingStrength", RequiredKey::vanillaColorGradingStrength},
@@ -524,6 +526,15 @@ PluginConfigurationError ParseGradingMethod(std::string_view value,
     return PluginConfigurationError::none;
 }
 
+PluginConfigurationError ParseGradingCurve(std::string_view value,
+    ColorGradingCurve& target) noexcept
+{
+    if (value == "Gamma22") target = ColorGradingCurve::gamma22;
+    else if (value == "sRGB") target = ColorGradingCurve::srgb;
+    else return PluginConfigurationError::unsupportedColorGradingCurve;
+    return PluginConfigurationError::none;
+}
+
 bool& BooleanTarget(PluginConfiguration& parsed, RequiredKey key) noexcept
 {
     struct Target { RequiredKey key; bool* value; };
@@ -545,6 +556,7 @@ PluginConfigurationError ParseNamedSetting(PluginConfiguration& parsed,
 {
     if (key == RequiredKey::algorithm) return ParseAlgorithm(value, parsed.productionAlgorithm);
     if (key == RequiredKey::colorGradingMethod) return ParseGradingMethod(value, parsed.colorGradingMethod);
+    if (key == RequiredKey::colorGradingCurve) return ParseGradingCurve(value, parsed.colorGradingCurve);
     if (key == RequiredKey::toggleKey)
         return ParseHdrSettingsHotkey(value, parsed.interfaceSettings.toggleKey) ?
             PluginConfigurationError::none : PluginConfigurationError::unsupportedToggleKey;
@@ -753,6 +765,17 @@ std::string_view ToString(
     return "unknown";
 }
 
+std::string_view ToString(
+    ColorGradingCurve curve) noexcept
+{
+    switch (curve)
+    {
+    case ColorGradingCurve::gamma22: return "Gamma22";
+    case ColorGradingCurve::srgb: return "sRGB";
+    }
+    return "unknown";
+}
+
 std::string_view ToString(PluginConfigurationError error) noexcept
 {
     struct ErrorName { PluginConfigurationError error; std::string_view name; };
@@ -767,6 +790,7 @@ std::string_view ToString(PluginConfigurationError error) noexcept
         {PluginConfigurationError::valueOutOfRange, "value-out-of-range"},
         {PluginConfigurationError::unsupportedAlgorithm, "unsupported-algorithm"},
         {PluginConfigurationError::unsupportedColorGradingMethod, "unsupported-color-grading-method"},
+        {PluginConfigurationError::unsupportedColorGradingCurve, "unsupported-color-grading-curve"},
         {PluginConfigurationError::unsupportedToggleKey, "unsupported-toggle-key"},
         {PluginConfigurationError::invalidCombination, "invalid-combination"},
     };

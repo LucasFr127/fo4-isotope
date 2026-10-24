@@ -25,6 +25,7 @@ void TestShippedConfiguration()
         ToneMapperParameters{});
     FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);
     FO4HDR_CHECK(shipped.value.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(shipped.value.colorGradingCurve == ColorGradingCurve::gamma22);
     FO4HDR_CHECK(shipped.value.exposureEv == 0.0);
     FO4HDR_CHECK(shipped.value.displayPeakNits == 1000.0);
     FO4HDR_CHECK(shipped.value.uiPaperWhiteNits == 203.0);
@@ -117,6 +118,24 @@ void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
     }
 }
 
+void TestGradingCurveRoundTrip(const PluginConfigurationResult& parsed)
+{
+    FO4HDR_CHECK(parsed.value.colorGradingCurve == ColorGradingCurve::gamma22);
+    for (const auto curve : {ColorGradingCurve::gamma22, ColorGradingCurve::srgb})
+    {
+        auto settings = static_cast<HdrSettings>(parsed.value);
+        settings.colorGradingCurve = curve;
+        const auto saved = RewriteHdrSettingsIni(
+            MinimalProductionConfiguration(), settings, {});
+        FO4HDR_CHECK(saved.find("ColorGradingCurve=" + std::string(ToString(curve)) + "\n") !=
+            std::string::npos);
+        const auto loaded = ParsePluginConfiguration(saved);
+        FO4HDR_CHECK(loaded.valid);
+        FO4HDR_CHECK(loaded.value.colorGradingCurve == curve);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
+    }
+}
+
 void TestMinimalConfiguration()
 {
     auto parsed = ParsePluginConfiguration(
@@ -126,6 +145,7 @@ void TestMinimalConfiguration()
         ToneMapperParameters{});
     FO4HDR_CHECK(parsed.value.toneMapperParameters.agxContrast == 2.7);
     TestDefaultRoundTrip(parsed);
+    TestGradingCurveRoundTrip(parsed);
     FO4HDR_CHECK(parsed.value.videoWhiteNits == 203.0);
     FO4HDR_CHECK(parsed.value.contrast == 0.0);
     FO4HDR_CHECK(parsed.value.blacks == 0.0);
@@ -210,6 +230,7 @@ void TestExtendedConfiguration()
         ExtendedProductionConfiguration());
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::nativeReference);
+    FO4HDR_CHECK(parsed.value.colorGradingCurve == ColorGradingCurve::srgb);
     FO4HDR_CHECK(parsed.value.toneMapperParameters.acesLookStrength == 0.25);
     FO4HDR_CHECK(parsed.value.toneMapperParameters.agxMiddleGrayEv == -0.25);
     FO4HDR_CHECK(parsed.value.toneMapperParameters.agxContrast == 2.9);
@@ -248,6 +269,29 @@ void TestOptionalConfigurationValues()
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();
+}
+
+void TestConfigurationCurveErrors()
+{
+    // Tokens are exact, like the grading method's.
+    for (const auto token : {"SRGB", "srgb", "gamma22", "Gamma 2.2", "2.2"})
+    {
+        const auto parsed = ParsePluginConfiguration(
+            MinimalProductionConfiguration() +
+            "\n[Image]\nColorGradingCurve=" + token + "\n");
+        FO4HDR_CHECK(!parsed.valid);
+        FO4HDR_CHECK(parsed.error ==
+            PluginConfigurationError::unsupportedColorGradingCurve);
+        FO4HDR_CHECK(parsed.value.colorGradingCurve == ColorGradingCurve::gamma22);
+        FO4HDR_CHECK(!parsed.value.productionRequested);
+    }
+    FO4HDR_CHECK(ToString(PluginConfigurationError::unsupportedColorGradingCurve) ==
+        "unsupported-color-grading-curve");
+    const auto duplicateCurve = ParsePluginConfiguration(
+        MinimalProductionConfiguration() +
+        "\n[Image]\nColorGradingCurve=Gamma22\nColorGradingCurve=sRGB\n");
+    FO4HDR_CHECK(!duplicateCurve.valid);
+    FO4HDR_CHECK(duplicateCurve.error == PluginConfigurationError::duplicateKey);
 }
 
 void TestConfigurationMethodErrors()
@@ -400,6 +444,7 @@ void TestConfigurationToggleKeys()
 void TestOptionalConfigurationFailures()
 {
     TestConfigurationMethodErrors();
+    TestConfigurationCurveErrors();
     TestConfigurationOperatorErrors();
     TestConfigurationRangeErrors();
     TestConfigurationDuplicateEffects();

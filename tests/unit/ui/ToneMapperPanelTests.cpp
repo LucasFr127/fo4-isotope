@@ -54,9 +54,45 @@ void CheckColorSettingsTabs(HdrSettings& settings)
         for (int index = 0; index < tabs->Tabs.Size; ++index)
             FO4HDR_CHECK(std::string_view{ImGui::TabBarGetTabName(tabs, &tabs->Tabs[index])} ==
                 names[static_cast<std::size_t>(index)]);
+        // Later frames draw the Effects tab, including the grading-curve combo.
+        ImGui::TabBarQueueFocus(tabs, "Effects");
         ImGui::EndTabBar();
     }
     FO4HDR_CHECK(!commitRequested);
+}
+
+void CheckEffectsSettingsTab(HdrSettings& settings)
+{
+    const auto curve = settings.colorGradingCurve;
+    SettingsWindowView view{};
+    view.activeSettings = settings;
+    bool commitRequested{};
+    if (ImGui::BeginTabBar("Recommendation smoke tabs"))
+    {
+        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        auto* tabs = ImGui::GetCurrentTabBar();
+        auto* selected = ImGui::TabBarFindTabByID(tabs, tabs->SelectedTabId);
+        FO4HDR_CHECK(selected != nullptr &&
+            std::string_view{ImGui::TabBarGetTabName(tabs, selected)} == "Effects");
+        ImGui::EndTabBar();
+    }
+    FO4HDR_CHECK(!commitRequested);
+    FO4HDR_CHECK(settings.colorGradingCurve == curve);
+}
+
+void RenderEffectsSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
+{
+    for (const auto curve : {ColorGradingCurve::gamma22, ColorGradingCurve::srgb})
+    {
+        settings.colorGradingCurve = curve;
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+        if (ImGui::Begin("Tone mapper parameters smoke", nullptr,
+                ImGuiWindowFlags_NoSavedSettings))
+            CheckEffectsSettingsTab(settings);
+        ImGui::End();
+        ImGui::Render();
+    }
 }
 
 void TestToneMapperRecommendationFloatEndpoints()
@@ -196,6 +232,7 @@ void TestToneMapperPanelSmoke()
         FO4HDR_CHECK(drawData->TotalVtxCount > 0);
         FO4HDR_CHECK(drawData->TotalIdxCount > 0);
         FO4HDR_CHECK(settings.toneMapperParameters == before);
+        RenderEffectsSettingsFrames(settings, windowSize);
         ImGui::DestroyContext();
     };
 

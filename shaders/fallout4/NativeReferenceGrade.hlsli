@@ -3,6 +3,7 @@
 #define FO4HDR_NATIVE_REFERENCE_GRADE_HLSLI
 
 #include "../tonemap/OperatorLut.hlsli"
+#include "GradeTransfer.hlsli"
 
 Texture3D<float4> PreparedLook : register(t3);
 
@@ -35,17 +36,6 @@ float NativeCurve(float value)
     // Factoring the native rational curve avoids cancellation at black.
     return value * (0.14f * value + 1.0f / 60.0f) /
         (value * (0.15f * value + 0.5f) + 0.06f);
-}
-
-float3 NativeDecode(float3 codes)
-{
-    return codes <= 0.04045f ? codes / 12.92f : pow(max((codes + 0.055f) / 1.055f, 0.0f), 2.4f);
-}
-
-float3 NativeEncode(float3 value)
-{
-    return value <= 0.0031308f ? value * 12.92f :
-        1.055f * pow(max(value, 0.0f), 1.0f / 2.4f) - 0.055f;
 }
 
 float3 NativeCoordinates(float3 scene)
@@ -85,7 +75,7 @@ float3 NativeTrilinear(Texture3D<float4> look, float3 codes)
                   look.Load(int4(cell + int3(1, 1, 1), 0)).rgb, fraction.x), fraction.y), fraction.z);
 }
 
-float3 NativeReference(float3 codes)
+float3 NativeReference(float3 codes, uint curve)
 {
     // Match the floating-point identity nodes and interpolation used by the
     // native sampler. A continuous ideal coordinate is a different reference
@@ -97,8 +87,8 @@ float3 NativeReference(float3 codes)
     const float3 position = saturate(codes) * 15.0f;
     const int3 cell = min(int3(position), 14);
     const float3 fraction = position - float3(cell);
-    return NativeDecode(NativeLerp(float3(ramp[cell.x], ramp[cell.y], ramp[cell.z]),
-        float3(ramp[cell.x+1], ramp[cell.y+1], ramp[cell.z+1]), fraction));
+    return Fo4HdrGradeDecode(NativeLerp(float3(ramp[cell.x], ramp[cell.y], ramp[cell.z]),
+        float3(ramp[cell.x+1], ramp[cell.y+1], ramp[cell.z+1]), fraction), curve);
 }
 
 float3 NativeWeightedCodes(float3 codes)
@@ -174,7 +164,7 @@ float3 NativeNeutralCodes(float code)
     return mad(t, mad(t, mad(t, d, c), b), a);
 }
 
-float3 Fo4HdrNativeReferenceGrade(float3 input, float strength)
+float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
 {
     const float3 scene = CleanScene(input);
     const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
@@ -182,21 +172,22 @@ float3 Fo4HdrNativeReferenceGrade(float3 input, float strength)
     if (!(amount > 0.0f)) return scene;
 
     const float3 codes = NativeCoordinates(scene);
-    // Both sides of the native look are decoded as sRGB. Keeping the decoded
-    // ungraded reference makes an identity look transfer no tonal response.
-    const float3 reference = NativeReference(codes);
-    const float3 graded = CleanScene(NativeDecode(CleanScene(NativeWeightedCodes(codes))));
-    const float3 black = PreparedLook.Load(int4(16, 15, 0, 0)).rgb;
-    const float3 neutralCodes = NativeEncode(NeutralPivot(reference).xxx);
-    const float3 neutralReference = NativeReference(neutralCodes);
-    const float3 neutral = CleanScene(NativeDecode(CleanScene(NativeNeutralCodes(neutralCodes.x))));
+    // Both sides of the native look use the selected grading curve. Keeping the
+    // decoded ungraded reference makes an identity look transfer no tonal response.
+    const float3 reference = NativeReference(codes, curve);
+    const float3 graded = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeWeightedCodes(codes)), curve));
+    // The prepared node at texel (0,0,0) holds the weighted black codes.
+    const float3 black = CleanScene(Fo4HdrGradeDecode(CleanScene(PreparedLook.Load(int4(0, 0, 0, 0)).rgb), curve));
+    const float3 neutralCodes = Fo4HdrGradeEncode(NeutralPivot(reference).xxx, curve);
+    const float3 neutralReference = NativeReference(neutralCodes, curve);
+    const float3 neutral = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeNeutralCodes(neutralCodes.x)), curve));
     float along;
     const float4 probe = ChromaProbe(scene, reference, GradeConfidence(), neutralReference.x, along);
-    const float3 probeCodes = NativeEncode(probe.rgb);
-    const float3 probeReference = NativeReference(probeCodes);
+    const float3 probeCodes = Fo4HdrGradeEncode(probe.rgb, curve);
+    const float3 probeReference = NativeReference(probeCodes, curve);
     float3 second = neutral;
     [branch] if (probe.w > 0.0f)
-        second = CleanScene(NativeDecode(CleanScene(NativeWeightedCodes(probeCodes))));
+        second = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeWeightedCodes(probeCodes)), curve));
     const float3 endpoint = NativeReferenceTransfer(scene, reference, graded, neutral, black,
         probeReference, second, along, probe.w, neutralReference);
     // H + amount*(endpoint-H) loses a small constant look at large H.

@@ -45,6 +45,7 @@ enum class PluginConfigurationError
     valueOutOfRange,
     unsupportedAlgorithm,
     unsupportedColorGradingMethod,
+    unsupportedColorGradingCurve,
     unsupportedToggleKey,
     invalidCombination
 };
@@ -67,6 +68,8 @@ LoadPluginConfiguration(
     ProductionToneMapperAlgorithm algorithm) noexcept;
 [[nodiscard]] std::string_view ToString(
     ColorGradingMethod method) noexcept;
+[[nodiscard]] std::string_view ToString(
+    ColorGradingCurve curve) noexcept;
 [[nodiscard]] std::string_view ToString(
     PluginConfigurationError error) noexcept;
 
