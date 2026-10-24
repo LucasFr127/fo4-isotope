@@ -176,8 +176,9 @@ float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
     // decoded ungraded reference makes an identity look transfer no tonal response.
     const float3 reference = NativeReference(codes, curve);
     const float3 graded = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeWeightedCodes(codes)), curve));
-    // The prepared node at texel (0,0,0) holds the weighted black codes.
-    const float3 black = CleanScene(Fo4HdrGradeDecode(CleanScene(PreparedLook.Load(int4(0, 0, 0, 0)).rgb), curve));
+    // The prepare pass stores the weighted black decoded by each curve.
+    const float3 black = PreparedLook.Load(
+        int4(curve == Fo4HdrGradeCurveSrgb ? 17 : 16, 15, 0, 0)).rgb;
     const float3 neutralCodes = Fo4HdrGradeEncode(NeutralPivot(reference).xxx, curve);
     const float3 neutralReference = NativeReference(neutralCodes, curve);
     const float3 neutral = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeNeutralCodes(neutralCodes.x)), curve));

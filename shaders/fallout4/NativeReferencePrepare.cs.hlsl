@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+#include "GradeTransfer.hlsli"
+
 Texture3D<float4> NativeLook0 : register(t0);
 Texture3D<float4> NativeLook1 : register(t1);
 Texture3D<float4> NativeLook2 : register(t2);
@@ -52,6 +54,16 @@ void main(uint3 coordinate : SV_DispatchThreadID)
         const float3 d = WeightedNode(cell + 1);
         const float3 coefficient = coordinate.x == 0 ? a : coordinate.x == 1 ? b - 3.0f * a : coordinate.x == 2 ? 3.0f * a - 2.0f * b + c : d - c + b - a;
         PreparedLook[uint3(coordinate.x + 16, coordinate.y, 0)] = float4(coefficient, 0.0f);
+    }
+    // Node (0,0,0) is the weighted black. Decode it once per draw with each
+    // grading curve: Gamma 2.2 at (16,15,0) and sRGB at (17,15,0).
+    if (all(coordinate == 0u))
+    {
+        const float3 black = Fo4HdrGradeCleanScene(encoded.rgb);
+        PreparedLook[uint3(16, 15, 0)] = float4(Fo4HdrGradeCleanScene(
+            Fo4HdrGradeDecode(black, Fo4HdrGradeCurveGamma22)), 0.0f);
+        PreparedLook[uint3(17, 15, 0)] = float4(Fo4HdrGradeCleanScene(
+            Fo4HdrGradeDecode(black, Fo4HdrGradeCurveSrgb)), 0.0f);
     }
     PreparedLook[coordinate] = encoded;
 }
