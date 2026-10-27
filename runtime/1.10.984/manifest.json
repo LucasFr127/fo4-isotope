@@ -5,17 +5,11 @@
     "f4seVersion": "0.7.2",
     "platform": "steam",
     "exeSha256": "bcb8f9fe660ef4c33712b873fdc24e5ecbd6a77e629d6419f803c2c09c63eaf2",
-    "addressLibraryFile": "version-1-10-984-0.bin",
-    "status": "runtime-pinned-unvalidated"
+    "addressLibraryFile": "version-1-10-984-0.bin"
   },
-  "shaderSetId": "fo4-1.10.984-development",
+  "shaderSetId": "fo4-1.10.984",
   "semanticStages": [],
   "resourceRules": [],
-  "manualValidation": {
-    "scope": "milestone-1-runtime-load",
-    "complete": false,
-    "report": null
-  },
   "imageSpaceObserver": {
     "status": "unvalidated",
     "scope": "weather-imagespace-provenance",

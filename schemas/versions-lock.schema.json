@@ -15,6 +15,10 @@
     "smoothTetraSelectiveColor"
   ],
   "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{64}$"
+    },
     "sha256OrPlaceholder": {
       "type": "string",
       "pattern": "^(?:[0-9a-fA-F]{64}|FILL_LOCAL|FILL_AFTER_ADD_COMMONLIB|FILL_AFTER_FIRST_CONFIGURE|FILL_AFTER_CAPTURE|FILL_DURING_SOURCE_PACKAGING|FILL_AFTER_INDEPENDENT_REVIEW|UNVALIDATED)$"
@@ -26,7 +30,6 @@
     "runtimeEntry": {
       "type": "object",
       "required": [
-        "status",
         "platform",
         "f4seVersion",
         "exeSha256",
@@ -34,24 +37,15 @@
         "f4seRuntimeDllSha256",
         "addressLibraryFile",
         "addressLibrarySha256",
+        "runtimeManifestCanonicalSha256",
         "shaderManifestSha256",
         "observedAtUtc"
       ],
       "properties": {
-        "status": {
-          "enum": [
-            "primary-uninitialized",
-            "planned",
-            "runtime-pinned-unvalidated",
-            "capture-complete",
-            "release-approved"
-          ]
-        },
         "platform": {
           "enum": [
             "steam",
-            "gog",
-            "unvalidated"
+            "gog"
           ]
         },
         "f4seVersion": {
@@ -59,98 +53,33 @@
           "pattern": "^0\\.[0-9]+\\.[0-9]+$"
         },
         "exeSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
+          "$ref": "#/definitions/sha256"
         },
         "f4seLoaderSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
+          "$ref": "#/definitions/sha256"
         },
         "f4seRuntimeDllSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
+          "$ref": "#/definitions/sha256"
         },
         "addressLibraryFile": {
           "type": "string",
           "pattern": "^version-[0-9-]+\\.bin$"
         },
         "addressLibrarySha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
+          "$ref": "#/definitions/sha256"
         },
         "runtimeManifestCanonicalSha256": {
-          "$ref": "#/definitions/sha256OrPlaceholder"
+          "$ref": "#/definitions/sha256"
         },
         "shaderManifestSha256": {
           "$ref": "#/definitions/sha256OrPlaceholder"
         },
         "observedAtUtc": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": "string",
           "format": "date-time"
         }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": {
-            "properties": { "status": { "const": "planned" } }
-          },
-          "then": {
-            "properties": {
-              "platform": { "const": "unvalidated" },
-              "exeSha256": { "const": "UNVALIDATED" },
-              "f4seLoaderSha256": { "const": "UNVALIDATED" },
-              "f4seRuntimeDllSha256": { "const": "UNVALIDATED" },
-              "addressLibrarySha256": { "const": "UNVALIDATED" },
-              "runtimeManifestCanonicalSha256": { "const": "UNVALIDATED" },
-              "shaderManifestSha256": { "const": "UNVALIDATED" },
-              "observedAtUtc": { "const": null }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": [
-                  "runtime-pinned-unvalidated",
-                  "capture-complete",
-                  "release-approved"
-                ]
-              }
-            }
-          },
-          "then": {
-            "required": ["runtimeManifestCanonicalSha256"],
-            "properties": {
-              "platform": { "enum": ["steam", "gog"] },
-              "exeSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
-              "f4seLoaderSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
-              "f4seRuntimeDllSha256": { "pattern": "^[0-9a-fA-F]{64}$" },
-              "addressLibrarySha256": { "pattern": "^[0-9a-fA-F]{64}$" },
-              "runtimeManifestCanonicalSha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              },
-              "observedAtUtc": { "type": "string", "format": "date-time" }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": ["capture-complete", "release-approved"]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "shaderManifestSha256": {
-                "pattern": "^[0-9a-fA-F]{64}$"
-              }
-            }
-          }
-        }
-      ]
+      "additionalProperties": false
     }
   },
   "properties": {

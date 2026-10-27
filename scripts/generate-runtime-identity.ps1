@@ -102,7 +102,6 @@ if (-not $OutputPath) {
 $manifestVersion = [string]$manifest.runtime.version
 if ($manifestVersion -ne "$Runtime.0" -or
     $manifest.runtime.f4seVersion -ne $entry.f4seVersion -or
-    $manifest.runtime.status -ne $entry.status -or
     $manifest.runtime.platform -ne $entry.platform -or
     $manifest.runtime.exeSha256 -ne $entry.exeSha256 -or
     $manifest.runtime.addressLibraryFile -ne
@@ -116,11 +115,6 @@ if ($entry.f4seVersion -ne $definition.F4SEVersion -or
     $entry.platform -notin (
         $definition.AllowedPlatforms |
         ForEach-Object { $_.ToLowerInvariant() }
-    ) -or
-    $entry.status -notin @(
-        "runtime-pinned-unvalidated",
-        "capture-complete",
-        "release-approved"
     )) {
     throw "Runtime lock differs from the project runtime definition."
 }
@@ -476,7 +470,6 @@ $lines = @(
     "inline constexpr std::string_view kRuntimeVersion = `"$manifestVersion`";",
     "inline constexpr std::uint32_t kRuntimePackedVersion = $(ConvertTo-Fo4HdrPackedPluginVersion $Runtime)u;",
     "inline constexpr std::uint32_t kF4sePackedVersion = $(ConvertTo-Fo4HdrPackedPluginVersion $entry.f4seVersion)u;",
-    "inline constexpr std::string_view kRuntimeStatus = `"$($entry.status)`";",
     "inline constexpr std::string_view kExecutableSha256 = `"$($entry.exeSha256)`";",
     "inline constexpr std::string_view kF4seVersion = `"$($entry.f4seVersion)`";",
     "inline constexpr std::string_view kF4seLoaderSha256 = `"$($entry.f4seLoaderSha256)`";",
@@ -504,7 +497,6 @@ $lines = @(
     '        kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,',
     '        kAddressLibrarySha256},',
     '    .manifestSha256 = kManifestSha256,',
-    '    .status = kRuntimeStatus,',
     '    .f4seRuntimeFile = kF4seRuntimeFile,',
     '    .commonLibCommit = kCommonLibCommit,',
     '    .runtimeVersion = kRuntimePackedVersion,',

@@ -29,10 +29,6 @@ $manifestPath =
 $manifest =
     Get-Content $manifestPath -Raw | ConvertFrom-Json
 
-Assert-Fo4HdrRuntimeActionAllowed `
-    -Status ([string]$entry.status) `
-    -Action "runtime-identity-validation"
-
 $paths = @{
     exe = Join-Path $env:FO4_ROOT "Fallout4.exe"
     loader = Join-Path $env:FO4_ROOT "f4se_loader.exe"
@@ -78,11 +74,9 @@ Assert-Fo4HdrExactRuntimeFileVersion `
     -Runtime $Runtime `
     -FileVersion $fileVersion
 
-if ($Runtime -in @("1.10.163", "1.10.984", "1.11.240")) {
-    & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
-        -Runtime $Runtime `
-        -Check
-}
+& (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
+    -Runtime $Runtime `
+    -Check
 
 Require-Hash $paths.exe $entry.exeSha256 "Fallout4.exe"
 Require-Hash $paths.loader $entry.f4seLoaderSha256 "f4se_loader.exe"
@@ -104,10 +98,7 @@ $addressLibrary = Assert-Fo4HdrAddressLibraryV0 `
     -ExecutablePath $paths.exe `
     -RequiredRelocations $requiredRelocations
 
-Write-Host (
-    "Runtime identity validation passed for $Runtime " +
-    "with status '$($entry.status)'."
-)
+Write-Host "Runtime identity validation passed for $Runtime."
 Write-Host "Game root:       $($paths.exe | Split-Path -Parent)"
 Write-Host "Address Library: $($paths.address)"
 Write-Host (

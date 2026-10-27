@@ -4,8 +4,6 @@ param(
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
 
-    [switch]$AllowUnvalidatedRuntime,
-
     [switch]$DisablePch,
 
     [switch]$DisableFrameTrace
@@ -16,7 +14,6 @@ $ErrorActionPreference = "Stop"
 
 & (Join-Path $PSScriptRoot "configure.ps1") `
     -Mode $Mode `
-    -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
     -DisablePch:$DisablePch `
     -DisableFrameTrace:$DisableFrameTrace
 
@@ -26,20 +23,6 @@ try {
     xmake build -v
     if ($LASTEXITCODE -ne 0) {
         throw "Build failed."
-    }
-
-    foreach ($relative in @(
-        "universal/Data/F4SE/Plugins/FO4Isotope/Default.ini",
-        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.10.163.json",
-        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.10.984.json",
-        "universal/Data/F4SE/Plugins/FO4Isotope/runtime-1.11.240.json"
-    )) {
-        $retiredFile = Resolve-Fo4HdrChildPath `
-            -Parent (Join-Path $repoRoot "dist") `
-            -RelativePath $relative
-        if (Test-Path -LiteralPath $retiredFile -PathType Leaf) {
-            Remove-Item -LiteralPath $retiredFile -Force
-        }
     }
 
     xmake install -v FO4Isotope

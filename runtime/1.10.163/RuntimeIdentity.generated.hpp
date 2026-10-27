@@ -122,7 +122,6 @@ inline constexpr ImageSpaceRuntimeProfile kImageSpaceProfile{
 inline constexpr std::string_view kRuntimeVersion = "1.10.163.0";
 inline constexpr std::uint32_t kRuntimePackedVersion = 17435184u;
 inline constexpr std::uint32_t kF4sePackedVersion = 393584u;
-inline constexpr std::string_view kRuntimeStatus = "runtime-pinned-unvalidated";
 inline constexpr std::string_view kExecutableSha256 = "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36";
 inline constexpr std::string_view kF4seVersion = "0.6.23";
 inline constexpr std::string_view kF4seLoaderSha256 = "f41d4065a1da80d4490be0baeee91985d2b10b3746ec708b91dc82a64ec1e2a6";
@@ -130,7 +129,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "caaecff6e14b8b0c037c5d89ec3af288b3c3ee12ed2ac2e5a576796fe518b560";
+inline constexpr std::string_view kManifestSha256 = "66b3b59b1a58223d62223c5d48caacec5d7b2d0bea0ac20080668aa7e9ad3701";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
@@ -176,7 +175,6 @@ inline constexpr RuntimeProfile kProfile{
         kF4seLoaderSha256, kF4seRuntimeSha256, kAddressLibraryFile,
         kAddressLibrarySha256},
     .manifestSha256 = kManifestSha256,
-    .status = kRuntimeStatus,
     .f4seRuntimeFile = kF4seRuntimeFile,
     .commonLibCommit = kCommonLibCommit,
     .runtimeVersion = kRuntimePackedVersion,

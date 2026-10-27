@@ -75,38 +75,24 @@ if (-not (Test-Fo4HdrRuntimeIdentityChanged -LockedEntry $locked -Observation $o
 }
 
 $manifest = [pscustomobject]@{
-    manualValidation = [pscustomobject]@{ complete = $false; report = $null }
     semanticStages = @()
     shaders = @()
     resourceRules = @()
 }
 if (Test-Fo4HdrIdentityBoundEvidencePresent -LockedEntry $locked -Manifest $manifest) {
-    throw "Empty planned-runtime evidence was reported as retained evidence."
+    throw "Empty runtime evidence was reported as retained evidence."
 }
 $manifest | Add-Member -NotePropertyName commonlibObservation -NotePropertyValue (
     [pscustomobject]@{ status = "runtime-validated" })
 if (-not (Test-Fo4HdrIdentityBoundEvidencePresent -LockedEntry $locked -Manifest $manifest)) {
     throw "CommonLib runtime evidence was not recognized as identity-bound."
 }
-$manifest.commonlibObservation = $null
-$evidenceDirectory = Join-Path `
+$tempRoot = Join-Path `
     ([IO.Path]::GetTempPath()) `
     ("fo4hdr-runtime-pinning-" + [Guid]::NewGuid().ToString('N'))
 try {
-    New-Item -ItemType Directory -Path $evidenceDirectory | Out-Null
-    Set-Content `
-        -LiteralPath (Join-Path $evidenceDirectory 'accepted.json') `
-        -Value '{}' `
-        -Encoding utf8NoBOM
-    if (-not (Test-Fo4HdrIdentityBoundEvidencePresent `
-            -LockedEntry $locked `
-            -Manifest $manifest `
-            -EvidenceDirectory $evidenceDirectory)) {
-        throw "Post-build runtime evidence was not recognized as identity-bound."
-    }
-
-    $fixture = Join-Path $evidenceDirectory "manifest-fixture"
-    New-Item -ItemType Directory -Path $fixture | Out-Null
+    $fixture = Join-Path $tempRoot "manifest-fixture"
+    New-Item -ItemType Directory -Path $fixture -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot "schemas") `
         -Destination $fixture -Recurse
     Copy-Item -LiteralPath (Join-Path $repoRoot "versions.lock.json") `
@@ -238,26 +224,39 @@ try {
     )
     Assert-Rejected {
         & $validator -RepoRoot $fixture
-    } "active runtime with a placeholder identity"
+    } "runtime with a placeholder identity"
     Copy-Item -LiteralPath (Join-Path $repoRoot "versions.lock.json") `
         -Destination $fixtureLock -Force
 
-    $plannedManifestPath = Join-Path $fixture "runtime\1.10.984\manifest.json"
-    $plannedManifest = Get-Content -LiteralPath $plannedManifestPath -Raw |
+    $mismatchedManifestPath = Join-Path $fixture "runtime\1.10.984\manifest.json"
+    $mismatchedManifest = Get-Content -LiteralPath $mismatchedManifestPath -Raw |
         ConvertFrom-Json
-    $plannedManifest.runtime.f4seVersion = "0.7.3"
+    $mismatchedManifest.runtime.f4seVersion = "0.7.3"
     Write-Fo4HdrJsonFile `
-        -Value $plannedManifest `
-        -Path $plannedManifestPath `
+        -Value $mismatchedManifest `
+        -Path $mismatchedManifestPath `
         -SchemaPath (Join-Path $fixture "schemas\runtime-manifest.schema.json")
     Assert-Rejected {
         & $validator -RepoRoot $fixture
     } "runtime manifest that differs from the lock"
 }
 finally {
-    if (Test-Path -LiteralPath $evidenceDirectory) {
-        Remove-Item -LiteralPath $evidenceDirectory -Recurse -Force
+    if (Test-Path -LiteralPath $tempRoot) {
+        Remove-Item -LiteralPath $tempRoot -Recurse -Force
     }
 }
+
+$savedRuntime = $env:FO4HDR_RUNTIME
+try {
+    # Parameter defaults bypass ValidateSet, so an unknown environment runtime reaches the script guard.
+    $env:FO4HDR_RUNTIME = '0.0.0'
+    $message = ''
+    try {
+        & (Join-Path $repoRoot 'scripts/test.ps1') -Mode debug -SkipConfigure -Scope compiled
+    } catch { $message = $_.Exception.Message }
+    if ($message -notlike 'Specify -Runtime or set FO4HDR_RUNTIME*') {
+        throw "Compiled tests did not reject an unknown runtime before execution: $message"
+    }
+} finally { $env:FO4HDR_RUNTIME = $savedRuntime }
 
 Write-Host "Runtime pinning policy regression tests passed."

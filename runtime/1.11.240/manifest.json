@@ -5,10 +5,9 @@
     "f4seVersion": "0.7.9",
     "platform": "steam",
     "exeSha256": "fdcef37ac1230af6d0b0050eb2142b139ef3a867b37b9211fb6edfcc646072f8",
-    "addressLibraryFile": "version-1-11-240-0.bin",
-    "status": "runtime-pinned-unvalidated"
+    "addressLibraryFile": "version-1-11-240-0.bin"
   },
-  "shaderSetId": "fo4-1.11.240-development",
+  "shaderSetId": "fo4-1.11.240",
   "semanticStages": [],
   "shaders": [
     {
@@ -46,11 +45,6 @@
     }
   ],
   "resourceRules": [],
-  "manualValidation": {
-    "scope": "milestone-1-runtime-load",
-    "complete": false,
-    "report": null
-  },
   "nativeLutObserver": {
     "status": "unvalidated",
     "scope": "synchronous-gamma-correct-lut-render",

@@ -99,22 +99,18 @@ if ((Test-Fo4HdrRuntimeIdentityChanged `
         -Observation $observation) -and
     (Test-Fo4HdrIdentityBoundEvidencePresent `
         -LockedEntry $entry `
-        -Manifest $manifest `
-        -EvidenceDirectory (Join-Path `
-            $repoRoot `
-            "runtime\$Runtime\validation"))) {
+        -Manifest $manifest)) {
     throw (
         "The reviewed binary identity differs from an identity with " +
-        "retained validation evidence. Use an explicitly scoped evidence-" +
-        "reset/promotion procedure; pin-runtime.ps1 will not rebind stale " +
-        "manual, CommonLib, shader, semantic, or resource evidence."
+        "retained validation evidence. Reset that evidence explicitly " +
+        "before re-pinning; pin-runtime.ps1 will not rebind stale " +
+        "CommonLib, shader, semantic, or resource evidence."
     )
 }
 
 Write-Host "Approving reviewed runtime observation:"
 $observation | ConvertTo-Json -Depth 16 | Write-Host
 
-$entry.status = "runtime-pinned-unvalidated"
 $entry.platform = $observation.platform
 $entry.f4seVersion = $observation.f4seRuntime.version
 $entry.exeSha256 = $observation.fallout4Exe.sha256
@@ -133,8 +129,6 @@ $manifest.runtime.exeSha256 =
     $observation.fallout4Exe.sha256
 $manifest.runtime.addressLibraryFile =
     $observation.addressLibrary.file
-$manifest.runtime.status =
-    "runtime-pinned-unvalidated"
 
 Write-Fo4HdrJsonFile `
     -Value $manifest `
@@ -153,15 +147,13 @@ Write-Fo4HdrJsonFile `
     -Path $lockPath `
     -SchemaPath (Join-Path $repoRoot "schemas\versions-lock.schema.json")
 
-if ($Runtime -in @("1.10.163", "1.10.984", "1.11.240")) {
-    & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
-        -Runtime $Runtime
-}
+& (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
+    -Runtime $Runtime
 
 & (Join-Path $PSScriptRoot "validate-manifests.ps1")
 
-Write-Host "Pinned Fallout 4 $Runtime ($Platform) for scoped validation."
+Write-Host "Pinned Fallout 4 $Runtime ($Platform)."
 Write-Host (
     "This records only the reviewed executable/runtime identity. " +
-    "Shader, target, and manual HDR validation remain incomplete."
+    "Re-run validate-runtime.ps1 and the affected tests."
 )

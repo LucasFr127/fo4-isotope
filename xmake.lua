@@ -25,8 +25,8 @@ end
 
 -- CommonLib is included before defining FO4Isotope targets so its shared
 -- targets and rules are available. The custom plugin rule below deliberately
--- uses the lower-level commonlib.plugin rule because FO4Isotope supplies a
--- runtime-specific PluginVersion.cpp.
+-- uses the lower-level commonlib.plugin rule because FO4Isotope supplies its
+-- own PluginVersion.cpp.
 includes("lib/commonlibf4")
 
 add_requires("imgui v1.92.6-docking", {
@@ -49,12 +49,6 @@ add_defines("NOMINMAX")
 
 add_rules("mode.debug", "mode.releasedbg")
 add_rules("plugin.vsxmake.autoupdate")
-
-option("fo4hdr_allow_unvalidated_runtime")
-    set_default(false)
-    set_showmenu(true)
-    set_description("Allow developer builds for planned runtime ports")
-option_end()
 
 option("fo4hdr_build_tests")
     set_default(true)

@@ -40,7 +40,6 @@ struct RuntimeProfile
     std::string_view key;
     RuntimeIdentity identity;
     std::string_view manifestSha256;
-    std::string_view status;
     std::string_view f4seRuntimeFile;
     std::string_view commonLibCommit;
     // Pinned build whose evidence produced the profile's facts.

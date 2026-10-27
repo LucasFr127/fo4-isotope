@@ -4,8 +4,6 @@ param(
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
 
-    [switch]$AllowUnvalidatedRuntime,
-
     [switch]$DisablePch,
 
     [switch]$DisableFrameTrace
@@ -24,23 +22,8 @@ foreach ($profileRuntime in @("1.10.163", "1.10.984", "1.11.240")) {
     & (Join-Path $PSScriptRoot "generate-runtime-identity.ps1") `
         -Runtime $profileRuntime `
         -Check
-
-    $manifestPath =
-        Join-Path $repoRoot "runtime\$profileRuntime\manifest.json"
-    $manifest =
-        Get-Content $manifestPath -Raw | ConvertFrom-Json
-    $status = [string]$manifest.runtime.status
-    $lockedStatus = [string]$lock.runtimes.$profileRuntime.status
-    if ($status -ne $lockedStatus) {
-        throw "Runtime $profileRuntime manifest and versions.lock.json disagree on status."
-    }
-    Assert-Fo4HdrRuntimeActionAllowed `
-        -Status $lockedStatus `
-        -Action "developer-build" `
-        -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime
 }
 
-$allowFlag = if ($AllowUnvalidatedRuntime) { "y" } else { "n" }
 $pchFlag = if ($DisablePch) { "n" } else { "y" }
 $traceFlag = if ($DisableFrameTrace) { "n" } else { "y" }
 $toolset = Get-Fo4HdrMsvcToolset -Lock $lock
@@ -56,7 +39,6 @@ try {
         --vs_toolset=$toolset `
         --vs_sdkver=$sdk `
         -m $Mode `
-        --fo4hdr_allow_unvalidated_runtime=$allowFlag `
         --fo4hdr_use_pch=$pchFlag `
         --fo4hdr_frame_trace=$traceFlag `
         --fo4hdr_build_tests=y `

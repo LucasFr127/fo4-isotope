@@ -13,7 +13,7 @@ $stage = Join-Path $project 'dist/universal/Data'
 $deploy = Join-Path $project 'scripts/deploy.ps1'
 function Get-DeploymentEnvironment {
     $saved = @{}
-    foreach ($name in @('FO4_ROOT', 'FO4_MOD_ROOT', 'FO4HDR_STAGE_ROOT')) {
+    foreach ($name in @('FO4_ROOT', 'FO4_MOD_ROOT')) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
     }
     return $saved
@@ -38,23 +38,18 @@ function Test-DeploymentRejections {
     }
     $extraFile = Join-Path $stage 'unexpected.txt'
     [IO.File]::WriteAllText($extraFile, 'extra')
-    Assert-DeployRejected 'Staged runtime file set is not exact.'
+    Assert-DeployRejected 'Staged plugin file set is not exact.'
     Remove-Item -LiteralPath $extraFile
+    New-Item -ItemType Directory -Path (Join-Path $stage 'F4SE/Plugins/FO4Isotope') -Force | Out-Null
     foreach ($name in @('Default.ini', 'Personal.ini', 'Weather.ini')) {
         $sidecarStage = Join-Path $stage "F4SE/Plugins/FO4Isotope/$name"
         [IO.File]::WriteAllText($sidecarStage, 'must not ship')
-        Assert-DeployRejected 'Staged runtime file set is not exact.'
-        Remove-Item -LiteralPath $sidecarStage
-    }
-    foreach ($runtime in @('1.10.163', '1.10.984', '1.11.240')) {
-        $sidecarStage = Join-Path $stage "F4SE/Plugins/FO4Isotope/runtime-$runtime.json"
-        [IO.File]::WriteAllText($sidecarStage, 'must not ship')
-        Assert-DeployRejected 'Staged runtime file set is not exact.'
+        Assert-DeployRejected 'Staged plugin file set is not exact.'
         Remove-Item -LiteralPath $sidecarStage
     }
     $requiredFile = Join-Path $stage $relativeFiles[0]
     Remove-Item -LiteralPath $requiredFile
-    Assert-DeployRejected 'Staged runtime file set is not exact.'
+    Assert-DeployRejected 'Staged plugin file set is not exact.'
     [IO.File]::WriteAllText($requiredFile, "fixture: $($relativeFiles[0])")
     $rejection = Join-Path $project 'reject-metadata'
     [IO.File]::WriteAllText($rejection, 'reject')
@@ -123,33 +118,6 @@ function Assert-DeployedFiles {
     if (Compare-Object $relativeFiles $recordedFiles) { throw 'Owned-file manifest differs from deployment.' }
 }
 
-function Test-BuildStageRetirement {
-    $default = Join-Path $stage 'F4SE/Plugins/FO4Isotope/Default.ini'
-    $manifests = @('1.10.163', '1.10.984', '1.11.240') | ForEach-Object {
-        Join-Path $stage "F4SE/Plugins/FO4Isotope/runtime-$_.json"
-    }
-    $userDefault = Join-Path $fixture 'user/Default.ini'
-    New-Item -ItemType Directory -Path (Split-Path $default) -Force | Out-Null
-    New-Item -ItemType Directory -Path (Split-Path $userDefault) -Force | Out-Null
-    [IO.File]::WriteAllText($default, 'retired generated default')
-    foreach ($manifest in $manifests) {
-        [IO.File]::WriteAllText($manifest, 'retired generated manifest')
-    }
-    [IO.File]::WriteAllText($userDefault, 'keep user data')
-    function xmake {
-        if ($args[0] -eq 'install' -and
-            (Test-Path -LiteralPath (@($default) + $manifests)) -contains $true) {
-            throw 'Incremental staging retained a retired file.'
-        }
-        $global:LASTEXITCODE = 0
-    }
-    & (Join-Path $project 'scripts/build.ps1') -Mode debug
-    if ((Test-Path -LiteralPath (@($default) + $manifests)) -contains $true -or
-        [IO.File]::ReadAllText($userDefault) -cne 'keep user data') {
-        throw 'Build cleanup must affect only the retired generated stage files.'
-    }
-}
-
 function Remove-DeploymentFixture {
     param([hashtable]$SavedEnvironment, [string]$Fixture, [string]$TempBase)
     foreach ($entry in $savedEnvironment.GetEnumerator()) {
@@ -165,7 +133,7 @@ function Remove-DeploymentFixture {
 
 function Copy-DeploymentScripts {
     New-Item -ItemType Directory -Path (Join-Path $project 'scripts/internal'), $game -Force | Out-Null
-    foreach ($script in @('build.ps1', 'deploy.ps1', 'internal/Project.Common.ps1', 'internal/Project.Process.ps1',
+    foreach ($script in @('deploy.ps1', 'internal/Project.Common.ps1', 'internal/Project.Process.ps1',
         'internal/Project.Toolchain.ps1', 'internal/Project.Runtime.ps1', 'internal/Project.Runtime.Binary.ps1',
         'internal/Project.Runtime.Profiles.ps1', 'internal/Project.Files.ps1',
         'internal/Project.Source.ps1')) {
@@ -189,13 +157,6 @@ if (Test-Path (Join-Path `$PSScriptRoot '../reject-metadata')) { throw 'Fixture 
 "@)
 }
 
-function Write-BuildConfigurationStub {
-    [IO.File]::WriteAllText((Join-Path $project 'scripts/configure.ps1'), @'
-param([string]$Mode)
-if ($Mode -cne 'debug') { throw 'Unexpected fixture build configuration.' }
-'@)
-}
-
 function Initialize-DeploymentStage {
     foreach ($relative in $relativeFiles) {
         $file = Join-Path $stage $relative
@@ -214,13 +175,10 @@ try {
     Copy-DeploymentScripts
     Write-RuntimeValidationStub
     Write-MetadataValidationStub
-    Write-BuildConfigurationStub
     Initialize-DeploymentStage
     $env:FO4_ROOT = $game
     $env:FO4_MOD_ROOT = $destination
-    $env:FO4HDR_STAGE_ROOT = Join-Path $fixture 'unused-stage'
 
-    Test-BuildStageRetirement
     Test-DeploymentRejections
     Test-DeploymentOwnedFiles
 }

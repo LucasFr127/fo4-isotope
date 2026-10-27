@@ -81,7 +81,6 @@ function Assert-RuntimeMirrors {
     param([string]$Runtime, $Manifest, $Entry, $Definition)
     $mirrors = [ordered]@{
         version = @([string]$manifest.runtime.version, "$runtime.0")
-        status = @([string]$manifest.runtime.status, [string]$entry.status)
         platform = @([string]$manifest.runtime.platform, [string]$entry.platform)
         f4seVersion = @(
             [string]$manifest.runtime.f4seVersion,
@@ -105,29 +104,15 @@ function Assert-RuntimeMirrors {
 
 function Assert-LockedRuntimeIdentity {
     param([string]$Runtime, [string]$ManifestPath, $Entry, $Definition)
-    if ($entry.status -in @(
-            "runtime-pinned-unvalidated",
-            "capture-complete",
-            "release-approved"
+    if ($entry.platform -notin @(
+            $definition.AllowedPlatforms |
+                ForEach-Object { $_.ToLowerInvariant() }
         )) {
-        if ($entry.platform -notin @(
-                $definition.AllowedPlatforms |
-                    ForEach-Object { $_.ToLowerInvariant() }
-            )) {
-            throw "Runtime $runtime has an unapproved platform '$($entry.platform)'."
-        }
-        if ((Get-Fo4HdrCanonicalTextSha256 $manifestPath) -cne
-            [string]$entry.runtimeManifestCanonicalSha256) {
-            throw "Runtime $runtime manifest canonical identity differs from the lock."
-        }
+        throw "Runtime $runtime has an unapproved platform '$($entry.platform)'."
     }
-}
-
-function Assert-NativeLutRuntime {
-    param([string]$Runtime, $Manifest)
-    $lutProperty = $manifest.PSObject.Properties['nativeLutObserver']
-    if ($null -ne $lutProperty -and $runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-        throw 'The native LUT observer has no qualified profile for this runtime.'
+    if ((Get-Fo4HdrCanonicalTextSha256 $manifestPath) -cne
+        [string]$entry.runtimeManifestCanonicalSha256) {
+        throw "Runtime $runtime manifest canonical identity differs from the lock."
     }
 }
 
@@ -142,12 +127,9 @@ function Test-ObserverCallRelationship {
 }
 
 function Assert-ImageSpaceRuntime {
-    param([string]$Runtime, $Manifest)
+    param($Manifest)
     $imageSpaceProperty = $manifest.PSObject.Properties['imageSpaceObserver']
     if ($null -eq $imageSpaceProperty) { return }
-    if ($runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-        throw 'The ImageSpace provenance observer has no qualified profile for this runtime.'
-    }
     $imageSpace = $imageSpaceProperty.Value
     $seenCalls = @{}
     foreach ($call in $imageSpace.calls) {
@@ -174,22 +156,16 @@ function Assert-NativeUiCallSequence {
 }
 
 function Assert-NativeUiResourcesRuntime {
-    param([string]$Runtime, $Manifest)
+    param($Manifest)
     $profileProperty = $Manifest.PSObject.Properties['nativeUiResources']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-        throw 'Native pause resource allocation has no qualified profile for this runtime.'
-    }
     Assert-NativeUiCallSequence $profileProperty.Value
 }
 
 function Assert-ScreenUiRuntime {
-    param([string]$Runtime, $Manifest)
+    param($Manifest)
     $profileProperty = $Manifest.PSObject.Properties['experimentalScreenUiObserver']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-        throw 'The screen-space UI entry has no qualified profile for this runtime.'
-    }
     $profile = $profileProperty.Value
     $target = [Convert]::ToInt64($profile.target.rva.Substring(2), 16)
     $seenCalls = @{}
@@ -208,12 +184,9 @@ function Test-SceneCompositeCall {
 }
 
 function Assert-SceneCompositeRuntime {
-    param([string]$Runtime, $Manifest)
+    param($Manifest)
     $profileProperty = $Manifest.PSObject.Properties['sceneCompositeObserver']
     if ($null -eq $profileProperty) { return }
-    if ($Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-        throw 'The deferred scene composite pass has no qualified profile for this runtime.'
-    }
     if (-not (Test-SceneCompositeCall $profileProperty.Value.call)) {
         throw 'Deferred scene composite CALL offset or fingerprint is invalid.'
     }
@@ -223,8 +196,8 @@ function Assert-ArmorUiContract {
     param([string]$Runtime, $Armor)
     $validStatus = $armor.status -eq 'unvalidated' -and
         $armor.scope -eq 'power-armor-encoded-peak-composition'
-    if ($runtime -notin @('1.10.163', '1.10.984', '1.11.240') -or -not $validStatus) {
-        throw 'Armor observer runtime, status or scope is invalid.'
+    if (-not $validStatus) {
+        throw 'Armor observer status or scope is invalid.'
     }
     $expectedCalls = if ($runtime -eq '1.10.163') { 2 } else { 1 }
     if (@($armor.calls).Count -ne $expectedCalls) {
@@ -302,10 +275,9 @@ foreach ($runtime in @(
     $definition = Get-Fo4HdrRuntimeDefinition $runtime
     Assert-RuntimeMirrors $runtime $manifest $entry $definition
     Assert-LockedRuntimeIdentity $runtime $manifestPath $entry $definition
-    Assert-NativeLutRuntime $runtime $manifest
-    Assert-ImageSpaceRuntime $runtime $manifest
-    Assert-NativeUiResourcesRuntime $runtime $manifest
-    Assert-ScreenUiRuntime $runtime $manifest
-    Assert-SceneCompositeRuntime $runtime $manifest
+    Assert-ImageSpaceRuntime $manifest
+    Assert-NativeUiResourcesRuntime $manifest
+    Assert-ScreenUiRuntime $manifest
+    Assert-SceneCompositeRuntime $manifest
     Assert-ArmorUiRuntime $runtime $manifest
 }

@@ -13,78 +13,6 @@ function ConvertTo-Fo4HdrPackedPluginVersion {
         (($parts[2] -band 0xFFF) -shl 4)
 }
 
-function Test-Fo4HdrRuntimeActionAuthorization {
-    param([string]$Status, [string]$Action, [bool]$AllowUnvalidatedRuntime)
-    $allowed = switch ($Action) {
-        "developer-build" {
-            $Status -in @(
-                "runtime-pinned-unvalidated",
-                "capture-complete",
-                "release-approved"
-            ) -or ($AllowUnvalidatedRuntime -and $Status -eq "planned")
-            break
-        }
-        "runtime-identity-validation" {
-            $Status -in @(
-                "runtime-pinned-unvalidated",
-                "capture-complete",
-                "release-approved"
-            )
-            break
-        }
-        "release-packaging" {
-            $Status -eq "release-approved"
-            break
-        }
-    }
-
-    return $allowed
-}
-
-function Assert-Fo4HdrRuntimeActionAllowed {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Status,
-
-        [Parameter(Mandatory = $true)]
-        [ValidateSet(
-            "developer-build",
-            "runtime-identity-validation",
-            "release-packaging"
-        )]
-        [string]$Action,
-
-        [switch]$AllowUnvalidatedRuntime
-    )
-
-    $knownStatuses = @(
-        "primary-uninitialized",
-        "planned",
-        "runtime-pinned-unvalidated",
-        "capture-complete",
-        "release-approved"
-    )
-    if ($Status -notin $knownStatuses) {
-        throw "Unknown FO4Isotope runtime status '$Status'."
-    }
-
-    $allowed = Test-Fo4HdrRuntimeActionAuthorization $Status $Action $AllowUnvalidatedRuntime.IsPresent
-
-    if (-not $allowed) {
-        $overrideHint = if ($Action -eq "developer-build" -and
-            $Status -eq "planned") {
-            " Pass -AllowUnvalidatedRuntime only for explicitly scoped " +
-            "runtime-porting work."
-        } else {
-            ""
-        }
-        throw (
-            "Runtime status '$Status' does not authorize action '$Action'." +
-            $overrideHint
-        )
-    }
-}
-
 function Assert-Fo4HdrExactRuntimeFileVersion {
     param(
         [Parameter(Mandatory = $true)][string]$Runtime,
@@ -112,9 +40,6 @@ function Test-Fo4HdrRuntimeIdentityChanged {
         @($LockedEntry.addressLibrarySha256, $Observation.addressLibrary.sha256)
     )
     foreach ($pair in $pairs) {
-        if ([string]$pair[0] -in @("", "unvalidated", "UNVALIDATED")) {
-            continue
-        }
         if (-not [string]::Equals(
             [string]$pair[0],
             [string]$pair[1],
@@ -124,16 +49,6 @@ function Test-Fo4HdrRuntimeIdentityChanged {
         }
     }
     return $false
-}
-
-function Test-Fo4HdrEvidenceDirectory {
-    param([string]$EvidenceDirectory)
-    return $EvidenceDirectory -and
-        (Test-Path -LiteralPath $EvidenceDirectory -PathType Container) -and
-        @(Get-ChildItem `
-            -LiteralPath $EvidenceDirectory `
-            -Filter '*.json' `
-            -File).Count -ne 0
 }
 
 function Test-Fo4HdrCommonLibObservationEvidence {
@@ -154,12 +69,9 @@ function Test-Fo4HdrSemanticEvidence {
 function Test-Fo4HdrIdentityBoundEvidencePresent {
     param(
         [Parameter(Mandatory = $true)]$LockedEntry,
-        [Parameter(Mandatory = $true)]$Manifest,
-
-        [string]$EvidenceDirectory
+        [Parameter(Mandatory = $true)]$Manifest
     )
 
-    if (Test-Fo4HdrEvidenceDirectory $EvidenceDirectory) { return $true }
     if (Test-Fo4HdrCommonLibObservationEvidence $Manifest) { return $true }
     if (Test-Fo4HdrSemanticEvidence $Manifest) { return $true }
     return [string]$LockedEntry.shaderManifestSha256 -notin @(

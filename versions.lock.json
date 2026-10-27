@@ -84,7 +84,6 @@
   },
   "runtimes": {
     "1.10.163": {
-      "status": "runtime-pinned-unvalidated",
       "platform": "steam",
       "f4seVersion": "0.6.23",
       "exeSha256": "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36",
@@ -92,12 +91,11 @@
       "f4seRuntimeDllSha256": "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd",
       "addressLibraryFile": "version-1-10-163-0.bin",
       "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
-      "runtimeManifestCanonicalSha256": "caaecff6e14b8b0c037c5d89ec3af288b3c3ee12ed2ac2e5a576796fe518b560",
+      "runtimeManifestCanonicalSha256": "66b3b59b1a58223d62223c5d48caacec5d7b2d0bea0ac20080668aa7e9ad3701",
       "shaderManifestSha256": "FILL_AFTER_CAPTURE",
       "observedAtUtc": "2026-08-09T21:33:23.9297903Z"
     },
     "1.10.984": {
-      "status": "runtime-pinned-unvalidated",
       "platform": "steam",
       "f4seVersion": "0.7.2",
       "exeSha256": "bcb8f9fe660ef4c33712b873fdc24e5ecbd6a77e629d6419f803c2c09c63eaf2",
@@ -107,10 +105,9 @@
       "addressLibrarySha256": "c13545f2dab806b7d19c5aa83a0d7524337b5afc89af79460f9915020e049d75",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-10-15T22:48:01.8026044Z",
-      "runtimeManifestCanonicalSha256": "43f60d3fcb9568e676b404167ed3718ada0e9f505d7ab5fd7fcba8902e8d656c"
+      "runtimeManifestCanonicalSha256": "bcb9519a3fe4f408b6648406614bca3b8070ec66870e534f5fb09252c7181a1c"
     },
     "1.11.240": {
-      "status": "runtime-pinned-unvalidated",
       "platform": "steam",
       "f4seVersion": "0.7.9",
       "exeSha256": "fdcef37ac1230af6d0b0050eb2142b139ef3a867b37b9211fb6edfcc646072f8",
@@ -120,7 +117,7 @@
       "addressLibrarySha256": "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-10-15T16:13:06.5613276Z",
-      "runtimeManifestCanonicalSha256": "488f1cc48ec119d9074edccffe5826a335b8d616b77c884d9dd8c7f10e05abff"
+      "runtimeManifestCanonicalSha256": "2625006ca7fc4523b0301fa150febd61ff0e737697fd976e12439b301308cdbf"
     }
   },
   "aces2": {

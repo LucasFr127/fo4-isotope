@@ -8,8 +8,7 @@
     "shaderSetId",
     "semanticStages",
     "shaders",
-    "resourceRules",
-    "manualValidation"
+    "resourceRules"
   ],
   "definitions": {
     "observerAddress": {
@@ -22,12 +21,6 @@
     "approvedHash": {
       "type": "string",
       "pattern": "^[0-9a-fA-F]{64}$"
-    },
-    "hashOrPlaceholder": {
-      "anyOf": [
-        { "$ref": "#/definitions/approvedHash" },
-        { "enum": ["FILL_LOCAL", "UNVALIDATED"] }
-      ]
     }
   },
   "properties": {
@@ -409,8 +402,7 @@
         "f4seVersion",
         "platform",
         "exeSha256",
-        "addressLibraryFile",
-        "status"
+        "addressLibraryFile"
       ],
       "properties": {
         "version": {
@@ -421,53 +413,14 @@
           "type": "string",
           "pattern": "^0\\.[0-9]+\\.[0-9]+$"
         },
-        "platform": { "enum": ["steam", "gog", "unvalidated"] },
-        "exeSha256": { "$ref": "#/definitions/hashOrPlaceholder" },
+        "platform": { "enum": ["steam", "gog"] },
+        "exeSha256": { "$ref": "#/definitions/approvedHash" },
         "addressLibraryFile": {
           "type": "string",
           "pattern": "^version-[0-9-]+\\.bin$"
-        },
-        "status": {
-          "enum": [
-            "primary-uninitialized",
-            "planned",
-            "runtime-pinned-unvalidated",
-            "capture-complete",
-            "release-approved"
-          ]
         }
       },
-      "additionalProperties": false,
-      "allOf": [
-        {
-          "if": { "properties": { "status": { "const": "planned" } } },
-          "then": {
-            "properties": {
-              "platform": { "const": "unvalidated" },
-              "exeSha256": { "const": "UNVALIDATED" }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "status": {
-                "enum": [
-                  "runtime-pinned-unvalidated",
-                  "capture-complete",
-                  "release-approved"
-                ]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "platform": { "enum": ["steam", "gog"] },
-              "exeSha256": { "$ref": "#/definitions/approvedHash" }
-            }
-          }
-        }
-      ]
+      "additionalProperties": false
     },
     "shaderSetId": { "type": "string", "minLength": 1 },
     "semanticStages": { "type": "array", "items": { "type": "object" } },
@@ -744,17 +697,6 @@
           },
           "additionalProperties": false
         }
-      },
-      "additionalProperties": false
-    },
-    "manualValidation": {
-      "type": "object",
-      "description": "Deprecated schema-v1 validation placeholder.",
-      "required": ["scope", "complete", "report"],
-      "properties": {
-        "scope": { "const": "milestone-1-runtime-load" },
-        "complete": { "const": false },
-        "report": { "type": "null" }
       },
       "additionalProperties": false
     }

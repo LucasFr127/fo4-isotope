@@ -5,8 +5,7 @@
     "f4seVersion": "0.6.23",
     "platform": "steam",
     "exeSha256": "55f57947db9e05575122fae1088f0b0247442f11e566b56036caa0ac93329c36",
-    "addressLibraryFile": "version-1-10-163-0.bin",
-    "status": "runtime-pinned-unvalidated"
+    "addressLibraryFile": "version-1-10-163-0.bin"
   },
   "experimentalScreenUiObserver": {
     "status": "unvalidated",
@@ -496,7 +495,7 @@
       }
     ]
   },
-  "shaderSetId": "fo4-1.10.163-uninitialized",
+  "shaderSetId": "fo4-1.10.163",
   "semanticStages": [],
   "shaders": [
     {
@@ -661,10 +660,5 @@
         "commonlibSymbol": "RE::ID::BSBatchRenderer::RenderPassImmediately"
       }
     ]
-  },
-  "manualValidation": {
-    "scope": "milestone-1-runtime-load",
-    "complete": false,
-    "report": null
   }
 }

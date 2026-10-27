@@ -7,8 +7,6 @@ param(
     [ValidateSet("debug", "releasedbg")]
     [string]$Mode = "debug",
 
-    [switch]$AllowUnvalidatedRuntime,
-
     [switch]$DisableFrameTrace,
 
     [ValidateSet("all", "compiled", "repository")]
@@ -35,7 +33,7 @@ $repoRoot = Get-Fo4HdrRepoRoot
 $runCompiled = $Scope -in @("all", "compiled")
 $runRepository = $Scope -in @("all", "repository")
 if ($runCompiled -and $Runtime -notin @('1.10.163', '1.10.984', '1.11.240')) {
-    throw 'Specify -Runtime or set FO4HDR_RUNTIME to an enabled runtime for compiled tests.'
+    throw 'Specify -Runtime or set FO4HDR_RUNTIME to a pinned runtime for compiled tests.'
 }
 if (($Suite -ne "all" -or $Filter -or $List) -and $Scope -ne "compiled") {
     throw "-Suite, -Filter and -List require -Scope compiled."
@@ -62,11 +60,6 @@ if ($runCompiled) {
             vs_toolset = '"' + (Get-Fo4HdrMsvcToolset -Lock $lock) + '"'
             vs_sdkver = '"' + $lock.toolchain.observed.windowsSdk.version + '"'
             mode = '"' + $Mode + '"'
-            fo4hdr_allow_unvalidated_runtime = if ($AllowUnvalidatedRuntime) {
-                'true'
-            } else {
-                'false'
-            }
             fo4hdr_build_tests = 'true'
             fo4hdr_frame_trace = if ($DisableFrameTrace) { 'false' } else { 'true' }
             commonlib_ini = 'false'
@@ -90,7 +83,6 @@ if ($runCompiled) {
     } else {
         & (Join-Path $PSScriptRoot "configure.ps1") `
             -Mode $Mode `
-            -AllowUnvalidatedRuntime:$AllowUnvalidatedRuntime `
             -DisableFrameTrace:$DisableFrameTrace
     }
 } elseif ($SkipConfigure) {
@@ -137,7 +129,6 @@ try {
             "tests\runtime\AddressLibraryV0.Tests.ps1",
             "tests\license\CanonicalLicense.Tests.ps1",
             "tests\source\SourceText.Tests.ps1",
-            "tests\runtime\RuntimeStatusPolicy.Tests.ps1",
             "tests\runtime\RuntimePinning.Tests.ps1",
             "tests\source\StagePolicy.Tests.ps1",
             "tests\runtime\ImageSpaceProfile.Tests.ps1",

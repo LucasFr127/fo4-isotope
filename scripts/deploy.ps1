@@ -20,7 +20,7 @@ $source = Join-Path $stageRoot "universal\Data"
 $destination = $env:FO4_MOD_ROOT
 
 if (-not (Test-Path $source)) {
-    throw "Staged runtime is absent: $source"
+    throw "Staged plugin is absent: $source"
 }
 
 & (Join-Path $PSScriptRoot "verify-plugin-metadata.ps1") `
@@ -46,7 +46,7 @@ $missing = @($expectedRelativeFiles | Where-Object {
 })
 if ($unexpected.Count -ne 0 -or $missing.Count -ne 0) {
     throw (
-        "Staged runtime file set is not exact. Missing: " +
+        "Staged plugin file set is not exact. Missing: " +
         ($missing -join ", ") + "; unexpected: " +
         ($unexpected -join ", ")
     )
