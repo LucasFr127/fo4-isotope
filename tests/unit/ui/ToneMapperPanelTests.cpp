@@ -123,6 +123,36 @@ void RenderSdrSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
     FO4HDR_CHECK(settings == before);
 }
 
+// Vertices one AgX panel draws. A zero peak leaves HDR ranges unavailable, as in SDR.
+int AgxPanelVertices(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
+{
+    HdrSettings settings{};
+    settings.productionAlgorithm = ProductionToneMapperAlgorithm::agX;
+    settings.displayPeakNits = 0.0;
+    settings.toneMapperParameters.agxMiddleGrayEv = middleGrayEv;
+    int vertices{};
+    ImGui::NewFrame();
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+    if (ImGui::Begin("SDR AgX smoke", nullptr, ImGuiWindowFlags_NoSavedSettings))
+    {
+        const auto before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        FO4HDR_CHECK(!DrawToneMapperPanel(settings, sdrProfile));
+        vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size - before;
+    }
+    ImGui::End();
+    ImGui::Render();
+    return vertices;
+}
+
+// SDR hides Highlight Shoulder, and HDR Color Response at neutral Middle Gray.
+void CheckSdrAgxControls(ImVec2 windowSize)
+{
+    const auto hdr = AgxPanelVertices(-0.25, false, windowSize);
+    const auto sdr = AgxPanelVertices(-0.25, true, windowSize);
+    const auto sdrNeutral = AgxPanelVertices(0.0, true, windowSize);
+    FO4HDR_CHECK(sdrNeutral < sdr && sdr < hdr);
+}
+
 void TestToneMapperRecommendationFloatEndpoints()
 {
     for (const auto range : {ToneMapperRecommendedRange{true, 0.25, 0.8, 1000.0},
@@ -262,6 +292,7 @@ void TestToneMapperPanelSmoke()
         FO4HDR_CHECK(settings.toneMapperParameters == before);
         RenderEffectsSettingsFrames(settings, windowSize);
         RenderSdrSettingsFrames(settings, windowSize);
+        if (algorithm == ProductionToneMapperAlgorithm::agX) CheckSdrAgxControls(windowSize);
         ImGui::DestroyContext();
     };
 

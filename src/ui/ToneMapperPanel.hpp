@@ -9,6 +9,7 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
     double value, const ToneMapperRecommendedRange& range) noexcept;
 void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     const SettingsWindowView& view, float footerHeight) noexcept;
-[[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings) noexcept;
+// The SDR profile hides controls without an SDR effect.
+[[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings, bool sdrProfile = false) noexcept;
 [[nodiscard]] bool DrawVanillaGradePanel(HdrSettings& settings, const HdrSettings& defaults) noexcept;
 }

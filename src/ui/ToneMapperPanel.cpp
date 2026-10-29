@@ -93,13 +93,25 @@ struct ToneMapperControl
     detail::SettingsSliderPresentation presentation;
 };
 
-[[nodiscard]] bool DrawRecommendedToneMapperSlider(
-    HdrSettings& settings, const ToneMapperControl& control) noexcept
+// One operator's controls. The SDR profile hides those without an SDR effect.
+struct ToneMapperPanel
+{
+    HdrSettings& settings;
+    bool sdrProfile;
+
+    [[nodiscard]] bool DrawSlider(const ToneMapperControl& control) noexcept;
+    [[nodiscard]] bool DrawAces2() noexcept;
+    [[nodiscard]] bool DrawAgx() noexcept;
+    [[nodiscard]] bool DrawGt7() noexcept;
+};
+
+bool ToneMapperPanel::DrawSlider(const ToneMapperControl& control) noexcept
 {
     const auto& [label, parameter, presentation] = control;
     auto& value = settings.toneMapperParameters.*parameter;
     const auto changed = detail::DrawSettingsPanelSlider(label, value, presentation);
-    const auto range = GetToneMapperRecommendedRange(
+    // HDR ranges were measured at display peaks; no SDR ranges are recorded yet.
+    const auto range = sdrProfile ? ToneMapperRecommendedRange{} : GetToneMapperRecommendedRange(
         settings.productionAlgorithm, settings.displayPeakNits, parameter);
     if (range.available)
     {
@@ -114,6 +126,10 @@ struct ToneMapperControl
         ImGui::TextWrapped("%s", status);
     return changed;
 }
+
+constexpr std::array kSdrToneCurves{ProductionToneMapperAlgorithm::native,
+    ProductionToneMapperAlgorithm::aces2, ProductionToneMapperAlgorithm::agX,
+    ProductionToneMapperAlgorithm::gt7};
 
 struct ColorSettingsTabs
 {
@@ -195,6 +211,49 @@ struct ColorSettingsTabs
         }
         if (DrawToneMapperPanel(settings))
             commitRequested = true;
+    }
+
+    // Lists Native and each operator whose SDR configuration has qualified.
+    [[nodiscard]] bool DrawSdrToneCurveChoices() noexcept
+    {
+        const auto current = settings.productionAlgorithm;
+        for (const auto curve : kSdrToneCurves)
+        {
+            if (!IsSelectableSdrToneMapper(curve)) continue;
+            const auto selected = curve == current;
+            if (ImGui::Selectable(SettingsOperatorDisplayName(curve), selected))
+                settings.productionAlgorithm = curve;
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        return settings.productionAlgorithm != current;
+    }
+
+    // Appears once an operator joins Native. SDR tables have a fixed white, so
+    // the pending request names no peak.
+    void DrawSdrToneCurve() noexcept
+    {
+        if (std::ranges::count_if(kSdrToneCurves, IsSelectableSdrToneMapper) < 2) return;
+        const auto defaultCurve = DefaultSdrSettings().productionAlgorithm;
+        ImGui::SeparatorText("Tone Curve");
+        DrawSettingsControlLabel("Tone Curve");
+        bool changed{};
+        if (ImGui::BeginCombo("##sdr-tone-curve",
+                SettingsOperatorDisplayName(settings.productionAlgorithm)))
+        {
+            changed = DrawSdrToneCurveChoices();
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip("Native keeps the game's SDR curve; an operator replaces it.");
+        if (DrawRestoreDefaultButton("sdr-tone-curve",
+                settings.productionAlgorithm != defaultCurve))
+        {
+            settings.productionAlgorithm = defaultCurve;
+            changed = true;
+        }
+        changed |= DrawToneMapperPanel(settings, true);
+        if (changed) commitRequested = true;
+        if (view.lutPending)
+            ImGui::Text("Requested: %s settings", SettingsOperatorDisplayName(view.pendingAlgorithm));
     }
 
     void DrawOutputPeak() noexcept
@@ -411,6 +470,7 @@ struct ColorSettingsTabs
                 ImGui::TextWrapped("SDR color controls are active on the game's own SDR image. "
                     "HDR output and its brightness and tone-mapping controls need an HDR10 "
                     "display with Windows HDR on before the game starts, and HdrEnabled=1.");
+                DrawSdrToneCurve();
                 ImGui::EndChild();
                 ImGui::EndTabItem();
                 return;
@@ -573,38 +633,44 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
 }
 
 
-[[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings) noexcept
+namespace {
+
+bool ToneMapperPanel::DrawAces2() noexcept
 {
     const ToneMapperParameters defaults{};
-    switch (settings.productionAlgorithm)
-    {
-    case ProductionToneMapperAlgorithm::aces2:
-        return DrawRecommendedToneMapperSlider(settings, {
-            "Contrast Look Strength", &ToneMapperParameters::acesLookStrength, {
-            defaults.acesLookStrength,
-            kMinimumAcesLookStrength, kMaximumAcesLookStrength,
-            100.0, "%.0f%%",
-            "Strength of the Contrast LMT before the adapted ACES 2 output "
-            "transform. 0% removes the look; 100% keeps the original look."}});
-    case ProductionToneMapperAlgorithm::agX:
-    {
-        bool changed{};
-        changed |= DrawRecommendedToneMapperSlider(settings, {
-            "Middle Gray", &ToneMapperParameters::agxMiddleGrayEv, {
-            defaults.agxMiddleGrayEv,
-            kMinimumAgxMiddleGrayEv, kMaximumAgxMiddleGrayEv,
-            1.0, "%.2f EV",
-            "Adjusts AgX middle-gray brightness while keeping display peak fixed."}});
-        changed |= DrawRecommendedToneMapperSlider(settings, {
-            "Contrast", &ToneMapperParameters::agxContrast, { defaults.agxContrast,
-            kMinimumAgxContrast, kMaximumAgxContrast,
-            1.0, "%.2f", "Controls AgX sigmoid contrast."}});
-        changed |= DrawRecommendedToneMapperSlider(settings, {
+    return DrawSlider({
+        "Contrast Look Strength", &ToneMapperParameters::acesLookStrength, {
+        defaults.acesLookStrength,
+        kMinimumAcesLookStrength, kMaximumAcesLookStrength,
+        100.0, "%.0f%%",
+        "Strength of the Contrast LMT before the adapted ACES 2 output "
+        "transform. 0% removes the look; 100% keeps the original look."}});
+}
+
+// SDR keeps Middle Gray at or below neutral and has no HDR shoulder; its color
+// response acts only away from neutral Middle Gray.
+bool ToneMapperPanel::DrawAgx() noexcept
+{
+    const ToneMapperParameters defaults{};
+    bool changed{};
+    changed |= DrawSlider({
+        "Middle Gray", &ToneMapperParameters::agxMiddleGrayEv, {
+        defaults.agxMiddleGrayEv,
+        kMinimumAgxMiddleGrayEv, sdrProfile ? kMaximumSdrAgxMiddleGrayEv : kMaximumAgxMiddleGrayEv,
+        1.0, "%.2f EV",
+        "Adjusts AgX middle-gray brightness while keeping display peak fixed."}});
+    changed |= DrawSlider({
+        "Contrast", &ToneMapperParameters::agxContrast, { defaults.agxContrast,
+        kMinimumAgxContrast, kMaximumAgxContrast,
+        1.0, "%.2f", "Controls AgX sigmoid contrast."}});
+    if (!sdrProfile)
+        changed |= DrawSlider({
             "Highlight Shoulder", &ToneMapperParameters::agxHdrShoulderPower, {
             defaults.agxHdrShoulderPower,
             kMinimumAgxHdrShoulderPower, kMaximumAgxHdrShoulderPower,
             1.0, "%.2fx", "Adjusts AgX highlight compression near the display peak."}});
-        changed |= DrawRecommendedToneMapperSlider(settings, {
+    if (!sdrProfile || settings.toneMapperParameters.agxMiddleGrayEv != 0.0)
+        changed |= DrawSlider({
             "HDR Color Response", &ToneMapperParameters::agxHdrPurity, {
             defaults.agxHdrPurity,
             kMinimumAgxHdrPurity, kMaximumAgxHdrPurity,
@@ -612,31 +678,45 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
             "Balances hue and saturation before and after AgX's HDR remapping. "
             "Higher values favor the remapped response and can also shift "
             "scene brightness."}});
-        return changed;
-    }
-    case ProductionToneMapperAlgorithm::gt7:
+    return changed;
+}
+
+bool ToneMapperPanel::DrawGt7() noexcept
+{
+    const ToneMapperParameters defaults{};
+    bool changed{};
+    changed |= DrawSlider({
+        "Shadow Toe", &ToneMapperParameters::gt7ToeStrength, {
+        defaults.gt7ToeStrength,
+        kMinimumGt7ToeStrength, kMaximumGt7ToeStrength,
+        1.0, "%.2f", "Adjusts GT7 shadow compression. Higher values deepen shadows."}});
+    changed |= DrawSlider({
+        "Shoulder Start", &ToneMapperParameters::gt7ShoulderStart, {
+        defaults.gt7ShoulderStart,
+        kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart,
+        100.0, "%.1f%%",
+        "Sets where the GT7 highlight shoulder begins as a fraction of display peak."}});
+    changed |= DrawSlider({
+        "Color Blend", &ToneMapperParameters::gt7ColorBlend, {
+        defaults.gt7ColorBlend,
+        kMinimumGt7ColorBlend, kMaximumGt7ColorBlend,
+        1.0, "%.2f",
+        "Controls hue and saturation handling in highlights. 0 uses "
+        "per-channel RGB curves; higher values favor the ICtCp color treatment."}});
+    return changed;
+}
+
+}  // namespace
+
+[[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings, bool sdrProfile) noexcept
+{
+    ToneMapperPanel panel{settings, sdrProfile};
+    switch (settings.productionAlgorithm)
     {
-        bool changed{};
-        changed |= DrawRecommendedToneMapperSlider(settings, {
-            "Shadow Toe", &ToneMapperParameters::gt7ToeStrength, {
-            defaults.gt7ToeStrength,
-            kMinimumGt7ToeStrength, kMaximumGt7ToeStrength,
-            1.0, "%.2f", "Adjusts GT7 shadow compression. Higher values deepen shadows."}});
-        changed |= DrawRecommendedToneMapperSlider(settings, {
-            "Shoulder Start", &ToneMapperParameters::gt7ShoulderStart, {
-            defaults.gt7ShoulderStart,
-            kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart,
-            100.0, "%.1f%%",
-            "Sets where the GT7 highlight shoulder begins as a fraction of display peak."}});
-        changed |= DrawRecommendedToneMapperSlider(settings, {
-            "Color Blend", &ToneMapperParameters::gt7ColorBlend, {
-            defaults.gt7ColorBlend,
-            kMinimumGt7ColorBlend, kMaximumGt7ColorBlend,
-            1.0, "%.2f",
-            "Controls hue and saturation handling in highlights. 0 uses "
-            "per-channel RGB curves; higher values favor the ICtCp color treatment."}});
-        return changed;
-    }
+    case ProductionToneMapperAlgorithm::aces2: return panel.DrawAces2();
+    case ProductionToneMapperAlgorithm::agX: return panel.DrawAgx();
+    case ProductionToneMapperAlgorithm::gt7: return panel.DrawGt7();
+    case ProductionToneMapperAlgorithm::native: return false;
     }
     return false;
 }
