@@ -41,6 +41,8 @@ void InitializeLiveSettings(const PluginConfiguration&) noexcept;
 // Latches SDR mode and selects the live profile it renders.
 void SetSdrModeActive(bool active) noexcept;
 OperatorLutBuildRequest DesiredOperatorLutBuild() noexcept;
+// Applies the settings draft; end Present calls it when a commit is requested.
+void CommitUiDraft(ID3D11Device*, ID3D11DeviceContext*) noexcept;
 void CommitLiveSettingsAtEndPresent(ID3D11Device*, ID3D11DeviceContext*) noexcept;
 
 } // namespace fo4hdr

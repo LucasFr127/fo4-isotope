@@ -619,42 +619,6 @@ void PublishImmediateSettings(ID3D11DeviceContext* context,
     g_settingsGeneration = g_desiredSettingsGeneration;
 }
 
-void UpdateDesiredOperator(bool operatorChanged,
-    const HdrSettings& desired) noexcept
-{
-    if (!operatorChanged)
-    {
-        RetirePendingOperatorLutBuild();
-        return;
-    }
-    if (!PendingOperatorKeyMatches(desired))
-        QueueDesiredOperatorLutBuild();
-}
-
-void CommitUiDraft(ID3D11DeviceContext* context) noexcept
-{
-    (void)ConsumeSettingsCommitRequest();
-    g_liveSettingsError = false;
-    if (ValidateProfileSettings(ReadSettingsDraft(), g_sdrProfileSelected) !=
-        HdrSettingsValidationError::none)
-    {
-        g_liveSettingsError = true;
-        return;
-    }
-    ++g_desiredSettingsGeneration;
-    auto desired = ReadSettingsDraft();
-    // An operator publishes with its table; the native curve needs none.
-    const auto deferOperator =
-        !SameOperatorKey(g_activeSettings, desired) && NeedsOperatorLut(desired);
-    auto immediate = desired;
-    if (deferOperator)
-        ApplyOperatorKey(g_activeSettings, immediate);
-    PublishImmediateSettings(context, immediate);
-    UpdateDesiredOperator(deferOperator, desired);
-    // Only the active table stays resident.
-    if (!NeedsOperatorLut(g_activeSettings)) ReleaseReplacementLut();
-}
-
 void FailPendingOperatorLut() noexcept
 {
     g_lutPending = false;
@@ -679,6 +643,57 @@ void PublishCompletedOperatorLut(ID3D11Device* device,
     g_lutPending = false;
     g_pendingLutRequest = {};
     g_liveSettingsError = g_settingsGeneration != g_desiredSettingsGeneration;
+}
+
+// The SDR native curve leaves the last operator table retained, so returning
+// to that operator publishes it without a rebuild.
+[[nodiscard]] bool PublishRetainedOperatorLut(ID3D11Device* device,
+    ID3D11DeviceContext* context, const HdrSettings& desired) noexcept
+{
+    const auto target = ActiveOperatorLutTarget();
+    const auto key = OperatorLutKeyFor(desired, target);
+    auto& retained = RetainedCpuLut(target);
+    if (!retained || !PreparedOperatorLutMatches(retained->data, key)) return false;
+    RetirePendingOperatorLutBuild();
+    PublishCompletedOperatorLut(device, context, std::move(retained));
+    return true;
+}
+
+void UpdateDesiredOperator(ID3D11Device* device, ID3D11DeviceContext* context,
+    bool operatorChanged, const HdrSettings& desired) noexcept
+{
+    if (!operatorChanged)
+    {
+        RetirePendingOperatorLutBuild();
+        return;
+    }
+    if (!PublishRetainedOperatorLut(device, context, desired) &&
+        !PendingOperatorKeyMatches(desired))
+        QueueDesiredOperatorLutBuild();
+}
+
+void CommitUiDraft(ID3D11Device* device, ID3D11DeviceContext* context) noexcept
+{
+    (void)ConsumeSettingsCommitRequest();
+    g_liveSettingsError = false;
+    if (ValidateProfileSettings(ReadSettingsDraft(), g_sdrProfileSelected) !=
+        HdrSettingsValidationError::none)
+    {
+        g_liveSettingsError = true;
+        return;
+    }
+    ++g_desiredSettingsGeneration;
+    auto desired = ReadSettingsDraft();
+    // An operator publishes with its table; the native curve needs none.
+    const auto deferOperator =
+        !SameOperatorKey(g_activeSettings, desired) && NeedsOperatorLut(desired);
+    auto immediate = desired;
+    if (deferOperator)
+        ApplyOperatorKey(g_activeSettings, immediate);
+    PublishImmediateSettings(context, immediate);
+    UpdateDesiredOperator(device, context, deferOperator, desired);
+    // Only the active table stays resident.
+    if (!NeedsOperatorLut(g_activeSettings)) ReleaseReplacementLut();
 }
 
 void CommitCompletedOperatorLut(ID3D11Device* device,
@@ -718,16 +733,31 @@ void SetSdrModeActive(bool active) noexcept
 
 namespace {
 
-// A selected operator without a retained SDR table draws the native curve
-// until the queued build publishes at end Present.
+// Draws the native curve until the queued SDR table publishes at end Present.
+void DeferSdrOperator() noexcept
+{
+    g_activeSettings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
+    if (!PendingOperatorKeyMatches(ReadSettingsDraft())) QueueDesiredOperatorLutBuild();
+}
+
+// A selected operator without a retained SDR table waits for its build.
 void DeferUnpreparedSdrOperator() noexcept
 {
     if (!NeedsOperatorLut(g_activeSettings)) return;
     const auto key = OperatorLutKeyFor(g_activeSettings, OperatorLutTarget::sdr);
     const auto& retained = RetainedCpuLut(OperatorLutTarget::sdr);
     if (retained && PreparedOperatorLutMatches(retained->data, key)) return;
-    g_activeSettings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
-    if (!PendingOperatorKeyMatches(ReadSettingsDraft())) QueueDesiredOperatorLutBuild();
+    DeferSdrOperator();
+}
+
+// The native curve needs no table, so a retained table that fails to upload
+// waits for a rebuild like a missing one instead of disabling SDR mode.
+[[nodiscard]] bool BuildSdrReplacementsOrDeferOperator(ID3D11Device* device) noexcept
+{
+    if (BuildSdrReplacementShaders(device)) return true;
+    if (!NeedsOperatorLut(g_activeSettings)) return false;
+    DeferSdrOperator();
+    return BuildSdrReplacementShaders(device);
 }
 
 }  // namespace
@@ -740,7 +770,7 @@ bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
     SetSdrModeActive(admitted);
     if (!admitted) return false;
     DeferUnpreparedSdrOperator();
-    if (!BuildSdrReplacementShaders(device))
+    if (!BuildSdrReplacementsOrDeferOperator(device))
     {
         SetSdrModeActive(false);
         RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
@@ -769,7 +799,7 @@ void CommitLiveSettingsAtEndPresent(ID3D11Device* device,
         return;
     }
     if (g_lutSubmissionNeeded) SubmitPendingOperatorLutBuild();
-    if (SettingsCommitRequested()) CommitUiDraft(context);
+    if (SettingsCommitRequested()) CommitUiDraft(device, context);
     CommitCompletedOperatorLut(device, context);
     RefreshWeatherGradeResponses();
 }
