@@ -479,10 +479,10 @@ HdrSettingsMath DeriveHdrSettingsMath(
     const HdrSettings& settings) noexcept
 {
     HdrSettingsMath result{};
-    // Only the SDR profile can select the native curve.
-    const auto sdrProfile =
-        settings.productionAlgorithm == ProductionToneMapperAlgorithm::native;
-    if (ValidateProfileSettings(settings, sdrProfile) != HdrSettingsValidationError::none)
+    // The math is profile-independent, and the curve cannot identify the
+    // profile once SDR selects an operator; either profile's rules suffice.
+    if (ValidateProfileSettings(settings, false) != HdrSettingsValidationError::none &&
+        ValidateProfileSettings(settings, true) != HdrSettingsValidationError::none)
         return result;
     result.sceneExposureMultiplier = std::exp2(settings.exposureEv);
     // The full slider range maps to a reversible one-stop contrast slope.

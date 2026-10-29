@@ -61,6 +61,9 @@ void TestSdrProfileDefaults()
         FO4HDR_CHECK(ValidateProfileSettings(selected, true) ==
             (IsSelectableSdrToneMapper(algorithm) ? HdrSettingsValidationError::none :
                 HdrSettingsValidationError::unsupportedAlgorithm));
+        // An SDR profile that selects an operator keeps its scene controls.
+        selected.exposureEv = 1.0;
+        FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
     }
     auto brighter = sdr;
     brighter.exposureEv = 1.0;
