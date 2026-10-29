@@ -5,12 +5,22 @@
 // Modification: retain Fallout 4 exposure, separate bloom, mask, and
 // scene-filter stages while removing only normalized Uncharted 2/Hable range
 // compression; apply a project-authored multiplier on that separate bloom
-// contribution before addition.
+// contribution before addition. The SDR-mode variants instead keep the
+// game's own curve and apply project scene controls before it.
 // See THIRD_PARTY_NOTICES.md for the retained MIT permission text.
 #ifndef FO4HDR_TONEMAP_BYPASS_COMMON_HLSLI
 #define FO4HDR_TONEMAP_BYPASS_COMMON_HLSLI
 
 #include "LiveSettingsConstants.hlsli"
+
+#ifndef FO4HDR_SDR_SCENE_CONTROLS
+#define FO4HDR_SDR_SCENE_CONTROLS 0
+#endif
+
+#if FO4HDR_SDR_SCENE_CONTROLS
+#include "ImageControls.hlsli"
+#include "SelectiveColor.hlsli"
+#endif
 
 #ifndef FO4HDR_SCENE_TEXTURE
 #error FO4HDR_SCENE_TEXTURE must identify the Fallout 4 scene texture
@@ -32,8 +42,10 @@ Texture2D<float4> t0 : register(t0);
 Texture2D<float4> t1 : register(t1);
 Texture2D<float4> t2 : register(t2);
 Texture2D<float4> t3 : register(t3);
+#if !FO4HDR_SDR_SCENE_CONTROLS
 // Borrowed only for the developer lock; normal b13 sets its activity bit to zero.
 Texture2D<float2> Fo4HdrDeveloperExposureSnapshot : register(t17);
+#endif
 
 SamplerState s0_s : register(s0);
 SamplerState s1_s : register(s1);
@@ -68,6 +80,22 @@ float3 Fo4HdrApplySceneFilter(
     return filtered.rgb;
 }
 
+#if FO4HDR_SDR_SCENE_CONTROLS
+// The game's own curve: Uncharted 2 with exposure bias 2, white 11.2 and the
+// ImageSpace toe numerator, in the original operation order.
+float3 Fo4HdrApplyNativeToneCurve(float3 color)
+{
+    const float toeNumerator = cb2[1].w;
+    const float3 doubled = color + color;
+    const float3 numerator = doubled * (color * 0.30f + 0.05f) + toeNumerator * 0.20f;
+    const float3 denominator = doubled * (color * 0.30f + 0.5f) + 0.06f;
+    const float3 curved = numerator / denominator - toeNumerator * 3.333333f;
+    const float white = (toeNumerator * 0.20f + 19.3759995f) * 0.0408563502f -
+        toeNumerator * 3.333333f;
+    return (1.0f / white) * curved;
+}
+#endif
+
 void main(
     float4 position : SV_POSITION0,
     float2 texcoord : TEXCOORD0,
@@ -89,6 +117,15 @@ void main(
     float measuredExposure = t2.Sample(s2_s, texcoord).x;
     float exposure = cb2[1].z / (0.00100000005f + measuredExposure);
     exposure = clamp(exposure, cb2[1].y, cb2[1].x);
+#if FO4HDR_SDR_SCENE_CONTROLS
+    // Scene controls act in scene-linear light before the curve; the
+    // ImageSpace filter then runs on display-referred values, as in vanilla.
+    float3 controlled = (scene + bloom * Fo4HdrBloomStrength) *
+        (exposure * Fo4HdrSceneExposureMultiplier);
+    controlled = Fo4HdrApplySelectiveColor(Fo4HdrApplyImageControls(controlled));
+    output = float4(Fo4HdrApplySceneFilter(
+        Fo4HdrApplyNativeToneCurve(controlled), measuredExposure), 1.0f);
+#else
     [branch]
     if (Fo4HdrDeveloperExposureLocked != 0u)
     {
@@ -114,6 +151,7 @@ void main(
     if (maxTargetChannel > 65504.0f)
         targetColor *= 65504.0f / maxTargetChannel;
     output = float4(targetColor, 1.0f);
+#endif
 }
 
 #endif

@@ -26,6 +26,9 @@ void VerifyCreativeGradeLutPixelShader(
     ID3D11VertexShader* vertexShader,
     ID3D11SamplerState* sceneSampler);
 
+void VerifySdrPixelShaders(Device& device,
+    ID3D11VertexShader* vertexShader, ID3D11SamplerState* sampler);
+
 void VerifyDeveloperExposureLock(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sampler);
 

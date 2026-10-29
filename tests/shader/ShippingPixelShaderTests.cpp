@@ -42,6 +42,7 @@ void VerifyShippingPixelShaders(Device& device)
         device, vertexShader.Get(), sampler.Get());
     VerifyCreativeGradeLutPixelShader(
         device, vertexShader.Get(), sampler.Get());
+    VerifySdrPixelShaders(device, vertexShader.Get(), sampler.Get());
     const auto temporalAa = CreatePixelShader(
         *device.device.Get(), fo4hdr::generated::kTemporalAa);
     VerifyTemporalWideGamutPixelShader(device, { vertexShader.Get(), sampler.Get(), temporalAa.Get(), false,
