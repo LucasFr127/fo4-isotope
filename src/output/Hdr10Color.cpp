@@ -74,7 +74,7 @@ LinearRgb ConvertBt709ToBt2020(LinearRgb value) noexcept
     return Transform(primaryTransform, value);
 }
 
-LinearRgb ConvertBt2020ToBt709ForComparison(LinearRgb value) noexcept
+LinearRgb ConvertBt2020ToBt709(LinearRgb value) noexcept
 {
     return Transform(comparisonTransform, value);
 }

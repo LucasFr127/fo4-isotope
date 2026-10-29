@@ -19,11 +19,11 @@ struct LinearRgb
     double blue{};
 };
 
-// D65 linear-light primary transforms. The CPU inverse is a comparison and
-// validation reference.
+// D65 linear-light primary transforms. The inverse also converts SDR operator
+// tables to BT.709.
 [[nodiscard]] LinearRgb ConvertBt709ToBt2020(
     LinearRgb value) noexcept;
-[[nodiscard]] LinearRgb ConvertBt2020ToBt709ForComparison(
+[[nodiscard]] LinearRgb ConvertBt2020ToBt709(
     LinearRgb value) noexcept;
 
 // Contains each absolute linear BT.2020 channel to [0, displayPeakNits] at the

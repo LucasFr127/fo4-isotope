@@ -385,7 +385,7 @@ LinearRgb MapGt7ToBt709NitsM12(
     const auto absoluteBt2020 = MapGt7ToBt2020Nits(
         sceneLinear, displayPeakNits);
     return FitBt709DisplayGamut(
-        ConvertBt2020ToBt709ForComparison(absoluteBt2020),
+        ConvertBt2020ToBt709(absoluteBt2020),
         displayPeakNits);
 }
 

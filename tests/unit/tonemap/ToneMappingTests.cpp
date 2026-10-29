@@ -634,6 +634,7 @@ void RunToneMappingTests()
     TestAces2LookStrength();
     TestSdrAces2Configuration();
     RunOperatorLutTests();
+    RunSdrOperatorLutTests();
     TestProductionConfiguration();
 }
 }  // namespace fo4hdr::tests

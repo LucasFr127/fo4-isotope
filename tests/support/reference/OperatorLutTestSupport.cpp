@@ -35,6 +35,28 @@ namespace fo4hdr::test {
     return negative ? -value : value;
 }
 
+namespace {
+
+[[nodiscard]] LinearRgb ContainSampledOperatorLut(
+    const OperatorLutData& lut, LinearRgb mapped) noexcept
+{
+    if (lut.target == OperatorLutTarget::sdr)
+        return ContainSdrOperatorOutput(lut.algorithm, mapped);
+    if (lut.algorithm == ProductionToneMapperAlgorithm::agX)
+        return ApplyAgxDisplayGamut(mapped, lut.displayPeakNits);
+    return ContainBt2020Nits(mapped, lut.displayPeakNits);
+}
+
+} // namespace
+
+LinearRgb OperatorLutMetricNits(const OperatorLutData& lut, LinearRgb value) noexcept
+{
+    if (lut.target != OperatorLutTarget::sdr) return value;
+    const auto bt2020 = ConvertBt709ToBt2020(value);
+    return {bt2020.red * kSceneReferenceWhiteNits, bt2020.green * kSceneReferenceWhiteNits,
+        bt2020.blue * kSceneReferenceWhiteNits};
+}
+
 // Independently sum all 64 coefficient-lattice contributions from the actual
 // half-precision texture rather than sharing the shader's grouped fetches.
 [[nodiscard]] LinearRgb SampleOperatorLut(
@@ -87,10 +109,7 @@ namespace fo4hdr::test {
                     base[1] + y, base[2] + z, channel);
         }
     }
-    const LinearRgb mapped{result[0], result[1], result[2]};
-    if (lut.algorithm == ProductionToneMapperAlgorithm::agX)
-        return ApplyAgxDisplayGamut(mapped, lut.displayPeakNits);
-    return ContainBt2020Nits(mapped, lut.displayPeakNits);
+    return ContainSampledOperatorLut(lut, {result[0], result[1], result[2]});
 }
 
 namespace {
@@ -160,9 +179,20 @@ struct SampleAxis
             }
     // Presentation containment sanitizes nonfinite inputs, so reject them first.
     if (!IsFiniteRgb(mapped)) return mapped;
-    return lut.algorithm == ProductionToneMapperAlgorithm::agX ?
-        ApplyAgxDisplayGamut(mapped, lut.displayPeakNits) :
-        ContainBt2020Nits(mapped, lut.displayPeakNits);
+    return ContainSampledOperatorLut(lut, mapped);
+}
+
+[[nodiscard]] Aces2TransformHandle CreateReferenceAces2(const OperatorLutData& lut) noexcept
+{
+    return lut.target == OperatorLutTarget::sdr ?
+        CreateSdrAces2Transform() : CreateAces2Transform(lut.displayPeakNits);
+}
+
+[[nodiscard]] std::optional<AgxTransform> CreateReferenceAgx(const OperatorLutData& lut) noexcept
+{
+    return lut.target == OperatorLutTarget::sdr ?
+        CreateSdrAgxTransform(lut.toneMapperParameters) :
+        CreateAgxTransform(lut.displayPeakNits, lut.toneMapperParameters);
 }
 
 struct QualityReference
@@ -170,10 +200,9 @@ struct QualityReference
     explicit QualityReference(const OperatorLutData& lut) noexcept :
         data(lut),
         aces2(data.algorithm == ProductionToneMapperAlgorithm::aces2 ?
-            CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
+            CreateReferenceAces2(data) : Aces2TransformHandle{}),
         agx(data.algorithm == ProductionToneMapperAlgorithm::agX ?
-            CreateAgxTransform(data.displayPeakNits, data.toneMapperParameters) :
-            std::optional<AgxTransform>{}),
+            CreateReferenceAgx(data) : std::optional<AgxTransform>{}),
         gt7(data.algorithm == ProductionToneMapperAlgorithm::gt7 ?
             CreateGt7Transform(data.displayPeakNits, data.toneMapperParameters) :
             Gt7TransformHandle{})
@@ -191,12 +220,28 @@ struct QualityReference
 
     [[nodiscard]] LinearRgb Map(LinearRgb scene) const noexcept
     {
+        if (data.target == OperatorLutTarget::sdr) return MapSdr(scene);
         if (aces2 != nullptr)
             return MapAdaptedAces2ToBt2020Nits(*aces2, scene,
                 data.toneMapperParameters.acesLookStrength);
         if (agx.has_value()) return MapAgxToBt2020Nits(*agx, scene);
         return ContainBt2020Nits(EvaluateGt7LutNits(*gt7, scene),
             data.displayPeakNits);
+    }
+
+    // The analytical SDR response: ACES2 emits Rec.709 nits, the others BT.2020.
+    [[nodiscard]] LinearRgb MapSdr(LinearRgb scene) const noexcept
+    {
+        LinearRgb bt709{};
+        if (aces2 != nullptr)
+            bt709 = EvaluateAdaptedAces2LutNits(*aces2, scene,
+                data.toneMapperParameters.acesLookStrength);
+        else
+            bt709 = ConvertBt2020ToBt709(agx.has_value() ?
+                EvaluateAgxLutNits(*agx, scene) : EvaluateGt7LutNits(*gt7, scene));
+        const auto white = SdrOperatorWhiteNits(data.algorithm);
+        return ContainSdrOperatorOutput(data.algorithm,
+            {bt709.red / white, bt709.green / white, bt709.blue / white});
     }
 };
 
@@ -231,8 +276,10 @@ struct QualityEvaluator
     [[nodiscard]] bool Measure(LinearRgb scene, OperatorLutQualityRegion region)
     {
         if ((count++ % 128U) == 0U && cancellation.IsCancelled()) return false;
-        const auto error = DeltaEItpBt2020Nits(reference.Map(scene),
-            ReconstructOperatorLut(reference.data, scene));
+        const auto& lut = reference.data;
+        const auto error = DeltaEItpBt2020Nits(
+            OperatorLutMetricNits(lut, reference.Map(scene)),
+            OperatorLutMetricNits(lut, ReconstructOperatorLut(lut, scene)));
         measurements.Record(error, region);
         return std::isfinite(error);
     }

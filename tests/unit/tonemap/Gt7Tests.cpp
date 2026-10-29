@@ -422,7 +422,7 @@ void TestComparisonGamutEmissives()
         FO4HDR_CHECK(mapped.red <= 1000.0);
         FO4HDR_CHECK(mapped.green <= 1000.0);
         FO4HDR_CHECK(mapped.blue <= 1000.0);
-        const auto native = ConvertBt2020ToBt709ForComparison(
+        const auto native = ConvertBt2020ToBt709(
             MapGt7ToBt2020Nits(emissive, 1000.0));
         outsideBt709Observed = outsideBt709Observed ||
             native.red < 0.0 || native.green < 0.0 || native.blue < 0.0 ||
@@ -476,7 +476,7 @@ void TestIndependentMode()
     constexpr auto infinity = std::numeric_limits<double>::infinity();
     constexpr LinearRgb emissive{2.03125, 0.6875, 0.53125};
     const auto gt7 = MapGt7ToBt709NitsM12(emissive, 1000.0);
-    const auto agx = ConvertBt2020ToBt709ForComparison(
+    const auto agx = ConvertBt2020ToBt709(
         MapAgxToBt2020Nits(emissive, 1000.0));
     FO4HDR_CHECK(std::abs(gt7.red - agx.red) > 1.0 ||
         std::abs(gt7.green - agx.green) > 1.0 ||

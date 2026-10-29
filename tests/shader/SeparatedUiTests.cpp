@@ -76,7 +76,7 @@ fo4hdr::LinearRgb ExpectedPublicPresentationPixel(const Float4& pixel,
             light.blue * 0.75 + layer.blue};
     }
     if (constants.mode == 4 || constants.mode == 5) {
-        light = fo4hdr::ConvertBt2020ToBt709ForComparison(light);
+        light = fo4hdr::ConvertBt2020ToBt709(light);
         return {std::pow(std::clamp(light.red, 0.0, 1.0), 1.0 / 2.2),
             std::pow(std::clamp(light.green, 0.0, 1.0), 1.0 / 2.2),
             std::pow(std::clamp(light.blue, 0.0, 1.0), 1.0 / 2.2)};

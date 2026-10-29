@@ -124,8 +124,11 @@ void TestInvalidOperatorLuts()
 
     for (const auto algorithm : algorithms)
     {
+        // The shaper also serves the 100-250-nit SDR whites, so only HDR
+        // builds reject 399 nits.
+        FO4HDR_CHECK(!BuildOperatorLut(algorithm, 399.0).IsValid());
         for (const auto invalidPeak :
-             {nan, infinity, -infinity, -1.0, 0.0, 399.0, 2001.0})
+             {nan, infinity, -infinity, -1.0, 0.0, 99.0, 2001.0})
         {
             FO4HDR_CHECK(!BuildOperatorLut(algorithm, invalidPeak).IsValid());
             FO4HDR_CHECK(OperatorLutInputShaperMinimum(
@@ -209,7 +212,7 @@ struct CorpusStatistics
 
     void Record(LinearRgb scene, LinearRgb sampled, LinearRgb analytic, bool broadSample)
     {
-        const auto bt709 = ConvertBt2020ToBt709ForComparison(sampled);
+        const auto bt709 = ConvertBt2020ToBt709(sampled);
         outsideBt709Observed = outsideBt709Observed || HasNegativeChannel(bt709);
         const std::array expected{
             analytic.red, analytic.green, analytic.blue};

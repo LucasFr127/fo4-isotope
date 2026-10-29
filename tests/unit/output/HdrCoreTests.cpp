@@ -62,7 +62,7 @@ void TestBt709ToBt2020()
              LinearRgb{0.0, 0.0, 1.0}, LinearRgb{8.0, 4.0, 0.5},
              LinearRgb{203.0, 203.0, 203.0}})
     {
-        const auto roundTrip = ConvertBt2020ToBt709ForComparison(
+        const auto roundTrip = ConvertBt2020ToBt709(
             ConvertBt709ToBt2020(sample));
         FO4HDR_CHECK(test::Approx(roundTrip.red, sample.red, 1.0e-12));
         FO4HDR_CHECK(test::Approx(roundTrip.green, sample.green, 1.0e-12));

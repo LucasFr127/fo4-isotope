@@ -48,9 +48,11 @@ HANDLE g_requestEvent{};
     result->request = request;
     try
     {
-        result->data = BuildOperatorLut(request.algorithm, request.displayPeakNits,
-            request.toneMapperParameters,
-            {&g_requestGeneration, request.requestGeneration});
+        const OperatorLutCancellation cancellation{&g_requestGeneration, request.requestGeneration};
+        result->data = request.target == OperatorLutTarget::sdr ?
+            BuildSdrOperatorLut(request.algorithm, request.toneMapperParameters, cancellation) :
+            BuildOperatorLut(request.algorithm, request.displayPeakNits,
+                request.toneMapperParameters, cancellation);
     }
     catch (...)
     {
@@ -76,6 +78,10 @@ void PublishResult(std::unique_ptr<OperatorLutBuildResult> result,
 
 [[nodiscard]] bool IsValidRequest(const OperatorLutBuildRequest& request) noexcept
 {
+    if (request.target == OperatorLutTarget::sdr)
+        return request.requestGeneration != 0 &&
+            request.displayPeakNits == SdrOperatorWhiteNits(request.algorithm) &&
+            ValidateToneMapperParameters(request.algorithm, request.toneMapperParameters);
     HdrSettings settings{};
     settings.productionAlgorithm = request.algorithm;
     settings.displayPeakNits = request.displayPeakNits;

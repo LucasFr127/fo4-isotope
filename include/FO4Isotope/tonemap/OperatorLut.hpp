@@ -2,6 +2,7 @@
 #pragma once
 
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/output/Hdr10Color.hpp"
 
 #include <cstdint>
 #include <atomic>
@@ -27,11 +28,24 @@ inline constexpr double kOperatorLutSceneMaximum{65504.0};
 [[nodiscard]] std::array<float, 4> OperatorLutShaperParameters(
     ProductionToneMapperAlgorithm algorithm, double displayPeakNits) noexcept;
 
+enum class OperatorLutTarget : std::uint8_t
+{
+    hdr10,
+    sdr
+};
+
+// Fixed white of each operator's SDR configuration in nits: ACES2 100, AgX
+// 203 and GT7 250. Zero for any other algorithm.
+[[nodiscard]] double SdrOperatorWhiteNits(
+    ProductionToneMapperAlgorithm algorithm) noexcept;
+
 // Owns tightly packed RGBA16F texels in D3D11 Texture3D order (x changes
-// fastest, then y, then z). Tables consume scene-linear BT.709 and store
-// uncontained absolute display-linear BT.2020 nits. Sampling must apply the
-// final [0, peak] containment AFTER interpolation. Negative lattice values
-// and values above peak preserve the reference's boundary slopes. No PQ.
+// fastest, then y, then z). Tables consume scene-linear BT.709. HDR10 tables
+// store uncontained absolute display-linear BT.2020 nits; SDR tables store
+// uncontained relative display-linear BT.709 with white at 1, and their
+// displayPeakNits is the SDR white. Sampling must apply the final containment
+// AFTER interpolation. Negative lattice values and values above peak preserve
+// the reference's boundary slopes. No PQ.
 struct OperatorLutData
 {
     std::vector<std::uint16_t> rgba16;
@@ -44,6 +58,7 @@ struct OperatorLutData
     double displayPeakNits{};
     ProductionToneMapperAlgorithm algorithm{
         ProductionToneMapperAlgorithm::aces2};
+    OperatorLutTarget target{OperatorLutTarget::hdr10};
     ToneMapperParameters toneMapperParameters{};
 
     [[nodiscard]] bool IsValid() const noexcept;
@@ -71,6 +86,19 @@ struct OperatorLutCancellation
     double displayPeakNits,
     const ToneMapperParameters& parameters = {},
     OperatorLutCancellation cancellation = {}) noexcept;
+
+// The operator's SDR configuration at its fixed white.
+[[nodiscard]] OperatorLutData BuildSdrOperatorLut(
+    ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters = {},
+    OperatorLutCancellation cancellation = {}) noexcept;
+
+// Final containment of an interpolated SDR sample. ACES2 clamps each channel
+// to [0, 1] like its Rec.709 preset. AgX and GT7 contract chroma about BT.709
+// luminance to remove negative channels, then scale RGB uniformly to white.
+// Nonfinite input fails black.
+[[nodiscard]] LinearRgb ContainSdrOperatorOutput(
+    ProductionToneMapperAlgorithm algorithm, LinearRgb relativeBt709) noexcept;
 
 [[nodiscard]] double DecodeOperatorLutCoordinate(
     double coordinate,

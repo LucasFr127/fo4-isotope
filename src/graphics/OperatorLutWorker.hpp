@@ -9,9 +9,11 @@
 
 namespace fo4hdr {
 
+// An SDR request's displayPeakNits is its operator's fixed SDR white.
 struct OperatorLutBuildRequest
 {
     ProductionToneMapperAlgorithm algorithm{};
+    OperatorLutTarget target{};
     double displayPeakNits{};
     std::uint64_t deviceGeneration{};
     std::uint64_t settingsGeneration{};
@@ -30,6 +32,7 @@ struct OperatorLutBuildResult
     const OperatorLutBuildRequest& request) noexcept
 {
     return data.IsValid() && data.algorithm == request.algorithm &&
+        data.target == request.target &&
         data.displayPeakNits == request.displayPeakNits &&
         data.toneMapperParameters == ActiveToneMapperParameters(
             request.algorithm, request.toneMapperParameters);
@@ -45,7 +48,7 @@ enum class OperatorLutCompletionAction : std::uint8_t
     const OperatorLutBuildRequest& left,
     const OperatorLutBuildRequest& right) noexcept
 {
-    return left.algorithm == right.algorithm &&
+    return left.algorithm == right.algorithm && left.target == right.target &&
         left.displayPeakNits == right.displayPeakNits &&
         ActiveToneMapperParameters(left.algorithm, left.toneMapperParameters) ==
             ActiveToneMapperParameters(right.algorithm, right.toneMapperParameters);

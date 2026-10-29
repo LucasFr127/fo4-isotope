@@ -16,6 +16,11 @@ namespace fo4hdr::test {
 [[nodiscard]] LinearRgb SampleOperatorLut(
     const OperatorLutData& lut, LinearRgb scene) noexcept;
 
+// Absolute BT.2020 nits for the quality metric. SDR output is relative BT.709;
+// project policy reads it at the 203-nit scene reference white.
+[[nodiscard]] LinearRgb OperatorLutMetricNits(
+    const OperatorLutData& lut, LinearRgb value) noexcept;
+
 // Maximum errors use two significant digits with positive ties upward; p99 and
 // the one-unit potential-JND goal remain unrounded. BT.2124 Annex 4 reports 2.363
 // as 2.4; using that precision and these caps for acceptance is project policy,

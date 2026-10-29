@@ -31,6 +31,7 @@ void RunHdrSettingsTests()
     TestSettingsPersistenceSave();
     TestOperatorLutDeviceReplacementTransitions();
     TestOperatorLutWorkerAndPreparedCache();
+    TestSdrOperatorLutRequests();
     TestSelectiveColorMathAndPersistence();
 }
 

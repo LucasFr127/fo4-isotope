@@ -356,7 +356,7 @@ void VerifyFxaaWideGamutPixelShader(
                 CodeDistance(values[index][channel],
                     inputPixels[index][channel]) <= 1U);
         }
-        const auto bt709 = fo4hdr::ConvertBt2020ToBt709ForComparison({
+        const auto bt709 = fo4hdr::ConvertBt2020ToBt709({
             Binary16ToFloat(values[index][0]),
             Binary16ToFloat(values[index][1]),
             Binary16ToFloat(values[index][2])});
@@ -490,7 +490,7 @@ struct TemporalScenario : TemporalVariant
                 FO4HDR_WARP_CHECK(std::abs(actual - expected) <= tolerance);
             }
             FO4HDR_WARP_CHECK(Binary16ToFloat(values[index][3]) == 1.0F);
-            const auto bt709 = fo4hdr::ConvertBt2020ToBt709ForComparison({
+            const auto bt709 = fo4hdr::ConvertBt2020ToBt709({
                 Binary16ToFloat(values[index][0]),
                 Binary16ToFloat(values[index][1]),
                 Binary16ToFloat(values[index][2])});

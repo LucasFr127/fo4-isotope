@@ -82,20 +82,35 @@ namespace {
     return static_cast<std::uint16_t>(sign | magnitude);
 }
 
+// SDR tables bake each operator at its fixed white; GT7's is its lowest peak.
+[[nodiscard]] Aces2TransformHandle PrepareAces2(const OperatorLutData& data) noexcept
+{
+    return data.target == OperatorLutTarget::sdr ?
+        CreateSdrAces2Transform() : CreateAces2Transform(data.displayPeakNits);
+}
+
+[[nodiscard]] std::optional<AgxTransform> PrepareAgx(const OperatorLutData& data) noexcept
+{
+    return data.target == OperatorLutTarget::sdr ?
+        CreateSdrAgxTransform(data.toneMapperParameters) :
+        CreateAgxTransform(data.displayPeakNits, data.toneMapperParameters);
+}
+
 struct PreparedOperator
 {
     explicit PreparedOperator(const OperatorLutData& data) noexcept :
-        algorithm(data.algorithm), parameters(data.toneMapperParameters),
+        algorithm(data.algorithm), target(data.target),
+        parameters(data.toneMapperParameters),
         aces2(algorithm == ProductionToneMapperAlgorithm::aces2 ?
-            CreateAces2Transform(data.displayPeakNits) : Aces2TransformHandle{}),
+            PrepareAces2(data) : Aces2TransformHandle{}),
         agx(algorithm == ProductionToneMapperAlgorithm::agX ?
-            CreateAgxTransform(data.displayPeakNits, parameters) :
-            std::optional<AgxTransform>{}),
+            PrepareAgx(data) : std::optional<AgxTransform>{}),
         gt7(algorithm == ProductionToneMapperAlgorithm::gt7 ?
             CreateGt7Transform(data.displayPeakNits, parameters) : Gt7TransformHandle{})
     {}
 
     ProductionToneMapperAlgorithm algorithm;
+    OperatorLutTarget target;
     const ToneMapperParameters& parameters;
     Aces2TransformHandle aces2;
     std::optional<AgxTransform> agx;
@@ -112,7 +127,7 @@ struct PreparedOperator
         return false;
     }
 
-    [[nodiscard]] LinearRgb Evaluate(LinearRgb sceneLinear) const noexcept
+    [[nodiscard]] LinearRgb EvaluateNits(LinearRgb sceneLinear) const noexcept
     {
         switch (algorithm)
         {
@@ -126,6 +141,17 @@ struct PreparedOperator
             return gt7 != nullptr ? EvaluateGt7LutNits(*gt7, sceneLinear) : LinearRgb{};
         }
         return {};
+    }
+
+    // ACES2's SDR transform already emits Rec.709; AgX and GT7 emit BT.2020.
+    [[nodiscard]] LinearRgb Evaluate(LinearRgb sceneLinear) const noexcept
+    {
+        const auto nits = EvaluateNits(sceneLinear);
+        if (target != OperatorLutTarget::sdr) return nits;
+        const auto bt709 = algorithm == ProductionToneMapperAlgorithm::aces2 ?
+            nits : ConvertBt2020ToBt709(nits);
+        const auto white = SdrOperatorWhiteNits(algorithm);
+        return {bt709.red / white, bt709.green / white, bt709.blue / white};
     }
 };
 
@@ -147,6 +173,20 @@ struct PreparedOperator
 {
     return std::isfinite(peak) && peak >= kMinimumDisplayPeakNits &&
         peak <= kMaximumDisplayPeakNits;
+}
+
+// The shaper also serves the SDR whites, the lowest of which is ACES2's.
+[[nodiscard]] bool IsValidShaperPeak(double peak) noexcept
+{
+    return std::isfinite(peak) && peak >= kAces2SdrPeakNits &&
+        peak <= kMaximumDisplayPeakNits;
+}
+
+[[nodiscard]] bool MatchesTargetPeak(const OperatorLutData& data) noexcept
+{
+    if (data.target == OperatorLutTarget::sdr)
+        return data.displayPeakNits == SdrOperatorWhiteNits(data.algorithm);
+    return data.target == OperatorLutTarget::hdr10 && IsValidPeak(data.displayPeakNits);
 }
 
 [[nodiscard]] bool IsFiniteRgb(LinearRgb value) noexcept
@@ -418,11 +458,16 @@ struct LatticeSampler
     return coordinates;
 }
 
+[[nodiscard]] bool IsValidOperator(ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters) noexcept
+{
+    return IsLutAlgorithm(algorithm) && ValidateToneMapperParameters(algorithm, parameters);
+}
+
 [[nodiscard]] bool IsValidBuildRequest(ProductionToneMapperAlgorithm algorithm,
     double peak, const ToneMapperParameters& parameters) noexcept
 {
-    return IsLutAlgorithm(algorithm) &&
-        ValidateToneMapperParameters(algorithm, parameters) && IsValidPeak(peak);
+    return IsValidOperator(algorithm, parameters) && IsValidPeak(peak);
 }
 
 [[nodiscard]] bool EncodeCoefficients(const std::vector<LinearRgb>& nodes,
@@ -495,7 +540,7 @@ bool OperatorLutData::IsValid() const noexcept
     return MatchesAlgorithm(*this) &&
         edge == OperatorLutEdge(algorithm) &&
         textureEdge == edge + kOperatorLutCoefficientPadding &&
-        IsValidPeak(displayPeakNits) &&
+        MatchesTargetPeak(*this) &&
         MatchesShaper(*this) &&
         rgba16.size() == expected;
 }
@@ -504,7 +549,7 @@ double OperatorLutInputShaperMinimum(
     ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits) noexcept
 {
-    if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits))
+    if (!IsLutAlgorithm(algorithm) || !IsValidShaperPeak(displayPeakNits))
         return 0.0;
     const double minimum = std::log2(OperatorLutInputOffset(algorithm));
     return std::atan((minimum - ShaperCenter(algorithm, displayPeakNits)) /
@@ -515,7 +560,7 @@ double OperatorLutInputShaperMaximum(
     ProductionToneMapperAlgorithm algorithm,
     double displayPeakNits) noexcept
 {
-    if (!IsLutAlgorithm(algorithm) || !IsValidPeak(displayPeakNits))
+    if (!IsLutAlgorithm(algorithm) || !IsValidShaperPeak(displayPeakNits))
         return 0.0;
     const double maximum = kOperatorLutSceneMaximum;
     const double logarithm = std::log2(maximum + OperatorLutInputOffset(algorithm));
@@ -588,11 +633,13 @@ std::array<float, 4> OperatorLutShaperParameters(
         static_cast<float>(logGain)};
 }
 
-OperatorLutData BuildOperatorLut(
+namespace {
+
+[[nodiscard]] OperatorLutData PrepareTable(
     ProductionToneMapperAlgorithm algorithm,
+    OperatorLutTarget target,
     double displayPeakNits,
-    const ToneMapperParameters& parameters,
-    OperatorLutCancellation cancellation) noexcept
+    const ToneMapperParameters& parameters) noexcept
 {
     OperatorLutData result;
     result.edge = OperatorLutEdge(algorithm);
@@ -604,11 +651,14 @@ OperatorLutData BuildOperatorLut(
     result.inputOffset = OperatorLutInputOffset(algorithm);
     result.displayPeakNits = displayPeakNits;
     result.algorithm = algorithm;
+    result.target = target;
     result.toneMapperParameters = ActiveToneMapperParameters(algorithm, parameters);
+    return result;
+}
 
-    if (cancellation.IsCancelled() ||
-        !IsValidBuildRequest(algorithm, displayPeakNits, parameters)) return {};
-
+[[nodiscard]] OperatorLutData BakeTable(
+    OperatorLutData result, OperatorLutCancellation cancellation) noexcept
+{
     try
     {
         if (!BakeOperatorLut(result, cancellation)) return {};
@@ -618,6 +668,87 @@ OperatorLutData BuildOperatorLut(
         return {};
     }
     return result.IsValid() ? std::move(result) : OperatorLutData{};
+}
+
+constexpr double kSdrGamutScaleKnee{0.05};
+
+[[nodiscard]] double SmoothMinimum(double first, double second, double knee) noexcept
+{
+    const auto blend = std::clamp(1.0 - std::abs(first - second) / knee, 0.0, 1.0);
+    return std::min(first, second) - 0.25 * knee * blend * blend;
+}
+
+// Project-authored SDR display gamut with the AgX production stage's structure:
+// negative channels contract chroma about BT.709 luminance with a 5% knee, then
+// RGB scales uniformly to white with a knee that shrinks with chroma.
+[[nodiscard]] LinearRgb ContainSdrDisplayGamut(LinearRgb value) noexcept
+{
+    const auto luminance = 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
+    const auto center = std::max(luminance, 0.0);
+    const std::array chroma{value.red - luminance, value.green - luminance,
+        value.blue - luminance};
+    const auto minimumChroma = std::min({chroma[0], chroma[1], chroma[2]});
+    const auto lowerScale = minimumChroma < 0.0 ? std::clamp(SmoothMinimum(
+        1.0, center / -minimumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0;
+    const std::array contained{center + lowerScale * chroma[0],
+        center + lowerScale * chroma[1], center + lowerScale * chroma[2]};
+    const auto maximum = std::max({contained[0], contained[1], contained[2]});
+    const auto minimum = std::min({contained[0], contained[1], contained[2]});
+    if (!(maximum > 0.0)) return {};
+    const auto knee = kSdrGamutScaleKnee * std::clamp((maximum - minimum) / maximum, 0.0, 1.0);
+    const auto upperScale = knee > 0.0 ?
+        std::clamp(SmoothMinimum(1.0, 1.0 / maximum, knee), 0.0, 1.0) :
+        std::clamp(1.0 / maximum, 0.0, 1.0);
+    return {std::clamp(upperScale * contained[0], 0.0, 1.0),
+        std::clamp(upperScale * contained[1], 0.0, 1.0),
+        std::clamp(upperScale * contained[2], 0.0, 1.0)};
+}
+
+}  // namespace
+
+OperatorLutData BuildOperatorLut(
+    ProductionToneMapperAlgorithm algorithm,
+    double displayPeakNits,
+    const ToneMapperParameters& parameters,
+    OperatorLutCancellation cancellation) noexcept
+{
+    if (cancellation.IsCancelled() ||
+        !IsValidBuildRequest(algorithm, displayPeakNits, parameters)) return {};
+    return BakeTable(PrepareTable(algorithm, OperatorLutTarget::hdr10, displayPeakNits,
+        parameters), cancellation);
+}
+
+OperatorLutData BuildSdrOperatorLut(
+    ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters,
+    OperatorLutCancellation cancellation) noexcept
+{
+    // SDR tables use the operator's fixed white instead of an HDR display peak.
+    if (cancellation.IsCancelled() || !IsValidOperator(algorithm, parameters)) return {};
+    return BakeTable(PrepareTable(algorithm, OperatorLutTarget::sdr,
+        SdrOperatorWhiteNits(algorithm), parameters), cancellation);
+}
+
+double SdrOperatorWhiteNits(ProductionToneMapperAlgorithm algorithm) noexcept
+{
+    switch (algorithm)
+    {
+    case ProductionToneMapperAlgorithm::aces2: return kAces2SdrPeakNits;
+    case ProductionToneMapperAlgorithm::agX: return kAgxSdrPeakNits;
+    case ProductionToneMapperAlgorithm::gt7: return kGt7SdrPaperWhiteNits;
+    default: return 0.0;
+    }
+}
+
+LinearRgb ContainSdrOperatorOutput(
+    ProductionToneMapperAlgorithm algorithm, LinearRgb relativeBt709) noexcept
+{
+    if (!IsFiniteRgb(relativeBt709)) return {};
+    if (algorithm != ProductionToneMapperAlgorithm::aces2)
+        return ContainSdrDisplayGamut(relativeBt709);
+    return {std::clamp(relativeBt709.red, 0.0, 1.0),
+        std::clamp(relativeBt709.green, 0.0, 1.0),
+        std::clamp(relativeBt709.blue, 0.0, 1.0)};
 }
 
 }  // namespace fo4hdr

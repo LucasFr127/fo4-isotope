@@ -122,13 +122,14 @@ void TestOperatorLutDeviceReplacementTransitions()
         OperatorLutRequestStatus::failed, attempts));
 }
 
-std::unique_ptr<OperatorLutBuildResult> WaitForPreparedOperatorLut()
+std::unique_ptr<OperatorLutBuildResult> WaitForPreparedOperatorLut(
+    std::uint64_t requestGeneration = 3)
 {
     std::unique_ptr<OperatorLutBuildResult> prepared;
     for (unsigned wait = 0; wait < 6000 && !prepared; ++wait)
     {
         prepared = TakeCompletedOperatorLutBuild();
-        if (prepared && prepared->request.requestGeneration != 3)
+        if (prepared && prepared->request.requestGeneration != requestGeneration)
             prepared.reset();
         if (!prepared) Sleep(10);
     }
@@ -182,6 +183,48 @@ void TestOperatorLutWorkerAndPreparedCache()
     request.toneMapperParameters = {};
     request.displayPeakNits = 450.0;
     FO4HDR_CHECK(!PreparedOperatorLutMatches(prepared->data, request));
+}
+
+void TestSdrOperatorLutRequests()
+{
+    // A completion keeps its target: an SDR table never publishes as HDR.
+    const OperatorLutBuildRequest hdr{
+        .algorithm = ProductionToneMapperAlgorithm::gt7,
+        .displayPeakNits = 430.0,
+        .requestGeneration = 20
+    };
+    auto sdr = hdr;
+    sdr.target = OperatorLutTarget::sdr;
+    sdr.displayPeakNits = SdrOperatorWhiteNits(sdr.algorithm);
+    FO4HDR_CHECK(ClassifyOperatorLutCompletion(sdr, hdr, true) ==
+        OperatorLutCompletionAction::retire);
+    FO4HDR_CHECK(ClassifyOperatorLutCompletion(sdr, sdr, true) ==
+        OperatorLutCompletionAction::publish);
+
+    // SDR requests bake each operator at its fixed white.
+    FO4HDR_CHECK(InitializeOperatorLutWorker());
+    auto wrongWhite = sdr;
+    wrongWhite.displayPeakNits = 430.0;
+    FO4HDR_CHECK(RequestOperatorLutBuild(wrongWhite) == OperatorLutRequestStatus::failed);
+    auto native = sdr;
+    native.algorithm = ProductionToneMapperAlgorithm::native;
+    native.displayPeakNits = 0.0;
+    FO4HDR_CHECK(RequestOperatorLutBuild(native) == OperatorLutRequestStatus::failed);
+    auto status = RequestOperatorLutBuild(sdr);
+    for (unsigned retry = 0; retry < 4 && status == OperatorLutRequestStatus::busy; ++retry)
+    {
+        Sleep(1);
+        status = RequestOperatorLutBuild(sdr);
+    }
+    FO4HDR_CHECK(status == OperatorLutRequestStatus::accepted);
+    const auto prepared = WaitForPreparedOperatorLut(sdr.requestGeneration);
+    FO4HDR_CHECK(prepared != nullptr);
+    if (!prepared) return;
+    FO4HDR_CHECK(prepared->data.target == OperatorLutTarget::sdr);
+    FO4HDR_CHECK(PreparedOperatorLutMatches(prepared->data, sdr));
+    auto hdrAtWhite = sdr;
+    hdrAtWhite.target = OperatorLutTarget::hdr10;
+    FO4HDR_CHECK(!PreparedOperatorLutMatches(prepared->data, hdrAtWhite));
 }
 
 }  // namespace fo4hdr::tests
