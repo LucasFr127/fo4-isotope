@@ -475,7 +475,7 @@ void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
         configuration.interfaceSettings);
     g_settingsGeneration = 1;
     g_desiredSettingsGeneration = 1;
-    g_lutRequestGeneration = 0;
+    // Request generations never restart: the process-lifetime worker skips one it already built.
     g_lutPending = false;
     g_pendingLutRequest = {};
     g_lutSubmissionNeeded = false;
