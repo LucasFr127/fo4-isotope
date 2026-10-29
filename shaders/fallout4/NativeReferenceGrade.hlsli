@@ -2,40 +2,23 @@
 #ifndef FO4HDR_NATIVE_REFERENCE_GRADE_HLSLI
 #define FO4HDR_NATIVE_REFERENCE_GRADE_HLSLI
 
-#include "../tonemap/OperatorLut.hlsli"
 #include "GradeTransfer.hlsli"
 
 Texture3D<float4> PreparedLook : register(t3);
-
-float Largest(float3 rgb) { return max(rgb.x, max(rgb.y, rgb.z)); }
-static const float3 GradeLuma = float3(0.212500006f, 0.715399981f, 0.0720999986f);
-
-float3 CleanScene(float3 rgb)
-{
-    [unroll] for (uint channel = 0; channel < 3; ++channel)
-        rgb[channel] = Fo4HdrSanitizeOperatorInput(rgb[channel], 0u);
-    return rgb;
-}
 
 float3 BoundScene(float3 rgb)
 {
     // Contract negative channels toward neutral at constant luminance instead
     // of clipping their hue correction independently.
-    const float luminance = dot(rgb, GradeLuma);
+    const float luminance = dot(rgb, Fo4HdrGradeLuma);
     if (luminance <= 0.0f) return 0.0f;
     const float minimum = min(rgb.r, min(rgb.g, rgb.b));
     if (minimum < 0.0f)
         rgb = luminance + (rgb - luminance) * (luminance / (luminance - minimum));
     rgb = max(rgb, 0.0f);
     // Uniform scaling can round its maximum one FP32 ULP above the FP16 limit.
-    return min(rgb * min(1.0f, 65504.0f / max(Largest(rgb), 65504.0f)), 65504.0f);
-}
-
-float NativeCurve(float value)
-{
-    // Factoring the native rational curve avoids cancellation at black.
-    return value * (0.14f * value + 1.0f / 60.0f) /
-        (value * (0.15f * value + 0.5f) + 0.06f);
+    return min(rgb * min(1.0f,
+        65504.0f / max(Fo4HdrLargestGradeChannel(rgb), 65504.0f)), 65504.0f);
 }
 
 float3 NativeCoordinates(float3 scene)
@@ -43,11 +26,12 @@ float3 NativeCoordinates(float3 scene)
     // Keep the native per-channel Hable/gamma lookup below a one-stop safety
     // margin. Above it, reduce only lookup exposure with a C1 shoulder tending
     // to native white (5.6); the retained HDR scene never enters this shoulder.
-    const float peak = Largest(scene);
+    const float peak = Fo4HdrLargestGradeChannel(scene);
     const float scale = peak > 2.8f ? (5.6f - 7.84f / peak) / peak : 1.0f;
     const float3 probe = scene * scale;
-    const float3 reference = float3(NativeCurve(2.0f * probe.r),
-        NativeCurve(2.0f * probe.g), NativeCurve(2.0f * probe.b)) / NativeCurve(11.2f);
+    const float3 reference = float3(Fo4HdrNativeCurve(2.0f * probe.r),
+        Fo4HdrNativeCurve(2.0f * probe.g), Fo4HdrNativeCurve(2.0f * probe.b)) /
+        Fo4HdrNativeCurve(11.2f);
     return pow(saturate(reference), 1.0f / 2.2f);
 }
 
@@ -107,47 +91,47 @@ float NeutralPivot(float3 reference)
 {
     // Leave a measurable two-sided chroma span even beside cube black/white.
     // This bounds only the auxiliary probe; the native guide stays unchanged.
-    return clamp(dot(reference, GradeLuma), 0.002f, 0.998f);
+    return clamp(dot(reference, Fo4HdrGradeLuma), 0.002f, 0.998f);
 }
 
 float4 ChromaProbe(float3 H, float3 R, float epsilon, float pivot, out float along)
 {
-    const float y = dot(R, GradeLuma);
+    const float y = dot(R, Fo4HdrGradeLuma);
     const float3 r = R - y;
-    const float3 difference = (H - dot(H, GradeLuma)) - r;
+    const float3 difference = (H - dot(H, Fo4HdrGradeLuma)) - r;
     along = dot(r, difference) / (dot(r, r) + epsilon * epsilon);
     const float3 residual = difference - along * r;
-    const float magnitude = Largest(abs(residual));
+    const float magnitude = Fo4HdrLargestGradeChannel(abs(residual));
     if (!(magnitude > 0.0f)) return float4(pivot.xxx, 0.0f);
 
     // Probe the missing target direction instead of inferring its response
     // from a rotated copy of the first chroma secant. Half the available
     // headroom keeps the probe inside the authored cube.
     const float3 direction = residual / magnitude;
-    const float positive = max(Largest(direction), 1.0e-20f);
-    const float negative = max(Largest(-direction), 1.0e-20f);
+    const float positive = max(Fo4HdrLargestGradeChannel(direction), 1.0e-20f);
+    const float negative = max(Fo4HdrLargestGradeChannel(-direction), 1.0e-20f);
     const float headroom = min(1.0f, min((1.0f - pivot) / positive, pivot / negative));
     // Keep a measurable span around neutral without differentiating a tiny
     // sampled color difference. Cube boundaries still take precedence.
-    const float radius = min(max(Largest(abs(r)), 1.0e-3f), 0.5f * headroom);
+    const float radius = min(max(Fo4HdrLargestGradeChannel(abs(r)), 1.0e-3f), 0.5f * headroom);
     return float4(pivot + radius * direction, magnitude / radius);
 }
 
 float3 NativeReferenceTransfer(float3 H, float3 R, float3 G, float3 N, float3 B,
     float3 P, float3 Q, float along, float across, float3 U)
 {
-    const float referenceY = dot(R, GradeLuma);
+    const float referenceY = dot(R, Fo4HdrGradeLuma);
     if (referenceY <= 0.0f) return B;
-    const float sceneY = dot(H, GradeLuma);
-    const float pivotY = dot(U, GradeLuma);
+    const float sceneY = dot(H, Fo4HdrGradeLuma);
+    const float pivotY = dot(U, Fo4HdrGradeLuma);
     const float3 neutralResponse = N - B;
-    const float gain = dot(neutralResponse, GradeLuma) / pivotY;
+    const float gain = dot(neutralResponse, Fo4HdrGradeLuma) / pivotY;
     const float3 neutralResidual = neutralResponse - gain * U;
     const float3 colorResidual = (G - B) - gain * R;
     const float3 probeResidual = (Q - B) - gain * P;
     // Factor the shared neutral-axis correction before rebuilding RGB.
     const float neutralScale = ((sceneY - referenceY) - along * referenceY -
-        across * dot(P, GradeLuma)) / pivotY;
+        across * dot(P, Fo4HdrGradeLuma)) / pivotY;
     return BoundScene(G + gain * (H - R) + neutralScale * neutralResidual +
         along * colorResidual + across * probeResidual);
 }
@@ -166,7 +150,7 @@ float3 NativeNeutralCodes(float code)
 
 float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
 {
-    const float3 scene = CleanScene(input);
+    const float3 scene = Fo4HdrGradeCleanScene(input);
     const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
         ? 0.0f : saturate(strength);
     if (!(amount > 0.0f)) return scene;
@@ -175,20 +159,23 @@ float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
     // Both sides of the native look use the selected grading curve. Keeping the
     // decoded ungraded reference makes an identity look transfer no tonal response.
     const float3 reference = NativeReference(codes, curve);
-    const float3 graded = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeWeightedCodes(codes)), curve));
+    const float3 graded = Fo4HdrGradeCleanScene(Fo4HdrGradeDecode(
+        Fo4HdrGradeCleanScene(NativeWeightedCodes(codes)), curve));
     // The prepare pass stores the weighted black decoded by each curve.
     const float3 black = PreparedLook.Load(
         int4(curve == Fo4HdrGradeCurveSrgb ? 17 : 16, 15, 0, 0)).rgb;
     const float3 neutralCodes = Fo4HdrGradeEncode(NeutralPivot(reference).xxx, curve);
     const float3 neutralReference = NativeReference(neutralCodes, curve);
-    const float3 neutral = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeNeutralCodes(neutralCodes.x)), curve));
+    const float3 neutral = Fo4HdrGradeCleanScene(Fo4HdrGradeDecode(
+        Fo4HdrGradeCleanScene(NativeNeutralCodes(neutralCodes.x)), curve));
     float along;
     const float4 probe = ChromaProbe(scene, reference, GradeConfidence(), neutralReference.x, along);
     const float3 probeCodes = Fo4HdrGradeEncode(probe.rgb, curve);
     const float3 probeReference = NativeReference(probeCodes, curve);
     float3 second = neutral;
     [branch] if (probe.w > 0.0f)
-        second = CleanScene(Fo4HdrGradeDecode(CleanScene(NativeWeightedCodes(probeCodes)), curve));
+        second = Fo4HdrGradeCleanScene(Fo4HdrGradeDecode(
+            Fo4HdrGradeCleanScene(NativeWeightedCodes(probeCodes)), curve));
     const float3 endpoint = NativeReferenceTransfer(scene, reference, graded, neutral, black,
         probeReference, second, along, probe.w, neutralReference);
     // H + amount*(endpoint-H) loses a small constant look at large H.

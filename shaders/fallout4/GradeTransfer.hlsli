@@ -95,7 +95,7 @@ float3 Fo4HdrApplyVanillaGradeRemoval(float3 hdr, float3 graded,
     return min(adjusted * scale, 65504.0f);
 }
 
-float Fo4HdrRadialCurve(float value)
+float Fo4HdrNativeCurve(float value)
 {
     // Factoring the native rational curve avoids cancellation at black.
     return value * (0.14f * value + 1.0f / 60.0f) /
@@ -109,7 +109,7 @@ float Fo4HdrRadialGuideScale(float peak)
     if (peak >= 5.6f) return 1.0f / peak;
     const float value = 2.0f * peak;
     return 2.0f * (0.14f * value + 1.0f / 60.0f) /
-        ((value * (0.15f * value + 0.5f) + 0.06f) * Fo4HdrRadialCurve(11.2f));
+        ((value * (0.15f * value + 0.5f) + 0.06f) * Fo4HdrNativeCurve(11.2f));
 }
 
 float3 Fo4HdrRadialCoordinates(float3 scene)
