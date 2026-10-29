@@ -8,6 +8,7 @@
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "TestHarness.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
@@ -126,6 +127,58 @@ void CheckOfficialAdapterParity(
             static_cast<float>(displayPeakNits) / 100.0F);
         FO4HDR_CHECK(distance <= 2U);
     }
+}
+
+// The LUT keeps the uncontained response; the official per-channel clamp follows.
+void CheckOfficialSdrParity(const Gt7Transform& transform, LinearRgb sceneLinear)
+{
+    const auto sceneRec2020 = ConvertBt709ToBt2020(sceneLinear);
+    constexpr float sceneScale =
+        static_cast<float>(kSceneReferenceWhiteNits) / 100.0F;
+    const std::array<float, 3> officialInput{
+        static_cast<float>(sceneRec2020.red) * sceneScale,
+        static_cast<float>(sceneRec2020.green) * sceneScale,
+        static_cast<float>(sceneRec2020.blue) * sceneScale
+    };
+    GT7ToneMapping oracle;
+    oracle.initializeAsSDR();
+    std::array<float, 3> expected{};
+    oracle.applyToneMapping(officialInput.data(), expected.data());
+
+    const auto nits = EvaluateGt7LutNits(transform, sceneLinear);
+    const std::array<float, 3> actual{
+        static_cast<float>(std::min(nits.red / kGt7SdrPaperWhiteNits, 1.0)),
+        static_cast<float>(std::min(nits.green / kGt7SdrPaperWhiteNits, 1.0)),
+        static_cast<float>(std::min(nits.blue / kGt7SdrPaperWhiteNits, 1.0))
+    };
+    for (std::size_t channel = 0; channel < expected.size(); ++channel)
+    {
+        const auto distance = FloatDistance(actual[channel], expected[channel]);
+        if (distance > 2U)
+            std::cerr << "GT7 official SDR parity: scene={" << sceneLinear.red << ','
+                      << sceneLinear.green << ',' << sceneLinear.blue << "} channel="
+                      << channel << " actual=" << actual[channel] << " expected="
+                      << expected[channel] << " float_ulp=" << distance << '\n';
+        FO4HDR_CHECK(std::isfinite(actual[channel]));
+        FO4HDR_CHECK(actual[channel] >= 0.0F && actual[channel] <= 1.0F);
+        FO4HDR_CHECK(distance <= 2U);
+    }
+}
+
+void TestOfficialSdrParity()
+{
+    const auto transform = CreateGt7Transform(kGt7SdrPaperWhiteNits);
+    FO4HDR_CHECK(transform != nullptr);
+    if (!transform) return;
+    for (const auto& scene : {LinearRgb{}, LinearRgb{0.001, 0.001, 0.001},
+             LinearRgb{0.18, 0.18, 0.18}, LinearRgb{1.0, 1.0, 1.0}, LinearRgb{4.0, 4.0, 4.0},
+             LinearRgb{64.0, 64.0, 64.0}, LinearRgb{8.0, 0.0, 0.0}, LinearRgb{0.0, 8.0, 0.0},
+             LinearRgb{0.0, 0.0, 8.0}, LinearRgb{2.03125, 0.6875, 0.53125},
+             LinearRgb{0.0, 0.60791015625, 54.21875}})
+        CheckOfficialSdrParity(*transform, scene);
+    // Local regression: the sample's ~35.63-nit gray response at its 250-nit white.
+    FO4HDR_CHECK(test::Approx(EvaluateGt7LutNits(*transform, {0.18, 0.18, 0.18}).green /
+        kGt7SdrPaperWhiteNits, 0.14252, 1.0e-5));
 }
 
 void TestOfficialReferenceVectorsAndPeaks()
@@ -610,6 +663,7 @@ void TestPreparedConfiguredSourceParity()
 void RunGt7Tests()
 {
     TestOfficialReferenceVectorsAndPeaks();
+    TestOfficialSdrParity();
     TestBroadOfficialSourceParity();
     TestDisplayAdapterAndGamutBoundaries();
     TestComparisonGamutEmissives();

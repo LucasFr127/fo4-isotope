@@ -2,6 +2,7 @@
 // Copyright Contributors to the ACES Project.
 // Upstream: aces-aswf/aces-core@ee380496a201fd008841ff9399b29241bcd27a3a/lib/Lib.Academy.OutputTransform.ctl
 // Upstream: aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad/d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
+// Upstream: aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad/d65/rec709/Output.Academy.Rec709-D65_100nit_in_Rec709-D65_BT1886.ctl
 //
 // Adapted from the ACES 2.0 forward Output Transform at:
 // aces-aswf/aces-core@ee380496a201fd008841ff9399b29241bcd27a3a
@@ -9,20 +10,24 @@
 //   lib/Lib.Academy.ColorSpaces.ctl
 //   lib/Lib.Academy.Tonescale.ctl
 //   lib/Lib.Academy.OutputTransform.ctl
-// and the Rec.2100/D65 1000-nit parameterization at:
+// and the Rec.2100/D65 1000-nit and Rec.709/D65 100-nit parameterizations at:
 // aces-aswf/aces-output@90cadee61547c006ba8fad320ffacc171095bfad
 //   d65/rec2100/Output.Academy.Rec2100-D65_1000nit_in_Rec2100-D65_ST2084.ctl
+//   d65/rec709/Output.Academy.Rec709-D65_100nit_in_Rec709-D65_BT1886.ctl
 //
 // Modified by FO4Isotope: parameterize the same Rec.2100 limiting gamut for
-// 400-2000 nits and adapt dimensionless scene-linear BT.709/D65 to AP0/D60
+// 400-2000 nits, keep the Rec.709 preset's 100-nit peak and limiting gamut for
+// the SDR configuration, adapt dimensionless scene-linear BT.709/D65 to AP0/D60
 // without changing neutral scene values, and stop at absolute display-linear
-// Rec.2020. The direct AP0 forward boundary supports the pinned Contrast LMT;
-// the shared forward path retains the official AP1 formation clamp.
+// RGB in the limiting primaries. The direct AP0 forward boundary supports the
+// pinned Contrast LMT; the shared forward path retains the official AP1
+// formation clamp.
 // ACES2 alone blends a recomputed zero-toe shadow response into the scalar
 // tone scale below internal 0.18 and uses a fixed-width gamut shoulder to avoid
 // the reference reach/gamut crossing discontinuity.
-// The official display-encoding/PQ stage is intentionally omitted because the
-// renderer owns the single final ST 2084 boundary. Normalized upper-hull hue
+// The official ST 2084 and BT.1886 encoding stages are intentionally omitted:
+// the renderer owns the single final ST 2084 boundary, and SDR output stays
+// display-linear for the game's own passes. Normalized upper-hull hue
 // interpolation and a full bounded interval search correct the pinned CTL's
 // hue interpolation/search issues. See THIRD_PARTY_NOTICES.md.
 
@@ -473,11 +478,11 @@ void RecordCompressionBoundary(
 class Aces2Transform
 {
 public:
-    explicit Aces2Transform(double peak) noexcept
+    Aces2Transform(double peak, const Chromaticities& limitingPrimaries) noexcept
         : bt709ToAp0(CalculateRgbToRgb(kBt709, kAp0)),
           ap0ToAp1(Multiply(RgbToXyz(kAp0), Invert(RgbToXyz(kAp1)))),
           ap1ToAp0(Multiply(RgbToXyz(kAp1), Invert(RgbToXyz(kAp0)))),
-          odt(InitializeOdt(peak)),
+          odt(InitializeOdt(peak, limitingPrimaries)),
           shadowToneScale(InitializeToneScale(peak, 0.0))
     {
     }
@@ -499,7 +504,13 @@ Aces2TransformHandle CreateAces2Transform(double displayPeakNits) noexcept
 {
     if (!IsPeakValid(displayPeakNits)) return {nullptr};
     return Aces2TransformHandle(
-        new (std::nothrow) Aces2Transform(displayPeakNits));
+        new (std::nothrow) Aces2Transform(displayPeakNits, kBt2020));
+}
+
+Aces2TransformHandle CreateSdrAces2Transform() noexcept
+{
+    return Aces2TransformHandle(
+        new (std::nothrow) Aces2Transform(kAces2SdrPeakNits, kBt709));
 }
 
 namespace {

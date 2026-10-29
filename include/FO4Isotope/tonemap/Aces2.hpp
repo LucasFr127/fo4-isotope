@@ -24,6 +24,12 @@ using Aces2TransformHandle =
 [[nodiscard]] Aces2TransformHandle CreateAces2Transform(
     double displayPeakNits) noexcept;
 
+// SDR configuration from the pinned Rec.709 100-nit preset: Rec.709 limiting
+// primaries at a 100-nit peak. Every output below is in the transform's
+// limiting primaries, so this transform's "BT.2020 nits" are BT.709 nits.
+inline constexpr double kAces2SdrPeakNits{100.0};
+[[nodiscard]] Aces2TransformHandle CreateSdrAces2Transform() noexcept;
+
 // Input is finite, non-negative, dimensionless scene-linear BT.709. The RGB
 // primary/white-point adapter preserves neutral scene values, so 0.18 reaches
 // the official ACES 0.18 middle-gray anchor without an absolute-nit rescale.

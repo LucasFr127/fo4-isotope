@@ -497,13 +497,14 @@ struct GammaTestData
     return table;
 }
 
-[[nodiscard]] OdtParams InitializeOdt(double peak) noexcept
+[[nodiscard]] OdtParams InitializeOdt(
+    double peak, const Chromaticities& limitingPrimaries) noexcept
 {
     OdtParams params{};
     params.peakLuminance = peak;
     params.input = InitializeJMh(kAp0);
     params.reach = InitializeJMh(kAp1);
-    params.limit = InitializeJMh(kBt2020);
+    params.limit = InitializeJMh(limitingPrimaries);
     params.toneScale = InitializeToneScale(peak);
     params.limitJMax = YToJ(peak, params.input);
     params.modelGammaInverse = 1.0 / kModelGamma;

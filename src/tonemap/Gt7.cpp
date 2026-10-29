@@ -24,7 +24,6 @@ namespace {
 using FloatRgb = std::array<float, 3>;
 
 constexpr float kReferenceLuminance = 100.0F;
-constexpr float kGt7SdrPaperWhiteNits = 250.0F;
 constexpr float kMaximumDisplayPeakNits = 10000.0F;
 constexpr double kMaximumSceneValue = 65504.0;
 

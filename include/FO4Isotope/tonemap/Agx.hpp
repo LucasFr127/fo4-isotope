@@ -39,6 +39,10 @@ public:
 private:
     friend std::optional<AgxTransform> CreateAgxTransform(
         double, const ToneMapperParameters&) noexcept;
+    friend std::optional<AgxTransform> CreateSdrAgxTransform(
+        const ToneMapperParameters&) noexcept;
+    [[nodiscard]] static std::optional<AgxTransform> Prepare(
+        double displayPeakNits, const ToneMapperParameters& parameters) noexcept;
 
     AgxTransform() noexcept = default;
 
@@ -52,6 +56,13 @@ private:
 
 [[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(
     double displayPeakNits,
+    const ToneMapperParameters& parameters = {}) noexcept;
+
+// SDR configuration: an HDR/SDR ratio of 1, so the peak is the fixed scene
+// reference white. Shoulder Power then has no effect, and HDR Color Response
+// acts only when Middle Gray moves.
+inline constexpr double kAgxSdrPeakNits{kSceneReferenceWhiteNits};
+[[nodiscard]] std::optional<AgxTransform> CreateSdrAgxTransform(
     const ToneMapperParameters& parameters = {}) noexcept;
 
 // The production AgX adapter consumes scene-linear BT.709 and returns bounded

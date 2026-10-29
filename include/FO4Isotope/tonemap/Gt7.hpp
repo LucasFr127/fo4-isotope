@@ -16,6 +16,10 @@ struct Gt7TransformDeleter
 using Gt7TransformHandle =
     std::unique_ptr<const Gt7Transform, Gt7TransformDeleter>;
 
+// The official sample's SDR paper white: initializeAsSDR maps it to output 1.
+// It is also the lowest supported peak.
+inline constexpr double kGt7SdrPaperWhiteNits{250.0};
+
 // Retain one immutable context per LUT bake; invalid settings fail creation.
 [[nodiscard]] Gt7TransformHandle CreateGt7Transform(
     double displayPeakNits,

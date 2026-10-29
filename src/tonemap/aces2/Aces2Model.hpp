@@ -255,6 +255,7 @@ struct GamutHull
     double analyticalThreshold,
     const OdtParams& params) noexcept;
 
-[[nodiscard]] OdtParams InitializeOdt(double peak) noexcept;
+[[nodiscard]] OdtParams InitializeOdt(
+    double peak, const Chromaticities& limitingPrimaries) noexcept;
 
 }  // namespace fo4hdr::aces2

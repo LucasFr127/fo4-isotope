@@ -6,6 +6,7 @@
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include "TestHarness.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -549,8 +550,55 @@ void TestInvalidParametersFailBlack()
 }
 }  // namespace
 
+// Largest channel difference between two SDR configurations, relative to white.
+[[nodiscard]] double SdrResponseDifference(
+    const ToneMapperParameters& left, const ToneMapperParameters& right)
+{
+    constexpr std::array inputs{LinearRgb{0.18, 0.18, 0.18}, LinearRgb{4.0, 1.0, 0.25},
+        LinearRgb{0.0, 1.0, 0.0}, LinearRgb{1.0, 0.0, 0.0}, LinearRgb{20.0, 0.0, 0.0},
+        LinearRgb{0.02, 0.05, 0.01}};
+    const auto first = CreateSdrAgxTransform(left);
+    const auto second = CreateSdrAgxTransform(right);
+    if (!first || !second) return std::numeric_limits<double>::infinity();
+    double largest{};
+    for (const auto& input : inputs)
+    {
+        const auto a = EvaluateAgxLutNits(*first, input);
+        const auto b = EvaluateAgxLutNits(*second, input);
+        largest = std::max({largest, std::abs(a.red - b.red),
+            std::abs(a.green - b.green), std::abs(a.blue - b.blue)});
+    }
+    return largest / kAgxSdrPeakNits;
+}
+
+void TestSdrConfiguration()
+{
+    const auto sdr = CreateSdrAgxTransform();
+    FO4HDR_CHECK(sdr.has_value());
+    if (!sdr) return;
+    FO4HDR_CHECK(sdr->DisplayPeakNits() == kAgxSdrPeakNits);
+    FO4HDR_CHECK(sdr->HdrSdrRatio() == 1.0);
+    // At ratio 1 Shoulder Power has no effect, and HDR Color Response acts only
+    // once Middle Gray moves; Middle Gray and Contrast keep their effect.
+    FO4HDR_CHECK(SdrResponseDifference({.agxHdrShoulderPower = kMinimumAgxHdrShoulderPower},
+        {.agxHdrShoulderPower = kMaximumAgxHdrShoulderPower}) == 0.0);
+    const auto neutralGrayPurity = SdrResponseDifference(
+        {.agxHdrPurity = kMinimumAgxHdrPurity}, {.agxHdrPurity = kMaximumAgxHdrPurity});
+    const auto movedGrayPurity = SdrResponseDifference(
+        {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv, .agxHdrPurity = kMinimumAgxHdrPurity},
+        {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv, .agxHdrPurity = kMaximumAgxHdrPurity});
+    FO4HDR_CHECK(neutralGrayPurity < 1.0e-6);
+    FO4HDR_CHECK(movedGrayPurity > 1.0e-3);
+    // Local regression: middle gray stays at 0.18 of the SDR white.
+    FO4HDR_CHECK(std::abs(EvaluateAgxLutNits(*sdr, {0.18, 0.18, 0.18}).green /
+        kAgxSdrPeakNits - 0.18) <= 1.0e-6);
+    FO4HDR_CHECK(SdrResponseDifference({}, {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv}) > 1.0e-3);
+    FO4HDR_CHECK(SdrResponseDifference({}, {.agxContrast = kMinimumAgxContrast}) > 1.0e-3);
+}
+
 void RunAgxTests()
 {
+    TestSdrConfiguration();
     TestIndependentCtmFloat32SourceOracle();
     TestExpandedIndependentCtmFloat32SourceOracle();
     TestProductionDefaultResponse();

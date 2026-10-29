@@ -594,6 +594,35 @@ void TestProductionConfiguration()
     CheckConfigurationExposure();
     CheckConfigurationModes();
 }
+
+void TestSdrAces2Configuration()
+{
+    const auto sdr = CreateSdrAces2Transform();
+    FO4HDR_CHECK(sdr != nullptr);
+    if (!sdr) return;
+    // Like the Rec.709 preset, the SDR transform clamps each channel to its peak.
+    for (const auto& input : {LinearRgb{65504.0, 65504.0, 65504.0}, LinearRgb{8.0, 0.0, 0.0},
+             LinearRgb{0.0, 8.0, 0.0}, LinearRgb{0.0, 0.0, 8.0}, LinearRgb{2.03125, 0.6875, 0.53125}})
+        CheckContainedRgb(MapAces2ToBt2020Nits(*sdr, input), kAces2SdrPeakNits);
+    // Without the Look, neutrals at or above internal 0.18 match the direct Academy
+    // SDR transform; the kept shadow response lifts them below it.
+    for (const double gray : {0.18, 1.0, 4.0, 16.0})
+    {
+        const LinearRgb input{gray, gray, gray};
+        const auto direct = EvaluateAces2LutNits(*sdr, input);
+        CheckRgb(EvaluateAdaptedAces2LutNits(*sdr, input, 0.0), direct, direct.green * 1.0e-9);
+        FO4HDR_CHECK(test::Approx(direct.red, direct.green, direct.green * 1.0e-6));
+        FO4HDR_CHECK(test::Approx(direct.blue, direct.green, direct.green * 1.0e-6));
+    }
+    const LinearRgb shadow{0.02, 0.02, 0.02};
+    FO4HDR_CHECK(EvaluateAdaptedAces2LutNits(*sdr, shadow, 0.0).green >
+        EvaluateAces2LutNits(*sdr, shadow).green);
+    // The direct transform keeps the preset's 10-nit gray; local regression for the
+    // production response, which the Contrast Look lifts.
+    const LinearRgb middleGray{0.18, 0.18, 0.18};
+    FO4HDR_CHECK(test::Approx(EvaluateAces2LutNits(*sdr, middleGray).green, 10.0, 1.0e-3));
+    FO4HDR_CHECK(test::Approx(EvaluateAdaptedAces2LutNits(*sdr, middleGray).green, 14.7705, 1.0e-3));
+}
 }  // namespace
 
 void RunToneMappingTests()
@@ -603,6 +632,7 @@ void RunToneMappingTests()
     TestAces2ContinuousColor();
     TestAces2TransformAndContainment();
     TestAces2LookStrength();
+    TestSdrAces2Configuration();
     RunOperatorLutTests();
     TestProductionConfiguration();
 }

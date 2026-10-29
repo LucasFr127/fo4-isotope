@@ -510,8 +510,21 @@ std::optional<AgxTransform> CreateAgxTransform(
     double displayPeakNits,
     const ToneMapperParameters& parameters) noexcept
 {
-    if (!IsValidDisplayPeak(displayPeakNits) ||
-        !ValidateToneMapperParameters(
+    if (!IsValidDisplayPeak(displayPeakNits)) return std::nullopt;
+    return AgxTransform::Prepare(displayPeakNits, parameters);
+}
+
+std::optional<AgxTransform> CreateSdrAgxTransform(
+    const ToneMapperParameters& parameters) noexcept
+{
+    return AgxTransform::Prepare(kAgxSdrPeakNits, parameters);
+}
+
+std::optional<AgxTransform> AgxTransform::Prepare(
+    double displayPeakNits,
+    const ToneMapperParameters& parameters) noexcept
+{
+    if (!ValidateToneMapperParameters(
             ProductionToneMapperAlgorithm::agX, parameters))
         return std::nullopt;
 
