@@ -2,6 +2,11 @@
 #ifndef FO4ISOTOPE_OPERATOR_LUT_HLSLI
 #define FO4ISOTOPE_OPERATOR_LUT_HLSLI
 
+// SDR tables hold relative BT.709 with white at 1 instead of BT.2020 nits.
+#ifndef FO4HDR_SDR_OPERATOR_OUTPUT
+#define FO4HDR_SDR_OPERATOR_OUTPUT 0
+#endif
+
 // These dimensions must match the CPU lattice and coefficient texture.
 static const float kFo4HdrAces2OperatorLutEdge = 119.0f;
 static const float kFo4HdrAgxOperatorLutEdge = 81.0f;
@@ -101,6 +106,26 @@ float3 Fo4HdrAgxDisplayGamut(float3 value, float peak)
     return clamp(value * Fo4HdrGamutScale(peak / maximum, knee), 0.0f, peak);
 }
 
+#if FO4HDR_SDR_OPERATOR_OUTPUT
+// Match ContainSdrOperatorOutput for AgX and GT7: the same stage about BT.709
+// luminance, with white at 1.
+float3 Fo4HdrSdrDisplayGamut(float3 value)
+{
+    const float luminance = dot(value, float3(0.2126f, 0.7152f, 0.0722f));
+    const float center = max(luminance, 0.0f);
+    const float3 chroma = value - luminance;
+    const float minimumChroma = min(chroma.r, min(chroma.g, chroma.b));
+    const float lowerScale = minimumChroma < 0.0f ?
+        Fo4HdrGamutScale(center / -minimumChroma, 0.05f) : 1.0f;
+    value = center + lowerScale * chroma;
+    const float maximum = max(value.r, max(value.g, value.b));
+    const float minimum = min(value.r, min(value.g, value.b));
+    if (maximum <= 0.0f) return 0.0f;
+    const float knee = 0.05f * saturate((maximum - minimum) / maximum);
+    return saturate(value * Fo4HdrGamutScale(1.0f / maximum, knee));
+}
+#endif
+
 // The full-FP16-range shaper matches the CPU lattice coordinates.
 float3 Fo4HdrSampleOperatorLut(
     Texture3D<float4> operatorLut,
@@ -147,9 +172,14 @@ float3 Fo4HdrSampleOperatorLut(
     }
     // The source operators' final display clamp belongs here, not at lattice
     // vertices: clipping first creates artificial interpolation knees.
+#if FO4HDR_SDR_OPERATOR_OUTPUT
+    // ACES2 clamps like its Rec.709 preset.
+    return productionMode == 1u ? saturate(mapped) : Fo4HdrSdrDisplayGamut(mapped);
+#else
     if (productionMode == 2u)
         return Fo4HdrAgxDisplayGamut(mapped, displayPeakNits);
     return clamp(mapped, 0.0f, displayPeakNits);
+#endif
 }
 
 #endif

@@ -6,7 +6,8 @@
 // scene-filter stages while removing only normalized Uncharted 2/Hable range
 // compression; apply a project-authored multiplier on that separate bloom
 // contribution before addition. The SDR-mode variants instead keep the
-// game's own curve and apply project scene controls before it.
+// game's own curve, or an operator's SDR table in its place, and apply
+// project scene controls before it.
 // See THIRD_PARTY_NOTICES.md for the retained MIT permission text.
 #ifndef FO4HDR_TONEMAP_BYPASS_COMMON_HLSLI
 #define FO4HDR_TONEMAP_BYPASS_COMMON_HLSLI
@@ -18,6 +19,8 @@
 #endif
 
 #if FO4HDR_SDR_SCENE_CONTROLS
+#define FO4HDR_SDR_OPERATOR_OUTPUT 1
+#include "../tonemap/OperatorLut.hlsli"
 #include "ImageControls.hlsli"
 #include "SelectiveColor.hlsli"
 #endif
@@ -42,7 +45,10 @@ Texture2D<float4> t0 : register(t0);
 Texture2D<float4> t1 : register(t1);
 Texture2D<float4> t2 : register(t2);
 Texture2D<float4> t3 : register(t3);
-#if !FO4HDR_SDR_SCENE_CONTROLS
+#if FO4HDR_SDR_SCENE_CONTROLS
+// The selected operator's SDR table, bound only while b13 selects it.
+Texture3D<float4> Fo4HdrOperatorLut : register(t7);
+#else
 // Borrowed only for the developer lock; normal b13 sets its activity bit to zero.
 Texture2D<float2> Fo4HdrDeveloperExposureSnapshot : register(t17);
 #endif
@@ -51,6 +57,9 @@ SamplerState s0_s : register(s0);
 SamplerState s1_s : register(s1);
 SamplerState s2_s : register(s2);
 SamplerState s3_s : register(s3);
+#if FO4HDR_SDR_SCENE_CONTROLS
+SamplerState Fo4HdrOperatorSampler : register(s7);
+#endif
 
 cbuffer Fallout4ImageSpaceConstants : register(b2)
 {
@@ -94,6 +103,21 @@ float3 Fo4HdrApplyNativeToneCurve(float3 color)
         toeNumerator * 3.333333f;
     return (1.0f / white) * curved;
 }
+
+// Mode 0 keeps the game's curve. Modes 1-3 read the selected operator's SDR
+// table, which takes the same scene value without the curve's exposure bias.
+float3 Fo4HdrApplySdrToneCurve(float3 color)
+{
+    float3 curved;
+    [branch]
+    if (Fo4HdrProductionMode == 0u)
+        curved = Fo4HdrApplyNativeToneCurve(color);
+    else
+        curved = Fo4HdrSampleOperatorLut(Fo4HdrOperatorLut, Fo4HdrOperatorSampler, color,
+            Fo4HdrProductionMode, Fo4HdrOperatorShaperAngleGain, Fo4HdrOperatorShaperBias,
+            1.0f, Fo4HdrOperatorShaperParameters);
+    return curved;
+}
 #endif
 
 void main(
@@ -124,7 +148,7 @@ void main(
         (exposure * Fo4HdrSceneExposureMultiplier);
     controlled = Fo4HdrApplySelectiveColor(Fo4HdrApplyImageControls(controlled));
     output = float4(Fo4HdrApplySceneFilter(
-        Fo4HdrApplyNativeToneCurve(controlled), measuredExposure), 1.0f);
+        Fo4HdrApplySdrToneCurve(controlled), measuredExposure), 1.0f);
 #else
     [branch]
     if (Fo4HdrDeveloperExposureLocked != 0u)

@@ -270,6 +270,8 @@ struct OperatorMeasurements
     const fo4hdr::ToneMapperParameters &parameters;
     const fo4hdr::Aces2TransformHandle &aces;
     const fo4hdr::OperatorLutData &lut;
+    // SDR cases measure in the 203-nit metric space; their peak is that white.
+    const fo4hdr::test::OperatorLutReference *sdrReference{};
     double maximumError{};
     double maximumApproximationError{};
     double broadErrorSum{};
@@ -390,8 +392,32 @@ struct OperatorMeasurements
         MeasureTint(expectedPqCodes, actualPqCodes);
     }
 
+    const char *Label() const
+    {
+        return sdrReference != nullptr ? "SDR operator LUT " : "Direct operator LUT ";
+    }
+
+    fo4hdr::LinearRgb Metric(const fo4hdr::LinearRgb &value) const
+    {
+        return fo4hdr::test::OperatorLutMetricNits(lut, value);
+    }
+
+    // SDR output must already lie in [0, 1] BT.709 before the metric mapping.
+    Pixel MeasuredPixel(const Pixel &raw)
+    {
+        if (sdrReference == nullptr)
+            return raw;
+        for (std::size_t channel = 0; channel < 3; ++channel)
+            contained = contained && std::isfinite(raw[channel]) && raw[channel] >= 0.0F && raw[channel] <= 1.0F;
+        const auto metric = Metric({raw[0], raw[1], raw[2]});
+        return {static_cast<float>(metric.red), static_cast<float>(metric.green), static_cast<float>(metric.blue),
+                raw[3]};
+    }
+
     fo4hdr::LinearRgb Reference(const fo4hdr::LinearRgb &scene) const
     {
+        if (sdrReference != nullptr)
+            return Metric(sdrReference->Map(scene));
         return algorithm == Algorithm::aces2
                    ? fo4hdr::MapAdaptedAces2ToBt2020Nits(*aces, scene, parameters.acesLookStrength)
                    : (algorithm == Algorithm::agX ? fo4hdr::MapAgxToBt2020Nits(scene, peak, parameters)
@@ -404,7 +430,7 @@ struct OperatorMeasurements
                      pixels] = dataset;
         for (std::size_t index = 0; index < corpus.size(); ++index) {
             const auto *row = static_cast<const std::byte *>(mapped.pData) + (index / kWidth) * mapped.RowPitch;
-            const auto &actual = reinterpret_cast<const Pixel *>(row)[index % kWidth];
+            const auto actual = MeasuredPixel(reinterpret_cast<const Pixel *>(row)[index % kWidth]);
             // Match the float32 input actually seen by HLSL, not a different
             // double-precision color or a rounded FP16 intermediate.
             const fo4hdr::LinearRgb scene{pixels[index][0], pixels[index][1], pixels[index][2]};
@@ -412,7 +438,7 @@ struct OperatorMeasurements
             const std::array expectedChannels{expected.red, expected.green, expected.blue};
             // Compare exact uploaded texels separately from approximation of the
             // analytical operator; neither creative grading nor UI can mask it.
-            const auto sampled = fo4hdr::test::SampleOperatorLut(lut, scene);
+            const auto sampled = Metric(fo4hdr::test::SampleOperatorLut(lut, scene));
             const std::array sampledChannels{sampled.red, sampled.green, sampled.blue};
             const auto region = index < broadEnd ? fo4hdr::test::OperatorLutQualityRegion::broad :
                 (index < holdoutEnd ? fo4hdr::test::OperatorLutQualityRegion::holdout :
@@ -468,7 +494,7 @@ struct OperatorMeasurements
     {
         const auto &[broadMeanError, holdoutMeanError, total, approximation, sampler, defaults, passed] = verdict;
         const auto &pixels = dataset.pixels;
-        const char *label = "Direct operator LUT ";
+        const char *label = Label();
 
         const auto &worst = pixels[worstIndex];
         std::cerr << __FILE__ << ':' << __LINE__ << ": FAIL: " << label << Name(algorithm) << " peak=" << peak
@@ -497,7 +523,7 @@ struct OperatorMeasurements
         const auto &[bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark] = timing;
         const auto verdict = Evaluate();
         const auto &[broadMeanError, holdoutMeanError, total, approximation, sampler, defaults, passed] = verdict;
-        const char *label = "Direct operator LUT ";
+        const char *label = Label();
         std::cout << label << Name(algorithm) << " peak=" << peak << " parameters=" << parameters.acesLookStrength
                   << ',' << parameters.agxMiddleGrayEv << ',' << parameters.agxContrast << ','
                   << parameters.agxHdrPurity << ',' << parameters.agxHdrShoulderPower << ','
@@ -583,15 +609,25 @@ struct OperatorExecution
     ID3D11DeviceContext &context;
     ID3D11ComputeShader &shader;
     ID3D11SamplerState &sampler;
+    ID3D11ComputeShader &sdrShader;
 };
 
+// An SDR case's peak is its operator's fixed SDR white.
 struct OperatorCase
 {
     Algorithm algorithm;
     double peak;
     bool benchmark;
     fo4hdr::ToneMapperParameters parameters{};
+    fo4hdr::OperatorLutTarget target{fo4hdr::OperatorLutTarget::hdr10};
 };
+
+fo4hdr::OperatorLutData BuildCaseLut(const OperatorCase &test)
+{
+    return test.target == fo4hdr::OperatorLutTarget::sdr
+               ? fo4hdr::BuildSdrOperatorLut(test.algorithm, test.parameters)
+               : fo4hdr::BuildOperatorLut(test.algorithm, test.peak, test.parameters);
+}
 
 struct UploadedOperatorLut
 {
@@ -637,10 +673,50 @@ struct OperatorBatch
     }
 };
 
+// The analytical responses a case is measured against: the retained ACES2
+// transform for HDR cases, or the table's own reference for SDR cases.
+struct CaseOracle
+{
+    bool sdr;
+    fo4hdr::Aces2TransformHandle aces;
+    fo4hdr::test::OperatorLutReference sdrReference;
+
+    CaseOracle(const OperatorCase &test, const fo4hdr::OperatorLutData &lut)
+        : sdr(test.target == fo4hdr::OperatorLutTarget::sdr),
+          aces(!sdr && IsAces2Family(test.algorithm) ? fo4hdr::CreateAces2Transform(test.peak)
+                                                     : fo4hdr::Aces2TransformHandle{}),
+          sdrReference(lut)
+    {
+    }
+
+    bool Ready(Algorithm algorithm) const
+    {
+        if (sdr)
+            return sdrReference.IsValid();
+        return !IsAces2Family(algorithm) || aces != nullptr;
+    }
+
+    double MeasurementPeak(double peak) const
+    {
+        return sdr ? fo4hdr::kSceneReferenceWhiteNits : peak;
+    }
+
+    const fo4hdr::test::OperatorLutReference *SdrReference() const
+    {
+        return sdr ? &sdrReference : nullptr;
+    }
+};
+
+ID3D11ComputeShader &CaseShader(const OperatorExecution &execution, const OperatorCase &test)
+{
+    return test.target == fo4hdr::OperatorLutTarget::sdr ? execution.sdrShader : execution.shader;
+}
+
 int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
 {
-    const auto &[device, context, shader, sampler] = execution;
-    const auto &[algorithm, peak, benchmark, parameters] = test;
+    const auto &[device, context, hdrShader, sampler, sdrShader] = execution;
+    const auto &[algorithm, peak, benchmark, parameters, target] = test;
+    auto &shader = CaseShader(execution, test);
     const OperatorCorpus dataset(peak);
     const auto &[corpus, broadEnd, holdoutBegin, holdoutEnd, darkBegin, darkEnd, neutralBegin, neutralEnd, height,
                  pixels] = dataset;
@@ -648,7 +724,7 @@ int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
     const auto &[input, output, staging, inputView, outputView] = batch;
 
     const auto bakeStart = Clock::now();
-    const auto lut = fo4hdr::BuildOperatorLut(algorithm, peak, parameters);
+    const auto lut = BuildCaseLut(test);
     const auto bakeEnd = Clock::now();
     if (!lut.IsValid())
         throw std::runtime_error("Operator LUT generation failed");
@@ -694,12 +770,13 @@ int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
     D3D11_MAPPED_SUBRESOURCE mapped{};
     Require(context.Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Read direct production LUT sampling");
 
-    const auto aces = IsAces2Family(algorithm) ? fo4hdr::CreateAces2Transform(peak) : fo4hdr::Aces2TransformHandle{};
-    if (IsAces2Family(algorithm) && !aces) {
+    const CaseOracle oracle(test, lut);
+    if (!oracle.Ready(algorithm)) {
         context.Unmap(staging.Get(), 0);
-        throw std::runtime_error("Cannot create retained ACES oracle");
+        throw std::runtime_error("Cannot create retained operator oracle");
     }
-    OperatorMeasurements measurements{dataset, algorithm, peak, parameters, aces, lut};
+    OperatorMeasurements measurements{dataset,    algorithm, oracle.MeasurementPeak(peak), parameters,
+                                      oracle.aces, lut,       oracle.SdrReference()};
     measurements.Measure(mapped);
     context.Unmap(staging.Get(), 0);
     return measurements.Report({bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark});
@@ -725,6 +802,26 @@ fo4hdr::ToneMapperParameters Gt7CornerParameters(unsigned corner)
     return parameters;
 }
 
+// SDR corners check safety and report quality; defaults alone qualify size.
+// SDR AgX Middle Gray tops out at zero, and Shoulder Power has no SDR effect.
+int VerifySdrCorners(const OperatorExecution &execution)
+{
+    const auto sdrCase = [](Algorithm algorithm, const fo4hdr::ToneMapperParameters &parameters) {
+        return OperatorCase{algorithm, fo4hdr::SdrOperatorWhiteNits(algorithm), false, parameters,
+                            fo4hdr::OperatorLutTarget::sdr};
+    };
+    int failures{};
+    for (const double strength : {0.0, 0.5})
+        failures += VerifyCase(execution, sdrCase(Algorithm::aces2, {.acesLookStrength = strength}));
+    for (unsigned corner = 0; corner < 8; ++corner) {
+        auto agx = AgxCornerParameters(corner);
+        agx.agxMiddleGrayEv = std::min(agx.agxMiddleGrayEv, fo4hdr::kMaximumSdrAgxMiddleGrayEv);
+        failures += VerifyCase(execution, sdrCase(Algorithm::agX, agx));
+        failures += VerifyCase(execution, sdrCase(Algorithm::gt7, Gt7CornerParameters(corner)));
+    }
+    return failures;
+}
+
 } // namespace
 
 int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context, bool benchmark)
@@ -742,13 +839,21 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
     descriptor.MaxLOD = D3D11_FLOAT32_MAX;
     ComPtr<ID3D11SamplerState> sampler;
     Require(device.CreateSamplerState(&descriptor, &sampler), "Create production-style LUT sampler");
-    const OperatorExecution execution{device, context, *shader.Get(), *sampler.Get()};
+    ComPtr<ID3D11ComputeShader> sdrShader;
+    const auto &sdrBytecode = fo4hdr::generated::test::kSdrOperatorLutCs;
+    Require(device.CreateComputeShader(sdrBytecode.data(), sdrBytecode.size(), nullptr, &sdrShader),
+            "Create build-time SDR operator LUT test shader");
+    const OperatorExecution execution{device, context, *shader.Get(), *sampler.Get(), *sdrShader.Get()};
     int failures{};
     for (const auto algorithm : {Algorithm::aces2, Algorithm::agX, Algorithm::gt7}) {
         for (const auto peak : {400.0, 430.0, 1000.0, 2000.0}) {
             failures += VerifyCase(execution, {algorithm, peak, benchmark});
         }
+        // Each SDR configuration qualifies its defaults at its fixed white.
+        failures += VerifyCase(execution, {algorithm, fo4hdr::SdrOperatorWhiteNits(algorithm), benchmark, {},
+                                           fo4hdr::OperatorLutTarget::sdr});
     }
+    failures += VerifySdrCorners(execution);
     // Configured corners check safety and report quality; defaults alone qualify size.
     for (const auto peak : {400.0, 2000.0}) {
         for (const double strength : {0.0, 0.25, 0.5, 0.75}) {

@@ -4,7 +4,9 @@
 #include "FO4Isotope/ShippingShaders.generated.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include "reference/ImageControlReference.hpp"
+#include "reference/OperatorLutTestSupport.hpp"
 #include "reference/ShaderReference.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -46,11 +48,10 @@ ImageSpaceConstantsWithFinalAffine SdrImageSpace(float toeNumerator)
 
 // Oracle for the pinned RenoDX vanilla tone map after exposure: the
 // Uncharted 2 curve with the live toe numerator, then the ImageSpace filter.
-NativeGradeRgb VanillaToneMap(const NativeGradeRgb& exposed,
-    const ImageSpaceConstantsWithFinalAffine& cb2, bool finalAffine)
+NativeGradeRgb VanillaToneCurve(const NativeGradeRgb& exposed,
+    const ImageSpaceConstantsWithFinalAffine& cb2)
 {
-    const auto& values = cb2.values;
-    const double toe = values[1].alpha;
+    const double toe = cb2.values[1].alpha;
     const double white = (toe * 0.2 + 19.3759995) * 0.0408563502 - toe * 3.333333;
     NativeGradeRgb curved{};
     for (std::size_t channel = 0; channel < 3; ++channel)
@@ -59,6 +60,13 @@ NativeGradeRgb VanillaToneMap(const NativeGradeRgb& exposed,
         curved[channel] = ((2.0 * x * (0.3 * x + 0.05) + 0.2 * toe) /
             (2.0 * x * (0.3 * x + 0.5) + 0.06) - toe * 3.333333) / white;
     }
+    return curved;
+}
+
+NativeGradeRgb VanillaFilter(const NativeGradeRgb& curved,
+    const ImageSpaceConstantsWithFinalAffine& cb2, bool finalAffine)
+{
+    const auto& values = cb2.values;
     const double luminance = curved[0] * kFilterLuma[0] + curved[1] * kFilterLuma[1] +
         curved[2] * kFilterLuma[2];
     const std::array<double, 3> tint{values[3].red, values[3].green, values[3].blue};
@@ -88,14 +96,21 @@ std::array<Float4, kWidth> ReadPixels(Device& device, Texture& output)
     return pixels;
 }
 
-void CheckPixel(const Float4& actual, const NativeGradeRgb& expected,
-    std::string_view label, std::size_t sample)
+struct PixelCheck
 {
+    std::string_view label;
+    std::size_t sample;
+    double tolerance{1.0e-4};
+};
+
+void CheckPixel(const Float4& actual, const NativeGradeRgb& expected, const PixelCheck& check)
+{
+    const auto& [label, sample, tolerance] = check;
     const std::array<double, 3> values{actual.red, actual.green, actual.blue};
     for (std::size_t channel = 0; channel < 3; ++channel)
     {
         const bool acceptable = std::isfinite(values[channel]) &&
-            std::abs(values[channel] - expected[channel]) <= 1.0e-4;
+            std::abs(values[channel] - expected[channel]) <= tolerance;
         if (!acceptable)
             std::cerr << label << ": sample=" << sample << " channel=" << channel
                       << " actual=" << values[channel] << " expected=" << expected[channel] << '\n';
@@ -123,13 +138,17 @@ struct SdrToneMapFixture
     Texture bypassDepth;
     Texture output;
     std::array<ComPtr<ID3D11PixelShader>, 4> shaders;
+    ComPtr<ID3D11SamplerState> lutSampler;
 
+    // An operator case binds its SDR table at t7/s7.
     struct Case
     {
         std::string_view label;
         ToneMapConstants settings;
         float toeNumerator;
         bool bypass;
+        const fo4hdr::OperatorLutData* lut{};
+        ID3D11ShaderResourceView* lutView{};
     };
 
     void Run(const Case& test)
@@ -139,23 +158,27 @@ struct SdrToneMapFixture
         const auto imageSpace = CreateConstantBuffer(*device.device.Get(), cb2);
         const auto settings = CreateConstantBuffer(*device.device.Get(), test.settings);
         auto* depthView = test.bypass ? bypassDepth.srv.Get() : depth.srv.Get();
+        // GPU filtering of the coefficient table adds subtexel interpolation error.
+        const double tolerance = test.lut != nullptr ? 1.0e-3 : 1.0e-4;
         for (std::size_t variant = 0; variant < shaders.size(); ++variant)
         {
             const bool newVariant = variant >= 2;
             const bool finalAffine = (variant & 1U) != 0U;
-            std::array<ID3D11ShaderResourceView*, 4> resources{
+            std::array<ID3D11ShaderResourceView*, 8> resources{
                 newVariant ? scene.srv.Get() : bloom.srv.Get(),
                 newVariant ? bloom.srv.Get() : scene.srv.Get(),
-                exposure.srv.Get(), depthView};
-            std::array<ID3D11SamplerState*, 4> samplers{sampler, sampler, sampler, sampler};
+                exposure.srv.Get(), depthView, nullptr, nullptr, nullptr, test.lutView};
+            std::array<ID3D11SamplerState*, 8> samplers{sampler, sampler, sampler, sampler,
+                nullptr, nullptr, nullptr, lutSampler.Get()};
             ID3D11RenderTargetView* targets[]{output.rtv.Get()};
             DrawFullscreen(*device.context.Get(), {vertexShader, shaders[variant].Get(),
-                imageSpace.Get(), settings.Get(), resources.data(), 4U,
-                samplers.data(), 4U, targets, 1});
+                imageSpace.Get(), settings.Get(), resources.data(), 8U,
+                samplers.data(), 8U, targets, 1});
             const auto pixels = ReadPixels(device, output);
+            const auto label = std::string(names[variant]) + " " + std::string(test.label);
             for (std::size_t sample = 0; sample < kWidth; ++sample)
                 CheckPixel(pixels[sample], Expected(test, cb2, finalAffine, kSdrScene[sample]),
-                    std::string(names[variant]) + " " + std::string(test.label), sample);
+                    {label, sample, tolerance});
         }
     }
 
@@ -171,7 +194,11 @@ struct SdrToneMapFixture
             (scene.blue + kSdrBloom.blue * bloomScale) * gain};
         exposed = ApplyImageControlsOracle(exposed, test.settings.shadowsEv,
             test.settings.contrastSlope, test.settings.blacksStrength);
-        return VanillaToneMap(exposed, cb2, finalAffine);
+        if (test.lut == nullptr) return VanillaFilter(VanillaToneCurve(exposed, cb2), cb2, finalAffine);
+        // The operator takes the exposed value without the curve's exposure bias.
+        const auto mapped = fo4hdr::test::SampleOperatorLut(*test.lut,
+            {exposed[0], exposed[1], exposed[2]});
+        return VanillaFilter({mapped.red, mapped.green, mapped.blue}, cb2, finalAffine);
     }
 };
 
@@ -179,6 +206,18 @@ struct SdrToneMapFixture
 {
     return {0U, 1000.0F, kReferenceWhiteNits, kReferenceWhiteNits,
         1.0F, kReferenceWhiteNits, 0.0F, 0.0F};
+}
+
+// b13 selects the table's operator (ACES2 1, AgX 2, GT7 3). The harness derives
+// the shaper lanes from the peak lane, which carries the SDR white here.
+[[nodiscard]] ToneMapConstants OperatorSdrConstants(const fo4hdr::OperatorLutData& lut) noexcept
+{
+    using Algorithm = fo4hdr::ProductionToneMapperAlgorithm;
+    auto constants = NeutralSdrConstants();
+    constants.productionMode = lut.algorithm == Algorithm::aces2 ? 1U :
+        (lut.algorithm == Algorithm::agX ? 2U : 3U);
+    constants.displayPeakNits = static_cast<float>(lut.displayPeakNits);
+    return constants;
 }
 
 void VerifySdrToneMapPixelShaders(Device& device, ID3D11VertexShader* vertexShader,
@@ -196,7 +235,8 @@ void VerifySdrToneMapPixelShaders(Device& device, ID3D11VertexShader* vertexShad
         {CreatePixelShader(d3d, fo4hdr::generated::kToneMapASdr),
             CreatePixelShader(d3d, fo4hdr::generated::kToneMapBSdr),
             CreatePixelShader(d3d, fo4hdr::generated::kToneMapNewASdr),
-            CreatePixelShader(d3d, fo4hdr::generated::kToneMapNewBSdr)}};
+            CreatePixelShader(d3d, fo4hdr::generated::kToneMapNewBSdr)},
+        CreateClampLinearSampler(d3d)};
 
     // Neutral controls reproduce the vanilla curve and filter for both toe values.
     fixture.Run({"neutral", NeutralSdrConstants(), 0.02F, false});
@@ -212,6 +252,21 @@ void VerifySdrToneMapPixelShaders(Device& device, ID3D11VertexShader* vertexShad
     controlled.shadowsEv = 0.5F;
     controlled.contrastSlope = 1.25F;
     fixture.Run({"image controls", controlled, 0.02F, false});
+    // Modes 1-3 replace the curve with the operator's SDR table; the filter
+    // still follows, and the depth-mask bypass still skips both.
+    for (const auto algorithm : {fo4hdr::ProductionToneMapperAlgorithm::aces2,
+             fo4hdr::ProductionToneMapperAlgorithm::agX, fo4hdr::ProductionToneMapperAlgorithm::gt7})
+    {
+        const auto lut = fo4hdr::BuildSdrOperatorLut(algorithm);
+        FO4HDR_WARP_CHECK(lut.IsValid());
+        if (!lut.IsValid()) continue;
+        const auto table = CreateOperatorLut(d3d, lut);
+        const auto constants = OperatorSdrConstants(lut);
+        constexpr std::array labels{"ACES2 operator", "AgX operator", "GT7 operator"};
+        fixture.Run({labels[static_cast<std::size_t>(algorithm)], constants, 0.02F, false,
+            &lut, table.srv.Get()});
+        fixture.Run({"operator bypass", constants, 0.02F, true, &lut, table.srv.Get()});
+    }
 }
 
 [[nodiscard]] Texture3D CreateUniformLut(ID3D11Device& device, Float4 code)
@@ -308,7 +363,7 @@ void VerifySdrGradeLutPixelShader(Device& device, ID3D11VertexShader* vertexShad
                 expected = EncodeGamma22(ApplyVanillaGradeRemovalOracle(
                     display, graded, test.luminanceRemoval, test.colorRemoval));
             }
-            CheckPixel(pixels[sample], expected, test.label, sample);
+            CheckPixel(pixels[sample], expected, {test.label, sample});
             FO4HDR_WARP_CHECK(pixels[sample].alpha == input.alpha);
         }
     }

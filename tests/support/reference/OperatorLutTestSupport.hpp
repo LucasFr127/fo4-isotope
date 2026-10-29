@@ -2,9 +2,13 @@
 #pragma once
 
 #include "FO4Isotope/output/Hdr10Color.hpp"
+#include "FO4Isotope/tonemap/Aces2.hpp"
+#include "FO4Isotope/tonemap/Agx.hpp"
+#include "FO4Isotope/tonemap/Gt7.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace fo4hdr::test {
@@ -20,6 +24,25 @@ namespace fo4hdr::test {
 // project policy reads it at the 203-nit scene reference white.
 [[nodiscard]] LinearRgb OperatorLutMetricNits(
     const OperatorLutData& lut, LinearRgb value) noexcept;
+
+// The analytical response a table approximates, in the table's own domain and
+// with its final containment. The table must outlive the reference.
+class OperatorLutReference
+{
+public:
+    explicit OperatorLutReference(const OperatorLutData& lut) noexcept;
+    [[nodiscard]] bool IsValid() const noexcept;
+    [[nodiscard]] LinearRgb Map(LinearRgb scene) const noexcept;
+    [[nodiscard]] const OperatorLutData& Data() const noexcept { return data_; }
+
+private:
+    [[nodiscard]] LinearRgb MapSdr(LinearRgb scene) const noexcept;
+
+    const OperatorLutData& data_;
+    Aces2TransformHandle aces2_;
+    std::optional<AgxTransform> agx_;
+    Gt7TransformHandle gt7_;
+};
 
 // Maximum errors use two significant digits with positive ties upward; p99 and
 // the one-unit potential-JND goal remain unrounded. BT.2124 Annex 4 reports 2.363
