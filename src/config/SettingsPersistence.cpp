@@ -1049,7 +1049,7 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
     return ValidateHdrSettings(settings.hdr) == HdrSettingsValidationError::none &&
-        ValidateHdrSettings(settings.sdr) == HdrSettingsValidationError::none &&
+        ValidateProfileSettings(settings.sdr, true) == HdrSettingsValidationError::none &&
         ValidateHdrInterfaceSettings(interfaceSettings) == HdrInterfaceSettingsValidationError::none;
 }
 

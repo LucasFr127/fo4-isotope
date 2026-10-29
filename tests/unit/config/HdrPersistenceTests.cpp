@@ -178,9 +178,21 @@ void CheckSdrProfileRewrite()
     sdr.selectiveColor.enabled = true;
     sdr.selectiveColor.regions[3].saturationPercent = 80.0;
     sdr.weatherGradeResponse.enabled = true;
+    sdr.toneMapperParameters.agxContrast = 2.5;
     const HdrSettingsProfiles profiles{.hdr = HdrSettings{}, .sdr = sdr};
     // Missing SDR sections are appended under their own names, without HDR-only keys.
     const auto saved = RewriteHdrSettingsIni(MinimalProductionConfiguration(), profiles, {});
+    // A section runs through the newline that ends its last key.
+    const auto section = [&saved](std::string_view header) {
+        const auto begin = saved.find(header);
+        if (begin == std::string::npos) return std::string{};
+        const auto end = saved.find("\n[", begin);
+        return saved.substr(begin, end == std::string::npos ? end : end + 1 - begin);
+    };
+    FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Native\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
+    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrImage]\nExposureEV=-0.5\nContrast=15\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrEffects]\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("BloomStrength=60\n") != std::string::npos);

@@ -40,10 +40,22 @@ struct PluginConfiguration : HdrSettings
 // SDR profile sections reuse their HDR section's key names.
 struct SdrProfileSection { std::string_view sdr; std::string_view base; };
 inline constexpr std::array kSdrProfileSections{
+    SdrProfileSection{"SdrToneMapper", "ToneMapper"},
+    SdrProfileSection{"SdrACES2", "ACES2"},
+    SdrProfileSection{"SdrAgX", "AgX"},
+    SdrProfileSection{"SdrGT7", "GT7"},
     SdrProfileSection{"SdrImage", "Image"},
     SdrProfileSection{"SdrSelectiveColor", "SelectiveColor"},
     SdrProfileSection{"SdrEffects", "Effects"},
     SdrProfileSection{"SdrWeatherLutResponse", "WeatherLutResponse"}};
+
+// HDR-only keys of those sections: the grading method and curve lift the LUTs
+// into HDR, and AgX Shoulder Power has no effect at the SDR white.
+struct SdrExcludedKey { std::string_view base; std::string_view key; };
+inline constexpr std::array kHdrOnlyProfileKeys{
+    SdrExcludedKey{"Image", "ColorGradingMethod"},
+    SdrExcludedKey{"Image", "ColorGradingCurve"},
+    SdrExcludedKey{"AgX", "ShoulderPower"}};
 
 // The HDR base section of an SDR profile section, or empty for any other section.
 [[nodiscard]] constexpr std::string_view SdrProfileBaseSection(std::string_view section) noexcept
@@ -61,11 +73,12 @@ inline constexpr std::array kSdrProfileSections{
     return {};
 }
 
-// The HDR-only grading method and curve are not part of the SDR profile.
 [[nodiscard]] constexpr bool IsSdrProfileKey(std::string_view base, std::string_view key) noexcept
 {
-    return !SdrProfileSectionName(base).empty() &&
-        !(base == "Image" && (key == "ColorGradingMethod" || key == "ColorGradingCurve"));
+    if (SdrProfileSectionName(base).empty()) return false;
+    for (const auto& excluded : kHdrOnlyProfileKeys)
+        if (excluded.base == base && excluded.key == key) return false;
+    return true;
 }
 
 enum class PluginConfigurationError

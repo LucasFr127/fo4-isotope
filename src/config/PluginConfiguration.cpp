@@ -404,6 +404,14 @@ constexpr ConfigurationKey kConfigurationKeys[]{
         {RequiredKey::vanillaGradeLuminance, &configuration.vanillaGradeLuminancePercent},
         {RequiredKey::vanillaGradeColor, &configuration.vanillaGradeColorPercent},
         {RequiredKey::bloomStrength, &configuration.bloomStrengthPercent},
+        {RequiredKey::acesLookStrength, &configuration.toneMapperParameters.acesLookStrength},
+        {RequiredKey::agxMiddleGrayEv, &configuration.toneMapperParameters.agxMiddleGrayEv},
+        {RequiredKey::agxContrast, &configuration.toneMapperParameters.agxContrast},
+        {RequiredKey::agxHdrPurity, &configuration.toneMapperParameters.agxHdrPurity},
+        {RequiredKey::agxHdrShoulderPower, &configuration.toneMapperParameters.agxHdrShoulderPower},
+        {RequiredKey::gt7ToeStrength, &configuration.toneMapperParameters.gt7ToeStrength},
+        {RequiredKey::gt7ShoulderStart, &configuration.toneMapperParameters.gt7ShoulderStart},
+        {RequiredKey::gt7ColorBlend, &configuration.toneMapperParameters.gt7ColorBlend},
     };
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? nullptr : found->value;
@@ -418,14 +426,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
         {RequiredKey::displayPeakNits, &configuration.displayPeakNits},
         {RequiredKey::uiPaperWhiteNits, &configuration.uiPaperWhiteNits},
         {RequiredKey::videoWhiteNits, &configuration.videoWhiteNits},
-        {RequiredKey::acesLookStrength, &configuration.toneMapperParameters.acesLookStrength},
-        {RequiredKey::agxMiddleGrayEv, &configuration.toneMapperParameters.agxMiddleGrayEv},
-        {RequiredKey::agxContrast, &configuration.toneMapperParameters.agxContrast},
-        {RequiredKey::agxHdrPurity, &configuration.toneMapperParameters.agxHdrPurity},
-        {RequiredKey::agxHdrShoulderPower, &configuration.toneMapperParameters.agxHdrShoulderPower},
-        {RequiredKey::gt7ToeStrength, &configuration.toneMapperParameters.gt7ToeStrength},
-        {RequiredKey::gt7ShoulderStart, &configuration.toneMapperParameters.gt7ShoulderStart},
-        {RequiredKey::gt7ColorBlend, &configuration.toneMapperParameters.gt7ColorBlend},
         {RequiredKey::interfaceScale, &configuration.interfaceSettings.scale},
         {RequiredKey::settingsWindowWidth, &configuration.interfaceSettings.windowWidth},
         {RequiredKey::settingsWindowHeight, &configuration.interfaceSettings.windowHeight},
@@ -531,6 +531,18 @@ PluginConfigurationError ParseAlgorithm(std::string_view value,
     return PluginConfigurationError::none;
 }
 
+// The SDR profile adds the native curve and offers only selectable operators.
+PluginConfigurationError ParseSdrAlgorithm(std::string_view value,
+    ProductionToneMapperAlgorithm& target) noexcept
+{
+    auto algorithm = ProductionToneMapperAlgorithm::native;
+    if (value != "Native" && ParseAlgorithm(value, algorithm) != PluginConfigurationError::none)
+        return PluginConfigurationError::unsupportedAlgorithm;
+    if (!IsSelectableSdrToneMapper(algorithm)) return PluginConfigurationError::unsupportedAlgorithm;
+    target = algorithm;
+    return PluginConfigurationError::none;
+}
+
 PluginConfigurationError ParseGradingMethod(std::string_view value,
     ColorGradingMethod& target) noexcept
 {
@@ -573,12 +585,13 @@ bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
     return nullptr;
 }
 
-// SDR profile sections accept only the shared creative controls.
+// SDR profile sections accept only the shared creative controls and the tone curve.
 PluginConfigurationError ParseProfileSetting(HdrSettings& profile,
     RequiredKey key, std::string_view value) noexcept
 {
     if (auto* target = ProfileNumericTarget(profile, key))
         return ParseNumber(value, NumericRange(key), *target);
+    if (key == RequiredKey::algorithm) return ParseSdrAlgorithm(value, profile.productionAlgorithm);
     auto* flag = ProfileBooleanTarget(profile, key);
     return flag != nullptr && ParseBoolean(value, *flag) ?
         PluginConfigurationError::none : PluginConfigurationError::invalidBoolean;
@@ -637,7 +650,7 @@ PluginConfigurationError ValidateConfiguration(const PluginConfiguration& parsed
     if (ValidateHdrInterfaceSettings(parsed.interfaceSettings) != HdrInterfaceSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
     if (ValidateHdrSettings(parsed) != HdrSettingsValidationError::none ||
-        ValidateHdrSettings(parsed.sdrSettings) != HdrSettingsValidationError::none)
+        ValidateProfileSettings(parsed.sdrSettings, true) != HdrSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
     return PluginConfigurationError::none;
 }
@@ -792,6 +805,7 @@ std::string_view ToString(
     case ProductionToneMapperAlgorithm::aces2: return "ACES2";
     case ProductionToneMapperAlgorithm::agX: return "AgX";
     case ProductionToneMapperAlgorithm::gt7: return "GT7";
+    case ProductionToneMapperAlgorithm::native: return "Native";
     }
     return "unknown";
 }

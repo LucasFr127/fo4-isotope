@@ -82,10 +82,14 @@ void TestSdrProfileConfiguration()
         "[SdrImage]\nExposureEV=0.5\nSaturation=120\nColorGradingMethod=Unknown\n"
         "[SdrEffects]\nBloomStrength=40\nVanillaGradeColorStrength=20\n"
         "[SdrSelectiveColor]\nEnabled=1\nRedHue=5\n"
-        "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n");
+        "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n"
+        "[SdrToneMapper]\nAlgorithm=Native\n"
+        "[SdrAgX]\nContrast=2.5\nShoulderPower=1.8\n");
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(!parsed.value.sdrEnabled);
     auto expected = DefaultSdrSettings();
+    // Shoulder Power has no SDR effect, so its SDR copy is ignored.
+    expected.toneMapperParameters.agxContrast = 2.5;
     expected.exposureEv = 0.5;
     expected.saturationPercent = 120.0;
     expected.bloomStrengthPercent = 40.0;
@@ -115,6 +119,22 @@ void TestSdrProfileConfiguration()
         PluginConfigurationError::invalidBoolean);
     FO4HDR_CHECK(SdrConfigurationError("[General]\nSdrEnabled=yes\n") ==
         PluginConfigurationError::invalidBoolean);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrAgX]\nContrast=3.1\n") ==
+        PluginConfigurationError::valueOutOfRange);
+
+    // SDR offers the native curve plus each operator once it is selectable.
+    FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=Vanilla\n") ==
+        PluginConfigurationError::unsupportedAlgorithm);
+    for (const auto [name, algorithm] : {std::pair{"ACES2", ProductionToneMapperAlgorithm::aces2},
+             std::pair{"AgX", ProductionToneMapperAlgorithm::agX},
+             std::pair{"GT7", ProductionToneMapperAlgorithm::gt7}})
+        FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=" + std::string(name) + "\n") ==
+            (IsSelectableSdrToneMapper(algorithm) ? PluginConfigurationError::none :
+                PluginConfigurationError::unsupportedAlgorithm));
+    // The HDR profile never takes the native curve.
+    auto hdrNative = MinimalProductionConfiguration();
+    hdrNative.replace(hdrNative.find("Algorithm=ACES2"), 15, "Algorithm=Native");
+    FO4HDR_CHECK(ParsePluginConfiguration(hdrNative).error == PluginConfigurationError::unsupportedAlgorithm);
 }
 
 void TestProductionConfiguration()

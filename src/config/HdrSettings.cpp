@@ -314,13 +314,15 @@ HdrSettingsValidationError ValidateColorGrading(const HdrSettings& settings) noe
     return HdrSettingsValidationError::none;
 }
 
-HdrSettingsValidationError ValidateHdrAlgorithms(const HdrSettings& settings) noexcept
+HdrSettingsValidationError ValidateToneMappers(
+    const HdrSettings& settings, bool sdrProfile) noexcept
 {
-
     constexpr std::array algorithms{ProductionToneMapperAlgorithm::aces2,
         ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7};
-    if (std::ranges::find(algorithms, settings.productionAlgorithm) == algorithms.end())
-        return HdrSettingsValidationError::unsupportedAlgorithm;
+    const auto selected = settings.productionAlgorithm;
+    const auto supported = sdrProfile ? IsSelectableSdrToneMapper(selected) :
+        std::ranges::find(algorithms, selected) != algorithms.end();
+    if (!supported) return HdrSettingsValidationError::unsupportedAlgorithm;
     if (!std::ranges::all_of(algorithms, [&settings](auto algorithm) {
             return ValidateToneMapperParameters(algorithm, settings.toneMapperParameters);
         }))
@@ -407,7 +409,13 @@ HdrSettingsValidationError ValidateHdrGrading(const HdrSettings& settings) noexc
 
 HdrSettingsValidationError ValidateHdrSettings(const HdrSettings& settings) noexcept
 {
-    if (const auto error = ValidateHdrAlgorithms(settings);
+    return ValidateProfileSettings(settings, false);
+}
+
+HdrSettingsValidationError ValidateProfileSettings(
+    const HdrSettings& settings, bool sdrProfile) noexcept
+{
+    if (const auto error = ValidateToneMappers(settings, sdrProfile);
         error != HdrSettingsValidationError::none) return error;
     if (const auto error = ValidateHdrLuminance(settings);
         error != HdrSettingsValidationError::none) return error;
@@ -458,7 +466,10 @@ HdrSettingsMath DeriveHdrSettingsMath(
     const HdrSettings& settings) noexcept
 {
     HdrSettingsMath result{};
-    if (ValidateHdrSettings(settings) != HdrSettingsValidationError::none)
+    // Only the SDR profile can select the native curve.
+    const auto sdrProfile =
+        settings.productionAlgorithm == ProductionToneMapperAlgorithm::native;
+    if (ValidateProfileSettings(settings, sdrProfile) != HdrSettingsValidationError::none)
         return result;
     result.sceneExposureMultiplier = std::exp2(settings.exposureEv);
     // The full slider range maps to a reversible one-stop contrast slope.
@@ -484,6 +495,7 @@ HdrSettingsMath DeriveHdrSettingsMath(
 HdrSettings DefaultSdrSettings() noexcept
 {
     HdrSettings settings{};
+    settings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
     settings.vanillaGradeLuminancePercent = 100.0;
     settings.vanillaGradeColorPercent = 100.0;
     settings.weatherGradeResponse.enabled = false;
@@ -493,7 +505,9 @@ HdrSettings DefaultSdrSettings() noexcept
 
 bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept
 {
-    const std::array neutral{settings.exposureEv == 0.0,
+    const std::array neutral{
+        settings.productionAlgorithm == ProductionToneMapperAlgorithm::native,
+        settings.exposureEv == 0.0,
         settings.bloomStrengthPercent == 100.0, settings.contrast == 0.0,
         settings.blacks == 0.0, settings.highlights == 0.0,
         settings.shadows == 0.0, settings.saturationPercent == 100.0,

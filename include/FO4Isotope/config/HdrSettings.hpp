@@ -27,8 +27,17 @@ enum class ProductionToneMapperAlgorithm : std::uint8_t
 {
     aces2,
     agX,
-    gt7
+    gt7,
+    // SDR profile only: the game's own tone curve.
+    native
 };
+
+// SDR profile choices. An operator joins once its SDR configuration qualifies.
+[[nodiscard]] constexpr bool IsSelectableSdrToneMapper(
+    ProductionToneMapperAlgorithm algorithm) noexcept
+{
+    return algorithm == ProductionToneMapperAlgorithm::native;
+}
 
 enum class ColorGradingMethod : std::uint8_t
 {
@@ -285,13 +294,16 @@ struct HdrSettingsMath
 
 [[nodiscard]] HdrSettingsValidationError ValidateHdrSettings(
     const HdrSettings& settings) noexcept;
+// The SDR profile follows the HDR rules but chooses among the SDR tone curves.
+[[nodiscard]] HdrSettingsValidationError ValidateProfileSettings(
+    const HdrSettings& settings, bool sdrProfile) noexcept;
 [[nodiscard]] bool ValidateToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
     const ToneMapperParameters& parameters) noexcept;
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(
     const HdrSettings& settings) noexcept;
-// SDR profile: vanilla-neutral defaults for the creative controls.
-// Its output, operator and grading-method fields keep HDR defaults and are unused.
+// SDR profile: vanilla-neutral defaults for the creative controls and the native
+// tone curve. Its output and grading-method fields keep HDR defaults and are unused.
 [[nodiscard]] HdrSettings DefaultSdrSettings() noexcept;
 // A neutral SDR pass reproduces vanilla, so its original shader draws.
 [[nodiscard]] bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept;

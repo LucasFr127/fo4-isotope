@@ -645,7 +645,8 @@ void CommitUiDraft(ID3D11DeviceContext* context) noexcept
 {
     (void)ConsumeSettingsCommitRequest();
     g_liveSettingsError = false;
-    if (ValidateHdrSettings(ReadSettingsDraft()) != HdrSettingsValidationError::none)
+    if (ValidateProfileSettings(ReadSettingsDraft(), g_sdrProfileSelected) !=
+        HdrSettingsValidationError::none)
     {
         g_liveSettingsError = true;
         return;

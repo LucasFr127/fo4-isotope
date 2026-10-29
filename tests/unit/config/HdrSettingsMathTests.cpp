@@ -49,7 +49,22 @@ void TestDefaultSettingsValues()
 void TestSdrProfileDefaults()
 {
     const auto sdr = DefaultSdrSettings();
-    FO4HDR_CHECK(ValidateHdrSettings(sdr) == HdrSettingsValidationError::none);
+    FO4HDR_CHECK(sdr.productionAlgorithm == ProductionToneMapperAlgorithm::native);
+    FO4HDR_CHECK(ValidateProfileSettings(sdr, true) == HdrSettingsValidationError::none);
+    // The native curve belongs to the SDR profile; operators join it once selectable.
+    FO4HDR_CHECK(ValidateHdrSettings(sdr) == HdrSettingsValidationError::unsupportedAlgorithm);
+    for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
+             ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7})
+    {
+        auto selected = sdr;
+        selected.productionAlgorithm = algorithm;
+        FO4HDR_CHECK(ValidateProfileSettings(selected, true) ==
+            (IsSelectableSdrToneMapper(algorithm) ? HdrSettingsValidationError::none :
+                HdrSettingsValidationError::unsupportedAlgorithm));
+    }
+    auto brighter = sdr;
+    brighter.exposureEv = 1.0;
+    FO4HDR_CHECK(DeriveHdrSettingsMath(brighter).sceneExposureMultiplier == 2.0);
     FO4HDR_CHECK(sdr.bloomStrengthPercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeColorPercent == 100.0);
@@ -72,6 +87,7 @@ void TestSdrProfileDefaults()
         return SdrSceneControlsNeutral(settings) && !SdrGradeControlsNeutral(settings);
     };
     for (const Edit edit : {Edit{[](HdrSettings& s) { s.exposureEv = 0.1; }},
+             Edit{[](HdrSettings& s) { s.productionAlgorithm = ProductionToneMapperAlgorithm::agX; }},
              Edit{[](HdrSettings& s) { s.bloomStrengthPercent = 99.0; }},
              Edit{[](HdrSettings& s) { s.contrast = 1.0; }},
              Edit{[](HdrSettings& s) { s.blacks = -1.0; }},
