@@ -110,9 +110,9 @@ bool ToneMapperPanel::DrawSlider(const ToneMapperControl& control) noexcept
     const auto& [label, parameter, presentation] = control;
     auto& value = settings.toneMapperParameters.*parameter;
     const auto changed = detail::DrawSettingsPanelSlider(label, value, presentation);
-    // HDR ranges were measured at display peaks; no SDR ranges are recorded yet.
-    const auto range = sdrProfile ? ToneMapperRecommendedRange{} : GetToneMapperRecommendedRange(
-        settings.productionAlgorithm, settings.displayPeakNits, parameter);
+    const auto range = sdrProfile ?
+        GetSdrToneMapperRecommendedRange(settings.productionAlgorithm, parameter) :
+        GetToneMapperRecommendedRange(settings.productionAlgorithm, settings.displayPeakNits, parameter);
     if (range.available)
     {
         std::array<char, 32> minimum{}, maximum{};

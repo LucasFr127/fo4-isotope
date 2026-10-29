@@ -123,12 +123,11 @@ void RenderSdrSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
     FO4HDR_CHECK(settings == before);
 }
 
-// Vertices one AgX panel draws. A zero peak leaves HDR ranges unavailable, as in SDR.
+// Vertices one AgX panel draws; both profiles show recommended ranges here.
 int AgxPanelVertices(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
 {
     HdrSettings settings{};
     settings.productionAlgorithm = ProductionToneMapperAlgorithm::agX;
-    settings.displayPeakNits = 0.0;
     settings.toneMapperParameters.agxMiddleGrayEv = middleGrayEv;
     int vertices{};
     ImGui::NewFrame();
@@ -151,6 +150,60 @@ void CheckSdrAgxControls(ImVec2 windowSize)
     const auto sdr = AgxPanelVertices(-0.25, true, windowSize);
     const auto sdrNeutral = AgxPanelVertices(0.0, true, windowSize);
     FO4HDR_CHECK(sdrNeutral < sdr && sdr < hdr);
+}
+
+// Vertices of one frame showing the SDR Output tab for a tone curve.
+int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize)
+{
+    auto settings = DefaultSdrSettings();
+    settings.productionAlgorithm = algorithm;
+    SettingsWindowView view{};
+    view.activeSettings = settings;
+    view.sdrMode = true;
+    bool commitRequested{};
+    ImGui::NewFrame();
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+    if (ImGui::Begin("SDR output smoke", nullptr, ImGuiWindowFlags_NoSavedSettings) &&
+        ImGui::BeginTabBar("SDR output tabs"))
+    {
+        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
+    ImGui::Render();
+    FO4HDR_CHECK(!commitRequested);
+    return ImGui::GetDrawData()->TotalVtxCount;
+}
+
+// The SDR Tone Curve choice is followed by the selected operator's controls.
+void CheckSdrOperatorControls(ImVec2 windowSize)
+{
+    CheckSdrAgxControls(windowSize);
+    (void)SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize);
+    const auto native = SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize);
+    for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
+             ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7})
+        FO4HDR_CHECK(SdrOutputVertices(algorithm, windowSize) > native);
+}
+
+void TestSdrToneMapperRecommendedRanges()
+{
+    const auto aces = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::aces2,
+        &ToneMapperParameters::acesLookStrength);
+    FO4HDR_CHECK(aces.available && aces.minimum == 0.0 && aces.maximum == 1.0);
+    const auto middleGray = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
+        &ToneMapperParameters::agxMiddleGrayEv);
+    FO4HDR_CHECK(middleGray.available && middleGray.minimum == -0.5 && middleGray.maximum == 0.0);
+    const auto shoulder = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::gt7,
+        &ToneMapperParameters::gt7ShoulderStart);
+    FO4HDR_CHECK(shoulder.available && shoulder.minimum == 0.35 && shoulder.maximum == 0.6);
+    // Shoulder Power has no SDR effect; native and mismatched controls have no range.
+    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
+        &ToneMapperParameters::agxHdrShoulderPower).available);
+    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::native,
+        &ToneMapperParameters::acesLookStrength).available);
+    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::gt7,
+        &ToneMapperParameters::agxContrast).available);
 }
 
 void TestToneMapperRecommendationFloatEndpoints()
@@ -231,14 +284,20 @@ void TestToneMapperRecommendedIntervals()
     FO4HDR_CHECK(gt7.minimum == 0.35 && gt7.maximum == 0.6);
 }
 
-}  // namespace
-
-void TestToneMapperPanelSmoke()
+void TestToneMapperRecommendations()
 {
     TestToneMapperRecommendationStatus();
     TestToneMapperRecommendationFloatEndpoints();
     TestToneMapperRecommendedPeaks();
     TestToneMapperRecommendedIntervals();
+    TestSdrToneMapperRecommendedRanges();
+}
+
+}  // namespace
+
+void TestToneMapperPanelSmoke()
+{
+    TestToneMapperRecommendations();
     const auto render = [](ProductionToneMapperAlgorithm algorithm,
                             ImVec2 windowSize,
                             float scale)
@@ -292,7 +351,7 @@ void TestToneMapperPanelSmoke()
         FO4HDR_CHECK(settings.toneMapperParameters == before);
         RenderEffectsSettingsFrames(settings, windowSize);
         RenderSdrSettingsFrames(settings, windowSize);
-        if (algorithm == ProductionToneMapperAlgorithm::agX) CheckSdrAgxControls(windowSize);
+        if (algorithm == ProductionToneMapperAlgorithm::agX) CheckSdrOperatorControls(windowSize);
         ImGui::DestroyContext();
     };
 

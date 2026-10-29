@@ -32,11 +32,13 @@ enum class ProductionToneMapperAlgorithm : std::uint8_t
     native
 };
 
-// SDR profile choices. An operator joins once its SDR configuration qualifies.
+// SDR profile choices: the game's curve and each operator whose SDR
+// configuration qualified.
 [[nodiscard]] constexpr bool IsSelectableSdrToneMapper(
     ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    return algorithm == ProductionToneMapperAlgorithm::native;
+    using enum ProductionToneMapperAlgorithm;
+    return algorithm == native || algorithm == aces2 || algorithm == agX || algorithm == gt7;
 }
 
 enum class ColorGradingMethod : std::uint8_t
