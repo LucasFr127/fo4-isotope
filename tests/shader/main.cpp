@@ -15,6 +15,7 @@ namespace fo4hdr::tests::gpu {
 
 constexpr auto kSectionNames = std::to_array<std::string_view>({
     "operator-lut",
+    "sdr-operator-recommendations",
     "context-query-safety",
 #if !defined(FO4HDR_DISABLE_FRAME_TRACE)
     "frame-trace",
@@ -86,6 +87,10 @@ struct ShippingShaderRun
             g_failures += VerifyOperatorLutSampling(
                 *device.device.Get(), *device.context.Get(), false);
         });
+        if (options.filter == "sdr-operator-recommendations")
+            RunSection(options.filter, "sdr-operator-recommendations", [&] {
+                g_failures += SweepSdrOperatorRecommendations(*device.device.Get(), *device.context.Get());
+            });
         RunSection(options.filter, "context-query-safety", VerifyContextQuerySafety);
         RunSection(options.filter, "module-exports", VerifyLoadedModuleExports);
 #if !defined(FO4HDR_DISABLE_FRAME_TRACE)

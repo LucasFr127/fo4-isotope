@@ -5,6 +5,8 @@
 #include "reference/ShaderReference.hpp"
 
 int VerifyOperatorLutSampling(ID3D11Device& device, ID3D11DeviceContext& context, bool benchmark);
+// Opt-in: sweeps each SDR operator control and prints its recommended range.
+int SweepSdrOperatorRecommendations(ID3D11Device& device, ID3D11DeviceContext& context);
 
 namespace fo4hdr::tests::gpu {
 

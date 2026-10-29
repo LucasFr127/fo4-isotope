@@ -712,7 +712,8 @@ ID3D11ComputeShader &CaseShader(const OperatorExecution &execution, const Operat
     return test.target == fo4hdr::OperatorLutTarget::sdr ? execution.sdrShader : execution.shader;
 }
 
-int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
+// Measures one case and hands its measurements and timings to the consumer.
+template <class Consume> int MeasureCase(const OperatorExecution &execution, const OperatorCase &test, Consume &&consume)
 {
     const auto &[device, context, hdrShader, sampler, sdrShader] = execution;
     const auto &[algorithm, peak, benchmark, parameters, target] = test;
@@ -779,7 +780,14 @@ int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
                                       oracle.aces, lut,       oracle.SdrReference()};
     measurements.Measure(mapped);
     context.Unmap(staging.Get(), 0);
-    return measurements.Report({bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark});
+    return consume(measurements, OperatorTimings{bakeStart, bakeEnd, uploadStart, uploadEnd, gpuMilliseconds, benchmark});
+}
+
+int VerifyCase(const OperatorExecution &execution, const OperatorCase &test)
+{
+    return MeasureCase(execution, test, [](OperatorMeasurements &measurements, const OperatorTimings &timing) {
+        return measurements.Report(timing);
+    });
 }
 
 fo4hdr::ToneMapperParameters AgxCornerParameters(unsigned corner)
@@ -822,28 +830,162 @@ int VerifySdrCorners(const OperatorExecution &execution)
     return failures;
 }
 
+// The production-style sampler and the HDR and SDR sampling shaders.
+struct OperatorShaders
+{
+    ComPtr<ID3D11ComputeShader> shader, sdrShader;
+    ComPtr<ID3D11SamplerState> sampler;
+
+    explicit OperatorShaders(ID3D11Device &device)
+    {
+        const auto &bytecode = fo4hdr::generated::test::kOperatorLutCs;
+        Require(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
+                "Create build-time operator LUT test shader");
+        D3D11_SAMPLER_DESC descriptor{};
+        descriptor.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        descriptor.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        descriptor.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        descriptor.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        descriptor.MaxLOD = D3D11_FLOAT32_MAX;
+        Require(device.CreateSamplerState(&descriptor, &sampler), "Create production-style LUT sampler");
+        const auto &sdrBytecode = fo4hdr::generated::test::kSdrOperatorLutCs;
+        Require(device.CreateComputeShader(sdrBytecode.data(), sdrBytecode.size(), nullptr, &sdrShader),
+                "Create build-time SDR operator LUT test shader");
+    }
+
+    OperatorExecution Execution(ID3D11Device &device, ID3D11DeviceContext &context) const
+    {
+        return {device, context, *shader.Get(), *sampler.Get(), *sdrShader.Get()};
+    }
+};
+
+// A swept tick qualifies when it is safe and also meets the default size gates.
+struct TickOutcome
+{
+    int failures;
+    bool qualifies;
+};
+
+TickOutcome MeasureTick(const OperatorExecution &execution, const OperatorCase &test)
+{
+    TickOutcome outcome{};
+    outcome.failures =
+        MeasureCase(execution, test, [&](OperatorMeasurements &measurements, const OperatorTimings &timing) {
+            const auto verdict = measurements.Evaluate();
+            outcome.qualifies = verdict.passed && verdict.total.MeetsPracticalLimit(test.algorithm) &&
+                                verdict.approximation.MeetsPracticalLimit(test.algorithm);
+            return measurements.Report(timing);
+        });
+    return outcome;
+}
+
+// One SDR control swept at its displayed precision. The other controls keep
+// the base values: defaults, unless the control acts only beside another.
+struct SweepControl
+{
+    Algorithm algorithm;
+    const char *name;
+    double fo4hdr::ToneMapperParameters::*parameter;
+    double minimum, maximum, ticksPerUnit;
+    fo4hdr::ToneMapperParameters base{};
+};
+
+using Parameters = fo4hdr::ToneMapperParameters;
+constexpr std::array<SweepControl, 7> kSdrSweepControls{{
+    {Algorithm::aces2, "Contrast Look Strength", &Parameters::acesLookStrength, fo4hdr::kMinimumAcesLookStrength,
+     fo4hdr::kMaximumAcesLookStrength, 100.0},
+    {Algorithm::agX, "Middle Gray", &Parameters::agxMiddleGrayEv, fo4hdr::kMinimumAgxMiddleGrayEv,
+     fo4hdr::kMaximumSdrAgxMiddleGrayEv, 100.0},
+    {Algorithm::agX, "Contrast", &Parameters::agxContrast, fo4hdr::kMinimumAgxContrast, fo4hdr::kMaximumAgxContrast,
+     100.0},
+    // SDR color response acts only away from neutral Middle Gray.
+    {Algorithm::agX, "HDR Color Response", &Parameters::agxHdrPurity, fo4hdr::kMinimumAgxHdrPurity,
+     fo4hdr::kMaximumAgxHdrPurity, 100.0, {.agxMiddleGrayEv = fo4hdr::kMinimumAgxMiddleGrayEv}},
+    {Algorithm::gt7, "Shadow Toe", &Parameters::gt7ToeStrength, fo4hdr::kMinimumGt7ToeStrength,
+     fo4hdr::kMaximumGt7ToeStrength, 100.0},
+    {Algorithm::gt7, "Shoulder Start", &Parameters::gt7ShoulderStart, fo4hdr::kMinimumGt7ShoulderStart,
+     fo4hdr::kMaximumGt7ShoulderStart, 1000.0},
+    {Algorithm::gt7, "Color Blend", &Parameters::gt7ColorBlend, fo4hdr::kMinimumGt7ColorBlend,
+     fo4hdr::kMaximumGt7ColorBlend, 100.0},
+}};
+
+struct PassingRun
+{
+    std::size_t first, last;
+    bool found;
+};
+
+// The contiguous passing run containing the default; a failed default has none.
+PassingRun DefaultPassingRun(const std::vector<bool> &passes, std::size_t defaultIndex)
+{
+    if (defaultIndex >= passes.size() || !passes[defaultIndex])
+        return {};
+    auto first = defaultIndex, last = defaultIndex;
+    while (first > 0 && passes[first - 1])
+        --first;
+    while (last + 1 < passes.size() && passes[last + 1])
+        ++last;
+    return {first, last, true};
+}
+
+void CheckPassingRunPolicy()
+{
+    const std::vector<bool> passes{true, false, true, true, true, false, true};
+    const auto run = DefaultPassingRun(passes, 3);
+    CheckQualityVerdict(run.found && run.first == 2 && run.last == 4, "A recommendation must not bridge failed ticks");
+    CheckQualityVerdict(!DefaultPassingRun(passes, 5).found, "A failed default must yield no recommendation");
+}
+
+int SweepSdrControl(const OperatorExecution &execution, const SweepControl &control)
+{
+    const auto &[algorithm, name, parameter, minimum, maximum, ticksPerUnit, base] = control;
+    const auto firstTick = std::lround(minimum * ticksPerUnit);
+    const auto defaultValue = base.*parameter;
+    const auto defaultTick = std::lround(defaultValue * ticksPerUnit);
+    CheckQualityVerdict(static_cast<double>(defaultTick) / ticksPerUnit == defaultValue,
+                        "Swept defaults must lie on the displayed tick grid");
+    std::vector<bool> passes;
+    int failures{};
+    for (auto tick = firstTick; tick <= std::lround(maximum * ticksPerUnit); ++tick) {
+        auto parameters = base;
+        parameters.*parameter = static_cast<double>(tick) / ticksPerUnit;
+        const auto outcome = MeasureTick(execution, {algorithm, fo4hdr::SdrOperatorWhiteNits(algorithm), false,
+                                                     parameters, fo4hdr::OperatorLutTarget::sdr});
+        failures += outcome.failures;
+        passes.push_back(outcome.qualifies);
+    }
+    const auto run = DefaultPassingRun(passes, static_cast<std::size_t>(defaultTick - firstTick));
+    const auto value = [&](std::size_t index) {
+        return static_cast<double>(firstTick + static_cast<long>(index)) / ticksPerUnit;
+    };
+    std::cout << "sdr_recommendation operator=" << Name(algorithm) << " control=\"" << name
+              << "\" default=" << defaultValue << " passed_ticks=" << std::count(passes.begin(), passes.end(), true) << '/'
+              << passes.size();
+    if (run.found)
+        std::cout << " minimum=" << value(run.first) << " maximum=" << value(run.last) << '\n';
+    else
+        std::cout << " recommendation=none\n";
+    return failures;
+}
+
 } // namespace
+
+int SweepSdrOperatorRecommendations(ID3D11Device &device, ID3D11DeviceContext &context)
+{
+    CheckPassingRunPolicy();
+    const OperatorShaders shaders(device);
+    const auto execution = shaders.Execution(device, context);
+    int failures{};
+    for (const auto &control : kSdrSweepControls)
+        failures += SweepSdrControl(execution, control);
+    return failures;
+}
 
 int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context, bool benchmark)
 {
     CheckQualityVerdictPolicy();
-    ComPtr<ID3D11ComputeShader> shader;
-    const auto &bytecode = fo4hdr::generated::test::kOperatorLutCs;
-    Require(device.CreateComputeShader(bytecode.data(), bytecode.size(), nullptr, &shader),
-            "Create build-time operator LUT test shader");
-    D3D11_SAMPLER_DESC descriptor{};
-    descriptor.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-    descriptor.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-    descriptor.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-    descriptor.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    descriptor.MaxLOD = D3D11_FLOAT32_MAX;
-    ComPtr<ID3D11SamplerState> sampler;
-    Require(device.CreateSamplerState(&descriptor, &sampler), "Create production-style LUT sampler");
-    ComPtr<ID3D11ComputeShader> sdrShader;
-    const auto &sdrBytecode = fo4hdr::generated::test::kSdrOperatorLutCs;
-    Require(device.CreateComputeShader(sdrBytecode.data(), sdrBytecode.size(), nullptr, &sdrShader),
-            "Create build-time SDR operator LUT test shader");
-    const OperatorExecution execution{device, context, *shader.Get(), *sampler.Get(), *sdrShader.Get()};
+    const OperatorShaders shaders(device);
+    const auto execution = shaders.Execution(device, context);
     int failures{};
     for (const auto algorithm : {Algorithm::aces2, Algorithm::agX, Algorithm::gt7}) {
         for (const auto peak : {400.0, 430.0, 1000.0, 2000.0}) {
