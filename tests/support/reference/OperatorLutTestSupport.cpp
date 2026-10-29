@@ -195,6 +195,13 @@ struct SampleAxis
         CreateAgxTransform(lut.displayPeakNits, lut.toneMapperParameters);
 }
 
+[[nodiscard]] Gt7TransformHandle CreateReferenceGt7(const OperatorLutData& lut) noexcept
+{
+    return lut.target == OperatorLutTarget::sdr ?
+        CreateSdrGt7Transform(lut.toneMapperParameters) :
+        CreateGt7Transform(lut.displayPeakNits, lut.toneMapperParameters);
+}
+
 [[nodiscard]] double NearestRankP99(std::vector<double>& errors)
 {
     // ceil(0.99*N)-1 without floating-point rounding or an integer product.
@@ -279,8 +286,7 @@ OperatorLutReference::OperatorLutReference(const OperatorLutData& lut) noexcept 
     agx_(lut.algorithm == ProductionToneMapperAlgorithm::agX ?
         CreateReferenceAgx(lut) : std::optional<AgxTransform>{}),
     gt7_(lut.algorithm == ProductionToneMapperAlgorithm::gt7 ?
-        CreateGt7Transform(lut.displayPeakNits, lut.toneMapperParameters) :
-        Gt7TransformHandle{})
+        CreateReferenceGt7(lut) : Gt7TransformHandle{})
 {}
 
 bool OperatorLutReference::IsValid() const noexcept

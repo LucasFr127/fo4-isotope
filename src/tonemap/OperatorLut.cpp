@@ -82,7 +82,7 @@ namespace {
     return static_cast<std::uint16_t>(sign | magnitude);
 }
 
-// SDR tables bake each operator at its fixed white; GT7's is its lowest peak.
+// SDR tables bake each operator's SDR configuration at its fixed white.
 [[nodiscard]] Aces2TransformHandle PrepareAces2(const OperatorLutData& data) noexcept
 {
     return data.target == OperatorLutTarget::sdr ?
@@ -96,6 +96,13 @@ namespace {
         CreateAgxTransform(data.displayPeakNits, data.toneMapperParameters);
 }
 
+[[nodiscard]] Gt7TransformHandle PrepareGt7(const OperatorLutData& data) noexcept
+{
+    return data.target == OperatorLutTarget::sdr ?
+        CreateSdrGt7Transform(data.toneMapperParameters) :
+        CreateGt7Transform(data.displayPeakNits, data.toneMapperParameters);
+}
+
 struct PreparedOperator
 {
     explicit PreparedOperator(const OperatorLutData& data) noexcept :
@@ -106,7 +113,7 @@ struct PreparedOperator
         agx(algorithm == ProductionToneMapperAlgorithm::agX ?
             PrepareAgx(data) : std::optional<AgxTransform>{}),
         gt7(algorithm == ProductionToneMapperAlgorithm::gt7 ?
-            CreateGt7Transform(data.displayPeakNits, parameters) : Gt7TransformHandle{})
+            PrepareGt7(data) : Gt7TransformHandle{})
     {}
 
     ProductionToneMapperAlgorithm algorithm;
@@ -684,6 +691,12 @@ constexpr double kSdrGamutScaleKnee{0.05};
     return std::min(first, second) - 0.25 * knee * blend * blend;
 }
 
+[[nodiscard]] LinearRgb ClampToWhite(LinearRgb value) noexcept
+{
+    return {std::clamp(value.red, 0.0, 1.0), std::clamp(value.green, 0.0, 1.0),
+        std::clamp(value.blue, 0.0, 1.0)};
+}
+
 // Project-authored SDR display gamut with the AgX production stage's structure:
 // negative channels contract chroma about BT.709 luminance with a 5% knee, then
 // RGB scales uniformly to white with a knee that shrinks with chroma.
@@ -750,11 +763,15 @@ LinearRgb ContainSdrOperatorOutput(
     ProductionToneMapperAlgorithm algorithm, LinearRgb relativeBt709) noexcept
 {
     if (!IsFiniteRgb(relativeBt709)) return {};
-    if (algorithm != ProductionToneMapperAlgorithm::aces2)
-        return ContainSdrDisplayGamut(relativeBt709);
-    return {std::clamp(relativeBt709.red, 0.0, 1.0),
-        std::clamp(relativeBt709.green, 0.0, 1.0),
-        std::clamp(relativeBt709.blue, 0.0, 1.0)};
+    switch (algorithm)
+    {
+    case ProductionToneMapperAlgorithm::agX: return ContainSdrDisplayGamut(relativeBt709);
+    // GT7 keeps its official per-channel clip at white, in its BT.2020 working space.
+    case ProductionToneMapperAlgorithm::gt7:
+        return ClampToWhite(ConvertBt2020ToBt709(
+            ClampToWhite(ConvertBt709ToBt2020(relativeBt709))));
+    default: return ClampToWhite(relativeBt709);
+    }
 }
 
 }  // namespace fo4hdr

@@ -94,9 +94,10 @@ struct OperatorLutCancellation
     OperatorLutCancellation cancellation = {}) noexcept;
 
 // Final containment of an interpolated SDR sample. ACES2 clamps each channel
-// to [0, 1] like its Rec.709 preset. AgX and GT7 contract chroma about BT.709
-// luminance to remove negative channels, then scale RGB uniformly to white.
-// Nonfinite input fails black.
+// to [0, 1] like its Rec.709 preset. AgX contracts chroma about BT.709
+// luminance to remove negative channels, then scales RGB uniformly to white.
+// GT7 clips each BT.2020 channel at white like its official sample, then
+// clamps each BT.709 channel. Nonfinite input fails black.
 [[nodiscard]] LinearRgb ContainSdrOperatorOutput(
     ProductionToneMapperAlgorithm algorithm, LinearRgb relativeBt709) noexcept;
 

@@ -7,6 +7,9 @@
 // Rec.2020/100-nit adapter. The native BT.2020 result is the production output;
 // the inverse-BT.709 fit remains a comparison oracle only.
 // LUT baking may defer the final peak clamp until after interpolation.
+// The SDR configuration replaces the shoulder above the linear section with one
+// that reaches the paper white at the game's own SDR white, and re-anchors the
+// chroma fade to that shoulder.
 // The complete Polyphony Digital MIT permission is in THIRD_PARTY_NOTICES.md.
 
 #include "FO4Isotope/tonemap/Gt7.hpp"
@@ -135,10 +138,14 @@ struct Gt7Curve
     float shoulderA{};
     float shoulderB{};
     float shoulderC{};
+    // Zero keeps the official shoulder; otherwise the SDR shoulder's white,
+    // measured from the shoulder start in units of its output range.
+    float shoulderWhite{};
 
     explicit Gt7Curve(
         float framebufferPeak,
-        const ToneMapperParameters& parameters = {}) noexcept
+        const ToneMapperParameters& parameters = {},
+        float whiteInput = 0.0F) noexcept
         : peakIntensity(framebufferPeak),
           midPoint(0.538F),
           linearSection(static_cast<float>(parameters.gt7ShoulderStart)),
@@ -151,6 +158,22 @@ struct Gt7Curve
         shoulderB = -peakIntensity * curvature *
             std::expf(linearSection / curvature);
         shoulderC = -1.0F / (curvature * peakIntensity);
+        if (whiteInput > 0.0F)
+            shoulderWhite = (whiteInput - ShoulderStart()) / ShoulderRange();
+    }
+
+    [[nodiscard]] float ShoulderStart() const noexcept { return linearSection * peakIntensity; }
+    [[nodiscard]] float ShoulderRange() const noexcept
+    {
+        return (1.0F - linearSection) * peakIntensity;
+    }
+
+    // Extended Reinhard: unit slope at the shoulder start, the peak at its white.
+    [[nodiscard]] float ExtendedShoulder(float value) const noexcept
+    {
+        const float progress = (value - ShoulderStart()) / ShoulderRange();
+        return ShoulderStart() + ShoulderRange() * progress *
+            (1.0F + progress / (shoulderWhite * shoulderWhite)) / (1.0F + progress);
     }
 
     [[nodiscard]] FloatRgb Evaluate(const FloatRgb& input) const noexcept
@@ -171,18 +194,36 @@ struct Gt7Curve
                     std::powf(value / midPoint, toeStrength);
                 result[index] = toeWeight * toe + linearWeight * value;
             }
-            else result[index] = shoulder;
+            else result[index] = shoulderWhite > 0.0F ? ExtendedShoulder(value) : shoulder;
         }
         return result;
     }
 };
 
+// The official fade starts at the peak input, where its shoulder already gives
+// most of the peak. The SDR fade starts where the extended shoulder gives that
+// same output, so colors still fade as they approach white.
+[[nodiscard]] float ExtendedFadeIntensity(
+    const Gt7Curve& official, const Gt7Curve& extended) noexcept
+{
+    const double fraction = (official.Evaluate({official.peakIntensity, 0.0F, 0.0F})[0] -
+        official.ShoulderStart()) / official.ShoulderRange();
+    // Inverse of the extended shoulder at that fraction of its output range.
+    const double white = extended.shoulderWhite;
+    const double progress = 0.5 * white * white * (fraction - 1.0 +
+        std::sqrt((1.0 - fraction) * (1.0 - fraction) + 4.0 * fraction / (white * white)));
+    return static_cast<float>(extended.ShoulderStart() + progress * extended.ShoulderRange());
+}
+
 struct Gt7ColorVolume
 {
     Gt7ColorVolume(Gt7Curve preparedCurve, float colorBlend) noexcept :
+        Gt7ColorVolume(preparedCurve, colorBlend, preparedCurve.peakIntensity)
+    {}
+
+    Gt7ColorVolume(Gt7Curve preparedCurve, float colorBlend, float fadeIntensity) noexcept :
         curve(preparedCurve),
-        targetIntensity(RgbToIctcp({curve.peakIntensity,
-            curve.peakIntensity, curve.peakIntensity})[0]),
+        targetIntensity(RgbToIctcp({fadeIntensity, fadeIntensity, fadeIntensity})[0]),
         blendRatio(colorBlend)
     {}
 
@@ -308,6 +349,8 @@ public:
           static_cast<float>(parameters.gt7ColorBlend)}
     {}
 
+    explicit Gt7Transform(const Gt7ColorVolume& prepared) noexcept : volume(prepared) {}
+
     const Gt7ColorVolume volume;
 };
 
@@ -323,6 +366,18 @@ Gt7TransformHandle CreateGt7Transform(
             ProductionToneMapperAlgorithm::gt7, parameters)) return {};
     return Gt7TransformHandle(new (std::nothrow)
         Gt7Transform(displayPeakNits, parameters));
+}
+
+Gt7TransformHandle CreateSdrGt7Transform(const ToneMapperParameters& parameters) noexcept
+{
+    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::gt7, parameters)) return {};
+    constexpr float peak = static_cast<float>(kGt7SdrPaperWhiteNits) / kReferenceLuminance;
+    constexpr float white =
+        static_cast<float>(kGt7SdrWhiteScene * kSceneReferenceWhiteNits) / kReferenceLuminance;
+    const Gt7Curve official(peak, parameters);
+    const Gt7Curve extended(peak, parameters, white);
+    return Gt7TransformHandle(new (std::nothrow) Gt7Transform(Gt7ColorVolume{extended,
+        static_cast<float>(parameters.gt7ColorBlend), ExtendedFadeIntensity(official, extended)}));
 }
 
 LinearRgb MapGt7ReferenceRec2020(

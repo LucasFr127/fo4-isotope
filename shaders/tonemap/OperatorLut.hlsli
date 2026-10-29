@@ -107,7 +107,24 @@ float3 Fo4HdrAgxDisplayGamut(float3 value, float peak)
 }
 
 #if FO4HDR_SDR_OPERATOR_OUTPUT
-// Match ContainSdrOperatorOutput for AgX and GT7: the same stage about BT.709
+// Match ContainSdrOperatorOutput for GT7: the official per-channel clip at white
+// in BT.2020, then each BT.709 channel clamped. These are the CPU matrices.
+float3 Fo4HdrSdrGt7Containment(float3 value)
+{
+    const float3x3 toBt2020 = {
+        0.627403895934699f, 0.329283038377884f, 0.043313065687417f,
+        0.069097289358232f, 0.919540395075459f, 0.011362315566309f,
+        0.016391438875150f, 0.088013307877226f, 0.895595253247624f
+    };
+    const float3x3 toBt709 = {
+        1.6604909457791666f, -0.5876410948776531f, -0.0728498646690886f,
+        -0.12455046636659303f, 1.1328998802803918f, -0.008349422033247976f,
+        -0.01815076427030725f, -0.10057889487266629f, 1.118729662272663f
+    };
+    return saturate(mul(toBt709, saturate(mul(toBt2020, value))));
+}
+
+// Match ContainSdrOperatorOutput for AgX: the AgX stage about BT.709
 // luminance, with white at 1.
 float3 Fo4HdrSdrDisplayGamut(float3 value)
 {
@@ -173,8 +190,9 @@ float3 Fo4HdrSampleOperatorLut(
     // The source operators' final display clamp belongs here, not at lattice
     // vertices: clipping first creates artificial interpolation knees.
 #if FO4HDR_SDR_OPERATOR_OUTPUT
-    // ACES2 clamps like its Rec.709 preset.
-    return productionMode == 1u ? saturate(mapped) : Fo4HdrSdrDisplayGamut(mapped);
+    // ACES2 clamps like its Rec.709 preset, and GT7 clips like its official sample.
+    if (productionMode == 2u) return Fo4HdrSdrDisplayGamut(mapped);
+    return productionMode == 3u ? Fo4HdrSdrGt7Containment(mapped) : saturate(mapped);
 #else
     if (productionMode == 2u)
         return Fo4HdrAgxDisplayGamut(mapped, displayPeakNits);

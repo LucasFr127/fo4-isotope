@@ -5,6 +5,7 @@
 #include "FO4Isotope/tonemap/Agx.hpp"
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include "FO4Isotope/tonemap/Gt7.hpp"
+#include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "TestHarness.hpp"
 
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <utility>
 
 // Compile the exact, immutable Polyphony source only into this independent
 // oracle. Its sample entry point is renamed; no upstream code enters the DLL.
@@ -179,6 +181,100 @@ void TestOfficialSdrParity()
     // Local regression: the sample's ~35.63-nit gray response at its 250-nit white.
     FO4HDR_CHECK(test::Approx(EvaluateGt7LutNits(*transform, {0.18, 0.18, 0.18}).green /
         kGt7SdrPaperWhiteNits, 0.14252, 1.0e-5));
+}
+
+[[nodiscard]] double SdrNeutral(const Gt7Transform& transform, double scene)
+{
+    return EvaluateGt7LutNits(transform, {scene, scene, scene}).green / kGt7SdrPaperWhiteNits;
+}
+
+// The SDR configuration keeps the official response below its shoulder start and
+// extends the shoulder so white lands where the game's own SDR curve reaches it.
+void TestExtendedSdrShoulder(const ToneMapperParameters& parameters)
+{
+    const auto transform = CreateSdrGt7Transform(parameters);
+    FO4HDR_CHECK(transform != nullptr);
+    if (!transform) return;
+    // The official ICtCp path works in binary32, which offsets white by about 2e-5.
+    FO4HDR_CHECK(test::Approx(SdrNeutral(*transform, kGt7SdrWhiteScene), 1.0, 1.0e-4));
+    // The shoulder leaves the linear section at unit slope: 203 nits per scene unit.
+    const double start = parameters.gt7ShoulderStart * kGt7SdrPaperWhiteNits /
+        kSceneReferenceWhiteNits;
+    constexpr double step = 1.0e-3;
+    const auto slope = (SdrNeutral(*transform, start + step) -
+        SdrNeutral(*transform, start - step)) * kGt7SdrPaperWhiteNits / (2.0 * step);
+    FO4HDR_CHECK(test::Approx(slope, kSceneReferenceWhiteNits, 0.5));
+    bool rising{true};
+    double previous{};
+    for (double scene = 1.0e-4; scene < 65504.0; scene *= 1.01)
+    {
+        const auto value = SdrNeutral(*transform, scene);
+        rising = rising && value >= previous;
+        previous = value;
+    }
+    FO4HDR_CHECK(rising);
+}
+
+void TestExtendedSdrConfiguration()
+{
+    for (const auto shoulder : {kMinimumGt7ShoulderStart, 0.444, kMaximumGt7ShoulderStart})
+        TestExtendedSdrShoulder({.gt7ShoulderStart = shoulder});
+    FO4HDR_CHECK(!CreateSdrGt7Transform({.gt7ToeStrength = kMaximumGt7ToeStrength + 0.1}));
+    const auto transform = CreateSdrGt7Transform();
+    if (!transform) return;
+    for (const auto& scene : {LinearRgb{}, LinearRgb{0.001, 0.001, 0.001},
+             LinearRgb{0.18, 0.18, 0.18}, LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.4, 0.2}})
+        CheckOfficialSdrParity(*transform, scene);
+    // Local regression of the default shoulder.
+    for (const auto& [scene, expected] : {std::pair{1.0, 0.6681}, std::pair{1.81, 0.8168},
+             std::pair{2.8, 0.8962}, std::pair{3.84, 0.9449}})
+        FO4HDR_CHECK(test::Approx(SdrNeutral(*transform, scene), expected, 1.0e-3));
+}
+
+[[nodiscard]] LinearRgb SdrDisplay(const Gt7Transform& transform, LinearRgb scene)
+{
+    const auto nits = ConvertBt2020ToBt709(EvaluateGt7LutNits(transform, scene));
+    return ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
+        {nits.red / kGt7SdrPaperWhiteNits, nits.green / kGt7SdrPaperWhiteNits,
+            nits.blue / kGt7SdrPaperWhiteNits});
+}
+
+[[nodiscard]] double Saturation(LinearRgb value)
+{
+    const auto maximum = std::max({value.red, value.green, value.blue});
+    return maximum > 0.0 ?
+        (maximum - std::min({value.red, value.green, value.blue})) / maximum : 0.0;
+}
+
+[[nodiscard]] double Bt709Luminance(LinearRgb value)
+{
+    return 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
+}
+
+// Colors fade as they approach the extended shoulder's white rather than where the
+// official shoulder clips, and the official per-channel clip keeps over-white light bright.
+void TestExtendedSdrColor()
+{
+    const auto transform = CreateSdrGt7Transform();
+    FO4HDR_CHECK(transform != nullptr);
+    if (!transform) return;
+    FO4HDR_CHECK(Saturation(SdrDisplay(*transform, {3.0, 2.2, 1.6})) > 0.2);
+    FO4HDR_CHECK(Saturation(SdrDisplay(*transform, {40.0, 18.0, 6.0})) < 0.1);
+    FO4HDR_CHECK(Bt709Luminance(SdrDisplay(*transform, {0.6, 0.6, 2.4})) > 0.45);
+    for (const auto& ray : {LinearRgb{1.0, 0.45, 0.15}, LinearRgb{0.25, 0.25, 1.0},
+             LinearRgb{1.0, 0.68, 0.53}})
+    {
+        bool rising{true};
+        double previous{};
+        for (double scale = 0.05; scale < 64.0; scale *= 1.01)
+        {
+            const auto luminance = Bt709Luminance(SdrDisplay(*transform,
+                {ray.red * scale, ray.green * scale, ray.blue * scale}));
+            rising = rising && luminance >= previous - 1.0e-5;
+            previous = luminance;
+        }
+        FO4HDR_CHECK(rising);
+    }
 }
 
 void TestOfficialReferenceVectorsAndPeaks()
@@ -664,6 +760,8 @@ void RunGt7Tests()
 {
     TestOfficialReferenceVectorsAndPeaks();
     TestOfficialSdrParity();
+    TestExtendedSdrConfiguration();
+    TestExtendedSdrColor();
     TestBroadOfficialSourceParity();
     TestDisplayAdapterAndGamutBoundaries();
     TestComparisonGamutEmissives();

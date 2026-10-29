@@ -25,6 +25,18 @@ inline constexpr double kGt7SdrPaperWhiteNits{250.0};
     double displayPeakNits,
     const ToneMapperParameters& parameters = {}) noexcept;
 
+// Scene value where the SDR shoulder reaches the paper white: where the game's
+// own SDR curve reaches white (Uncharted 2 white 11.2 after its x2 exposure bias).
+inline constexpr double kGt7SdrWhiteScene{5.6};
+
+// SDR configuration at kGt7SdrPaperWhiteNits. The official toe, linear section
+// and color-volume mapping stay; a project shoulder leaves the linear section at
+// unit slope and reaches the peak at kGt7SdrWhiteScene instead of the official
+// shoulder clipped at 1.47 times the peak, and the chroma fade starts where this
+// shoulder gives the official shoulder's output at the peak input.
+[[nodiscard]] Gt7TransformHandle CreateSdrGt7Transform(
+    const ToneMapperParameters& parameters = {}) noexcept;
+
 [[nodiscard]] LinearRgb EvaluateGt7LutNits(
     const Gt7Transform& transform, LinearRgb sceneLinear) noexcept;
 
