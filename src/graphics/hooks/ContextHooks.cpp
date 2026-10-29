@@ -254,6 +254,13 @@ bool PixelReplacementEligible()
         ReferenceDisplayStillEligible();
 }
 
+// SDR mode has its own replacement set and never takes the HDR path.
+ID3D11PixelShader* SelectReplacement(RenoDxShaderPass pass)
+{
+    if (g_sdrModeActive.load(std::memory_order_acquire)) return FindSdrReplacement(pass);
+    return PixelReplacementEligible() ? FindReplacement(pass) : nullptr;
+}
+
 void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
     DrawObservation& record, ID3D11PixelShader*& selectedShader)
 {
@@ -269,11 +276,8 @@ void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
     record.currentPass = descriptor->pass;
     record.currentPassKnown = true;
     record.currentRequirement = descriptor->requirement;
-    if (PixelReplacementEligible())
-    {
-        if (auto* replacement = FindReplacement(descriptor->pass))
-            selectedShader = replacement;
-    }
+    if (auto* replacement = SelectReplacement(descriptor->pass))
+        selectedShader = replacement;
 }
 
 void STDMETHODCALLTYPE HookPsSetShader(
@@ -343,13 +347,15 @@ bool RestoreNativePixelShader(ID3D11DeviceContext* context, DrawObservation& rec
         return true;
     ComPtr<ID3D11PixelShader> actual;
     context->PSGetShader(&actual, nullptr, nullptr);
+    // SDR passes are independent, so HDR production health never applies to them.
+    const auto sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
     if (actual.Get() == record.expectedBoundShader)
-        return g_productionHealthy || RestoreNativePixelShader(context, record);
+        return sdrMode || g_productionHealthy || RestoreNativePixelShader(context, record);
 
     // A downstream owner changed a shader after FO4Isotope selected its
     // replacement. Required-pass collisions disable production for this generation; an
     // optional collision disables only scene continuation for this draw.
-    if (DecideUnknownShaderOutcome(record.currentRequirement) ==
+    if (!sdrMode && DecideUnknownShaderOutcome(record.currentRequirement) ==
         UnknownShaderOutcome::disableHdrGeneration)
     {
         g_productionHealthy = false;

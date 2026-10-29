@@ -89,6 +89,13 @@ HdrCandidateDecision DecideHdrCandidate(const HdrCandidateInputs& inputs) noexce
     return HdrCandidateDecision::attempt;
 }
 
+bool DecideSdrMode(const SdrModeInputs& inputs) noexcept
+{
+    if (!inputs.requested || inputs.enbDetected) return false;
+    return !inputs.hdrPathRequested ||
+        inputs.hdrCandidate == HdrCandidateDecision::displayNotHdr10;
+}
+
 namespace {
 
 [[nodiscard]] bool IsPresentingState(HdrRendererState state) noexcept

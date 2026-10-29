@@ -150,6 +150,7 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.liveSettingsError = g_liveSettingsError;
     result.developerMode = g_configuration.developerMode;
     result.hdrActive = g_evidence.hdrColorSpaceActive.load();
+    result.sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
     result.exposureRequested = g_developerExposure.state.Requested();
     result.exposureActive = g_developerExposure.state.Active();
     result.exposureFailed = g_developerExposure.failed;
@@ -446,6 +447,42 @@ bool PresentationContextAvailable(IDXGISwapChain* swapChain, ID3D11Device* devic
 {
     const std::array<const void*, 3> required{swapChain, device, context};
     return std::ranges::find(required, nullptr) == required.end();
+}
+
+[[nodiscard]] bool SdrOverlayReady(IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    return PresentationContextAvailable(swapChain, device, context) &&
+        PresentationContextValid(context) && SettingsWindowBackendReady() &&
+        EnsureSdrBackBufferTarget(swapChain, device);
+}
+
+// The window runs every Present, open or closed, so it can consume toggles.
+[[nodiscard]] ImDrawData* DrawSdrSettingsFrame() noexcept
+{
+    auto view = UiSettingsSnapshot();
+    const SettingsWindowActions actions{
+        SettingsFocusLost, RequestExposure, RequestPipboyObservation, RefreshSettingsView};
+    if (!DrawSettingsWindow(view, actions)) return nullptr;
+    auto* drawData = ImGui::GetDrawData();
+    return drawData != nullptr && drawData->TotalVtxCount > 0 ? drawData : nullptr;
+}
+
+void DrawSdrSettingsOverlay(IDXGISwapChain* swapChain, ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    if (!SdrOverlayReady(swapChain, device, context)) return;
+    ScopedPresentationContext ownedContext(context, PresentationScope::finalOutput);
+    if (!ownedContext.Ready()) return;
+    auto* drawData = DrawSdrSettingsFrame();
+    if (drawData == nullptr) return;
+    BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
+        g_presentation.sdrBackBuffer.Get());
+    if (!priorState.Ready()) return;
+    // The SDR backbuffer holds display codes, so sRGB-authored ImGui draws directly.
+    ID3D11RenderTargetView* target = g_presentation.sdrBackBufferRtv.Get();
+    context->OMSetRenderTargets(1, &target, nullptr);
+    ImGui_ImplDX11_RenderDrawData(drawData);
 }
 
 [[nodiscard]] bool RenderBlackPresentationFrame(

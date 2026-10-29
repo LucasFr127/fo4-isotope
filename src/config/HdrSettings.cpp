@@ -481,4 +481,33 @@ HdrSettingsMath DeriveHdrSettingsMath(
     return result;
 }
 
+HdrSettings DefaultSdrSettings() noexcept
+{
+    HdrSettings settings{};
+    settings.vanillaGradeLuminancePercent = 100.0;
+    settings.vanillaGradeColorPercent = 100.0;
+    settings.weatherGradeResponse.enabled = false;
+    settings.bloomStrengthPercent = 100.0;
+    return settings;
+}
+
+bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept
+{
+    const std::array neutral{settings.exposureEv == 0.0,
+        settings.bloomStrengthPercent == 100.0, settings.contrast == 0.0,
+        settings.blacks == 0.0, settings.highlights == 0.0,
+        settings.shadows == 0.0, settings.saturationPercent == 100.0,
+        settings.temperature == 0.0, settings.tint == 0.0,
+        !IsSelectiveColorEffective(settings.selectiveColor)};
+    return std::ranges::find(neutral, false) == neutral.end();
+}
+
+bool SdrGradeControlsNeutral(const HdrSettings& settings) noexcept
+{
+    return settings.vanillaColorGradingStrengthPercent == 100.0 &&
+        settings.vanillaGradeLuminancePercent == 100.0 &&
+        settings.vanillaGradeColorPercent == 100.0 &&
+        !settings.weatherGradeResponse.enabled;
+}
+
 }  // namespace fo4hdr

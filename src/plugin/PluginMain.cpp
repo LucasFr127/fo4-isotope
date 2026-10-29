@@ -424,7 +424,7 @@ namespace
     REX::INFO(
         "diagnostics_configuration valid={} error={} line={} "
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
-        "overlay={} forced_failure={} enabled={} production_requested={} "
+        "overlay={} forced_failure={} enabled={} sdr_enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
         "exposure_ev={} exposure_multiplier={}",
         diagnosticsConfiguration.valid,
@@ -438,6 +438,7 @@ namespace
         diagnosticsConfiguration.value.showDeveloperOverlay,
         diagnosticsConfiguration.value.forceHdrSwapChainFailure,
         diagnosticsConfiguration.value.enabled,
+        diagnosticsConfiguration.value.sdrEnabled,
         diagnosticsConfiguration.value.productionRequested,
         fo4hdr::ToString(diagnosticsConfiguration.value.productionAlgorithm),
         diagnosticsConfiguration.value.displayPeakNits,
@@ -466,6 +467,13 @@ void ReportGameObserverStatus(bool observerActive) noexcept
 [[nodiscard]] bool ProductionRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
 {
     return configuration.valid && configuration.value.enabled && configuration.value.productionRequested;
+}
+
+// The SDR weather response reads the same native LUT provenance as HDR production.
+[[nodiscard]] bool LutObservationRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
+{
+    return ProductionRequested(configuration) ||
+        (configuration.valid && configuration.value.sdrEnabled);
 }
 
 // Matches the renderer's HDR path request, which gates scene-target initialization.
@@ -535,7 +543,7 @@ void InitializeObserverBoundaries(bool observerActive,
     (void)fo4hdr::game::direct_call_patch::TakeSiteMismatch();
     const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
     const bool nativeLut = ReportBoundary("native LUT observation",
-        fo4hdr::game::InitializeNativeLutObserver(sharedUiRequested));
+        fo4hdr::game::InitializeNativeLutObserver(LutObservationRequested(diagnosticsConfiguration)));
     (void)ReportBoundary("ImageSpace provenance",
         fo4hdr::game::InitializeImageSpaceObserver(
             nativeLut, services.trampoline, services.pluginHandle));

@@ -46,6 +46,56 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
+void TestSdrProfileDefaults()
+{
+    const auto sdr = DefaultSdrSettings();
+    FO4HDR_CHECK(ValidateHdrSettings(sdr) == HdrSettingsValidationError::none);
+    FO4HDR_CHECK(sdr.bloomStrengthPercent == 100.0);
+    FO4HDR_CHECK(sdr.vanillaGradeLuminancePercent == 100.0);
+    FO4HDR_CHECK(sdr.vanillaGradeColorPercent == 100.0);
+    FO4HDR_CHECK(!sdr.weatherGradeResponse.enabled);
+    FO4HDR_CHECK(SdrSceneControlsNeutral(sdr) && SdrGradeControlsNeutral(sdr));
+    // The HDR defaults change the vanilla image, so SDR keeps its own profile.
+    FO4HDR_CHECK(!SdrSceneControlsNeutral(HdrSettings{}));
+    FO4HDR_CHECK(!SdrGradeControlsNeutral(HdrSettings{}));
+    FO4HDR_CHECK(HdrSettingsProfiles{}.sdr == sdr);
+
+    using Edit = void (*)(HdrSettings&);
+    const auto sceneOnly = [&sdr](Edit edit) {
+        auto settings = sdr;
+        edit(settings);
+        return !SdrSceneControlsNeutral(settings) && SdrGradeControlsNeutral(settings);
+    };
+    const auto gradeOnly = [&sdr](Edit edit) {
+        auto settings = sdr;
+        edit(settings);
+        return SdrSceneControlsNeutral(settings) && !SdrGradeControlsNeutral(settings);
+    };
+    for (const Edit edit : {Edit{[](HdrSettings& s) { s.exposureEv = 0.1; }},
+             Edit{[](HdrSettings& s) { s.bloomStrengthPercent = 99.0; }},
+             Edit{[](HdrSettings& s) { s.contrast = 1.0; }},
+             Edit{[](HdrSettings& s) { s.blacks = -1.0; }},
+             Edit{[](HdrSettings& s) { s.highlights = 1.0; }},
+             Edit{[](HdrSettings& s) { s.shadows = 1.0; }},
+             Edit{[](HdrSettings& s) { s.saturationPercent = 101.0; }},
+             Edit{[](HdrSettings& s) { s.temperature = 1.0; }},
+             Edit{[](HdrSettings& s) { s.tint = -1.0; }},
+             Edit{[](HdrSettings& s) {
+                 s.selectiveColor.enabled = true;
+                 s.selectiveColor.regions[2].brightness = 10.0;
+             }}})
+        FO4HDR_CHECK(sceneOnly(edit));
+    for (const Edit edit : {Edit{[](HdrSettings& s) { s.vanillaColorGradingStrengthPercent = 50.0; }},
+             Edit{[](HdrSettings& s) { s.vanillaGradeLuminancePercent = 90.0; }},
+             Edit{[](HdrSettings& s) { s.vanillaGradeColorPercent = 0.0; }},
+             Edit{[](HdrSettings& s) { s.weatherGradeResponse.enabled = true; }}})
+        FO4HDR_CHECK(gradeOnly(edit));
+    // Enabled Selective Color with neutral regions has no effect to draw.
+    auto selective = sdr;
+    selective.selectiveColor.enabled = true;
+    FO4HDR_CHECK(SdrSceneControlsNeutral(selective));
+}
+
 void TestSettingsEquality()
 {
     const HdrSettings defaults{};
@@ -233,6 +283,7 @@ void TestSettingsDefaultsAndMath()
 {
     TestLiveSettingsThreads();
     TestDefaultSettingsValues();
+    TestSdrProfileDefaults();
     TestSettingsEquality();
     TestActiveOperatorParameters();
     TestDefaultSettingsMath();

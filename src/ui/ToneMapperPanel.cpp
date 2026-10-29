@@ -130,10 +130,16 @@ struct ColorSettingsTabs
         SettingsSliderRange range;
     };
 
+    // The SDR profile resets to vanilla-neutral values.
+    [[nodiscard]] HdrSettings ProfileDefaults() const noexcept
+    {
+        return view.sdrMode ? DefaultSdrSettings() : HdrSettings{};
+    }
+
     bool DrawImageSetting(const ImageSettingControl& control) noexcept
     {
         auto& value = settings.*control.value;
-        const auto baseline = HdrSettings{}.*control.value;
+        const auto baseline = ProfileDefaults().*control.value;
         float editable = static_cast<float>(value);
         bool changed = DrawSettingsSlider(control.label, &editable, control.range);
         if (changed) value = editable;
@@ -147,7 +153,8 @@ struct ColorSettingsTabs
 
     void DrawAutomaticWeatherResponse() noexcept
     {
-        if (DrawWeatherLutResponsePanel(settings, view.weatherLutResponse))
+        if (DrawWeatherLutResponsePanel(settings, view.weatherLutResponse,
+                ProfileDefaults().weatherGradeResponse))
             commitRequested = true;
     }
 
@@ -399,6 +406,15 @@ struct ColorSettingsTabs
         if (ImGui::BeginTabItem("Output"))
         {
             ImGui::BeginChild("Output-content", ImVec2(0.0F, -footerHeight));
+            if (view.sdrMode)
+            {
+                ImGui::TextWrapped("SDR color controls are active on the game's own SDR image. "
+                    "HDR output and its brightness and tone-mapping controls need an HDR10 "
+                    "display with Windows HDR on before the game starts, and HdrEnabled=1.");
+                ImGui::EndChild();
+                ImGui::EndTabItem();
+                return;
+            }
             ImGui::TextWrapped("Set display brightness, then choose the tone mapper and its look.");
             DrawDetectedDisplay();
             ImGui::SeparatorText("Display Brightness");
@@ -425,7 +441,9 @@ struct ColorSettingsTabs
         if (ImGui::BeginTabItem("Image"))
         {
             ImGui::BeginChild("Image-content", ImVec2(0.0F, -footerHeight));
-            ImGui::TextWrapped("Adjust scene brightness, tonal detail and color. "
+            ImGui::TextWrapped("%s", view.sdrMode ?
+                "Adjust scene brightness, tonal detail and color." :
+                "Adjust scene brightness, tonal detail and color. "
                 "Menu, HUD and video brightness are set in Output.");
             ImGui::SeparatorText("Brightness & Detail");
             bool changed{};
@@ -526,9 +544,13 @@ struct ColorSettingsTabs
                     "Blends the game's color grading. 0% removes it; "
                     "100% applies it fully, including grade response adjustments."}}))
                 commitRequested = true;
-            DrawColorGradingMethod();
-            DrawColorGradingCurve();
-            if (DrawVanillaGradePanel(settings))
+            if (!view.sdrMode)
+            {
+                // Both exist to lift the game's LUTs into HDR.
+                DrawColorGradingMethod();
+                DrawColorGradingCurve();
+            }
+            if (DrawVanillaGradePanel(settings, ProfileDefaults()))
                 commitRequested = true;
             if (ImGui::CollapsingHeader("Automatic Weather LUT Response"))
                 DrawAutomaticWeatherResponse();
@@ -619,9 +641,8 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     return false;
 }
 
-[[nodiscard]] bool DrawVanillaGradePanel(HdrSettings& settings) noexcept
+[[nodiscard]] bool DrawVanillaGradePanel(HdrSettings& settings, const HdrSettings& defaults) noexcept
 {
-    const HdrSettings defaults{};
     bool changed{};
     changed |= detail::DrawSettingsPanelSlider(
         "Global Grade Luminance",
@@ -631,8 +652,8 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
         "Global fallback for disabled or unqualified automatic weather response. "
-        "Controls the vanilla grade's luminance response before Image "
-        "controls. 0% removes that response; 100% keeps it."});
+        "Controls the vanilla grade's luminance response. "
+        "0% removes that response; 100% keeps it."});
     changed |= detail::DrawSettingsPanelSlider(
         "Global Grade Color",
         settings.vanillaGradeColorPercent, {
@@ -641,8 +662,8 @@ void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
         "Global fallback for disabled or unqualified automatic weather response. "
-        "Controls the vanilla grade's hue and saturation response before "
-        "Image controls. 0% retains the original scene colors rather than "
+        "Controls the vanilla grade's hue and saturation response. "
+        "0% retains the original scene colors rather than "
         "making them gray; 100% keeps the full response."});
     return changed;
 }

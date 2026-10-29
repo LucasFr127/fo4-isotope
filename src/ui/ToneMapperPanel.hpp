@@ -10,5 +10,5 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
 void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
     const SettingsWindowView& view, float footerHeight) noexcept;
 [[nodiscard]] bool DrawToneMapperPanel(HdrSettings& settings) noexcept;
-[[nodiscard]] bool DrawVanillaGradePanel(HdrSettings& settings) noexcept;
+[[nodiscard]] bool DrawVanillaGradePanel(HdrSettings& settings, const HdrSettings& defaults) noexcept;
 }

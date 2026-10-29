@@ -788,42 +788,6 @@ struct ObservedSceneFixture : PresentationContextFixture
 };
 
 
-struct NativeReplacementDrawProbe
-{
-    ContextRecord& record;
-    Draw next;
-    ID3D11PixelShader* expectedShader;
-    ID3D11Buffer* expectedConstants;
-    UINT calls{};
-    static inline thread_local NativeReplacementDrawProbe* active{};
-
-    NativeReplacementDrawProbe(ContextRecord& observation, ID3D11PixelShader* shader,
-        ID3D11Buffer* constants) : record(observation), next(record.nextDraw),
-        expectedShader(shader), expectedConstants(constants)
-    {
-        FO4HDR_WARP_CHECK(active == nullptr);
-        active = this;
-        record.nextDraw = Invoke;
-    }
-    ~NativeReplacementDrawProbe()
-    {
-        record.nextDraw = next;
-        active = nullptr;
-    }
-    static void STDMETHODCALLTYPE Invoke(ID3D11DeviceContext* context, UINT count, UINT start)
-    {
-        auto& probe = *active;
-        ComPtr<ID3D11PixelShader> shader;
-        ComPtr<ID3D11Buffer> constants;
-        context->PSGetShader(&shader, nullptr, nullptr);
-        context->PSGetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
-        FO4HDR_WARP_CHECK(shader.Get() == probe.expectedShader);
-        FO4HDR_WARP_CHECK(constants.Get() == probe.expectedConstants);
-        ++probe.calls;
-        probe.next(context, count, start);
-    }
-};
-
 struct DisabledReplacementFixture : SharedPresentationContextFixture
 {
     ComPtr<ID3D11PixelShader> temporalShader;
@@ -942,6 +906,53 @@ struct DisabledReplacementFixture : SharedPresentationContextFixture
     }
 };
 
+// SDR mode substitutes only non-neutral tone-map and LUT passes through the hooks.
+struct SdrReplacementFixture : SharedPresentationContextFixture
+{
+    explicit SdrReplacementFixture(Device& source) : SharedPresentationContextFixture(source)
+    {
+        BindHud();
+        g_activeSettings = DefaultSdrSettings();
+        g_sdrModeActive = true;
+        FO4HDR_WARP_CHECK(BuildSdrReplacementShaders(device.device.Get()));
+    }
+    ~SdrReplacementFixture() { g_sdrModeActive = false; ResetShaderRegistry(); }
+
+    ID3D11PixelShader* Bind(RenoDxShaderPass pass)
+    {
+        ResetShaderRegistry();
+        auto* shader = hudShader.Get();
+        CreatedShaderIdentity{.descriptor = FindShaderDescriptor(pass)}.Register(S_OK, &shader);
+        device.context->PSSetShader(shader, nullptr, 0);
+        ComPtr<ID3D11PixelShader> bound;
+        device.context->PSGetShader(&bound, nullptr, nullptr);
+        return bound.Get();
+    }
+};
+
+void CheckSdrReplacements(Device& device)
+{
+    SdrReplacementFixture fixture(device);
+    auto* original = fixture.hudShader.Get();
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == original);
+    g_activeSettings.vanillaColorGradingStrengthPercent = 50.0;
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::lut) == g_replacements.lutSdr.Get());
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapNewB) == original);
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::taa) == original);
+    g_activeSettings.exposureEv = 1.0;
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == g_replacements.toneMapASdr.Get());
+    {
+        NativeReplacementDrawProbe probe(*fixture.record, g_replacements.toneMapASdr.Get(),
+            g_replacements.operatorConstants.Get());
+        device.context->Draw(3, 0);
+        FO4HDR_WARP_CHECK(probe.calls == 1);
+    }
+    // Only b13 was borrowed for the draw; the game's empty slot returns.
+    ComPtr<ID3D11Buffer> restored;
+    device.context->PSGetConstantBuffers(kProductionOperatorConstantSlot, 1, &restored);
+    FO4HDR_WARP_CHECK(!restored && g_productionHealthy.load());
+}
+
 void CheckDisabledReplacements(Device& device)
 {
     for (const auto pass : {RenoDxShaderPass::lut, RenoDxShaderPass::video})
@@ -1030,7 +1041,7 @@ struct SettingsOverlayWindow
 
     explicit SettingsOverlayWindow(Device& device)
     {
-        InitializeSettingsWindow(HdrSettings{}, HdrInterfaceSettings{});
+        InitializeSettingsWindow(HdrSettingsProfiles{}, HdrInterfaceSettings{});
         RegisterHdrSettingsInteractionRequestHandler(&AcceptSettingsInteraction);
         EnsureSettingsWindowBackend(true, window, device.device.Get(), device.context.Get());
         FO4HDR_WARP_CHECK(TryActivateSettingsWindowInput().active);
@@ -1155,6 +1166,7 @@ void VerifyPresentationContext(Device& device)
     }
     VerifySharedUiContext(native);
     CheckDisabledReplacements(native);
+    CheckSdrReplacements(native);
     for (const bool productionDisabled : {false, true})
         for (const bool empty : {false, true})
             CheckRetainedPartialCopy(native, productionDisabled, empty);

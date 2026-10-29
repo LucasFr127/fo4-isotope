@@ -647,6 +647,23 @@ void TestHdrCandidateDecision()
         HdrCandidateDecision::displayNotHdr10);
 }
 
+void TestSdrModeDecision()
+{
+    // With HDR off, SDR mode follows its own request unless ENB is present.
+    FO4HDR_CHECK(DecideSdrMode({.requested = true}));
+    FO4HDR_CHECK(!DecideSdrMode({}));
+    FO4HDR_CHECK(!DecideSdrMode({.requested = true, .enbDetected = true}));
+    // With HDR requested, only an output that is not HDR10 leaves room for SDR mode.
+    FO4HDR_CHECK(DecideSdrMode({.requested = true, .hdrPathRequested = true,
+        .hdrCandidate = HdrCandidateDecision::displayNotHdr10}));
+    FO4HDR_CHECK(!DecideSdrMode({.hdrPathRequested = true,
+        .hdrCandidate = HdrCandidateDecision::displayNotHdr10}));
+    for (const auto decision : {HdrCandidateDecision::attempt, HdrCandidateDecision::enbDetected,
+             HdrCandidateDecision::descriptorUnsupported})
+        FO4HDR_CHECK(!DecideSdrMode({.requested = true, .hdrPathRequested = true,
+            .hdrCandidate = decision}));
+}
+
 void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)
 {
     heartbeat.BeginFrame(1, 2);
@@ -1031,6 +1048,7 @@ void RunHdrCoreTests()
     TestActivationCapabilityRequirements();
     TestDeviceCreationBypass();
     TestHdrCandidateDecision();
+    TestSdrModeDecision();
     TestOrderedHeartbeat();
     TestRendererLifecycleStress();
     TestGraphicsLifecyclePublication();

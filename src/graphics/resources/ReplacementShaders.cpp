@@ -48,6 +48,14 @@ constexpr ReplacementProgram kReplacementPrograms[]{
     {RenoDxShaderPass::video, generated::kVideo, &ReplacementShaderSet::video}
 };
 
+constexpr ReplacementProgram kSdrReplacementPrograms[]{
+    {RenoDxShaderPass::toneMapA, generated::kToneMapASdr, &ReplacementShaderSet::toneMapASdr},
+    {RenoDxShaderPass::toneMapB, generated::kToneMapBSdr, &ReplacementShaderSet::toneMapBSdr},
+    {RenoDxShaderPass::toneMapNewA, generated::kToneMapNewASdr, &ReplacementShaderSet::toneMapNewASdr},
+    {RenoDxShaderPass::toneMapNewB, generated::kToneMapNewBSdr, &ReplacementShaderSet::toneMapNewBSdr},
+    {RenoDxShaderPass::lut, generated::kCreativeGradeLutSdr, &ReplacementShaderSet::lutSdr}
+};
+
 [[nodiscard]] ID3D11PixelShader* FindReplacement(RenoDxShaderPass pass) noexcept
 {
     const auto resourcesReady = IsWideGamutGenerationReady(
@@ -57,6 +65,31 @@ constexpr ReplacementProgram kReplacementPrograms[]{
     const auto program = std::ranges::find(kReplacementPrograms, pass, &ReplacementProgram::pass);
     if (program == std::end(kReplacementPrograms)) return nullptr;
     return (g_replacements.*program->destination).Get();
+}
+
+[[nodiscard]] bool SdrReplacementsReady() noexcept
+{
+    return g_sdrModeActive.load(std::memory_order_acquire) &&
+        !g_replacements.sdrSubstitutionDisabled &&
+        g_replacements.device == g_rendererDevice.activeDevice &&
+        ReplacementConstantBuffersReady() && ReplacementSetMatchesConfiguration();
+}
+
+[[nodiscard]] ID3D11PixelShader* FindSdrReplacement(RenoDxShaderPass pass) noexcept
+{
+    if (!SdrReplacementsReady()) return nullptr;
+    const auto program = std::ranges::find(kSdrReplacementPrograms, pass, &ReplacementProgram::pass);
+    if (program == std::end(kSdrReplacementPrograms)) return nullptr;
+    const auto neutral = pass == RenoDxShaderPass::lut ?
+        SdrGradeControlsNeutral(g_activeSettings) : SdrSceneControlsNeutral(g_activeSettings);
+    return neutral ? nullptr : (g_replacements.*program->destination).Get();
+}
+
+void DisableSdrSubstitution() noexcept
+{
+    if (g_replacements.sdrSubstitutionDisabled) return;
+    g_replacements.sdrSubstitutionDisabled = true;
+    RecordFailure(GraphicsObservationFailure::sdrBindingFailed);
 }
 
 void ResetReplacementShaders() noexcept
@@ -74,6 +107,12 @@ void ResetReplacementShaders() noexcept
     g_replacements.temporalAa2.Reset();
     g_replacements.fxaa.Reset();
     g_replacements.video.Reset();
+    g_replacements.toneMapASdr.Reset();
+    g_replacements.toneMapBSdr.Reset();
+    g_replacements.toneMapNewASdr.Reset();
+    g_replacements.toneMapNewBSdr.Reset();
+    g_replacements.lutSdr.Reset();
+    g_replacements.sdrSubstitutionDisabled = false;
     g_replacements.bypassConstants.Reset();
     g_replacements.operatorConstants.Reset();
     g_replacements.lutProfileConstants.Reset();
@@ -178,9 +217,9 @@ void PublishReplacementConfiguration(
 }
 
 [[nodiscard]] bool CreateReplacementPrograms(ID3D11Device* device,
-    ReplacementShaderSet& candidate) noexcept
+    ReplacementShaderSet& candidate, std::span<const ReplacementProgram> programs) noexcept
 {
-    for (const auto& program : kReplacementPrograms)
+    for (const auto& program : programs)
     {
         if (program.bytecode.empty()) return false;
         if (FAILED(device->CreatePixelShader(program.bytecode.data(),
@@ -275,7 +314,7 @@ void PublishReplacementConfiguration(
 {
     if (device == nullptr) return false;
     ReplacementShaderSet candidate;
-    if (!CreateReplacementPrograms(device, candidate)) return false;
+    if (!CreateReplacementPrograms(device, candidate, kReplacementPrograms)) return false;
     // A failed optional grading allocation keeps the Radial renderer available.
     (void)BuildNativeReferenceResources(device, candidate.nativeReference);
     OperatorConstants settings{};
@@ -284,6 +323,22 @@ void PublishReplacementConfiguration(
     if (RequiresOperatorLut(settings.mode) &&
         !CreateReplacementLut(device, candidate))
         return false;
+    candidate.configurationKey = settings;
+    candidate.configurationGeneration = g_settingsGeneration;
+    candidate.configurationReady = true;
+    candidate.device = device;
+    g_replacements = std::move(candidate);
+    return true;
+}
+
+[[nodiscard]] bool BuildSdrReplacementShaders(ID3D11Device* device) noexcept
+{
+    if (device == nullptr || !g_sdrModeActive.load(std::memory_order_acquire)) return false;
+    ReplacementShaderSet candidate;
+    if (!CreateReplacementPrograms(device, candidate, kSdrReplacementPrograms)) return false;
+    OperatorConstants settings{};
+    if (!BuildOperatorSettings(settings)) return false;
+    if (!CreateReplacementConstants(device, candidate, settings)) return false;
     candidate.configurationKey = settings;
     candidate.configurationGeneration = g_settingsGeneration;
     candidate.configurationReady = true;

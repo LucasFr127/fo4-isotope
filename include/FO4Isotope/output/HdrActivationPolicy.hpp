@@ -93,6 +93,19 @@ struct HdrCandidateInputs
 [[nodiscard]] HdrCandidateDecision DecideHdrCandidate(
     const HdrCandidateInputs& inputs) noexcept;
 
+// SDR mode runs only where HDR was not attempted because HDR is off or
+// the output is not HDR10. ENB and HDR attempts, including failed ones, keep vanilla.
+struct SdrModeInputs
+{
+    bool requested{};
+    bool hdrPathRequested{};
+    // Meaningful only when the HDR path was requested.
+    HdrCandidateDecision hdrCandidate{HdrCandidateDecision::attempt};
+    bool enbDetected{};
+};
+
+[[nodiscard]] bool DecideSdrMode(const SdrModeInputs& inputs) noexcept;
+
 enum class HdrRendererState : std::uint8_t
 {
     detached,

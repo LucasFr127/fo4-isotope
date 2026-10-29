@@ -51,6 +51,7 @@ std::atomic<bool> g_referenceHealthy{true};
 std::atomic<bool> g_productionHealthy{true};
 std::atomic<bool> g_gameplayReadyApplied{};
 std::atomic<bool> g_rendererCreationClaimed{};
+std::atomic<bool> g_sdrModeActive{};
 [[nodiscard]] std::uint64_t PublishLifecycleGeneration() noexcept
 {
     const auto generation = g_lifecycle.Snapshot().resourceGeneration;
@@ -268,6 +269,7 @@ void RetireLostDeviceGeneration() noexcept
     ShutdownSettingsWindowBackend();
     if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
     g_presentation.applicationFacadeChain = nullptr;
+    g_sdrModeActive.store(false, std::memory_order_release);
     ResetResources();
     ResetReplacementShaders();
     ResetShaderRegistry();
@@ -381,6 +383,13 @@ namespace {
         static_cast<float>(math.vanillaGradeLuminanceRemoval);
     settings.selectiveColorPlaneB[3] =
         static_cast<float>(math.vanillaGradeColorRemoval);
+    // SDR replacements read only the scene and grade lanes; mode 0 needs no operator LUT.
+    if (g_sdrModeActive.load(std::memory_order_acquire))
+    {
+        settings.sceneExposureMultiplier =
+            static_cast<float>(math.sceneExposureMultiplier);
+        return true;
+    }
     if (!g_configuration.productionRequested) return true;
 
     if (!SetProductionOperatorMode(values.productionAlgorithm, settings)) return false;
@@ -425,10 +434,45 @@ void ObserveQualifiedSettingsDrawThread() noexcept
 }
 
 
+namespace {
+bool g_sdrProfileSelected{};
+}
+
+void SetSdrModeActive(bool active) noexcept
+{
+    // Swap only on an actual profile change, so HDR sessions keep their live settings.
+    if (active != g_sdrProfileSelected)
+    {
+        SelectSettingsWindowProfile(active);
+        g_activeSettings = ReadSettingsDraft();
+        g_sdrProfileSelected = active;
+    }
+    g_sdrModeActive.store(active, std::memory_order_release);
+}
+
+bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    // The latch precedes the build so its constants omit the HDR operator mode.
+    const auto admitted = DecideSdrMode(inputs);
+    SetSdrModeActive(admitted);
+    if (!admitted) return false;
+    if (!BuildSdrReplacementShaders(device))
+    {
+        SetSdrModeActive(false);
+        RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
+        return false;
+    }
+    EnsureSettingsWindowBackend(true, g_outputWindow, device, context);
+    return true;
+}
+
 void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
 {
     g_activeSettings = static_cast<const HdrSettings&>(configuration);
-    InitializeSettingsWindow(g_activeSettings, configuration.interfaceSettings);
+    g_sdrProfileSelected = false;
+    InitializeSettingsWindow({g_activeSettings, configuration.sdrSettings},
+        configuration.interfaceSettings);
     g_settingsGeneration = 1;
     g_desiredSettingsGeneration = 1;
     g_lutRequestGeneration = 0;
@@ -664,8 +708,9 @@ void CommitCompletedOperatorLut(ID3D11Device* device,
 bool CanCommitLiveSettings(ID3D11Device* device,
     ID3D11DeviceContext* context) noexcept
 {
-    return g_configuration.productionRequested && device != nullptr &&
-        context != nullptr;
+    return (g_configuration.productionRequested ||
+               g_sdrModeActive.load(std::memory_order_acquire)) &&
+        device != nullptr && context != nullptr;
 }
 
 void CommitLiveSettingsAtEndPresent(ID3D11Device* device,
@@ -700,6 +745,13 @@ OneShotInitialization g_initialization;
     return configuration.enabled &&
         (configuration.productionRequested ||
             (configuration.developerMode && configuration.developerHdr10Reference));
+}
+
+[[nodiscard]] bool GraphicsRequested(const PluginConfiguration& configuration) noexcept
+{
+    // SDR mode needs the renderer hooks even when HDR is off.
+    return GraphicsHdrRequested(configuration) || configuration.sdrEnabled ||
+        GraphicsDiagnosticsRequested(configuration);
 }
 
 void PublishGraphicsRequest(const PluginConfiguration& configuration, bool hdrRequested) noexcept
@@ -755,9 +807,8 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
 
 bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noexcept
 {
-    const auto diagnosticsRequested = GraphicsDiagnosticsRequested(configuration);
     const auto hdrRequested = GraphicsHdrRequested(configuration);
-    if (!hdrRequested && !diagnosticsRequested) return false;
+    if (!GraphicsRequested(configuration)) return false;
     switch (g_initialization.Begin()) {
     case OneShotInitializationAction::alreadyActive:
         return g_configuration == configuration;

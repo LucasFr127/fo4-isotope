@@ -58,6 +58,63 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!shipped.value.developerHdr10Reference);
     FO4HDR_CHECK(!shipped.value.showDeveloperOverlay);
     FO4HDR_CHECK(!shipped.value.forceHdrSwapChainFailure);
+    FO4HDR_CHECK(shipped.value.sdrEnabled);
+    FO4HDR_CHECK(shipped.value.sdrSettings == DefaultSdrSettings());
+}
+
+[[nodiscard]] PluginConfigurationError SdrConfigurationError(std::string_view extra)
+{
+    const auto parsed = ParsePluginConfiguration(MinimalProductionConfiguration() + std::string(extra));
+    return parsed.valid ? PluginConfigurationError::none : parsed.error;
+}
+
+void TestSdrProfileConfiguration()
+{
+    // A file without SDR keys requests SDR mode with the vanilla-neutral profile.
+    const auto minimal = ParsePluginConfiguration(MinimalProductionConfiguration());
+    FO4HDR_CHECK(minimal.valid && minimal.value.sdrEnabled);
+    FO4HDR_CHECK(minimal.value.sdrSettings == DefaultSdrSettings());
+    // A failed load falls back to default construction, which stays inert.
+    FO4HDR_CHECK(!PluginConfiguration{}.sdrEnabled);
+
+    const auto parsed = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "[General]\nSdrEnabled=0\n"
+        "[SdrImage]\nExposureEV=0.5\nSaturation=120\nColorGradingMethod=Unknown\n"
+        "[SdrEffects]\nBloomStrength=40\nVanillaGradeColorStrength=20\n"
+        "[SdrSelectiveColor]\nEnabled=1\nRedHue=5\n"
+        "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n");
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(!parsed.value.sdrEnabled);
+    auto expected = DefaultSdrSettings();
+    expected.exposureEv = 0.5;
+    expected.saturationPercent = 120.0;
+    expected.bloomStrengthPercent = 40.0;
+    expected.vanillaGradeColorPercent = 20.0;
+    expected.selectiveColor.enabled = true;
+    expected.selectiveColor.regions[0].hueDegrees = 5.0;
+    expected.weatherGradeResponse.enabled = true;
+    expected.weatherGradeResponse.color.gain = 0.5;
+    FO4HDR_CHECK(parsed.value.sdrSettings == expected);
+    // SDR keys never reach the HDR settings or the production request.
+    FO4HDR_CHECK(static_cast<const HdrSettings&>(parsed.value) ==
+        static_cast<const HdrSettings&>(minimal.value));
+    FO4HDR_CHECK(parsed.value.productionRequested == minimal.value.productionRequested);
+
+    // Each copy of a key may appear once, and SDR values keep the HDR ranges.
+    FO4HDR_CHECK(SdrConfigurationError("[Image]\nContrast=1\n[SdrImage]\nContrast=2\n") ==
+        PluginConfigurationError::none);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrImage]\nContrast=1\n[SdrImage]\nContrast=2\n") ==
+        PluginConfigurationError::duplicateKey);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrImage]\nExposureEV=4.5\n") ==
+        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrEffects]\nBloomStrength=100.01\n") ==
+        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrSelectiveColor]\nRedSaturation=151\n") ==
+        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrWeatherLutResponse]\nEnabled=2\n") ==
+        PluginConfigurationError::invalidBoolean);
+    FO4HDR_CHECK(SdrConfigurationError("[General]\nSdrEnabled=yes\n") ==
+        PluginConfigurationError::invalidBoolean);
 }
 
 void TestProductionConfiguration()
@@ -90,7 +147,7 @@ void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
     auto sourceContrastSettings = static_cast<HdrSettings>(parsed.value);
     sourceContrastSettings.toneMapperParameters.agxContrast = 2.4;
     const auto sourceContrastSaved = RewriteHdrSettingsIni(
-        MinimalProductionConfiguration(), sourceContrastSettings, {});
+        MinimalProductionConfiguration(), {sourceContrastSettings}, {});
     FO4HDR_CHECK(sourceContrastSaved.find("Contrast=2.4\n") !=
         std::string::npos);
     const auto sourceContrastReloaded =
@@ -105,14 +162,14 @@ void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
         auto settings = static_cast<HdrSettings>(parsed.value);
         settings.colorGradingMethod = method;
         const auto saved = RewriteHdrSettingsIni(
-            MinimalProductionConfiguration(), settings, {});
+            MinimalProductionConfiguration(), {settings}, {});
         const auto loaded = ParsePluginConfiguration(saved);
         FO4HDR_CHECK(loaded.valid);
         FO4HDR_CHECK(loaded.value.colorGradingMethod == method);
-        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {settings}, {}) == saved);
         settings.colorGradingMethod = HdrSettings{}.colorGradingMethod;
         const auto reset = ParsePluginConfiguration(
-            RewriteHdrSettingsIni(saved, settings, {}));
+            RewriteHdrSettingsIni(saved, {settings}, {}));
         FO4HDR_CHECK(reset.valid);
         FO4HDR_CHECK(reset.value.colorGradingMethod == ColorGradingMethod::radial);
     }
@@ -126,13 +183,13 @@ void TestGradingCurveRoundTrip(const PluginConfigurationResult& parsed)
         auto settings = static_cast<HdrSettings>(parsed.value);
         settings.colorGradingCurve = curve;
         const auto saved = RewriteHdrSettingsIni(
-            MinimalProductionConfiguration(), settings, {});
+            MinimalProductionConfiguration(), {settings}, {});
         FO4HDR_CHECK(saved.find("ColorGradingCurve=" + std::string(ToString(curve)) + "\n") !=
             std::string::npos);
         const auto loaded = ParsePluginConfiguration(saved);
         FO4HDR_CHECK(loaded.valid);
         FO4HDR_CHECK(loaded.value.colorGradingCurve == curve);
-        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {settings}, {}) == saved);
     }
 }
 
@@ -178,11 +235,11 @@ void TestToneMapperConfigurationRanges()
         HdrSettings settings;
         settings.toneMapperParameters = parameters;
         const auto saved = RewriteHdrSettingsIni(
-            MinimalProductionConfiguration(), settings, {});
+            MinimalProductionConfiguration(), {settings}, {});
         const auto loaded = ParsePluginConfiguration(saved);
         FO4HDR_CHECK(loaded.valid);
         FO4HDR_CHECK(loaded.value.toneMapperParameters == parameters);
-        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, settings, {}) == saved);
+        FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {settings}, {}) == saved);
     }
 }
 
@@ -264,6 +321,7 @@ void TestExtendedConfiguration()
 void TestOptionalConfigurationValues()
 {
     TestShippedConfiguration();
+    TestSdrProfileConfiguration();
     TestProductionConfiguration();
     TestMinimalConfiguration();
     TestToneMapperConfigurationRanges();

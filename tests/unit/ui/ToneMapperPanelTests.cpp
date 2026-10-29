@@ -95,6 +95,34 @@ void RenderEffectsSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
     }
 }
 
+// Every SDR-mode tab renders without changing the settings.
+void RenderSdrSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
+{
+    const auto before = settings;
+    SettingsWindowView view{};
+    view.activeSettings = settings;
+    view.sdrMode = true;
+    for (const auto* next : {"Effects", "Image", "Selective Color", "Output"})
+    {
+        bool commitRequested{};
+        ImGui::NewFrame();
+        ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+        if (ImGui::Begin("SDR settings smoke", nullptr, ImGuiWindowFlags_NoSavedSettings) &&
+            ImGui::BeginTabBar("SDR smoke tabs"))
+        {
+            DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+            auto* tabs = ImGui::GetCurrentTabBar();
+            FO4HDR_CHECK(tabs->Tabs.Size == 4);
+            ImGui::TabBarQueueFocus(tabs, next);
+            ImGui::EndTabBar();
+        }
+        ImGui::End();
+        ImGui::Render();
+        FO4HDR_CHECK(!commitRequested);
+    }
+    FO4HDR_CHECK(settings == before);
+}
+
 void TestToneMapperRecommendationFloatEndpoints()
 {
     for (const auto range : {ToneMapperRecommendedRange{true, 0.25, 0.8, 1000.0},
@@ -233,6 +261,7 @@ void TestToneMapperPanelSmoke()
         FO4HDR_CHECK(drawData->TotalIdxCount > 0);
         FO4HDR_CHECK(settings.toneMapperParameters == before);
         RenderEffectsSettingsFrames(settings, windowSize);
+        RenderSdrSettingsFrames(settings, windowSize);
         ImGui::DestroyContext();
     };
 
@@ -276,7 +305,7 @@ void TestVanillaGradePanelSmoke()
         {
             const auto verticesBefore =
                 ImGui::GetWindowDrawList()->VtxBuffer.Size;
-            FO4HDR_CHECK(!DrawVanillaGradePanel(settings));
+            FO4HDR_CHECK(!DrawVanillaGradePanel(settings, HdrSettings{}));
             FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size >
                 verticesBefore);
         }

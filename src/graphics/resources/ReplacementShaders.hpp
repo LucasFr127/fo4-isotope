@@ -24,6 +24,13 @@ struct ReplacementShaderSet
     Microsoft::WRL::ComPtr<ID3D11PixelShader> temporalAa2;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> fxaa;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> video;
+    // SDR-mode set; it holds no HDR programs and never needs an operator LUT.
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapASdr;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapBSdr;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewASdr;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewBSdr;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> lutSdr;
+    bool sdrSubstitutionDisabled{};
     Microsoft::WRL::ComPtr<ID3D11Buffer> bypassConstants;
     Microsoft::WRL::ComPtr<ID3D11Buffer> operatorConstants;
     Microsoft::WRL::ComPtr<ID3D11Buffer> lutProfileConstants;
@@ -45,8 +52,13 @@ bool ReplacementProgramsReady() noexcept;
 bool ReplacementConstantBuffersReady() noexcept;
 bool ReplacementSetMatchesConfiguration() noexcept;
 ID3D11PixelShader* FindReplacement(RenoDxShaderPass) noexcept;
+// Null for a neutral pass, so its original shader draws.
+ID3D11PixelShader* FindSdrReplacement(RenoDxShaderPass) noexcept;
+void DisableSdrSubstitution() noexcept;
 void ResetReplacementShaders() noexcept;
 bool BuildReplacementShaders(ID3D11Device*) noexcept;
+// Requires the SDR latch, so the constants are built in mode 0.
+bool BuildSdrReplacementShaders(ID3D11Device*) noexcept;
 bool PublishReplacementSettings(ID3D11DeviceContext*, const HdrSettings&, std::uint64_t generation) noexcept;
 bool PublishReplacementLut(ID3D11Device*, ID3D11DeviceContext*,
     const OperatorLutBuildResult&, const HdrSettings&) noexcept;

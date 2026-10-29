@@ -799,16 +799,16 @@ private:    void ReleaseFailedCreationClaim()
     // ENB ships as a d3d11.dll proxy exporting its SDK; its SDR post-processing
     // would regrade the HDR10 output beneath this hook. The display and facade
     // inputs repeat checks that would otherwise reject a created candidate.
-    [[nodiscard]] bool CandidateAllowed() const
+    [[nodiscard]] bool CandidateAllowed()
     {
         const auto& description = *request_.description;
-        const auto decision = DecideHdrCandidate({
+        candidateDecision_ = DecideHdrCandidate({
             .enbDetected = LoadedModuleExports("ENBGetSDKVersion"),
             .displayHdr10 = DisplayHdr10(description.OutputWindow),
             .facadeRequired = g_configuration.productionRequested,
             .facadeDescriptorSupported = PresentationFacadeDescriptorSupported(description)});
-        RecordHdrCandidateDecision(decision, description);
-        return decision == HdrCandidateDecision::attempt;
+        RecordHdrCandidateDecision(candidateDecision_, description);
+        return candidateDecision_ == HdrCandidateDecision::attempt;
     }
 
     [[nodiscard]] HdrCandidateRejection CandidateRejection()
@@ -833,6 +833,8 @@ private:    void ReleaseFailedCreationClaim()
 
     void CreateHdrCandidate()
     {
+        // HDR replacements read the live HDR profile, so the attempt leaves SDR mode first.
+        SetSdrModeActive(false);
         g_evidence.hdrCreationAttemptCount.fetch_add(1, std::memory_order_relaxed);
         auto modified = *request_.description;
         modified.BufferDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
@@ -929,6 +931,11 @@ private:    void ReleaseFailedCreationClaim()
 
     void PublishInstallation()
     {
+        // SDR mode is ready before publication activates settings input below.
+        (void)PrepareSdrMode({.requested = g_configuration.sdrEnabled,
+            .hdrPathRequested = HdrPathRequested(), .hdrCandidate = candidateDecision_,
+            .enbDetected = LoadedModuleExports("ENBGetSDKVersion")},
+            *request_.device, *request_.context);
         g_rendererDevice.activeDevice = *request_.device;
         g_rendererDevice.activeContext = *request_.context;
         g_rendererDevice.activeContext1.Reset();
@@ -968,6 +975,7 @@ private:    void ReleaseFailedCreationClaim()
         if (installed.context) RollBackShadow(*request_.context, FindContext(*request_.context));
         if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
         ShutdownSettingsWindowBackend();
+        SetSdrModeActive(false);
         ResetResources();
         ResetReplacementShaders();
         g_referenceHealthy = false;
@@ -990,6 +998,7 @@ private:    void ReleaseFailedCreationClaim()
     bool owner_{};
     bool attemptHdr_{};
     bool hdrDescriptor_{};
+    HdrCandidateDecision candidateDecision_{HdrCandidateDecision::attempt};
     ComPtr<IDXGISwapChain> facade_;
     HRESULT result_{E_FAIL};
 };

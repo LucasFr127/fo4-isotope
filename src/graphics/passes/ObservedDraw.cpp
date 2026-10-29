@@ -793,6 +793,32 @@ void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservat
     ObserveSharedSdrDraw(context, record);
 }
 
+// An SDR replacement reads only b13 and writes its original's domain,
+// so a draw that cannot bind it draws the original shader instead.
+[[nodiscard]] bool DrawSdrReplacement(ID3D11DeviceContext* context, DrawObservation& record,
+    const DrawInvocation& draw) noexcept
+{
+    if (!record.currentReplacementActive || !g_sdrModeActive.load(std::memory_order_acquire))
+        return false;
+    auto* constants = g_replacements.operatorConstants.Get();
+    if (record.currentPass == RenoDxShaderPass::lut)
+        constants = PrepareLutProfileDraw(context, record, constants);
+    ScopedD3D11PixelBindings bindings;
+    if (bindings.Bind(context, g_rendererDevice.activeContext1.Get(),
+            {.constantBufferSlot = kProductionOperatorConstantSlot, .constantBuffer = constants}))
+    {
+        ObserveQualifiedSettingsDrawThread();
+    }
+    else
+    {
+        DisableSdrSubstitution();
+        (void)RestoreNativePixelShader(context, record);
+    }
+    draw();
+    ObserveCompletedNativeDraw(context, record);
+    return true;
+}
+
 void ExecuteObservedDraw(
     DrawObservation& record,
     ID3D11DeviceContext* context,
@@ -819,6 +845,7 @@ void ExecuteObservedDraw(
         ObserveCompletedNativeDraw(context, record);
         return;
     }
+    if (DrawSdrReplacement(context, record, draw)) return;
     PrepareNativeSceneDraw(context, record, draw.indexedTriangle);
     bool productionOperatorApplied{};
     SharedUiWriteEvidence write;

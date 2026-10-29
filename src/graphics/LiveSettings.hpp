@@ -35,6 +35,8 @@ bool RequiresOperatorLut(std::uint32_t mode) noexcept;
 void ObserveQualifiedSettingsDrawThread() noexcept;
 bool HdrPathRequested() noexcept;
 void InitializeLiveSettings(const PluginConfiguration&) noexcept;
+// Latches SDR mode and selects the live profile it renders.
+void SetSdrModeActive(bool active) noexcept;
 OperatorLutBuildRequest DesiredOperatorLutBuild() noexcept;
 void CommitLiveSettingsAtEndPresent(ID3D11Device*, ID3D11DeviceContext*) noexcept;
 

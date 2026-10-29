@@ -54,10 +54,11 @@ struct SettingsAutosaveFrame
 class SettingsAutosave
 {
 public:
-    void Initialize(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings) noexcept;
-    void Update(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings,
+    void Initialize(const HdrSettingsProfiles& settings,
+        const HdrInterfaceSettings& interfaceSettings) noexcept;
+    void Update(const HdrSettingsProfiles& settings, const HdrInterfaceSettings& interfaceSettings,
         const SettingsAutosaveFrame& frame) noexcept;
-    [[nodiscard]] bool Dirty(const HdrSettings& settings,
+    [[nodiscard]] bool Dirty(const HdrSettingsProfiles& settings,
         const HdrInterfaceSettings& interfaceSettings) const noexcept;
     [[nodiscard]] bool RequestFailed() const noexcept { return requestFailed_; }
 
@@ -65,7 +66,7 @@ private:
     void Acknowledge(const SettingsPersistenceSnapshot& persistence) noexcept;
     [[nodiscard]] bool Ready(const SettingsPersistenceSnapshot& persistence,
         const SettingsAutosaveFrame& frame) const noexcept;
-    HdrSettings persistedSettings_{}, observedSettings_{}, requestedSettings_{};
+    HdrSettingsProfiles persistedSettings_{}, observedSettings_{}, requestedSettings_{};
     HdrInterfaceSettings persistedInterface_{}, observedInterface_{}, requestedInterface_{};
     std::uint64_t changedAt_{}, retryAt_{}, requestGeneration_{};
     bool requestFailed_{};
@@ -74,7 +75,7 @@ private:
 [[nodiscard]] bool InitializeSettingsPersistence(
     const std::filesystem::path& iniPath) noexcept;
 [[nodiscard]] std::uint64_t RequestHdrSettingsSave(
-    const HdrSettings& settings,
+    const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept;
 [[nodiscard]] SettingsPersistenceSnapshot
 ReadSettingsPersistenceSnapshot() noexcept;

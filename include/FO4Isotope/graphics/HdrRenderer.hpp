@@ -36,7 +36,8 @@ enum class GraphicsObservationFailure : std::uint32_t
     temporalOutputUnavailable,
     referenceRenderFailed,
     colorDomainMismatch,
-    deviceLost
+    deviceLost,
+    sdrBindingFailed
 };
 
 // The first post-creation check that released an HDR candidate before the

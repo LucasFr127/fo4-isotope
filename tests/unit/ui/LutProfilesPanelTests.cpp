@@ -79,7 +79,7 @@ struct PanelFrame
             };
             ImGui::LogToClipboard();
         }
-        changed = DrawWeatherLutResponsePanel(settings, view);
+        changed = DrawWeatherLutResponsePanel(settings, view, WeatherGradeResponseSettings{});
         if (renderedText != nullptr) ImGui::LogFinish();
         FO4HDR_CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size > verticesBefore);
     }

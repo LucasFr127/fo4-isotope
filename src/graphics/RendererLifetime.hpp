@@ -28,6 +28,10 @@ extern std::atomic<bool> g_referenceHealthy;
 extern std::atomic<bool> g_productionHealthy;
 extern std::atomic<bool> g_gameplayReadyApplied;
 extern std::atomic<bool> g_rendererCreationClaimed;
+// SDR color controls, latched per device generation on a chain that never attempted HDR.
+extern std::atomic<bool> g_sdrModeActive;
+// Latches SDR mode when DecideSdrMode admits it and its replacements build; otherwise clears it.
+bool PrepareSdrMode(const SdrModeInputs&, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 
 std::uint64_t PublishLifecycleGeneration() noexcept;
 void ResetSceneTracking() noexcept;

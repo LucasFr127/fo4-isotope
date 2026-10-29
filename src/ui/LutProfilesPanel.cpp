@@ -185,11 +185,10 @@ void DrawContributors(const WeatherLutResponseView& view) noexcept
 
 }  // namespace
 
-bool DrawWeatherLutResponsePanel(
-    HdrSettings& settings, const WeatherLutResponseView& view) noexcept
+bool DrawWeatherLutResponsePanel(HdrSettings& settings,
+    const WeatherLutResponseView& view, const WeatherGradeResponseSettings& defaults) noexcept
 {
     auto& response = settings.weatherGradeResponse;
-    const WeatherGradeResponseSettings defaults{};
     bool changed = ImGui::Checkbox("Enable Automatic Weather Response", &response.enabled);
     ImGui::SetItemTooltip("Uses one fixed response per ImageSpace, averaged from all referencing weather slots.\n"
         "Unqualified and non-weather sources use the global grade controls.");

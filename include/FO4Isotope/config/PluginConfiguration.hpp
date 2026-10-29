@@ -3,6 +3,7 @@
 
 #include "FO4Isotope/config/HdrSettings.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -20,6 +21,9 @@ struct PluginConfiguration : HdrSettings
     }
 
     bool enabled{};
+    // The parser requests SDR mode by default; default construction stays inert.
+    bool sdrEnabled{};
+    HdrSettings sdrSettings{DefaultSdrSettings()};
     bool productionRequested{};
     double sceneExposureMultiplier{1.0};
     HdrInterfaceSettings interfaceSettings{};
@@ -32,6 +36,37 @@ struct PluginConfiguration : HdrSettings
     bool forceHdrSwapChainFailure{};
     bool operator==(const PluginConfiguration&) const = default;
 };
+
+// SDR profile sections reuse their HDR section's key names.
+struct SdrProfileSection { std::string_view sdr; std::string_view base; };
+inline constexpr std::array kSdrProfileSections{
+    SdrProfileSection{"SdrImage", "Image"},
+    SdrProfileSection{"SdrSelectiveColor", "SelectiveColor"},
+    SdrProfileSection{"SdrEffects", "Effects"},
+    SdrProfileSection{"SdrWeatherLutResponse", "WeatherLutResponse"}};
+
+// The HDR base section of an SDR profile section, or empty for any other section.
+[[nodiscard]] constexpr std::string_view SdrProfileBaseSection(std::string_view section) noexcept
+{
+    for (const auto& entry : kSdrProfileSections)
+        if (entry.sdr == section) return entry.base;
+    return {};
+}
+
+// The SDR profile section for an HDR base section, or empty when it has none.
+[[nodiscard]] constexpr std::string_view SdrProfileSectionName(std::string_view base) noexcept
+{
+    for (const auto& entry : kSdrProfileSections)
+        if (entry.base == base) return entry.sdr;
+    return {};
+}
+
+// The HDR-only grading method and curve are not part of the SDR profile.
+[[nodiscard]] constexpr bool IsSdrProfileKey(std::string_view base, std::string_view key) noexcept
+{
+    return !SdrProfileSectionName(base).empty() &&
+        !(base == "Image" && (key == "ColorGradingMethod" || key == "ColorGradingCurve"));
+}
 
 enum class PluginConfigurationError
 {

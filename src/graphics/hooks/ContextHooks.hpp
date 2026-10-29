@@ -117,5 +117,6 @@ void STDMETHODCALLTYPE HookOmSetRenderTargets(
     ID3D11DepthStencilView* depth) noexcept;
 
 bool ValidateExpectedShaderBinding(ID3D11DeviceContext*, DrawObservation&) noexcept;
+bool RestoreNativePixelShader(ID3D11DeviceContext*, DrawObservation&) noexcept;
 
 } // namespace fo4hdr

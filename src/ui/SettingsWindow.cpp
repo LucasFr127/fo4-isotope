@@ -23,7 +23,10 @@ constexpr const char* kPositionSaveError = "Window position could not be saved. 
 
 struct SettingsWindowState {
     HdrSettings sessionSettings{};
+    // The draft edits the renderer's active profile; the other profile is kept for saving.
     HdrSettings uiDraft{};
+    HdrSettings inactiveSettings{DefaultSdrSettings()};
+    bool sdrProfile{};
     HdrInterfaceSettings sessionInterfaceSettings{};
     HdrInterfaceSettings uiInterfaceDraft{};
     ImGuiStyle baseImGuiStyle{};
@@ -345,8 +348,11 @@ struct SettingsTabs {
                 static_cast<unsigned>(persistence.state),
                 state.persistenceRequestError ? " (request rejected)" : "");
             ImGui::Text("Armor HUD composition: %s", view.armorEncodedStatus);
-            ImGui::SeparatorText("Exposure");
-            DrawExposureLockDiagnostic(view, actions);
+            if (!view.sdrMode)
+            {
+                ImGui::SeparatorText("Exposure");
+                DrawExposureLockDiagnostic(view, actions);
+            }
             ImGui::SeparatorText("Pip-Boy");
             DrawPipboyObservationDiagnostic(view, actions);
             ImGui::EndChild();
@@ -625,24 +631,34 @@ void RevertSettingsDraft() noexcept
 
 void DrawSettingsRestoreActions(bool narrowFooter) noexcept
 {
-    if (ImGui::Button("HDR Defaults"))
+    if (ImGui::Button(g_state.sdrProfile ? "SDR Defaults" : "HDR Defaults"))
     {
-        g_state.uiDraft = HdrSettings{};
+        g_state.uiDraft = g_state.sdrProfile ? DefaultSdrSettings() : HdrSettings{};
         g_state.uiCommitRequested = true;
     }
-    ImGui::SetItemTooltip("Restore HDR defaults; interface settings stay unchanged.");
+    ImGui::SetItemTooltip("%s", g_state.sdrProfile ?
+        "Restore SDR defaults; interface settings stay unchanged." :
+        "Restore HDR defaults; interface settings stay unchanged.");
     if (!narrowFooter) ImGui::SameLine();
     if (ImGui::Button("Revert"))
     {
         RevertSettingsDraft();
     }
-    ImGui::SetItemTooltip("Restore HDR and interface settings from when this window opened. Changes save automatically.");
+    ImGui::SetItemTooltip("%s", g_state.sdrProfile ?
+        "Restore SDR and interface settings from when this window opened. Changes save automatically." :
+        "Restore HDR and interface settings from when this window opened. Changes save automatically.");
 
+}
+
+[[nodiscard]] HdrSettingsProfiles PersistedProfiles() noexcept
+{
+    return g_state.sdrProfile ? HdrSettingsProfiles{g_state.inactiveSettings, g_state.uiDraft} :
+        HdrSettingsProfiles{g_state.uiDraft, g_state.inactiveSettings};
 }
 
 void UpdateSettingsAutosave() noexcept
 {
-    g_state.autosave.Update(g_state.uiDraft, g_state.uiInterfaceDraft,
+    g_state.autosave.Update(PersistedProfiles(), g_state.uiInterfaceDraft,
         {GetTickCount64(), !g_view->lutPending && g_view->activeSettings == g_state.uiDraft, g_open});
     g_state.persistenceRequestError = g_state.autosave.RequestFailed();
 }
@@ -666,6 +682,11 @@ struct SettingsWindowContents
     void DrawSettingsSummary() noexcept
     {
         const auto* settingsStatus = SettingsSummaryStatus();
+        if (g_view->sdrMode)
+        {
+            ImGui::TextWrapped("SDR color controls | %s", settingsStatus);
+            return;
+        }
         ImGui::TextWrapped("%s | HDR10 %s | %.0f-nit peak | %s",
             SettingsOperatorDisplayName(g_view->activeSettings.productionAlgorithm),
             g_view->hdrActive ? "active" : "inactive",
@@ -709,7 +730,7 @@ struct SettingsWindowContents
     void Draw() noexcept
     {
         UpdateSettingsWindowSize(interfaceScale);
-        dirty = g_state.autosave.Dirty(g_state.uiDraft, g_state.uiInterfaceDraft);
+        dirty = g_state.autosave.Dirty(PersistedProfiles(), g_state.uiInterfaceDraft);
         DrawSettingsSummary();
         const auto width = ImGui::GetContentRegionAvail().x;
         const auto narrowFooter = width < ImGui::GetFontSize() * 27.0F;
@@ -759,11 +780,13 @@ struct SettingsWindowContents
 
 } // namespace
 
-void InitializeSettingsWindow(const HdrSettings& settings,
+void InitializeSettingsWindow(const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
-    g_state.sessionSettings = settings;
-    g_state.uiDraft = settings;
+    g_state.sessionSettings = settings.hdr;
+    g_state.uiDraft = settings.hdr;
+    g_state.inactiveSettings = settings.sdr;
+    g_state.sdrProfile = false;
     g_state.sessionInterfaceSettings = interfaceSettings;
     g_state.uiInterfaceDraft = interfaceSettings;
     SetHdrSettingsHotkey(interfaceSettings.toggleKey);
@@ -774,6 +797,14 @@ void InitializeSettingsWindow(const HdrSettings& settings,
     g_state.interfaceWindowPositionPending = true;
     g_state.windowPositionSavePending = false;
     g_state.autosave.Initialize(settings, interfaceSettings);
+}
+
+void SelectSettingsWindowProfile(bool sdr) noexcept
+{
+    if (sdr == g_state.sdrProfile) return;
+    std::swap(g_state.uiDraft, g_state.inactiveSettings);
+    g_state.sessionSettings = g_state.uiDraft;
+    g_state.sdrProfile = sdr;
 }
 
 void EnsureSettingsWindowBackend(bool requested, HWND window,

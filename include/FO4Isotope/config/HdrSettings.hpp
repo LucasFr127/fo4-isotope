@@ -290,6 +290,20 @@ struct HdrSettingsMath
     const ToneMapperParameters& parameters) noexcept;
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(
     const HdrSettings& settings) noexcept;
+// SDR profile: vanilla-neutral defaults for the creative controls.
+// Its output, operator and grading-method fields keep HDR defaults and are unused.
+[[nodiscard]] HdrSettings DefaultSdrSettings() noexcept;
+// A neutral SDR pass reproduces vanilla, so its original shader draws.
+[[nodiscard]] bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept;
+[[nodiscard]] bool SdrGradeControlsNeutral(const HdrSettings& settings) noexcept;
+
+// Both persisted creative profiles; Interface settings stay shared.
+struct HdrSettingsProfiles
+{
+    HdrSettings hdr{};
+    HdrSettings sdr{DefaultSdrSettings()};
+    bool operator==(const HdrSettingsProfiles&) const = default;
+};
 [[nodiscard]] HdrInterfaceSettingsValidationError
 ValidateHdrInterfaceSettings(
     const HdrInterfaceSettings& settings) noexcept;

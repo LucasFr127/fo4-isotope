@@ -424,6 +424,61 @@ void RetirePresentationOutput() noexcept
     // Armor closes before this phase; its borrowed proxy UAV retires before output.
     g_presentation.presentationProxyUav.Reset();
     g_presentation.presentationBackBufferRtv.Reset();
+    g_presentation.sdrBackBufferRtv.Reset();
+    g_presentation.sdrBackBuffer.Reset();
+    g_presentation.sdrBackBufferUnsupported = false;
+}
+
+namespace {
+
+// ImGui writes display codes, so the view must not apply an sRGB encode.
+[[nodiscard]] DXGI_FORMAT SdrBackBufferViewFormat(DXGI_FORMAT format) noexcept
+{
+    switch (format)
+    {
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS: return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS: return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case DXGI_FORMAT_R10G10B10A2_UNORM:
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS: return DXGI_FORMAT_R10G10B10A2_UNORM;
+    default: return DXGI_FORMAT_UNKNOWN;
+    }
+}
+
+// ImGui's rasterizer needs a single-sample render target.
+[[nodiscard]] bool SdrBackBufferDrawable(const D3D11_TEXTURE2D_DESC& description) noexcept
+{
+    return SdrBackBufferViewFormat(description.Format) != DXGI_FORMAT_UNKNOWN &&
+        description.SampleDesc.Count == 1 &&
+        (description.BindFlags & D3D11_BIND_RENDER_TARGET) != 0;
+}
+
+}  // namespace
+
+bool EnsureSdrBackBufferTarget(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
+{
+    if (g_presentation.sdrBackBufferRtv) return true;
+    if (g_presentation.sdrBackBufferUnsupported) return false;
+    if (swapChain == nullptr || device == nullptr) return false;
+    // Retry only after this swap-chain generation retires.
+    g_presentation.sdrBackBufferUnsupported = true;
+    ComPtr<ID3D11Texture2D> backBuffer;
+    if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) return false;
+    D3D11_TEXTURE2D_DESC description{};
+    backBuffer->GetDesc(&description);
+    if (!SdrBackBufferDrawable(description)) return false;
+    D3D11_RENDER_TARGET_VIEW_DESC view{};
+    view.Format = SdrBackBufferViewFormat(description.Format);
+    view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+    if (FAILED(device->CreateRenderTargetView(backBuffer.Get(), &view,
+            &g_presentation.sdrBackBufferRtv)))
+        return false;
+    g_presentation.sdrBackBufferUnsupported = false;
+    g_presentation.sdrBackBuffer = std::move(backBuffer);
+    g_presentation.width = description.Width;
+    g_presentation.height = description.Height;
+    return true;
 }
 
 void ResetPresentationResources(bool retainColorControl, bool retainPresentationBuffer) noexcept

@@ -68,7 +68,7 @@ struct SettingsPipboyView
 struct SettingsWindowView
 {
     HdrSettings activeSettings;
-    bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{};
+    bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{}, sdrMode{};
     bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
     ProductionToneMapperAlgorithm pendingAlgorithm{};
     double pendingPeakNits{};
@@ -98,7 +98,11 @@ struct SettingsInputActivation
     std::uint32_t currentThreadId{}, windowThreadId{};
 };
 
-void InitializeSettingsWindow(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings) noexcept;
+void InitializeSettingsWindow(const HdrSettingsProfiles& settings,
+    const HdrInterfaceSettings& interfaceSettings) noexcept;
+// The renderer selects the profile its device generation renders;
+// the draft then edits that profile and Read/Commit act on it.
+void SelectSettingsWindowProfile(bool sdr) noexcept;
 void EnsureSettingsWindowBackend(bool requested, HWND window, ID3D11Device* device, ID3D11DeviceContext* context) noexcept;
 void ShutdownSettingsWindowBackend() noexcept;
 [[nodiscard]] bool SettingsWindowBackendReady() noexcept;

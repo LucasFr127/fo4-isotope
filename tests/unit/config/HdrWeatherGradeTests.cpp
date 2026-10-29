@@ -84,13 +84,13 @@ void TestWeatherGradeConfiguration()
     FO4HDR_CHECK(parsed.value.weatherGradeResponse.luminance.gain == 0.25);
     FO4HDR_CHECK(parsed.value.weatherGradeResponse.color.coefficients[0] ==
         -17.123456789012345);
-    const auto saved = RewriteHdrSettingsIni(minimal + legacy, parsed.value, {});
+    const auto saved = RewriteHdrSettingsIni(minimal + legacy, {parsed.value}, {});
     const auto reloaded = ParsePluginConfiguration(saved);
     FO4HDR_CHECK(reloaded.valid);
     FO4HDR_CHECK(reloaded.value.weatherGradeResponse == parsed.value.weatherGradeResponse);
     FO4HDR_CHECK(saved.find("GradeProfilesEnabled") == std::string::npos);
     FO4HDR_CHECK(saved.find("[LUT:test.dds]\nColor=25\n") != std::string::npos);
-    FO4HDR_CHECK(RewriteHdrSettingsIni(saved, parsed.value, {}) == saved);
+    FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {parsed.value}, {}) == saved);
     for (const auto invalid : {
              "Enabled=2", "ColorGain=-0.01", "LuminanceGain=2.01",
              "LuminanceBase=101", "ColorMinimum=70\nColorMaximum=60",

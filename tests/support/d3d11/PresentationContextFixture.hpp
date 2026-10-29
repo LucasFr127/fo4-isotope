@@ -134,4 +134,41 @@ struct ObservedConstantProbe
 void PrepareObservedProductionBindings(Device& device);
 Device CreateNativeContextDevice(Device& source);
 
+// Verifies the shader and b13 that a hooked draw forwards to the device.
+struct NativeReplacementDrawProbe
+{
+    ContextRecord& record;
+    Draw next;
+    ID3D11PixelShader* expectedShader;
+    ID3D11Buffer* expectedConstants;
+    UINT calls{};
+    static inline thread_local NativeReplacementDrawProbe* active{};
+
+    NativeReplacementDrawProbe(ContextRecord& observation, ID3D11PixelShader* shader,
+        ID3D11Buffer* constants) : record(observation), next(record.nextDraw),
+        expectedShader(shader), expectedConstants(constants)
+    {
+        FO4HDR_WARP_CHECK(active == nullptr);
+        active = this;
+        record.nextDraw = Invoke;
+    }
+    ~NativeReplacementDrawProbe()
+    {
+        record.nextDraw = next;
+        active = nullptr;
+    }
+    static void STDMETHODCALLTYPE Invoke(ID3D11DeviceContext* context, UINT count, UINT start)
+    {
+        auto& probe = *active;
+        ComPtr<ID3D11PixelShader> shader;
+        ComPtr<ID3D11Buffer> constants;
+        context->PSGetShader(&shader, nullptr, nullptr);
+        context->PSGetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
+        FO4HDR_WARP_CHECK(shader.Get() == probe.expectedShader);
+        FO4HDR_WARP_CHECK(constants.Get() == probe.expectedConstants);
+        ++probe.calls;
+        probe.next(context, count, start);
+    }
+};
+
 } // namespace fo4hdr::tests::gpu

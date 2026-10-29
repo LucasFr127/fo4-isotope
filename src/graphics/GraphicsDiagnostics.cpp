@@ -205,7 +205,8 @@ const char* GraphicsObservationFailureName(GraphicsObservationFailure value) noe
         std::pair{GraphicsObservationFailure::temporalOutputUnavailable, "temporal-output-unavailable"},
         std::pair{GraphicsObservationFailure::referenceRenderFailed, "reference-render-failed"},
         std::pair{GraphicsObservationFailure::colorDomainMismatch, "color-domain-mismatch"},
-        std::pair{GraphicsObservationFailure::deviceLost, "device-lost"}
+        std::pair{GraphicsObservationFailure::deviceLost, "device-lost"},
+        std::pair{GraphicsObservationFailure::sdrBindingFailed, "sdr-binding-failed"}
     };
     const auto found = std::ranges::find(names, value, &decltype(names)::value_type::first);
     return found == names.end() ? "unknown" : found->second;

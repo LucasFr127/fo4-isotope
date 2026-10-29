@@ -212,6 +212,7 @@ enum class RequiredKey : std::size_t
     weatherColorGlare,
     weatherColorAmbient,
     weatherColorColorChange,
+    sdrEnabled,
     count
 };
 
@@ -266,6 +267,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Debug", "ShowDeveloperOverlay", RequiredKey::showDeveloperOverlay},
     {"Debug", "ForceHdrSwapChainFailure", RequiredKey::forceHdrSwapChainFailure},
     {"General", "HdrEnabled", RequiredKey::enabled},
+    {"General", "SdrEnabled", RequiredKey::sdrEnabled},
     {"Output", "DisplayPeakNits", RequiredKey::displayPeakNits},
     {"Output", "UiPaperWhiteNits", RequiredKey::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", RequiredKey::videoWhiteNits},
@@ -332,7 +334,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     result = found->key;
     return true;
 }
-[[nodiscard]] double* WeatherNumericTarget(PluginConfiguration& configuration,
+[[nodiscard]] double* WeatherNumericTarget(HdrSettings& configuration,
     RequiredKey key) noexcept
 {
     struct Target { RequiredKey key; double* value; };
@@ -360,24 +362,14 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     return found == std::end(targets) ? nullptr : found->value;
 }
 
-[[nodiscard]] double* NumericTarget(PluginConfiguration& configuration,
+// Creative controls shared by the HDR settings and the SDR profile.
+[[nodiscard]] double* ProfileNumericTarget(HdrSettings& configuration,
     RequiredKey key) noexcept
 {
     if (auto* weather = WeatherNumericTarget(configuration, key)) return weather;
     auto& regions = configuration.selectiveColor.regions;
     struct Target { RequiredKey key; double* value; };
     const Target targets[]{
-        {RequiredKey::displayPeakNits, &configuration.displayPeakNits},
-        {RequiredKey::uiPaperWhiteNits, &configuration.uiPaperWhiteNits},
-        {RequiredKey::videoWhiteNits, &configuration.videoWhiteNits},
-        {RequiredKey::acesLookStrength, &configuration.toneMapperParameters.acesLookStrength},
-        {RequiredKey::agxMiddleGrayEv, &configuration.toneMapperParameters.agxMiddleGrayEv},
-        {RequiredKey::agxContrast, &configuration.toneMapperParameters.agxContrast},
-        {RequiredKey::agxHdrPurity, &configuration.toneMapperParameters.agxHdrPurity},
-        {RequiredKey::agxHdrShoulderPower, &configuration.toneMapperParameters.agxHdrShoulderPower},
-        {RequiredKey::gt7ToeStrength, &configuration.toneMapperParameters.gt7ToeStrength},
-        {RequiredKey::gt7ShoulderStart, &configuration.toneMapperParameters.gt7ShoulderStart},
-        {RequiredKey::gt7ColorBlend, &configuration.toneMapperParameters.gt7ColorBlend},
         {RequiredKey::exposureEv, &configuration.exposureEv},
         {RequiredKey::contrast, &configuration.contrast},
         {RequiredKey::blacks, &configuration.blacks},
@@ -412,6 +404,28 @@ constexpr ConfigurationKey kConfigurationKeys[]{
         {RequiredKey::vanillaGradeLuminance, &configuration.vanillaGradeLuminancePercent},
         {RequiredKey::vanillaGradeColor, &configuration.vanillaGradeColorPercent},
         {RequiredKey::bloomStrength, &configuration.bloomStrengthPercent},
+    };
+    const auto found = std::ranges::find(targets, key, &Target::key);
+    return found == std::end(targets) ? nullptr : found->value;
+}
+
+[[nodiscard]] double* NumericTarget(PluginConfiguration& configuration,
+    RequiredKey key) noexcept
+{
+    if (auto* profile = ProfileNumericTarget(configuration, key)) return profile;
+    struct Target { RequiredKey key; double* value; };
+    const Target targets[]{
+        {RequiredKey::displayPeakNits, &configuration.displayPeakNits},
+        {RequiredKey::uiPaperWhiteNits, &configuration.uiPaperWhiteNits},
+        {RequiredKey::videoWhiteNits, &configuration.videoWhiteNits},
+        {RequiredKey::acesLookStrength, &configuration.toneMapperParameters.acesLookStrength},
+        {RequiredKey::agxMiddleGrayEv, &configuration.toneMapperParameters.agxMiddleGrayEv},
+        {RequiredKey::agxContrast, &configuration.toneMapperParameters.agxContrast},
+        {RequiredKey::agxHdrPurity, &configuration.toneMapperParameters.agxHdrPurity},
+        {RequiredKey::agxHdrShoulderPower, &configuration.toneMapperParameters.agxHdrShoulderPower},
+        {RequiredKey::gt7ToeStrength, &configuration.toneMapperParameters.gt7ToeStrength},
+        {RequiredKey::gt7ShoulderStart, &configuration.toneMapperParameters.gt7ShoulderStart},
+        {RequiredKey::gt7ColorBlend, &configuration.toneMapperParameters.gt7ColorBlend},
         {RequiredKey::interfaceScale, &configuration.interfaceSettings.scale},
         {RequiredKey::settingsWindowWidth, &configuration.interfaceSettings.windowWidth},
         {RequiredKey::settingsWindowHeight, &configuration.interfaceSettings.windowHeight},
@@ -546,9 +560,28 @@ bool& BooleanTarget(PluginConfiguration& parsed, RequiredKey key) noexcept
         {RequiredKey::measurePerformance, &parsed.measurePerformance},
         {RequiredKey::developerHdr10Reference, &parsed.developerHdr10Reference},
         {RequiredKey::showDeveloperOverlay, &parsed.showDeveloperOverlay},
-        {RequiredKey::forceHdrSwapChainFailure, &parsed.forceHdrSwapChainFailure}};
+        {RequiredKey::forceHdrSwapChainFailure, &parsed.forceHdrSwapChainFailure},
+        {RequiredKey::sdrEnabled, &parsed.sdrEnabled}};
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? parsed.enabled : *found->value;
+}
+
+bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
+{
+    if (key == RequiredKey::weatherEnabled) return &profile.weatherGradeResponse.enabled;
+    if (key == RequiredKey::selectiveColorEnabled) return &profile.selectiveColor.enabled;
+    return nullptr;
+}
+
+// SDR profile sections accept only the shared creative controls.
+PluginConfigurationError ParseProfileSetting(HdrSettings& profile,
+    RequiredKey key, std::string_view value) noexcept
+{
+    if (auto* target = ProfileNumericTarget(profile, key))
+        return ParseNumber(value, NumericRange(key), *target);
+    auto* flag = ProfileBooleanTarget(profile, key);
+    return flag != nullptr && ParseBoolean(value, *flag) ?
+        PluginConfigurationError::none : PluginConfigurationError::invalidBoolean;
 }
 
 PluginConfigurationError ParseNamedSetting(PluginConfiguration& parsed,
@@ -603,7 +636,8 @@ PluginConfigurationError ValidateConfiguration(const PluginConfiguration& parsed
     if (error != PluginConfigurationError::none) return error;
     if (ValidateHdrInterfaceSettings(parsed.interfaceSettings) != HdrInterfaceSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
-    if (ValidateHdrSettings(parsed) != HdrSettingsValidationError::none)
+    if (ValidateHdrSettings(parsed) != HdrSettingsValidationError::none ||
+        ValidateHdrSettings(parsed.sdrSettings) != HdrSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
     return PluginConfigurationError::none;
 }
@@ -615,6 +649,7 @@ public:
     {
         // Files containing only diagnostic keys remain valid, but cannot request a production operator.
         output_.value.enabled = true;
+        output_.value.sdrEnabled = true;
     }
 
     PluginConfigurationResult Parse(std::string_view text) noexcept
@@ -656,16 +691,21 @@ private:
         if (line.size() < 3 || line.back() != ']') return PluginConfigurationError::invalidSyntax;
         section_ = Trim(line.substr(1, line.size() - 2));
         if (section_.empty()) return PluginConfigurationError::invalidSyntax;
+        const auto base = SdrProfileBaseSection(section_);
+        sdrSection_ = !base.empty();
+        if (sdrSection_) section_ = base;
         return PluginConfigurationError::none;
     }
 
     PluginConfigurationError ParseValue(std::string_view key, std::string_view value) noexcept
     {
         RequiredKey required{};
+        if (sdrSection_ && !IsSdrProfileKey(section_, key)) return PluginConfigurationError::none;
         if (!MatchKey(section_, key, required)) return PluginConfigurationError::none;
-        auto& seen = seen_[static_cast<std::size_t>(required)];
+        auto& seen = (sdrSection_ ? seenSdr_ : seen_)[static_cast<std::size_t>(required)];
         if (seen) return PluginConfigurationError::duplicateKey;
         seen = true;
+        if (sdrSection_) return ParseProfileSetting(output_.value.sdrSettings, required, value);
         return ParseSetting(output_.value, required, value);
     }
 
@@ -714,7 +754,9 @@ private:
 
     PluginConfigurationResult output_{};
     std::array<bool, static_cast<std::size_t>(RequiredKey::count)> seen_{};
+    std::array<bool, static_cast<std::size_t>(RequiredKey::count)> seenSdr_{};
     std::string_view section_;
+    bool sdrSection_{};
     std::size_t lineNumber_{};
 };
 

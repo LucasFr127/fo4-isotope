@@ -6,7 +6,8 @@
 
 namespace fo4hdr {
 
-[[nodiscard]] bool DrawWeatherLutResponsePanel(
-    HdrSettings& settings, const WeatherLutResponseView& view) noexcept;
+// Reset buttons restore the active profile's defaults.
+[[nodiscard]] bool DrawWeatherLutResponsePanel(HdrSettings& settings,
+    const WeatherLutResponseView& view, const WeatherGradeResponseSettings& defaults) noexcept;
 
 }  // namespace fo4hdr

@@ -1039,6 +1039,9 @@ struct PresentFrame
         ValidateActivation();
         RenderHdrFallback();
         RenderSdrHandoff();
+        if (g_sdrModeActive.load(std::memory_order_acquire))
+            DrawSdrSettingsOverlay(swapChain, g_rendererDevice.activeDevice,
+                g_rendererDevice.activeContext);
         PublishResult();
         if (rendered) PublishSharedUiPresentation();
         TraceSharedUiOutput({rendered, rendered || hdrFallbackRendered || sdrHandoffRendered,

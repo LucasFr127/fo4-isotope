@@ -176,7 +176,7 @@ constexpr std::array<SelectivePersistedKey, 21> kSelectivePersistedKeys{{
 }};
 
 std::filesystem::path g_iniPath;
-HdrSettings g_requestedSettings{};
+HdrSettingsProfiles g_requestedSettings{};
 HdrInterfaceSettings g_requestedInterfaceSettings{};
 double g_requestedWindowX{-1.0};
 double g_requestedWindowY{-1.0};
@@ -542,9 +542,18 @@ class SettingsIniWriter
 {
 public:
     SettingsIniWriter(const HdrSettings& settings,
-        const HdrInterfaceSettings& interfaceSettings, bool positionOnly) :
-        settings_(settings), interfaceSettings_(interfaceSettings), positionOnly_(positionOnly)
+        const HdrInterfaceSettings& interfaceSettings, bool positionOnly,
+        bool sdrProfile = false) :
+        settings_(settings), interfaceSettings_(interfaceSettings), positionOnly_(positionOnly),
+        sdrProfile_(sdrProfile)
     {
+        if (sdrProfile_)
+        {
+            // The SDR pass rewrites only its own sections; HDR rows are already written.
+            for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
+                seen_[index] = !IsSdrProfileKey(kPersistedKeys[index].section, kPersistedKeys[index].key);
+            return;
+        }
         if (!positionOnly_) return;
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
             seen_[index] = !IsPositionKey(kPersistedKeys[index]);
@@ -575,9 +584,15 @@ private:
     [[nodiscard]] bool IsRetiredKey(std::string_view name) const noexcept
     {
         // A full save performs one-way migration of retired names.
-        if (positionOnly_) return false;
+        if (positionOnly_ || sdrProfile_) return false;
         return (section_ == "Image" && name == "GradeTransfer") ||
             (section_ == "Effects" && name == "GradeProfilesEnabled");
+    }
+
+    [[nodiscard]] bool Writes(const PersistedKey& key) const noexcept
+    {
+        if (positionOnly_ && !IsPositionKey(key)) return false;
+        return !sdrProfile_ || IsSdrProfileKey(key.section, key.key);
     }
 
     [[nodiscard]] bool ReplaceKnownKey(std::string_view name)
@@ -585,7 +600,7 @@ private:
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
         {
             const auto& key = kPersistedKeys[index];
-            if (positionOnly_ && !IsPositionKey(key)) continue;
+            if (!Writes(key)) continue;
             if (section_ != key.section || name != key.key) continue;
             result_.append(KeyValue(key, settings_, interfaceSettings_));
             seen_[index] = true;
@@ -634,7 +649,8 @@ private:
 
     void AppendLine(const IniLine& line)
     {
-        if (line.IsSection()) section_ = line.Section();
+        if (line.IsSection())
+            section_ = sdrProfile_ ? SdrProfileBaseSection(line.Section()) : line.Section();
         const auto key = line.Key();
         const auto replaced = key && ReplaceKey(*key);
         if (!replaced) result_.append(line.raw);
@@ -650,7 +666,7 @@ private:
     {
         const auto missing = MissingSelectiveKeys();
         if (!missing) return;
-        result_.append("[SelectiveColor]").append(newline_);
+        result_.append("[").append(HeaderName("SelectiveColor")).append("]").append(newline_);
         if (!selectiveEnabledSeen_)
             result_.append("Enabled=").append(settings_.selectiveColor.enabled ? "1" : "0").append(newline_);
         if (!selectiveAmountSeen_)
@@ -666,7 +682,7 @@ private:
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
             missing = missing || (kPersistedKeys[index].section == group && !seen_[index]);
         if (!missing) return;
-        result_.append("[").append(group).append("]").append(newline_);
+        result_.append("[").append(HeaderName(group)).append("]").append(newline_);
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
             if (kPersistedKeys[index].section == group && !seen_[index])
                 result_.append(KeyValue(kPersistedKeys[index], settings_, interfaceSettings_)).append(newline_);
@@ -679,14 +695,21 @@ private:
             "WeatherLutResponse"};
         for (const auto group : groups)
         {
+            if (sdrProfile_ && SdrProfileSectionName(group).empty()) continue;
             if (group == "SelectiveColor") AppendMissingSelective();
             else AppendMissingGroup(group);
         }
     }
 
+    [[nodiscard]] std::string_view HeaderName(std::string_view group) const noexcept
+    {
+        return sdrProfile_ ? SdrProfileSectionName(group) : group;
+    }
+
     const HdrSettings& settings_;
     const HdrInterfaceSettings& interfaceSettings_;
     bool positionOnly_{};
+    bool sdrProfile_{};
     std::array<bool, kPersistedKeys.size()> seen_{};
     std::array<bool, kSelectivePersistedKeys.size()> selectiveSeen_{};
     bool selectiveEnabledSeen_{};
@@ -697,10 +720,12 @@ private:
 };
 
 [[nodiscard]] std::string RewriteIni(std::string_view original,
-    const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings,
+    const HdrSettingsProfiles& settings, const HdrInterfaceSettings& interfaceSettings,
     bool positionOnly = false)
 {
-    return SettingsIniWriter(settings, interfaceSettings, positionOnly).Rewrite(original);
+    auto rewritten = SettingsIniWriter(settings.hdr, interfaceSettings, positionOnly).Rewrite(original);
+    if (positionOnly) return rewritten;
+    return SettingsIniWriter(settings.sdr, interfaceSettings, false, true).Rewrite(rewritten);
 }
 
 [[nodiscard]] std::filesystem::path ResolveBackingPath(
@@ -789,7 +814,7 @@ private:
 }
 
 [[nodiscard]] bool SaveSettings(
-    const HdrSettings& settings,
+    const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings,
     bool positionOnly) noexcept
 {
@@ -847,7 +872,7 @@ struct PersistenceGenerations
 
 struct PersistenceRequest
 {
-    HdrSettings settings;
+    HdrSettingsProfiles settings;
     HdrInterfaceSettings interfaceSettings;
     DisplayCalibrationProfile calibration;
     DisplayCalibrationOperation calibrationOperation{};
@@ -1020,10 +1045,11 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
     return std::ranges::find(terminal, state) != terminal.end();
 }
 
-[[nodiscard]] bool ValidSettingsForPersistence(const HdrSettings& settings,
+[[nodiscard]] bool ValidSettingsForPersistence(const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
-    return ValidateHdrSettings(settings) == HdrSettingsValidationError::none &&
+    return ValidateHdrSettings(settings.hdr) == HdrSettingsValidationError::none &&
+        ValidateHdrSettings(settings.sdr) == HdrSettingsValidationError::none &&
         ValidateHdrInterfaceSettings(interfaceSettings) == HdrInterfaceSettingsValidationError::none;
 }
 
@@ -1043,12 +1069,12 @@ std::string RewriteHdrWindowPositionIni(
     settings.windowY = y;
     if (ValidateHdrInterfaceSettings(settings) !=
         HdrInterfaceSettingsValidationError::none) return std::string(original);
-    return RewriteIni(original, HdrSettings{}, settings, true);
+    return RewriteIni(original, HdrSettingsProfiles{}, settings, true);
 }
 
 std::string RewriteHdrSettingsIni(
     std::string_view original,
-    const HdrSettings& settings,
+    const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings)
 {
     if (!ValidSettingsForPersistence(settings, interfaceSettings))
@@ -1082,7 +1108,7 @@ bool InitializeSettingsPersistence(
 }
 
 std::uint64_t RequestHdrSettingsSave(
-    const HdrSettings& settings,
+    const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
     if (!g_started.load(std::memory_order_acquire) ||
@@ -1219,7 +1245,7 @@ std::uint64_t RequestDisplayCalibrationLoad(
     return 0;
 }
 
-void SettingsAutosave::Initialize(const HdrSettings& settings,
+void SettingsAutosave::Initialize(const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) noexcept
 {
     persistedSettings_ = observedSettings_ = settings;
@@ -1228,7 +1254,7 @@ void SettingsAutosave::Initialize(const HdrSettings& settings,
     requestFailed_ = false;
 }
 
-bool SettingsAutosave::Dirty(const HdrSettings& settings,
+bool SettingsAutosave::Dirty(const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings) const noexcept
 {
     return settings != persistedSettings_ ||
@@ -1254,7 +1280,7 @@ bool SettingsAutosave::Ready(const SettingsPersistenceSnapshot& persistence,
         persistence.state != SettingsPersistenceState::unavailable;
 }
 
-void SettingsAutosave::Update(const HdrSettings& settings,
+void SettingsAutosave::Update(const HdrSettingsProfiles& settings,
     const HdrInterfaceSettings& interfaceSettings, const SettingsAutosaveFrame& frame) noexcept
 {
     const auto persistence = ReadSettingsPersistenceSnapshot();

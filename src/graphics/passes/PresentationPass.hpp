@@ -43,5 +43,7 @@ PresentationResult RenderPublicSharedUiFrame(IDXGISwapChain*, ID3D11Device*, ID3
 PresentationResult RenderPublicSharedUiSdrFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*,
     const SharedUiPresentation&) noexcept;
 bool RenderBlackPresentationFrame(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
+// SDR mode draws the settings window onto the game's own backbuffer.
+void DrawSdrSettingsOverlay(IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 
 } // namespace fo4hdr
