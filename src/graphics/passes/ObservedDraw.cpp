@@ -800,12 +800,18 @@ void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservat
 {
     if (!record.currentReplacementActive || !g_sdrModeActive.load(std::memory_order_acquire))
         return false;
+    const bool lutPass = record.currentPass == RenoDxShaderPass::lut;
     auto* constants = g_replacements.operatorConstants.Get();
-    if (record.currentPass == RenoDxShaderPass::lut)
-        constants = PrepareLutProfileDraw(context, record, constants);
+    if (lutPass) constants = PrepareLutProfileDraw(context, record, constants);
+    // A selected operator's SDR table replaces the curve in the tone-map passes.
+    const bool bindOperatorLut = !lutPass && RequiresOperatorLut(g_replacements.configurationKey.mode);
     ScopedD3D11PixelBindings bindings;
     if (bindings.Bind(context, g_rendererDevice.activeContext1.Get(),
-            {.constantBufferSlot = kProductionOperatorConstantSlot, .constantBuffer = constants}))
+            {.constantBufferSlot = kProductionOperatorConstantSlot, .constantBuffer = constants,
+            .shaderResourceSlot = kProductionOperatorLutSlot,
+            .shaderResource = g_replacements.operatorLutSrv.Get(),
+            .samplerSlot = kProductionOperatorSamplerSlot,
+            .sampler = g_replacements.operatorLutSampler.Get(), .bindShaderResource = bindOperatorLut}))
     {
         ObserveQualifiedSettingsDrawThread();
     }

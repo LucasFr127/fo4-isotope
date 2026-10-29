@@ -38,6 +38,21 @@ struct OperatorLutBuildResult
             request.algorithm, request.toneMapperParameters);
 }
 
+// The table a settings profile renders with. An SDR key's peak is its
+// operator's fixed SDR white, so the HDR display peak never selects it.
+[[nodiscard]] inline OperatorLutBuildRequest OperatorLutKeyFor(
+    const HdrSettings& settings, OperatorLutTarget target) noexcept
+{
+    const auto algorithm = settings.productionAlgorithm;
+    return {
+        .algorithm = algorithm,
+        .target = target,
+        .displayPeakNits = target == OperatorLutTarget::sdr ?
+            SdrOperatorWhiteNits(algorithm) : settings.displayPeakNits,
+        .toneMapperParameters = ActiveToneMapperParameters(algorithm, settings.toneMapperParameters)
+    };
+}
+
 enum class OperatorLutCompletionAction : std::uint8_t
 {
     retire,

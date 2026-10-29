@@ -24,7 +24,8 @@ struct ReplacementShaderSet
     Microsoft::WRL::ComPtr<ID3D11PixelShader> temporalAa2;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> fxaa;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> video;
-    // SDR-mode set; it holds no HDR programs and never needs an operator LUT.
+    // SDR-mode set; it holds no HDR programs, and only a selected operator
+    // needs the table and sampler below.
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapASdr;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapBSdr;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewASdr;
@@ -57,10 +58,12 @@ ID3D11PixelShader* FindSdrReplacement(RenoDxShaderPass) noexcept;
 void DisableSdrSubstitution() noexcept;
 void ResetReplacementShaders() noexcept;
 bool BuildReplacementShaders(ID3D11Device*) noexcept;
-// Requires the SDR latch, so the constants are built in mode 0.
+// Requires the SDR latch, so the constants carry the SDR operator mode.
 bool BuildSdrReplacementShaders(ID3D11Device*) noexcept;
 bool PublishReplacementSettings(ID3D11DeviceContext*, const HdrSettings&, std::uint64_t generation) noexcept;
 bool PublishReplacementLut(ID3D11Device*, ID3D11DeviceContext*,
     const OperatorLutBuildResult&, const HdrSettings&) noexcept;
+// Drops the table once no mode reads it; the sampler stays for the next one.
+void ReleaseReplacementLut() noexcept;
 
 } // namespace fo4hdr

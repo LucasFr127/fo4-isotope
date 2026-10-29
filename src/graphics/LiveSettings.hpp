@@ -20,7 +20,6 @@ extern std::uint64_t g_lutRequestGeneration;
 extern std::uint64_t g_deviceGeneration;
 extern bool g_lutPending;
 extern OperatorLutBuildRequest g_pendingLutRequest;
-extern std::unique_ptr<OperatorLutBuildResult> g_activeCpuLut;
 extern bool g_liveSettingsError;
 extern std::atomic<DWORD> g_currentFrameQualifiedDrawThread;
 extern std::atomic<bool> g_currentFrameQualifiedDrawThreadConflict;
@@ -31,6 +30,10 @@ extern std::atomic<bool> g_liveSettingsThreadCompatible;
 bool BuildOperatorSettings(const HdrSettings& values, OperatorConstants& settings) noexcept;
 bool BuildOperatorSettings(OperatorConstants& settings) noexcept;
 bool RequiresOperatorLut(std::uint32_t mode) noexcept;
+// Each target's retained CPU table survives device loss for re-upload.
+[[nodiscard]] std::unique_ptr<OperatorLutBuildResult>& RetainedCpuLut(OperatorLutTarget target) noexcept;
+// The table target of the selected settings profile.
+[[nodiscard]] OperatorLutTarget ActiveOperatorLutTarget() noexcept;
 
 void ObserveQualifiedSettingsDrawThread() noexcept;
 bool HdrPathRequested() noexcept;

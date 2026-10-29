@@ -276,26 +276,23 @@ void PublishReplacementConfiguration(
     return true;
 }
 
-[[nodiscard]] bool CreateReplacementLut(ID3D11Device* device,
+[[nodiscard]] bool UploadRetainedLut(ID3D11Device* device,
     ReplacementShaderSet& candidate) noexcept
 {
     // The CPU cache survives device loss; only GPU resources are recreated.
-    if (!g_activeCpuLut) return false;
-    if (!PreparedOperatorLutMatches(g_activeCpuLut->data, {
-            .algorithm = g_activeSettings.productionAlgorithm,
-            .displayPeakNits = g_activeSettings.displayPeakNits,
-            .toneMapperParameters = g_activeSettings.toneMapperParameters}))
-        return false;
-    if (!UploadOperatorLut(device, g_activeCpuLut->data,
+    const auto key = OperatorLutKeyFor(g_activeSettings, ActiveOperatorLutTarget());
+    const auto& retained = RetainedCpuLut(key.target);
+    if (!retained || !PreparedOperatorLutMatches(retained->data, key)) return false;
+    if (!UploadOperatorLut(device, retained->data,
             candidate.operatorLut, candidate.operatorLutSrv))
         return false;
-    candidate.operatorLutKey = {
-        .algorithm = g_activeSettings.productionAlgorithm,
-        .displayPeakNits = g_activeSettings.displayPeakNits,
-        .toneMapperParameters = ActiveToneMapperParameters(
-            g_activeSettings.productionAlgorithm,
-            g_activeSettings.toneMapperParameters)
-    };
+    candidate.operatorLutKey = key;
+    return true;
+}
+
+[[nodiscard]] bool CreateOperatorLutSampler(ID3D11Device* device,
+    ReplacementShaderSet& candidate) noexcept
+{
     D3D11_SAMPLER_DESC samplerDescription{};
     samplerDescription.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
     samplerDescription.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -310,6 +307,24 @@ void PublishReplacementConfiguration(
     return true;
 }
 
+// Publishes the programs with the active settings' constants and operator table.
+[[nodiscard]] bool PublishReplacementSet(ID3D11Device* device,
+    ReplacementShaderSet& candidate) noexcept
+{
+    OperatorConstants settings{};
+    if (!BuildOperatorSettings(settings)) return false;
+    if (!CreateReplacementConstants(device, candidate, settings)) return false;
+    // The sampler precedes any table, which may publish later from the worker.
+    if (!CreateOperatorLutSampler(device, candidate)) return false;
+    if (RequiresOperatorLut(settings.mode) && !UploadRetainedLut(device, candidate)) return false;
+    candidate.configurationKey = settings;
+    candidate.configurationGeneration = g_settingsGeneration;
+    candidate.configurationReady = true;
+    candidate.device = device;
+    g_replacements = std::move(candidate);
+    return true;
+}
+
 [[nodiscard]] bool BuildReplacementShaders(ID3D11Device* device) noexcept
 {
     if (device == nullptr) return false;
@@ -317,49 +332,30 @@ void PublishReplacementConfiguration(
     if (!CreateReplacementPrograms(device, candidate, kReplacementPrograms)) return false;
     // A failed optional grading allocation keeps the Radial renderer available.
     (void)BuildNativeReferenceResources(device, candidate.nativeReference);
-    OperatorConstants settings{};
-    if (!BuildOperatorSettings(settings)) return false;
-    if (!CreateReplacementConstants(device, candidate, settings)) return false;
-    if (RequiresOperatorLut(settings.mode) &&
-        !CreateReplacementLut(device, candidate))
-        return false;
-    candidate.configurationKey = settings;
-    candidate.configurationGeneration = g_settingsGeneration;
-    candidate.configurationReady = true;
-    candidate.device = device;
-    g_replacements = std::move(candidate);
-    return true;
+    return PublishReplacementSet(device, candidate);
 }
 
 [[nodiscard]] bool BuildSdrReplacementShaders(ID3D11Device* device) noexcept
 {
     if (device == nullptr || !g_sdrModeActive.load(std::memory_order_acquire)) return false;
     ReplacementShaderSet candidate;
-    if (!CreateReplacementPrograms(device, candidate, kSdrReplacementPrograms)) return false;
-    OperatorConstants settings{};
-    if (!BuildOperatorSettings(settings)) return false;
-    if (!CreateReplacementConstants(device, candidate, settings)) return false;
-    candidate.configurationKey = settings;
-    candidate.configurationGeneration = g_settingsGeneration;
-    candidate.configurationReady = true;
-    candidate.device = device;
-    g_replacements = std::move(candidate);
-    return true;
+    return CreateReplacementPrograms(device, candidate, kSdrReplacementPrograms) &&
+        PublishReplacementSet(device, candidate);
+}
+
+void ReleaseReplacementLut() noexcept
+{
+    g_replacements.operatorLut.Reset();
+    g_replacements.operatorLutSrv.Reset();
+    g_replacements.operatorLutKey = {};
 }
 
 [[nodiscard]] bool ReplacementLutMatchesConfiguration() noexcept
 {
-    return g_replacements.operatorLut &&
-             g_replacements.operatorLutSrv &&
-             g_replacements.operatorLutSampler &&
-             g_replacements.operatorLutKey.algorithm ==
-                g_activeSettings.productionAlgorithm &&
-             g_replacements.operatorLutKey.displayPeakNits ==
-                g_activeSettings.displayPeakNits &&
-             g_replacements.operatorLutKey.toneMapperParameters ==
-                ActiveToneMapperParameters(
-                    g_activeSettings.productionAlgorithm,
-                    g_activeSettings.toneMapperParameters);
+    return g_replacements.operatorLut && g_replacements.operatorLutSrv &&
+        g_replacements.operatorLutSampler &&
+        OperatorLutContentMatches(g_replacements.operatorLutKey,
+            OperatorLutKeyFor(g_activeSettings, ActiveOperatorLutTarget()));
 }
 
 [[nodiscard]] bool ReplacementSetMatchesConfiguration() noexcept

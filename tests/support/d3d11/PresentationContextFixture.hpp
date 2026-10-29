@@ -141,12 +141,15 @@ struct NativeReplacementDrawProbe
     Draw next;
     ID3D11PixelShader* expectedShader;
     ID3D11Buffer* expectedConstants;
+    // When set, the draw must also see this operator table at t7 with a sampler at s7.
+    ID3D11ShaderResourceView* expectedLut{};
     UINT calls{};
     static inline thread_local NativeReplacementDrawProbe* active{};
 
     NativeReplacementDrawProbe(ContextRecord& observation, ID3D11PixelShader* shader,
-        ID3D11Buffer* constants) : record(observation), next(record.nextDraw),
-        expectedShader(shader), expectedConstants(constants)
+        ID3D11Buffer* constants, ID3D11ShaderResourceView* lut = nullptr) :
+        record(observation), next(record.nextDraw), expectedShader(shader),
+        expectedConstants(constants), expectedLut(lut)
     {
         FO4HDR_WARP_CHECK(active == nullptr);
         active = this;
@@ -166,8 +169,18 @@ struct NativeReplacementDrawProbe
         context->PSGetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
         FO4HDR_WARP_CHECK(shader.Get() == probe.expectedShader);
         FO4HDR_WARP_CHECK(constants.Get() == probe.expectedConstants);
+        if (probe.expectedLut != nullptr) CheckLutBinding(*context, probe.expectedLut);
         ++probe.calls;
         probe.next(context, count, start);
+    }
+
+    static void CheckLutBinding(ID3D11DeviceContext& context, ID3D11ShaderResourceView* expected)
+    {
+        ComPtr<ID3D11ShaderResourceView> lut;
+        ComPtr<ID3D11SamplerState> sampler;
+        context.PSGetShaderResources(kProductionOperatorLutSlot, 1, &lut);
+        context.PSGetSamplers(kProductionOperatorSamplerSlot, 1, &sampler);
+        FO4HDR_WARP_CHECK(lut.Get() == expected && sampler);
     }
 };
 

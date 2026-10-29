@@ -794,13 +794,14 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
         }
         else CheckMenuFallback(pattern);
         g_activeSettings.uiPaperWhiteNits = 203;
-        auto savedCpuLut = std::move(g_activeCpuLut);
-        g_activeCpuLut = std::make_unique<OperatorLutBuildResult>();
-        g_activeCpuLut->data = BuildOperatorLut(g_activeSettings.productionAlgorithm,
+        auto& retainedCpuLut = RetainedCpuLut(OperatorLutTarget::hdr10);
+        auto savedCpuLut = std::move(retainedCpuLut);
+        retainedCpuLut = std::make_unique<OperatorLutBuildResult>();
+        retainedCpuLut->data = BuildOperatorLut(g_activeSettings.productionAlgorithm,
             g_activeSettings.displayPeakNits, ActiveToneMapperParameters(
                 g_activeSettings.productionAlgorithm, g_activeSettings.toneMapperParameters));
         FO4HDR_WARP_CHECK(BuildReplacementShaders(device.device.Get()));
-        g_activeCpuLut = std::move(savedCpuLut);
+        retainedCpuLut = std::move(savedCpuLut);
         FO4HDR_WARP_CHECK(CurrentWideGamutReadiness().Complete());
         PublishGraphicsLifecycle(true, false);
         PublishGraphicsPresentationBlocked(false);

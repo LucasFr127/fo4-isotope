@@ -300,9 +300,14 @@ OperatorLutBuildRequest g_pendingLutRequest{};
 namespace {
 bool g_lutSubmissionNeeded{};
 unsigned g_lutSubmissionAttempts{};
+std::array<std::unique_ptr<OperatorLutBuildResult>, 2> g_retainedCpuLuts;
 }
-std::unique_ptr<OperatorLutBuildResult> g_activeCpuLut;
 bool g_liveSettingsError{};
+
+std::unique_ptr<OperatorLutBuildResult>& RetainedCpuLut(OperatorLutTarget target) noexcept
+{
+    return g_retainedCpuLuts[target == OperatorLutTarget::sdr ? 1U : 0U];
+}
 std::atomic<DWORD> g_currentFrameQualifiedDrawThread{};
 std::atomic<bool> g_currentFrameQualifiedDrawThreadConflict{};
 std::atomic<DWORD> g_observedQualifiedDrawThread{};
@@ -327,6 +332,19 @@ namespace {
     case ProductionToneMapperAlgorithm::gt7: settings.mode = 3U; return true;
     default: return false;
     }
+}
+
+// SDR tables bake at the operator's fixed white, so their shaper does too.
+[[nodiscard]] bool ApplySdrOperatorMode(
+    ProductionToneMapperAlgorithm algorithm, OperatorConstants& settings) noexcept
+{
+    if (algorithm == ProductionToneMapperAlgorithm::native) return true;
+    if (!SetProductionOperatorMode(algorithm, settings)) return false;
+    const auto shaper = OperatorLutShaperParameters(algorithm, SdrOperatorWhiteNits(algorithm));
+    settings.operatorShaperAngleGain = shaper[0];
+    settings.operatorShaperBias = shaper[1];
+    settings.operatorShaperParameters = {shaper[2], shaper[3]};
+    return true;
 }
 
 } // namespace
@@ -383,12 +401,13 @@ namespace {
         static_cast<float>(math.vanillaGradeLuminanceRemoval);
     settings.selectiveColorPlaneB[3] =
         static_cast<float>(math.vanillaGradeColorRemoval);
-    // SDR replacements read only the scene and grade lanes; mode 0 needs no operator LUT.
+    // SDR replacements read the scene, grade and operator lanes; the native
+    // curve keeps mode 0 and needs no operator LUT.
     if (g_sdrModeActive.load(std::memory_order_acquire))
     {
         settings.sceneExposureMultiplier =
             static_cast<float>(math.sceneExposureMultiplier);
-        return true;
+        return ApplySdrOperatorMode(values.productionAlgorithm, settings);
     }
     if (!g_configuration.productionRequested) return true;
 
@@ -436,35 +455,16 @@ void ObserveQualifiedSettingsDrawThread() noexcept
 
 namespace {
 bool g_sdrProfileSelected{};
+
+[[nodiscard]] bool NeedsOperatorLut(const HdrSettings& settings) noexcept
+{
+    return settings.productionAlgorithm != ProductionToneMapperAlgorithm::native;
+}
 }
 
-void SetSdrModeActive(bool active) noexcept
+OperatorLutTarget ActiveOperatorLutTarget() noexcept
 {
-    // Swap only on an actual profile change, so HDR sessions keep their live settings.
-    if (active != g_sdrProfileSelected)
-    {
-        SelectSettingsWindowProfile(active);
-        g_activeSettings = ReadSettingsDraft();
-        g_sdrProfileSelected = active;
-    }
-    g_sdrModeActive.store(active, std::memory_order_release);
-}
-
-bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
-    ID3D11DeviceContext* context) noexcept
-{
-    // The latch precedes the build so its constants omit the HDR operator mode.
-    const auto admitted = DecideSdrMode(inputs);
-    SetSdrModeActive(admitted);
-    if (!admitted) return false;
-    if (!BuildSdrReplacementShaders(device))
-    {
-        SetSdrModeActive(false);
-        RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
-        return false;
-    }
-    EnsureSettingsWindowBackend(true, g_outputWindow, device, context);
-    return true;
+    return g_sdrProfileSelected ? OperatorLutTarget::sdr : OperatorLutTarget::hdr10;
 }
 
 void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
@@ -487,12 +487,9 @@ void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
     const HdrSettings& left,
     const HdrSettings& right) noexcept
 {
-    return left.productionAlgorithm == right.productionAlgorithm &&
-        left.displayPeakNits == right.displayPeakNits &&
-        ActiveToneMapperParameters(left.productionAlgorithm,
-            left.toneMapperParameters) ==
-            ActiveToneMapperParameters(right.productionAlgorithm,
-                right.toneMapperParameters);
+    const auto target = ActiveOperatorLutTarget();
+    return OperatorLutContentMatches(
+        OperatorLutKeyFor(left, target), OperatorLutKeyFor(right, target));
 }
 
 void ApplyOperatorKey(
@@ -540,22 +537,19 @@ void ApplyOperatorKey(
     const OperatorLutBuildRequest& source,
     HdrSettings& destination) noexcept
 {
-    ApplyOperatorKey(source.algorithm, source.displayPeakNits,
-        source.toneMapperParameters, destination);
+    // An SDR key's peak is its operator's white; the profile keeps its own.
+    const auto peak = source.target == OperatorLutTarget::sdr ?
+        destination.displayPeakNits : source.displayPeakNits;
+    ApplyOperatorKey(source.algorithm, peak, source.toneMapperParameters, destination);
 }
 
 [[nodiscard]] OperatorLutBuildRequest DesiredOperatorLutBuild() noexcept
 {
-    return {
-        .algorithm = ReadSettingsDraft().productionAlgorithm,
-        .displayPeakNits = ReadSettingsDraft().displayPeakNits,
-        .deviceGeneration = g_deviceGeneration,
-        .settingsGeneration = g_desiredSettingsGeneration,
-        .requestGeneration = g_lutRequestGeneration,
-        .toneMapperParameters = ActiveToneMapperParameters(
-            ReadSettingsDraft().productionAlgorithm,
-            ReadSettingsDraft().toneMapperParameters)
-    };
+    auto request = OperatorLutKeyFor(ReadSettingsDraft(), ActiveOperatorLutTarget());
+    request.deviceGeneration = g_deviceGeneration;
+    request.settingsGeneration = g_desiredSettingsGeneration;
+    request.requestGeneration = g_lutRequestGeneration;
+    return request;
 }
 
 [[nodiscard]] OperatorLutBuildRequest PendingOperatorLutBuild() noexcept
@@ -569,12 +563,8 @@ void ApplyOperatorKey(
 [[nodiscard]] bool PendingOperatorKeyMatches(
     const HdrSettings& settings) noexcept
 {
-    return g_lutPending &&
-        g_pendingLutRequest.algorithm == settings.productionAlgorithm &&
-        g_pendingLutRequest.displayPeakNits == settings.displayPeakNits &&
-        g_pendingLutRequest.toneMapperParameters ==
-            ActiveToneMapperParameters(settings.productionAlgorithm,
-                settings.toneMapperParameters);
+    return g_lutPending && OperatorLutContentMatches(g_pendingLutRequest,
+        OperatorLutKeyFor(settings, ActiveOperatorLutTarget()));
 }
 
 void RetirePendingOperatorLutBuild() noexcept
@@ -653,12 +643,16 @@ void CommitUiDraft(ID3D11DeviceContext* context) noexcept
     }
     ++g_desiredSettingsGeneration;
     auto desired = ReadSettingsDraft();
-    const auto operatorChanged = !SameOperatorKey(g_activeSettings, desired);
+    // An operator publishes with its table; the native curve needs none.
+    const auto deferOperator =
+        !SameOperatorKey(g_activeSettings, desired) && NeedsOperatorLut(desired);
     auto immediate = desired;
-    if (operatorChanged)
+    if (deferOperator)
         ApplyOperatorKey(g_activeSettings, immediate);
     PublishImmediateSettings(context, immediate);
-    UpdateDesiredOperator(operatorChanged, desired);
+    UpdateDesiredOperator(deferOperator, desired);
+    // Only the active table stays resident.
+    if (!NeedsOperatorLut(g_activeSettings)) ReleaseReplacementLut();
 }
 
 void FailPendingOperatorLut() noexcept
@@ -679,7 +673,8 @@ void PublishCompletedOperatorLut(ID3D11Device* device,
         FailPendingOperatorLut();
         return;
     }
-    g_activeCpuLut = std::move(result);
+    const auto target = result->request.target;
+    RetainedCpuLut(target) = std::move(result);
     g_activeSettings = completedSettings;
     g_lutPending = false;
     g_pendingLutRequest = {};
@@ -704,6 +699,55 @@ void CommitCompletedOperatorLut(ID3D11Device* device,
         return;
     }
     PublishCompletedOperatorLut(device, context, std::move(result));
+}
+
+void SetSdrModeActive(bool active) noexcept
+{
+    // Swap only on an actual profile change, so HDR sessions keep their live settings.
+    if (active != g_sdrProfileSelected)
+    {
+        // A pending table belongs to the profile being left.
+        RetirePendingOperatorLutBuild();
+        g_liveSettingsError = false;
+        SelectSettingsWindowProfile(active);
+        g_activeSettings = ReadSettingsDraft();
+        g_sdrProfileSelected = active;
+    }
+    g_sdrModeActive.store(active, std::memory_order_release);
+}
+
+namespace {
+
+// A selected operator without a retained SDR table draws the native curve
+// until the queued build publishes at end Present.
+void DeferUnpreparedSdrOperator() noexcept
+{
+    if (!NeedsOperatorLut(g_activeSettings)) return;
+    const auto key = OperatorLutKeyFor(g_activeSettings, OperatorLutTarget::sdr);
+    const auto& retained = RetainedCpuLut(OperatorLutTarget::sdr);
+    if (retained && PreparedOperatorLutMatches(retained->data, key)) return;
+    g_activeSettings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
+    if (!PendingOperatorKeyMatches(ReadSettingsDraft())) QueueDesiredOperatorLutBuild();
+}
+
+}  // namespace
+
+bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    // The latch precedes the build so its constants omit the HDR operator mode.
+    const auto admitted = DecideSdrMode(inputs);
+    SetSdrModeActive(admitted);
+    if (!admitted) return false;
+    DeferUnpreparedSdrOperator();
+    if (!BuildSdrReplacementShaders(device))
+    {
+        SetSdrModeActive(false);
+        RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
+        return false;
+    }
+    EnsureSettingsWindowBackend(true, g_outputWindow, device, context);
+    return true;
 }
 
 bool CanCommitLiveSettings(ID3D11Device* device,
@@ -783,18 +827,24 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
 
 [[nodiscard]] bool PrepareInitialOperatorLut(const PluginConfiguration& configuration) noexcept
 {
-    if (!configuration.enabled || !configuration.productionRequested) return true;
+    if (!configuration.enabled || !configuration.productionRequested)
+    {
+        // SDR tables build on demand; without the worker SDR keeps the native curve.
+        if (configuration.sdrEnabled) (void)InitializeOperatorLutWorker();
+        return true;
+    }
     // Prepare before intercepting device creation, which requires a complete
     // operator. Retain these device-independent bytes for later recreation.
-    g_activeCpuLut.reset(new (std::nothrow) OperatorLutBuildResult{});
-    if (g_activeCpuLut) {
-        g_activeCpuLut->request = DesiredOperatorLutBuild();
-        g_activeCpuLut->data = BuildOperatorLut(
+    auto& retained = RetainedCpuLut(OperatorLutTarget::hdr10);
+    retained.reset(new (std::nothrow) OperatorLutBuildResult{});
+    if (retained) {
+        retained->request = DesiredOperatorLutBuild();
+        retained->data = BuildOperatorLut(
             g_activeSettings.productionAlgorithm, g_activeSettings.displayPeakNits,
             ActiveToneMapperParameters(g_activeSettings.productionAlgorithm,
                 g_activeSettings.toneMapperParameters));
     }
-    return g_activeCpuLut && g_activeCpuLut->data.IsValid() && InitializeOperatorLutWorker();
+    return retained && retained->data.IsValid() && InitializeOperatorLutWorker();
 }
 
 [[nodiscard]] bool FailGraphicsInitialization(GraphicsObservationFailure failure) noexcept
@@ -821,7 +871,7 @@ bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noe
     PublishGraphicsRequest(configuration, hdrRequested);
     InitializeGraphicsSettings(configuration);
     if (!PrepareInitialOperatorLut(configuration)) {
-        g_activeCpuLut.reset();
+        RetainedCpuLut(OperatorLutTarget::hdr10).reset();
         return FailGraphicsInitialization(GraphicsObservationFailure::resourceCreationFailed);
     }
     ResetPerformanceMeasurement();

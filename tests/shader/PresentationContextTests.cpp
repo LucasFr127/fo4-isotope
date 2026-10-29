@@ -1167,6 +1167,7 @@ void VerifyPresentationContext(Device& device)
     VerifySharedUiContext(native);
     CheckDisabledReplacements(native);
     CheckSdrReplacements(native);
+    VerifySdrOperatorPresentation(native);
     for (const bool productionDisabled : {false, true})
         for (const bool empty : {false, true})
             CheckRetainedPartialCopy(native, productionDisabled, empty);
