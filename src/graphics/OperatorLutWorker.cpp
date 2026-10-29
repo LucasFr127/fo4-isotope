@@ -81,7 +81,7 @@ void PublishResult(std::unique_ptr<OperatorLutBuildResult> result,
     if (request.target == OperatorLutTarget::sdr)
         return request.requestGeneration != 0 &&
             request.displayPeakNits == SdrOperatorWhiteNits(request.algorithm) &&
-            ValidateToneMapperParameters(request.algorithm, request.toneMapperParameters);
+            ValidateSdrToneMapperParameters(request.algorithm, request.toneMapperParameters);
     HdrSettings settings{};
     settings.productionAlgorithm = request.algorithm;
     settings.displayPeakNits = request.displayPeakNits;

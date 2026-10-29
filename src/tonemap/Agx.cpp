@@ -517,6 +517,8 @@ std::optional<AgxTransform> CreateAgxTransform(
 std::optional<AgxTransform> CreateSdrAgxTransform(
     const ToneMapperParameters& parameters) noexcept
 {
+    if (!ValidateSdrToneMapperParameters(ProductionToneMapperAlgorithm::agX, parameters))
+        return std::nullopt;
     return AgxTransform::Prepare(kAgxSdrPeakNits, parameters);
 }
 

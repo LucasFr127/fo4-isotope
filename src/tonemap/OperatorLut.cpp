@@ -470,6 +470,12 @@ struct LatticeSampler
     return IsValidOperator(algorithm, parameters) && IsValidPeak(peak);
 }
 
+[[nodiscard]] bool IsValidSdrOperator(ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters) noexcept
+{
+    return IsLutAlgorithm(algorithm) && ValidateSdrToneMapperParameters(algorithm, parameters);
+}
+
 [[nodiscard]] bool EncodeCoefficients(const std::vector<LinearRgb>& nodes,
     OperatorLutData& result, OperatorLutCancellation cancellation)
 {
@@ -724,7 +730,7 @@ OperatorLutData BuildSdrOperatorLut(
     OperatorLutCancellation cancellation) noexcept
 {
     // SDR tables use the operator's fixed white instead of an HDR display peak.
-    if (cancellation.IsCancelled() || !IsValidOperator(algorithm, parameters)) return {};
+    if (cancellation.IsCancelled() || !IsValidSdrOperator(algorithm, parameters)) return {};
     return BakeTable(PrepareTable(algorithm, OperatorLutTarget::sdr,
         SdrOperatorWhiteNits(algorithm), parameters), cancellation);
 }

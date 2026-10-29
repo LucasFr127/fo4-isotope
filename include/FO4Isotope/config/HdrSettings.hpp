@@ -59,6 +59,9 @@ inline constexpr double kMinimumAcesLookStrength{0.0};
 inline constexpr double kMaximumAcesLookStrength{1.0};
 inline constexpr double kMinimumAgxMiddleGrayEv{-0.5};
 inline constexpr double kMaximumAgxMiddleGrayEv{0.5};
+// At the SDR white AgX can only lower middle gray: raising it leaves the
+// darkening sigmoid without a valid toe.
+inline constexpr double kMaximumSdrAgxMiddleGrayEv{0.0};
 inline constexpr double kMinimumAgxContrast{2.2};
 inline constexpr double kMaximumAgxContrast{3.0};
 inline constexpr double kMinimumAgxHdrPurity{0.25};
@@ -298,6 +301,10 @@ struct HdrSettingsMath
 [[nodiscard]] HdrSettingsValidationError ValidateProfileSettings(
     const HdrSettings& settings, bool sdrProfile) noexcept;
 [[nodiscard]] bool ValidateToneMapperParameters(
+    ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters) noexcept;
+// The HDR ranges with the SDR AgX Middle Gray limit.
+[[nodiscard]] bool ValidateSdrToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
     const ToneMapperParameters& parameters) noexcept;
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(

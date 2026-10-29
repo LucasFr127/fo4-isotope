@@ -65,6 +65,13 @@ void TestSdrProfileDefaults()
     auto brighter = sdr;
     brighter.exposureEv = 1.0;
     FO4HDR_CHECK(DeriveHdrSettingsMath(brighter).sceneExposureMultiplier == 2.0);
+    // AgX can only lower middle gray at the SDR white, even while not selected.
+    auto raisedGray = sdr;
+    raisedGray.toneMapperParameters.agxMiddleGrayEv = 0.1;
+    FO4HDR_CHECK(ValidateProfileSettings(raisedGray, true) ==
+        HdrSettingsValidationError::toneMapperParametersOutOfRange);
+    raisedGray.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
+    FO4HDR_CHECK(ValidateHdrSettings(raisedGray) == HdrSettingsValidationError::none);
     FO4HDR_CHECK(sdr.bloomStrengthPercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeColorPercent == 100.0);

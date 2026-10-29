@@ -137,6 +137,8 @@ void TestSdrBuildRequests()
     FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::native).IsValid());
     FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::agX,
         {.agxContrast = kMaximumAgxContrast + 0.1}).IsValid());
+    FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::agX,
+        {.agxMiddleGrayEv = 0.1}).IsValid());
 }
 
 }  // namespace

@@ -59,8 +59,8 @@ private:
     const ToneMapperParameters& parameters = {}) noexcept;
 
 // SDR configuration: an HDR/SDR ratio of 1, so the peak is the fixed scene
-// reference white. Shoulder Power then has no effect, and HDR Color Response
-// acts only when Middle Gray moves.
+// reference white. Shoulder Power then has no effect, HDR Color Response acts
+// only when Middle Gray moves, and Middle Gray can only fall (to 0 EV at most).
 inline constexpr double kAgxSdrPeakNits{kSceneReferenceWhiteNits};
 [[nodiscard]] std::optional<AgxTransform> CreateSdrAgxTransform(
     const ToneMapperParameters& parameters = {}) noexcept;

@@ -585,12 +585,20 @@ bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
     return nullptr;
 }
 
+// The HDR ranges with the SDR AgX Middle Gray limit.
+[[nodiscard]] constexpr std::array<double, 2> SdrNumericRange(RequiredKey key) noexcept
+{
+    if (key == RequiredKey::agxMiddleGrayEv)
+        return {kMinimumAgxMiddleGrayEv, kMaximumSdrAgxMiddleGrayEv};
+    return NumericRange(key);
+}
+
 // SDR profile sections accept only the shared creative controls and the tone curve.
 PluginConfigurationError ParseProfileSetting(HdrSettings& profile,
     RequiredKey key, std::string_view value) noexcept
 {
     if (auto* target = ProfileNumericTarget(profile, key))
-        return ParseNumber(value, NumericRange(key), *target);
+        return ParseNumber(value, SdrNumericRange(key), *target);
     if (key == RequiredKey::algorithm) return ParseSdrAlgorithm(value, profile.productionAlgorithm);
     auto* flag = ProfileBooleanTarget(profile, key);
     return flag != nullptr && ParseBoolean(value, *flag) ?

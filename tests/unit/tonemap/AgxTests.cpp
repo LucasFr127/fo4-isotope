@@ -550,7 +550,8 @@ void TestInvalidParametersFailBlack()
 }
 }  // namespace
 
-// Largest channel difference between two SDR configurations, relative to white.
+// Largest channel difference between two SDR configurations, relative to white;
+// NaN when either configuration fails, so no comparison can pass by accident.
 [[nodiscard]] double SdrResponseDifference(
     const ToneMapperParameters& left, const ToneMapperParameters& right)
 {
@@ -559,14 +560,17 @@ void TestInvalidParametersFailBlack()
         LinearRgb{0.02, 0.05, 0.01}};
     const auto first = CreateSdrAgxTransform(left);
     const auto second = CreateSdrAgxTransform(right);
-    if (!first || !second) return std::numeric_limits<double>::infinity();
+    if (!first || !second) return std::numeric_limits<double>::quiet_NaN();
     double largest{};
     for (const auto& input : inputs)
     {
         const auto a = EvaluateAgxLutNits(*first, input);
         const auto b = EvaluateAgxLutNits(*second, input);
-        largest = std::max({largest, std::abs(a.red - b.red),
-            std::abs(a.green - b.green), std::abs(a.blue - b.blue)});
+        for (const auto difference : {a.red - b.red, a.green - b.green, a.blue - b.blue})
+        {
+            if (!std::isfinite(difference)) return std::numeric_limits<double>::quiet_NaN();
+            largest = std::max(largest, std::abs(difference));
+        }
     }
     return largest / kAgxSdrPeakNits;
 }
@@ -578,21 +582,23 @@ void TestSdrConfiguration()
     if (!sdr) return;
     FO4HDR_CHECK(sdr->DisplayPeakNits() == kAgxSdrPeakNits);
     FO4HDR_CHECK(sdr->HdrSdrRatio() == 1.0);
-    // At ratio 1 Shoulder Power has no effect, and HDR Color Response acts only
-    // once Middle Gray moves; Middle Gray and Contrast keep their effect.
+    // At ratio 1 Shoulder Power has no effect, Middle Gray can only fall, and
+    // HDR Color Response acts only once it does; Middle Gray and Contrast act.
     FO4HDR_CHECK(SdrResponseDifference({.agxHdrShoulderPower = kMinimumAgxHdrShoulderPower},
         {.agxHdrShoulderPower = kMaximumAgxHdrShoulderPower}) == 0.0);
+    FO4HDR_CHECK(!CreateSdrAgxTransform({.agxMiddleGrayEv = 0.01}));
+    FO4HDR_CHECK(CreateSdrAgxTransform({.agxMiddleGrayEv = kMaximumSdrAgxMiddleGrayEv}));
     const auto neutralGrayPurity = SdrResponseDifference(
         {.agxHdrPurity = kMinimumAgxHdrPurity}, {.agxHdrPurity = kMaximumAgxHdrPurity});
     const auto movedGrayPurity = SdrResponseDifference(
-        {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv, .agxHdrPurity = kMinimumAgxHdrPurity},
-        {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv, .agxHdrPurity = kMaximumAgxHdrPurity});
+        {.agxMiddleGrayEv = kMinimumAgxMiddleGrayEv, .agxHdrPurity = kMinimumAgxHdrPurity},
+        {.agxMiddleGrayEv = kMinimumAgxMiddleGrayEv, .agxHdrPurity = kMaximumAgxHdrPurity});
     FO4HDR_CHECK(neutralGrayPurity < 1.0e-6);
     FO4HDR_CHECK(movedGrayPurity > 1.0e-3);
     // Local regression: middle gray stays at 0.18 of the SDR white.
     FO4HDR_CHECK(std::abs(EvaluateAgxLutNits(*sdr, {0.18, 0.18, 0.18}).green /
         kAgxSdrPeakNits - 0.18) <= 1.0e-6);
-    FO4HDR_CHECK(SdrResponseDifference({}, {.agxMiddleGrayEv = kMaximumAgxMiddleGrayEv}) > 1.0e-3);
+    FO4HDR_CHECK(SdrResponseDifference({}, {.agxMiddleGrayEv = kMinimumAgxMiddleGrayEv}) > 1.0e-3);
     FO4HDR_CHECK(SdrResponseDifference({}, {.agxContrast = kMinimumAgxContrast}) > 1.0e-3);
 }
 

@@ -121,6 +121,11 @@ void TestSdrProfileConfiguration()
         PluginConfigurationError::invalidBoolean);
     FO4HDR_CHECK(SdrConfigurationError("[SdrAgX]\nContrast=3.1\n") ==
         PluginConfigurationError::valueOutOfRange);
+    // At the SDR white AgX can only lower middle gray.
+    FO4HDR_CHECK(SdrConfigurationError("[SdrAgX]\nMiddleGrayOffsetEV=0.1\n") ==
+        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrAgX]\nMiddleGrayOffsetEV=-0.5\n") ==
+        PluginConfigurationError::none);
 
     // SDR offers the native curve plus each operator once it is selectable.
     FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=Vanilla\n") ==

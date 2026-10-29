@@ -301,6 +301,15 @@ bool ValidateToneMapperParameters(
     }
 }
 
+bool ValidateSdrToneMapperParameters(
+    ProductionToneMapperAlgorithm algorithm,
+    const ToneMapperParameters& parameters) noexcept
+{
+    return ValidateToneMapperParameters(algorithm, parameters) &&
+        (algorithm != ProductionToneMapperAlgorithm::agX ||
+            parameters.agxMiddleGrayEv <= kMaximumSdrAgxMiddleGrayEv);
+}
+
 namespace {
 
 HdrSettingsValidationError ValidateColorGrading(const HdrSettings& settings) noexcept
@@ -323,9 +332,13 @@ HdrSettingsValidationError ValidateToneMappers(
     const auto supported = sdrProfile ? IsSelectableSdrToneMapper(selected) :
         std::ranges::find(algorithms, selected) != algorithms.end();
     if (!supported) return HdrSettingsValidationError::unsupportedAlgorithm;
-    if (!std::ranges::all_of(algorithms, [&settings](auto algorithm) {
-            return ValidateToneMapperParameters(algorithm, settings.toneMapperParameters);
-        }))
+    // Every operator's settings stay valid, including those not selected.
+    const auto validParameters = [&settings, sdrProfile](auto algorithm) {
+        const auto& parameters = settings.toneMapperParameters;
+        return sdrProfile ? ValidateSdrToneMapperParameters(algorithm, parameters) :
+            ValidateToneMapperParameters(algorithm, parameters);
+    };
+    if (!std::ranges::all_of(algorithms, validParameters))
         return HdrSettingsValidationError::toneMapperParametersOutOfRange;
     return ValidateColorGrading(settings);
 }
