@@ -107,6 +107,15 @@ float3 Fo4HdrAgxDisplayGamut(float3 value, float peak)
 }
 
 #if FO4HDR_SDR_OPERATOR_OUTPUT
+// Match WhiteChromaScale: the knee'd chroma scale about the luminance center that
+// brings the brightest channel to white.
+float Fo4HdrSdrWhiteChromaScale(float center, float3 chroma)
+{
+    const float maximumChroma = max(chroma.r, max(chroma.g, chroma.b));
+    return maximumChroma > 0.0f ?
+        Fo4HdrGamutScale((1.0f - center) / maximumChroma, 0.05f) : 1.0f;
+}
+
 // Match ContainSdrOperatorOutput for GT7: the official per-channel clip at white
 // in BT.2020, then BT.709 chroma contracted toward luminance with the 5% knee
 // until it fits, keeping luminance below white. These are the CPU matrices.
@@ -128,30 +137,26 @@ float3 Fo4HdrSdrGt7Containment(float3 value)
     const float center = max(luminance, 0.0f);
     const float3 chroma = clipped - luminance;
     const float minimumChroma = min(chroma.r, min(chroma.g, chroma.b));
-    const float maximumChroma = max(chroma.r, max(chroma.g, chroma.b));
     const float lowerScale = minimumChroma < 0.0f ?
         Fo4HdrGamutScale(center / -minimumChroma, 0.05f) : 1.0f;
-    const float upperScale = maximumChroma > 0.0f ?
-        Fo4HdrGamutScale((1.0f - center) / maximumChroma, 0.05f) : 1.0f;
-    return saturate(center + min(lowerScale, upperScale) * chroma);
+    const float scale = min(lowerScale, Fo4HdrSdrWhiteChromaScale(center, chroma));
+    return saturate(center + scale * chroma);
 }
 
-// Match ContainSdrOperatorOutput for AgX: the AgX stage about BT.709
-// luminance, with white at 1.
+// Match ContainSdrOperatorOutput for AgX: each channel soft-clips at zero, with
+// a knee 5% of BT.709 luminance wide, and scales back to that luminance; chroma
+// then contracts toward it until the brightest channel fits.
 float3 Fo4HdrSdrDisplayGamut(float3 value)
 {
-    const float luminance = dot(value, float3(0.2126f, 0.7152f, 0.0722f));
-    const float center = max(luminance, 0.0f);
-    const float3 chroma = value - luminance;
-    const float minimumChroma = min(chroma.r, min(chroma.g, chroma.b));
-    const float lowerScale = minimumChroma < 0.0f ?
-        Fo4HdrGamutScale(center / -minimumChroma, 0.05f) : 1.0f;
-    value = center + lowerScale * chroma;
-    const float maximum = max(value.r, max(value.g, value.b));
-    const float minimum = min(value.r, min(value.g, value.b));
-    if (maximum <= 0.0f) return 0.0f;
-    const float knee = 0.05f * saturate((maximum - minimum) / maximum);
-    return saturate(value * Fo4HdrGamutScale(1.0f / maximum, knee));
+    const float3 weights = float3(0.2126f, 0.7152f, 0.0722f);
+    const float luminance = dot(value, weights);
+    if (luminance <= 0.0f) return 0.0f;
+    if (luminance >= 1.0f) return 1.0f;
+    const float knee = 0.05f * luminance;
+    const float3 blend = saturate(1.0f - abs(value) / knee);
+    const float3 lifted = max(value, 0.0f) + 0.25f * knee * blend * blend;
+    const float3 chroma = lifted * (luminance / dot(lifted, weights)) - luminance;
+    return saturate(luminance + Fo4HdrSdrWhiteChromaScale(luminance, chroma) * chroma);
 }
 #endif
 

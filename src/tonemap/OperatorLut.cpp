@@ -697,6 +697,11 @@ constexpr double kSdrGamutScaleKnee{0.05};
         std::clamp(value.blue, 0.0, 1.0)};
 }
 
+[[nodiscard]] double Bt709Luminance(LinearRgb value) noexcept
+{
+    return 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
+}
+
 // BT.709 luminance floored at black, each channel's chroma about the unfloored
 // luminance, and the knee'd chroma scale that lifts negative channels to zero.
 struct LuminanceChroma
@@ -708,13 +713,22 @@ struct LuminanceChroma
 
 [[nodiscard]] LuminanceChroma SplitAboutLuminance(LinearRgb value) noexcept
 {
-    const auto luminance = 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
+    const auto luminance = Bt709Luminance(value);
     const auto center = std::max(luminance, 0.0);
     const std::array chroma{value.red - luminance, value.green - luminance,
         value.blue - luminance};
     const auto minimumChroma = std::min({chroma[0], chroma[1], chroma[2]});
     return {center, chroma, minimumChroma < 0.0 ? std::clamp(SmoothMinimum(
         1.0, center / -minimumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0};
+}
+
+// The knee'd chroma scale about the luminance center that brings the brightest
+// channel to white.
+[[nodiscard]] double WhiteChromaScale(double center, const std::array<double, 3>& chroma) noexcept
+{
+    const auto maximumChroma = std::max({chroma[0], chroma[1], chroma[2]});
+    return maximumChroma > 0.0 ? std::clamp(SmoothMinimum(
+        1.0, (1.0 - center) / maximumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0;
 }
 
 // GT7's BT.709 fit after its BT.2020 clip: chroma also contracts toward
@@ -724,32 +738,33 @@ struct LuminanceChroma
 {
     const auto [center, chroma, lowerScale] = SplitAboutLuminance(value);
     if (center >= 1.0) return {1.0, 1.0, 1.0};
-    const auto maximumChroma = std::max({chroma[0], chroma[1], chroma[2]});
-    const auto upperScale = maximumChroma > 0.0 ? std::clamp(SmoothMinimum(
-        1.0, (1.0 - center) / maximumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0;
-    const auto scale = std::min(lowerScale, upperScale);
+    const auto scale = std::min(lowerScale, WhiteChromaScale(center, chroma));
     return ClampToWhite({center + scale * chroma[0], center + scale * chroma[1],
         center + scale * chroma[2]});
 }
 
-// Project-authored SDR display gamut with the AgX production stage's structure:
-// negative channels contract chroma about BT.709 luminance with a 5% knee, then
-// RGB scales uniformly to white with a knee that shrinks with chroma.
+// AgX's project-authored BT.709 gamut. Contracting chroma toward luminance to
+// lift a negative channel would cost a dark saturated blue much of its chroma,
+// so each channel instead soft-clips at zero, with a knee 5% of luminance wide,
+// and the result scales back to that luminance. Chroma then contracts toward it
+// until the brightest channel fits, as in GT7's fit.
 [[nodiscard]] LinearRgb ContainSdrDisplayGamut(LinearRgb value) noexcept
 {
-    const auto [center, chroma, lowerScale] = SplitAboutLuminance(value);
-    const std::array contained{center + lowerScale * chroma[0],
-        center + lowerScale * chroma[1], center + lowerScale * chroma[2]};
-    const auto maximum = std::max({contained[0], contained[1], contained[2]});
-    const auto minimum = std::min({contained[0], contained[1], contained[2]});
-    if (!(maximum > 0.0)) return {};
-    const auto knee = kSdrGamutScaleKnee * std::clamp((maximum - minimum) / maximum, 0.0, 1.0);
-    const auto upperScale = knee > 0.0 ?
-        std::clamp(SmoothMinimum(1.0, 1.0 / maximum, knee), 0.0, 1.0) :
-        std::clamp(1.0 / maximum, 0.0, 1.0);
-    return {std::clamp(upperScale * contained[0], 0.0, 1.0),
-        std::clamp(upperScale * contained[1], 0.0, 1.0),
-        std::clamp(upperScale * contained[2], 0.0, 1.0)};
+    const auto luminance = Bt709Luminance(value);
+    const auto knee = kSdrGamutScaleKnee * luminance;
+    if (!(knee > 0.0)) return {};
+    if (luminance >= 1.0) return {1.0, 1.0, 1.0};
+    // Smooth maximum with zero.
+    const auto lift = [knee](double channel) noexcept {
+        return -SmoothMinimum(-channel, 0.0, knee);
+    };
+    const LinearRgb lifted{lift(value.red), lift(value.green), lift(value.blue)};
+    const auto restore = luminance / Bt709Luminance(lifted);
+    const std::array chroma{restore * lifted.red - luminance,
+        restore * lifted.green - luminance, restore * lifted.blue - luminance};
+    const auto scale = WhiteChromaScale(luminance, chroma);
+    return ClampToWhite({luminance + scale * chroma[0], luminance + scale * chroma[1],
+        luminance + scale * chroma[2]});
 }
 
 }  // namespace

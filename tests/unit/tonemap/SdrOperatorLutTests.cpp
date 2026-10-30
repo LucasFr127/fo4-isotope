@@ -50,37 +50,42 @@ void CheckSdrContainment(ProductionToneMapperAlgorithm algorithm)
         algorithm, {std::numeric_limits<double>::quiet_NaN(), 0.5, 0.5}), {}, 0.0));
 }
 
-// ACES2 clamps each channel like its preset; the AgX stage removes a negative
-// channel without changing BT.709 luminance.
+// ACES2 clamps each channel like its preset. AgX lifts a negative channel to
+// zero and returns to the color's BT.709 luminance, so the other channels keep
+// their ratio instead of contracting toward that luminance; luminance at or
+// above white becomes white.
 void CheckAces2AndAgxContainment()
 {
     FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::aces2,
         {-0.2, 0.5, 1.4}), {0.0, 0.5, 1.0}, 0.0));
-    const LinearRgb negative{-0.05, 0.4, 0.3};
-    const auto smooth = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::agX, negative);
-    FO4HDR_CHECK(IsContained(smooth));
-    FO4HDR_CHECK(test::Approx(Bt709Luminance(smooth), Bt709Luminance(negative), 1.0e-12));
+    const LinearRgb negative{-0.01, 0.01, 0.17};
+    const auto lifted = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::agX, negative);
+    FO4HDR_CHECK(IsContained(lifted) && lifted.red == 0.0);
+    FO4HDR_CHECK(test::Approx(Bt709Luminance(lifted), Bt709Luminance(negative), 1.0e-12));
+    FO4HDR_CHECK(test::Approx(lifted.green * negative.blue, negative.green * lifted.blue,
+        1.0e-12));
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::agX,
+        {1.3, 1.0, 0.6}), {1.0, 1.0, 1.0}, 0.0));
 }
 
-// GT7 clips each BT.2020 channel at white like its official sample. The clipped
-// color still exceeds BT.709 white, so it keeps its luminance and chroma
-// direction while chroma contracts into range, instead of losing a channel.
-void CheckGt7LuminanceFit()
+// A color that still exceeds BT.709 white, after GT7's BT.2020 clip or as AgX's
+// output, keeps its luminance and chroma direction while chroma contracts into
+// range, instead of losing a channel. Colors well inside BT.709 are unchanged.
+void CheckLuminanceFit(ProductionToneMapperAlgorithm algorithm, LinearRgb input,
+    LinearRgb overWhite)
 {
-    const auto clipped = ConvertBt2020ToBt709({1.0, 0.4, 0.2});
-    const auto gt7 = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
-        ConvertBt2020ToBt709({1.3, 0.4, 0.2}));
-    FO4HDR_CHECK(IsContained(gt7));
-    FO4HDR_CHECK(clipped.red > 1.0);
-    const auto luminance = Bt709Luminance(clipped);
-    FO4HDR_CHECK(test::Approx(Bt709Luminance(gt7), luminance, 1.0e-12));
-    const auto scale = (gt7.red - luminance) / (clipped.red - luminance);
+    const auto fitted = ContainSdrOperatorOutput(algorithm, input);
+    FO4HDR_CHECK(IsContained(fitted));
+    FO4HDR_CHECK(overWhite.red > 1.0);
+    const auto luminance = Bt709Luminance(overWhite);
+    FO4HDR_CHECK(test::Approx(Bt709Luminance(fitted), luminance, 1.0e-12));
+    const auto scale = (fitted.red - luminance) / (overWhite.red - luminance);
     FO4HDR_CHECK(scale > 0.0 && scale < 1.0);
     const auto toward = [=](double channel) { return luminance + scale * (channel - luminance); };
-    FO4HDR_CHECK(ApproxRgb(gt7,
-        {toward(clipped.red), toward(clipped.green), toward(clipped.blue)}, 1.0e-12));
-    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
-        {0.5, 0.3, 0.2}), {0.5, 0.3, 0.2}, 1.0e-12));
+    FO4HDR_CHECK(ApproxRgb(fitted,
+        {toward(overWhite.red), toward(overWhite.green), toward(overWhite.blue)}, 1.0e-12));
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(algorithm, {0.5, 0.3, 0.2}),
+        {0.5, 0.3, 0.2}, 1.0e-12));
 }
 
 void TestSdrContainment()
@@ -88,7 +93,10 @@ void TestSdrContainment()
     for (const auto algorithm : kSdrAlgorithms)
         CheckSdrContainment(algorithm);
     CheckAces2AndAgxContainment();
-    CheckGt7LuminanceFit();
+    // GT7 first clips each BT.2020 channel at white like its official sample.
+    CheckLuminanceFit(ProductionToneMapperAlgorithm::gt7, ConvertBt2020ToBt709({1.3, 0.4, 0.2}),
+        ConvertBt2020ToBt709({1.0, 0.4, 0.2}));
+    CheckLuminanceFit(ProductionToneMapperAlgorithm::agX, {1.4, 0.6, 0.5}, {1.4, 0.6, 0.5});
 }
 
 // Tint, adjacent jitter and running drawdown in 10-bit PQ codes at the metric
