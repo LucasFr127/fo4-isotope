@@ -697,18 +697,47 @@ constexpr double kSdrGamutScaleKnee{0.05};
         std::clamp(value.blue, 0.0, 1.0)};
 }
 
-// Project-authored SDR display gamut with the AgX production stage's structure:
-// negative channels contract chroma about BT.709 luminance with a 5% knee, then
-// RGB scales uniformly to white with a knee that shrinks with chroma.
-[[nodiscard]] LinearRgb ContainSdrDisplayGamut(LinearRgb value) noexcept
+// BT.709 luminance floored at black, each channel's chroma about the unfloored
+// luminance, and the knee'd chroma scale that lifts negative channels to zero.
+struct LuminanceChroma
+{
+    double center;
+    std::array<double, 3> chroma;
+    double lowerScale;
+};
+
+[[nodiscard]] LuminanceChroma SplitAboutLuminance(LinearRgb value) noexcept
 {
     const auto luminance = 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
     const auto center = std::max(luminance, 0.0);
     const std::array chroma{value.red - luminance, value.green - luminance,
         value.blue - luminance};
     const auto minimumChroma = std::min({chroma[0], chroma[1], chroma[2]});
-    const auto lowerScale = minimumChroma < 0.0 ? std::clamp(SmoothMinimum(
-        1.0, center / -minimumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0;
+    return {center, chroma, minimumChroma < 0.0 ? std::clamp(SmoothMinimum(
+        1.0, center / -minimumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0};
+}
+
+// GT7's BT.709 fit after its BT.2020 clip: chroma also contracts toward
+// luminance, with the same knee, until the brightest channel fits, so the color
+// keeps its BT.709 luminance and chroma direction instead of losing a channel.
+[[nodiscard]] LinearRgb FitSdrLuminance(LinearRgb value) noexcept
+{
+    const auto [center, chroma, lowerScale] = SplitAboutLuminance(value);
+    if (center >= 1.0) return {1.0, 1.0, 1.0};
+    const auto maximumChroma = std::max({chroma[0], chroma[1], chroma[2]});
+    const auto upperScale = maximumChroma > 0.0 ? std::clamp(SmoothMinimum(
+        1.0, (1.0 - center) / maximumChroma, kSdrGamutScaleKnee), 0.0, 1.0) : 1.0;
+    const auto scale = std::min(lowerScale, upperScale);
+    return ClampToWhite({center + scale * chroma[0], center + scale * chroma[1],
+        center + scale * chroma[2]});
+}
+
+// Project-authored SDR display gamut with the AgX production stage's structure:
+// negative channels contract chroma about BT.709 luminance with a 5% knee, then
+// RGB scales uniformly to white with a knee that shrinks with chroma.
+[[nodiscard]] LinearRgb ContainSdrDisplayGamut(LinearRgb value) noexcept
+{
+    const auto [center, chroma, lowerScale] = SplitAboutLuminance(value);
     const std::array contained{center + lowerScale * chroma[0],
         center + lowerScale * chroma[1], center + lowerScale * chroma[2]};
     const auto maximum = std::max({contained[0], contained[1], contained[2]});
@@ -766,9 +795,10 @@ LinearRgb ContainSdrOperatorOutput(
     switch (algorithm)
     {
     case ProductionToneMapperAlgorithm::agX: return ContainSdrDisplayGamut(relativeBt709);
-    // GT7 keeps its official per-channel clip at white, in its BT.2020 working space.
+    // GT7 keeps its official per-channel clip at white in its BT.2020 working
+    // space, then fits BT.709 by luminance.
     case ProductionToneMapperAlgorithm::gt7:
-        return ClampToWhite(ConvertBt2020ToBt709(
+        return FitSdrLuminance(ConvertBt2020ToBt709(
             ClampToWhite(ConvertBt709ToBt2020(relativeBt709))));
     default: return ClampToWhite(relativeBt709);
     }

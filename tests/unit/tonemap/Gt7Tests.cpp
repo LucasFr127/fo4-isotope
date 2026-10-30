@@ -252,7 +252,7 @@ void TestExtendedSdrConfiguration()
 }
 
 // Colors fade as they approach the extended shoulder's white rather than where the
-// official shoulder clips, and the official per-channel clip keeps over-white light bright.
+// official shoulder clips, and the BT.709 luminance fit keeps over-white light bright.
 void TestExtendedSdrColor()
 {
     const auto transform = CreateSdrGt7Transform();

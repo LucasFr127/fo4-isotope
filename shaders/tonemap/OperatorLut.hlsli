@@ -108,7 +108,8 @@ float3 Fo4HdrAgxDisplayGamut(float3 value, float peak)
 
 #if FO4HDR_SDR_OPERATOR_OUTPUT
 // Match ContainSdrOperatorOutput for GT7: the official per-channel clip at white
-// in BT.2020, then each BT.709 channel clamped. These are the CPU matrices.
+// in BT.2020, then BT.709 chroma contracted toward luminance with the 5% knee
+// until it fits, keeping luminance below white. These are the CPU matrices.
 float3 Fo4HdrSdrGt7Containment(float3 value)
 {
     const float3x3 toBt2020 = {
@@ -121,7 +122,18 @@ float3 Fo4HdrSdrGt7Containment(float3 value)
         -0.12455046636659303f, 1.1328998802803918f, -0.008349422033247976f,
         -0.01815076427030725f, -0.10057889487266629f, 1.118729662272663f
     };
-    return saturate(mul(toBt709, saturate(mul(toBt2020, value))));
+    const float3 clipped = mul(toBt709, saturate(mul(toBt2020, value)));
+    const float luminance = dot(clipped, float3(0.2126f, 0.7152f, 0.0722f));
+    if (luminance >= 1.0f) return 1.0f;
+    const float center = max(luminance, 0.0f);
+    const float3 chroma = clipped - luminance;
+    const float minimumChroma = min(chroma.r, min(chroma.g, chroma.b));
+    const float maximumChroma = max(chroma.r, max(chroma.g, chroma.b));
+    const float lowerScale = minimumChroma < 0.0f ?
+        Fo4HdrGamutScale(center / -minimumChroma, 0.05f) : 1.0f;
+    const float upperScale = maximumChroma > 0.0f ?
+        Fo4HdrGamutScale((1.0f - center) / maximumChroma, 0.05f) : 1.0f;
+    return saturate(center + min(lowerScale, upperScale) * chroma);
 }
 
 // Match ContainSdrOperatorOutput for AgX: the AgX stage about BT.709

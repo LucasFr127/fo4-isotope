@@ -97,7 +97,8 @@ struct OperatorLutCancellation
 // to [0, 1] like its Rec.709 preset. AgX contracts chroma about BT.709
 // luminance to remove negative channels, then scales RGB uniformly to white.
 // GT7 clips each BT.2020 channel at white like its official sample, then
-// clamps each BT.709 channel. Nonfinite input fails black.
+// contracts BT.709 chroma toward luminance with AgX's 5% knee until it fits, so
+// a color keeps its BT.709 luminance below white. Nonfinite input fails black.
 [[nodiscard]] LinearRgb ContainSdrOperatorOutput(
     ProductionToneMapperAlgorithm algorithm, LinearRgb relativeBt709) noexcept;
 

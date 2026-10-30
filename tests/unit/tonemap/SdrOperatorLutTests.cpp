@@ -31,40 +31,64 @@ constexpr std::array kSdrAlgorithms{ProductionToneMapperAlgorithm::aces2,
     return 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
 }
 
+[[nodiscard]] bool ApproxRgb(LinearRgb actual, LinearRgb expected, double tolerance)
+{
+    return test::Approx(actual.red, expected.red, tolerance) &&
+        test::Approx(actual.green, expected.green, tolerance) &&
+        test::Approx(actual.blue, expected.blue, tolerance);
+}
+
 void CheckSdrContainment(ProductionToneMapperAlgorithm algorithm)
 {
     // GT7's BT.2020 round trip may move an in-range neutral by rounding only.
-    const auto neutral = ContainSdrOperatorOutput(algorithm, {0.18, 0.18, 0.18});
-    FO4HDR_CHECK(test::Approx(neutral.red, 0.18, 1.0e-12) &&
-        test::Approx(neutral.green, 0.18, 1.0e-12) && test::Approx(neutral.blue, 0.18, 1.0e-12));
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(algorithm, {0.18, 0.18, 0.18}),
+        {0.18, 0.18, 0.18}, 1.0e-12));
     for (const auto& value : {LinearRgb{-0.2, 0.5, 0.3}, LinearRgb{1.4, 0.2, 0.1},
              LinearRgb{2.0, 2.0, 2.0}, LinearRgb{-1.0, -1.0, -1.0}})
         FO4HDR_CHECK(IsContained(ContainSdrOperatorOutput(algorithm, value)));
-    const auto invalid = ContainSdrOperatorOutput(
-        algorithm, {std::numeric_limits<double>::quiet_NaN(), 0.5, 0.5});
-    FO4HDR_CHECK(invalid.red == 0.0 && invalid.green == 0.0 && invalid.blue == 0.0);
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(
+        algorithm, {std::numeric_limits<double>::quiet_NaN(), 0.5, 0.5}), {}, 0.0));
+}
+
+// ACES2 clamps each channel like its preset; the AgX stage removes a negative
+// channel without changing BT.709 luminance.
+void CheckAces2AndAgxContainment()
+{
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::aces2,
+        {-0.2, 0.5, 1.4}), {0.0, 0.5, 1.0}, 0.0));
+    const LinearRgb negative{-0.05, 0.4, 0.3};
+    const auto smooth = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::agX, negative);
+    FO4HDR_CHECK(IsContained(smooth));
+    FO4HDR_CHECK(test::Approx(Bt709Luminance(smooth), Bt709Luminance(negative), 1.0e-12));
+}
+
+// GT7 clips each BT.2020 channel at white like its official sample. The clipped
+// color still exceeds BT.709 white, so it keeps its luminance and chroma
+// direction while chroma contracts into range, instead of losing a channel.
+void CheckGt7LuminanceFit()
+{
+    const auto clipped = ConvertBt2020ToBt709({1.0, 0.4, 0.2});
+    const auto gt7 = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
+        ConvertBt2020ToBt709({1.3, 0.4, 0.2}));
+    FO4HDR_CHECK(IsContained(gt7));
+    FO4HDR_CHECK(clipped.red > 1.0);
+    const auto luminance = Bt709Luminance(clipped);
+    FO4HDR_CHECK(test::Approx(Bt709Luminance(gt7), luminance, 1.0e-12));
+    const auto scale = (gt7.red - luminance) / (clipped.red - luminance);
+    FO4HDR_CHECK(scale > 0.0 && scale < 1.0);
+    const auto toward = [=](double channel) { return luminance + scale * (channel - luminance); };
+    FO4HDR_CHECK(ApproxRgb(gt7,
+        {toward(clipped.red), toward(clipped.green), toward(clipped.blue)}, 1.0e-12));
+    FO4HDR_CHECK(ApproxRgb(ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
+        {0.5, 0.3, 0.2}), {0.5, 0.3, 0.2}, 1.0e-12));
 }
 
 void TestSdrContainment()
 {
     for (const auto algorithm : kSdrAlgorithms)
         CheckSdrContainment(algorithm);
-    // ACES2 clamps each channel like its preset; the smooth stage removes a
-    // negative channel without changing BT.709 luminance.
-    const auto clamped = ContainSdrOperatorOutput(
-        ProductionToneMapperAlgorithm::aces2, {-0.2, 0.5, 1.4});
-    FO4HDR_CHECK(clamped.red == 0.0 && clamped.green == 0.5 && clamped.blue == 1.0);
-    const LinearRgb negative{-0.05, 0.4, 0.3};
-    const auto smooth = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::agX, negative);
-    FO4HDR_CHECK(IsContained(smooth));
-    FO4HDR_CHECK(test::Approx(Bt709Luminance(smooth), Bt709Luminance(negative), 1.0e-12));
-    // GT7 clips each BT.2020 channel at white like its official sample.
-    const auto overWhite = ConvertBt2020ToBt709({1.3, 0.4, 0.2});
-    const auto clipped = ConvertBt2020ToBt709({1.0, 0.4, 0.2});
-    const auto gt7 = ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7, overWhite);
-    FO4HDR_CHECK(test::Approx(gt7.red, std::clamp(clipped.red, 0.0, 1.0), 1.0e-12) &&
-        test::Approx(gt7.green, std::clamp(clipped.green, 0.0, 1.0), 1.0e-12) &&
-        test::Approx(gt7.blue, std::clamp(clipped.blue, 0.0, 1.0), 1.0e-12));
+    CheckAces2AndAgxContainment();
+    CheckGt7LuminanceFit();
 }
 
 // Tint, adjacent jitter and running drawdown in 10-bit PQ codes at the metric
