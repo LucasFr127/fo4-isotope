@@ -44,10 +44,10 @@ void CheckColorSettingsTabs(HdrSettings& settings)
     view.display.peakNits = 430.0F;
     view.display.fullFrameNits = std::numeric_limits<float>::quiet_NaN();
     view.display.sdrWhiteNits = 180.0F;
-    bool commitRequested{};
+    bool commitRequested{}, hdrEnabled{true};
     if (ImGui::BeginTabBar("Recommendation smoke tabs"))
     {
-        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        DrawColorSettingsTabs({settings, commitRequested, hdrEnabled}, view, 0.0F);
         auto* tabs = ImGui::GetCurrentTabBar();
         constexpr std::array names{"Output", "Effects", "Image", "Selective Color"};
         FO4HDR_CHECK(tabs->Tabs.Size == static_cast<int>(names.size()));
@@ -66,10 +66,10 @@ void CheckEffectsSettingsTab(HdrSettings& settings)
     const auto curve = settings.colorGradingCurve;
     SettingsWindowView view{};
     view.activeSettings = settings;
-    bool commitRequested{};
+    bool commitRequested{}, hdrEnabled{true};
     if (ImGui::BeginTabBar("Recommendation smoke tabs"))
     {
-        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        DrawColorSettingsTabs({settings, commitRequested, hdrEnabled}, view, 0.0F);
         auto* tabs = ImGui::GetCurrentTabBar();
         auto* selected = ImGui::TabBarFindTabByID(tabs, tabs->SelectedTabId);
         FO4HDR_CHECK(selected != nullptr &&
@@ -104,13 +104,13 @@ void RenderSdrSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
     view.sdrMode = true;
     for (const auto* next : {"Effects", "Image", "Selective Color", "Output"})
     {
-        bool commitRequested{};
+        bool commitRequested{}, hdrEnabled{true};
         ImGui::NewFrame();
         ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
         if (ImGui::Begin("SDR settings smoke", nullptr, ImGuiWindowFlags_NoSavedSettings) &&
             ImGui::BeginTabBar("SDR smoke tabs"))
         {
-            DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+            DrawColorSettingsTabs({settings, commitRequested, hdrEnabled}, view, 0.0F);
             auto* tabs = ImGui::GetCurrentTabBar();
             FO4HDR_CHECK(tabs->Tabs.Size == 4);
             ImGui::TabBarQueueFocus(tabs, next);
@@ -154,30 +154,35 @@ void CheckSdrAgxControls(ImVec2 windowSize)
     FO4HDR_CHECK(std::abs(sdr - sdrNeutral) < hdr - sdr);
 }
 
-// Vertices of one frame showing the SDR Output tab for a tone curve.
-int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize)
+// Vertices of one frame showing the SDR Output tab for a tone curve and HDR request.
+int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize,
+    bool hdrEnabled = false, bool hdrEnabledAtStart = false)
 {
     auto settings = DefaultSdrSettings();
     settings.productionAlgorithm = algorithm;
     SettingsWindowView view{};
     view.activeSettings = settings;
     view.sdrMode = true;
+    view.hdrEnabledAtStart = hdrEnabledAtStart;
+    const auto requested = hdrEnabled;
     bool commitRequested{};
     ImGui::NewFrame();
     ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
     if (ImGui::Begin("SDR output smoke", nullptr, ImGuiWindowFlags_NoSavedSettings) &&
         ImGui::BeginTabBar("SDR output tabs"))
     {
-        DrawColorSettingsTabs(settings, commitRequested, view, 0.0F);
+        DrawColorSettingsTabs({settings, commitRequested, hdrEnabled}, view, 0.0F);
         ImGui::EndTabBar();
     }
     ImGui::End();
     ImGui::Render();
     FO4HDR_CHECK(!commitRequested);
+    FO4HDR_CHECK(hdrEnabled == requested);
     return ImGui::GetDrawData()->TotalVtxCount;
 }
 
-// The SDR Tone Curve choice is followed by the selected operator's controls.
+// The SDR Tone Curve choice is followed by the selected operator's controls, and
+// only an HDR request with a status draws more than the unchecked box.
 void CheckSdrOperatorControls(ImVec2 windowSize)
 {
     CheckSdrAgxControls(windowSize);
@@ -186,6 +191,29 @@ void CheckSdrOperatorControls(ImVec2 windowSize)
     for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
              ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7})
         FO4HDR_CHECK(SdrOutputVertices(algorithm, windowSize) > native);
+    FO4HDR_CHECK(SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize, true, true) > native);
+    FO4HDR_CHECK(SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize, false, true) == native);
+}
+
+// A restart is requested only when it would change the HDR outcome.
+void TestHdrRequestStatus()
+{
+    const auto status = [](bool enabled, bool atStart, bool sdrMode) {
+        SettingsWindowView view{};
+        view.hdrEnabledAtStart = atStart;
+        view.sdrMode = sdrMode;
+        const auto* text = HdrRequestStatus(enabled, view);
+        return std::string_view{text != nullptr ? text : ""};
+    };
+    // HDR session: turning HDR off needs a restart.
+    FO4HDR_CHECK(status(true, true, false).empty());
+    FO4HDR_CHECK(status(false, true, false).starts_with("Restart the game to turn HDR off"));
+    // HDR requested, but the session entered SDR mode: only the unavailable note.
+    FO4HDR_CHECK(status(true, true, true).starts_with("HDR is not active"));
+    FO4HDR_CHECK(status(false, true, true).empty());
+    // HDR off at start: turning it on needs a restart.
+    FO4HDR_CHECK(status(false, false, true).empty());
+    FO4HDR_CHECK(status(true, false, true).starts_with("Restart the game to turn HDR on"));
 }
 
 void TestSdrToneMapperRecommendedRanges()
@@ -294,6 +322,7 @@ void TestToneMapperRecommendations()
     TestToneMapperRecommendedPeaks();
     TestToneMapperRecommendedIntervals();
     TestSdrToneMapperRecommendedRanges();
+    TestHdrRequestStatus();
 }
 
 }  // namespace

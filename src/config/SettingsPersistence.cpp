@@ -58,9 +58,11 @@ struct PersistedKey
     // Last, so earlier positional rows are unaffected.
     bool colorGradingCurve{};
     bool HdrSettings::*flag{};
+    bool HdrInterfaceSettings::*interfaceFlag{};
 };
 
-constexpr std::array<PersistedKey, 53> kPersistedKeys{{
+constexpr std::array<PersistedKey, 54> kPersistedKeys{{
+    {.section = "General", .key = "HdrEnabled", .interfaceFlag = &HdrInterfaceSettings::hdrEnabled},
     {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
         &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
@@ -293,6 +295,17 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
     return result;
 }
 
+// The value of a switch key; other keys have none.
+[[nodiscard]] std::optional<std::string> FlagKeyValue(
+    const PersistedKey& key,
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings)
+{
+    if (key.flag != nullptr) return settings.*key.flag ? "1" : "0";
+    if (key.interfaceFlag != nullptr) return interfaceSettings.*key.interfaceFlag ? "1" : "0";
+    return std::nullopt;
+}
+
 // The value of a key that names a choice or a switch; numbers have none.
 [[nodiscard]] std::optional<std::string> NamedKeyValue(
     const PersistedKey& key,
@@ -303,8 +316,7 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
     if (key.hotkey) return FormatHdrSettingsHotkey(interfaceSettings.toggleKey).data();
     if (key.colorGradingMethod) return std::string(ToString(settings.colorGradingMethod));
     if (key.colorGradingCurve) return std::string(ToString(settings.colorGradingCurve));
-    if (key.flag != nullptr) return settings.*key.flag ? "1" : "0";
-    return std::nullopt;
+    return FlagKeyValue(key, settings, interfaceSettings);
 }
 
 [[nodiscard]] std::string KeyValue(
@@ -704,7 +716,7 @@ private:
 
     void AppendMissingGroups()
     {
-        constexpr std::array<std::string_view, 10> groups{"Output", "ToneMapper",
+        constexpr std::array<std::string_view, 11> groups{"General", "Output", "ToneMapper",
             "ACES2", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "Interface",
             "WeatherLutResponse"};
         for (const auto group : groups)

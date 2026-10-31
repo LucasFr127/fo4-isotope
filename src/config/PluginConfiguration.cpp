@@ -777,6 +777,7 @@ private:
         parsed.productionRequested = parsed.enabled && present && !parsed.developerHdr10Reference;
         if (!Seen(RequiredKey::weatherEnabled))
             parsed.weatherGradeResponse.enabled = parsed.productionRequested;
+        parsed.interfaceSettings.hdrEnabled = parsed.enabled;
         return ValidateConfiguration(parsed);
     }
 

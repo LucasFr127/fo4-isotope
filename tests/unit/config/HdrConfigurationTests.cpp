@@ -52,6 +52,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.interfaceSettings.windowHeight == 680.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.windowX == -1.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.windowY == -1.0);
+    FO4HDR_CHECK(shipped.value.interfaceSettings.hdrEnabled);
     FO4HDR_CHECK(!shipped.value.developerMode);
     FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
     FO4HDR_CHECK(!shipped.value.measurePerformance);

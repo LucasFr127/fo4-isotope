@@ -169,6 +169,20 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
 }
 
+// The settings window saves the HDR request for the next game start.
+void CheckRewrittenHdrRequest(const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings, std::string_view original)
+{
+    auto hdrOff = interfaceSettings;
+    hdrOff.hdrEnabled = false;
+    FO4HDR_CHECK(RewriteHdrSettingsIni(original, {settings}, hdrOff).find(
+        "[General]\r\nHdrEnabled=0\r\nUnknown=kept\r\n") != std::string::npos);
+    const auto reloaded = ParsePluginConfiguration(
+        RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hdrOff));
+    FO4HDR_CHECK(reloaded.valid && !reloaded.value.enabled);
+    FO4HDR_CHECK(!reloaded.value.interfaceSettings.hdrEnabled);
+}
+
 void CheckSdrProfileRewrite()
 {
     auto sdr = DefaultSdrSettings();
@@ -275,6 +289,7 @@ void TestSettingsPersistenceRewrite()
     CheckRewrittenWindowPosition(settings, interfaceSettings, rewritten);
     CheckRewrittenMigration(settings, interfaceSettings);
     CheckSdrProfileRewrite();
+    CheckRewrittenHdrRequest(settings, interfaceSettings, original);
     settings.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         original, {settings}, interfaceSettings) == original);

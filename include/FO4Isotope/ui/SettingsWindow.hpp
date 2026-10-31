@@ -69,6 +69,8 @@ struct SettingsWindowView
 {
     HdrSettings activeSettings;
     bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{}, sdrMode{};
+    // [General] HdrEnabled as this game session started.
+    bool hdrEnabledAtStart{};
     bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
     ProductionToneMapperAlgorithm pendingAlgorithm{};
     double pendingPeakNits{};

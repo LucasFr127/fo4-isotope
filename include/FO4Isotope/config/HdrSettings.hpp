@@ -268,6 +268,8 @@ struct HdrInterfaceSettings
     double windowX{-1.0};
     double windowY{-1.0};
     HdrSettingsHotkey toggleKey{};
+    // [General] HdrEnabled; it applies at the next game start.
+    bool hdrEnabled{true};
     bool operator==(const HdrInterfaceSettings&) const = default;
 };
 

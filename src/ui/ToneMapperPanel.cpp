@@ -64,6 +64,17 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
         "ACES 2" : ToString(algorithm).data();
 }
 
+const char* HdrRequestStatus(bool hdrEnabled, const SettingsWindowView& view) noexcept
+{
+    if (hdrEnabled && !view.hdrEnabledAtStart) return "Restart the game to turn HDR on.";
+    // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
+    if (!hdrEnabled && !view.sdrMode) return "Restart the game to turn HDR off.";
+    if (hdrEnabled && view.sdrMode)
+        return "HDR is not active: Windows HDR was off or no HDR display was detected when the "
+            "game started. Turn on Use HDR in the Windows display settings, then restart the game.";
+    return nullptr;
+}
+
 const char* ToneMapperRecommendationStatus(
     double value, const ToneMapperRecommendedRange& range) noexcept
 {
@@ -141,6 +152,7 @@ struct ColorSettingsTabs
 {
     HdrSettings& settings;
     bool& commitRequested;
+    bool& hdrEnabled;
     const SettingsWindowView& view;
     float footerHeight;
 
@@ -232,6 +244,22 @@ struct ColorSettingsTabs
             if (selected) ImGui::SetItemDefaultFocus();
         }
         return settings.productionAlgorithm != current;
+    }
+
+    // The request is saved at once but read only at game start.
+    void DrawHdrRequest() noexcept
+    {
+        ImGui::SeparatorText("HDR");
+        ImGui::Checkbox("Enable HDR", &hdrEnabled);
+        ImGui::SetItemTooltip("Uses HDR10 output on an HDR display with Windows HDR on.\n"
+            "Takes effect after restarting the game.");
+        if (DrawRestoreDefaultButton("hdr-enabled", !hdrEnabled))
+            hdrEnabled = true;
+        const auto* status = HdrRequestStatus(hdrEnabled, view);
+        if (status == nullptr) return;
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.8F, 0.2F, 1.0F));
+        ImGui::TextWrapped("%s", status);
+        ImGui::PopStyleColor();
     }
 
     // Native follows the Effects tab's weather response setting.
@@ -491,14 +519,16 @@ struct ColorSettingsTabs
             if (view.sdrMode)
             {
                 ImGui::TextWrapped("SDR color controls are active on the game's own SDR image. "
-                    "HDR output and its brightness and tone-mapping controls need an HDR10 "
-                    "display with Windows HDR on before the game starts, and HdrEnabled=1.");
+                    "HDR output and its brightness and tone-mapping controls need Enable HDR "
+                    "and an HDR10 display with Windows HDR on when the game starts.");
+                DrawHdrRequest();
                 DrawSdrToneCurve();
                 ImGui::EndChild();
                 ImGui::EndTabItem();
                 return;
             }
             ImGui::TextWrapped("Set display brightness, then choose the tone mapper and its look.");
+            DrawHdrRequest();
             DrawDetectedDisplay();
             ImGui::SeparatorText("Display Brightness");
             DrawOutputPeak();
@@ -645,10 +675,10 @@ struct ColorSettingsTabs
 
 }  // namespace
 
-void DrawColorSettingsTabs(HdrSettings& settings, bool& commitRequested,
+void DrawColorSettingsTabs(const ColorSettingsDrafts& drafts,
     const SettingsWindowView& view, float footerHeight) noexcept
 {
-    ColorSettingsTabs panel{settings, commitRequested, view, footerHeight};
+    ColorSettingsTabs panel{drafts.settings, drafts.commitRequested, drafts.hdrEnabled, view, footerHeight};
     panel.DrawOutputSettingsTab();
     panel.DrawEffectsSettingsTab();
     panel.DrawImageSettingsTab();

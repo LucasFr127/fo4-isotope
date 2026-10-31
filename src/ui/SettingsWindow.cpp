@@ -305,7 +305,8 @@ struct SettingsTabs {
     {
         if (!ImGui::BeginTabBar("FO4IsotopeTabs",
                 ImGuiTabBarFlags_FittingPolicyScroll | ImGuiTabBarFlags_TabListPopupButton)) return;
-        DrawColorSettingsTabs(state.uiDraft, state.uiCommitRequested, view, footerHeight);
+        DrawColorSettingsTabs({state.uiDraft, state.uiCommitRequested, state.uiInterfaceDraft.hdrEnabled},
+            view, footerHeight);
         DrawInterfaceSettingsTab();
         DrawDiagnosticsSettingsTab();
         ImGui::EndTabBar();

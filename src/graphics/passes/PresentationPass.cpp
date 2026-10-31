@@ -151,6 +151,7 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.developerMode = g_configuration.developerMode;
     result.hdrActive = g_evidence.hdrColorSpaceActive.load();
     result.sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
+    result.hdrEnabledAtStart = g_configuration.enabled;
     result.exposureRequested = g_developerExposure.state.Requested();
     result.exposureActive = g_developerExposure.state.Active();
     result.exposureFailed = g_developerExposure.failed;
