@@ -46,6 +46,26 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
+// GT7 adds its exposure compensation only while it is selected.
+void CheckSdrOperatorSwitches(const HdrSettings& sdr)
+{
+    for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
+             ProductionToneMapperAlgorithm::agX, ProductionToneMapperAlgorithm::gt7})
+    {
+        auto selected = sdr;
+        selected.productionAlgorithm = algorithm;
+        selected.exposureEv = 1.0;
+        const auto compensation = algorithm == ProductionToneMapperAlgorithm::gt7 ?
+            kSdrGt7ExposureCompensationEv : 0.0;
+        FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier ==
+            std::exp2(1.0 + compensation));
+        selected.sdrGt7ExposureCompensation = false;
+        FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
+    }
+    // The HDR profile keeps its exposure.
+    FO4HDR_CHECK(DeriveHdrSettingsMath(HdrSettings{}).sceneExposureMultiplier == 1.0);
+}
+
 void TestSdrProfileDefaults()
 {
     const auto sdr = DefaultSdrSettings();
@@ -63,6 +83,7 @@ void TestSdrProfileDefaults()
                 HdrSettingsValidationError::unsupportedAlgorithm));
         // An SDR profile that selects an operator keeps its scene controls.
         selected.exposureEv = 1.0;
+        selected.sdrGt7ExposureCompensation = false;
         FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
     }
     auto brighter = sdr;
@@ -113,6 +134,7 @@ void TestSdrProfileDefaults()
     auto selective = sdr;
     selective.selectiveColor.enabled = true;
     FO4HDR_CHECK(SdrSceneControlsNeutral(selective));
+    CheckSdrOperatorSwitches(sdr);
 }
 
 // SDR operator limits apply even while the operator is not selected.
@@ -127,10 +149,11 @@ void TestSdrOperatorLimits()
     raisedGray.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
     raisedGray.toneMapperParameters.gt7ShoulderStart = kMinimumGt7ShoulderStart;
     FO4HDR_CHECK(ValidateHdrSettings(raisedGray) == HdrSettingsValidationError::none);
-    // SDR GT7 starts its shoulder where its toe ends, below the HDR minimum.
+    // SDR GT7 may start its shoulder where its toe ends, below the HDR minimum.
     FO4HDR_CHECK(sdr.toneMapperParameters == kDefaultSdrToneMapperParameters);
     auto toeEndShoulder = sdr;
     toeEndShoulder.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
+    toeEndShoulder.toneMapperParameters.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart;
     FO4HDR_CHECK(ValidateProfileSettings(toeEndShoulder, true) == HdrSettingsValidationError::none);
     FO4HDR_CHECK(ValidateHdrSettings(toeEndShoulder) ==
         HdrSettingsValidationError::toneMapperParametersOutOfRange);

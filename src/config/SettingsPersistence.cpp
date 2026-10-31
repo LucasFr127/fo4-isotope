@@ -57,9 +57,10 @@ struct PersistedKey
     bool weatherEnabled{};
     // Last, so earlier positional rows are unaffected.
     bool colorGradingCurve{};
+    bool HdrSettings::*flag{};
 };
 
-constexpr std::array<PersistedKey, 51> kPersistedKeys{{
+constexpr std::array<PersistedKey, 52> kPersistedKeys{{
     {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
         &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
@@ -117,6 +118,7 @@ constexpr std::array<PersistedKey, 51> kPersistedKeys{{
         &ToneMapperParameters::gt7ShoulderStart},
     {"GT7", "ColorBlend", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::gt7ColorBlend},
+    {.section = "GT7", .key = "ExposureCompensation", .flag = &HdrSettings::sdrGt7ExposureCompensation},
     {"Image", "ExposureEV", &HdrSettings::exposureEv},
     {"Image", "Contrast", &HdrSettings::contrast},
     {"Image", "Blacks", &HdrSettings::blacks},
@@ -290,6 +292,20 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
     return result;
 }
 
+// The value of a key that names a choice or a switch; numbers have none.
+[[nodiscard]] std::optional<std::string> NamedKeyValue(
+    const PersistedKey& key,
+    const HdrSettings& settings,
+    const HdrInterfaceSettings& interfaceSettings)
+{
+    if (key.algorithm) return std::string(ToString(settings.productionAlgorithm));
+    if (key.hotkey) return FormatHdrSettingsHotkey(interfaceSettings.toggleKey).data();
+    if (key.colorGradingMethod) return std::string(ToString(settings.colorGradingMethod));
+    if (key.colorGradingCurve) return std::string(ToString(settings.colorGradingCurve));
+    if (key.flag != nullptr) return settings.*key.flag ? "1" : "0";
+    return std::nullopt;
+}
+
 [[nodiscard]] std::string KeyValue(
     const PersistedKey& key,
     const HdrSettings& settings,
@@ -299,14 +315,8 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
         return WeatherKeyValue(key, settings.weatherGradeResponse);
     std::string result(key.key);
     result.push_back('=');
-    if (key.algorithm)
-        result.append(ToString(settings.productionAlgorithm));
-    else if (key.hotkey)
-        result.append(FormatHdrSettingsHotkey(interfaceSettings.toggleKey).data());
-    else if (key.colorGradingMethod)
-        result.append(ToString(settings.colorGradingMethod));
-    else if (key.colorGradingCurve)
-        result.append(ToString(settings.colorGradingCurve));
+    if (const auto named = NamedKeyValue(key, settings, interfaceSettings))
+        result.append(*named);
     else if (key.interfaceNumber != nullptr)
         result.append(FormatNumber(interfaceSettings.*key.interfaceNumber));
     else if (key.toneMapperNumber != nullptr)
@@ -554,9 +564,11 @@ public:
                 seen_[index] = !IsSdrProfileKey(kPersistedKeys[index].section, kPersistedKeys[index].key);
             return;
         }
-        if (!positionOnly_) return;
+        // The HDR pass leaves SDR-only rows to the SDR pass.
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            seen_[index] = !IsPositionKey(kPersistedKeys[index]);
+            seen_[index] = IsSdrOnlyProfileKey(kPersistedKeys[index].section, kPersistedKeys[index].key) ||
+                (positionOnly_ && !IsPositionKey(kPersistedKeys[index]));
+        if (!positionOnly_) return;
         selectiveSeen_.fill(true);
         selectiveEnabledSeen_ = true;
         selectiveAmountSeen_ = true;
@@ -592,7 +604,8 @@ private:
     [[nodiscard]] bool Writes(const PersistedKey& key) const noexcept
     {
         if (positionOnly_ && !IsPositionKey(key)) return false;
-        return !sdrProfile_ || IsSdrProfileKey(key.section, key.key);
+        return sdrProfile_ ? IsSdrProfileKey(key.section, key.key) :
+            !IsSdrOnlyProfileKey(key.section, key.key);
     }
 
     [[nodiscard]] bool ReplaceKnownKey(std::string_view name)

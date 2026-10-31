@@ -220,6 +220,7 @@ void TestExtendedSdrConfiguration()
     for (const auto shoulder : {kMinimumSdrGt7ShoulderStart, kMinimumGt7ShoulderStart, 0.444,
              kMaximumGt7ShoulderStart})
         TestExtendedSdrShoulder({.gt7ShoulderStart = shoulder});
+    TestExtendedSdrShoulder(kDefaultSdrToneMapperParameters);
     // The SDR minimum is the first saved 0.001 step where the official 0.538 toe has ended.
     constexpr double toeEnd = 0.538 * 100.0 / kGt7SdrPaperWhiteNits;
     FO4HDR_CHECK(kMinimumSdrGt7ShoulderStart >= toeEnd &&
@@ -230,14 +231,14 @@ void TestExtendedSdrConfiguration()
     if (const auto linear = CreateSdrGt7Transform(ToneMapperParameters{}))
         for (const auto& scene : {LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.4, 0.2}})
             CheckOfficialSdrParity(*linear, scene);
-    const auto transform = CreateSdrGt7Transform();
+    const auto transform = CreateSdrGt7Transform({.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart});
     FO4HDR_CHECK(transform != nullptr);
     if (!transform) return;
-    // The default keeps the sample's toe and middle gray up to where the toe ends.
+    // With the sample's toe and a shoulder starting where it ends, the response matches the sample up to there.
     for (const auto& scene : {LinearRgb{}, LinearRgb{0.001, 0.001, 0.001},
              LinearRgb{0.18, 0.18, 0.18}, LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.2, 0.1}})
         CheckOfficialSdrParity(*transform, scene);
-    // Local regression of the default shoulder.
+    // Local regression of the toe-end shoulder.
     for (const auto& [scene, expected] : {std::pair{1.0, 0.5630}, std::pair{1.81, 0.7236},
              std::pair{2.8, 0.8325}, std::pair{3.84, 0.9081}})
         FO4HDR_CHECK(test::Approx(SdrNeutral(*transform, scene), expected, 1.0e-3));

@@ -68,6 +68,18 @@ void TestShippedConfiguration()
     return parsed.valid ? PluginConfigurationError::none : parsed.error;
 }
 
+// The SDR-only switch parses in its SDR section; the HDR section ignores it.
+void CheckSdrOnlySwitches()
+{
+    const auto switches = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "[SdrGT7]\nExposureCompensation=0\n[GT7]\nExposureCompensation=1\n");
+    FO4HDR_CHECK(switches.valid);
+    FO4HDR_CHECK(!switches.value.sdrSettings.sdrGt7ExposureCompensation);
+    FO4HDR_CHECK(!switches.value.sdrGt7ExposureCompensation);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrGT7]\nExposureCompensation=2\n") ==
+        PluginConfigurationError::invalidBoolean);
+}
+
 void TestSdrProfileConfiguration()
 {
     // A file without SDR keys requests SDR mode with the vanilla-neutral profile.
@@ -133,6 +145,7 @@ void TestSdrProfileConfiguration()
         PluginConfigurationError::valueOutOfRange);
     FO4HDR_CHECK(SdrConfigurationError("[GT7]\nShoulderStart=0.216\n") ==
         PluginConfigurationError::valueOutOfRange);
+    CheckSdrOnlySwitches();
 
     // SDR offers the native curve plus each operator once it is selectable.
     FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=Vanilla\n") ==

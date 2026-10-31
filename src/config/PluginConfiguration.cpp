@@ -213,6 +213,7 @@ enum class RequiredKey : std::size_t
     weatherColorAmbient,
     weatherColorColorChange,
     sdrEnabled,
+    sdrGt7ExposureCompensation,
     count
 };
 
@@ -280,6 +281,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"GT7", "ToeStrength", RequiredKey::gt7ToeStrength},
     {"GT7", "ShoulderStart", RequiredKey::gt7ShoulderStart},
     {"GT7", "ColorBlend", RequiredKey::gt7ColorBlend},
+    {"GT7", "ExposureCompensation", RequiredKey::sdrGt7ExposureCompensation},
     {"Image", "Contrast", RequiredKey::contrast},
     {"Image", "Blacks", RequiredKey::blacks},
     {"Image", "Highlights", RequiredKey::highlights},
@@ -582,6 +584,7 @@ bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
 {
     if (key == RequiredKey::weatherEnabled) return &profile.weatherGradeResponse.enabled;
     if (key == RequiredKey::selectiveColorEnabled) return &profile.selectiveColor.enabled;
+    if (key == RequiredKey::sdrGt7ExposureCompensation) return &profile.sdrGt7ExposureCompensation;
     return nullptr;
 }
 
@@ -720,10 +723,16 @@ private:
         return PluginConfigurationError::none;
     }
 
+    // Each profile ignores the other profile's own keys.
+    [[nodiscard]] bool IgnoredKey(std::string_view key) const noexcept
+    {
+        return sdrSection_ ? !IsSdrProfileKey(section_, key) : IsSdrOnlyProfileKey(section_, key);
+    }
+
     PluginConfigurationError ParseValue(std::string_view key, std::string_view value) noexcept
     {
         RequiredKey required{};
-        if (sdrSection_ && !IsSdrProfileKey(section_, key)) return PluginConfigurationError::none;
+        if (IgnoredKey(key)) return PluginConfigurationError::none;
         if (!MatchKey(section_, key, required)) return PluginConfigurationError::none;
         auto& seen = (sdrSection_ ? seenSdr_ : seen_)[static_cast<std::size_t>(required)];
         if (seen) return PluginConfigurationError::duplicateKey;

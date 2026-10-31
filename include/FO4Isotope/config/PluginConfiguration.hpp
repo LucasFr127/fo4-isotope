@@ -57,6 +57,17 @@ inline constexpr std::array kHdrOnlyProfileKeys{
     SdrExcludedKey{"Image", "ColorGradingCurve"},
     SdrExcludedKey{"AgX", "ShoulderPower"}};
 
+// SDR-only keys of those sections, ignored in the HDR sections.
+inline constexpr std::array kSdrOnlyProfileKeys{
+    SdrExcludedKey{"GT7", "ExposureCompensation"}};
+
+[[nodiscard]] constexpr bool IsSdrOnlyProfileKey(std::string_view base, std::string_view key) noexcept
+{
+    for (const auto& entry : kSdrOnlyProfileKeys)
+        if (entry.base == base && entry.key == key) return true;
+    return false;
+}
+
 // The HDR base section of an SDR profile section, or empty for any other section.
 [[nodiscard]] constexpr std::string_view SdrProfileBaseSection(std::string_view section) noexcept
 {

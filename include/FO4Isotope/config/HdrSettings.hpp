@@ -77,6 +77,8 @@ inline constexpr double kMaximumGt7ShoulderStart{0.60};
 // In SDR, GT7's shoulder may start where its toe ends: the toe's 0.538 extent is
 // 21.52% of the 250-nit SDR white, rounded up to the saved 0.001 precision.
 inline constexpr double kMinimumSdrGt7ShoulderStart{0.216};
+// Exposure offset that brings SDR GT7 close to the brightness of the game's own SDR curve.
+inline constexpr double kSdrGt7ExposureCompensationEv{-0.22};
 inline constexpr double kMinimumGt7ColorBlend{0.0};
 inline constexpr double kMaximumGt7ColorBlend{1.0};
 inline constexpr double kMinimumImageAdjustment{-100.0};
@@ -177,10 +179,12 @@ struct ToneMapperParameters
     bool operator==(const ToneMapperParameters&) const = default;
 };
 
-// The SDR profile's operator defaults. GT7 starts its shoulder where its toe
-// ends; at its HDR default, SDR daylight ran about 0.45 EV above the game's curve.
+// SDR operator defaults, tuned in game separately from the HDR defaults.
 inline constexpr ToneMapperParameters kDefaultSdrToneMapperParameters{
-    .gt7ShoulderStart = kMinimumSdrGt7ShoulderStart};
+    .acesLookStrength = 0.3,
+    .agxMiddleGrayEv = -0.44,
+    .gt7ToeStrength = 1.22,
+    .gt7ShoulderStart = 0.378};
 
 [[nodiscard]] constexpr ToneMapperParameters ActiveToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
@@ -233,6 +237,9 @@ struct HdrSettings
     double vanillaGradeColorPercent{67.0};
     WeatherGradeResponseSettings weatherGradeResponse{};
     double bloomStrengthPercent{50.0};
+    // SDR profile only; the HDR profile keeps it off. It applies
+    // kSdrGt7ExposureCompensationEv while GT7 replaces the SDR curve.
+    bool sdrGt7ExposureCompensation{};
     bool operator==(const HdrSettings&) const = default;
 };
 

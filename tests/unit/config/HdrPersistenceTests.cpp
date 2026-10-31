@@ -179,6 +179,8 @@ void CheckSdrProfileRewrite()
     sdr.selectiveColor.regions[3].saturationPercent = 80.0;
     sdr.weatherGradeResponse.enabled = true;
     sdr.toneMapperParameters.agxContrast = 2.5;
+    sdr.toneMapperParameters.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart;
+    sdr.sdrGt7ExposureCompensation = false;
     const HdrSettingsProfiles profiles{.hdr = HdrSettings{}, .sdr = sdr};
     // Missing SDR sections are appended under their own names, without HDR-only keys.
     const auto saved = RewriteHdrSettingsIni(MinimalProductionConfiguration(), profiles, {});
@@ -192,7 +194,10 @@ void CheckSdrProfileRewrite()
     FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Native\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
-    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.22\n") != std::string::npos);
+    // The SDR-only key is written only to its SDR section.
+    FO4HDR_CHECK(section("[SdrGT7]").find("ExposureCompensation=0\n") != std::string::npos);
+    FO4HDR_CHECK(saved.find("ExposureCompensation=") == saved.rfind("ExposureCompensation="));
     // The SDR shoulder minimum survives the saved 0.001 precision.
     FO4HDR_CHECK(section("[SdrGT7]").find("ShoulderStart=0.216\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrImage]\nExposureEV=-0.5\nContrast=15\n") != std::string::npos);

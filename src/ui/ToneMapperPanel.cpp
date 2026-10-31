@@ -686,7 +686,7 @@ bool ToneMapperPanel::DrawAgx() noexcept
     return changed;
 }
 
-// SDR lets the shoulder start lower, where the toe ends.
+// SDR lets the shoulder start lower, where the toe ends, and adds exposure compensation.
 bool ToneMapperPanel::DrawGt7() noexcept
 {
     const auto defaults = Defaults();
@@ -710,6 +710,17 @@ bool ToneMapperPanel::DrawGt7() noexcept
         1.0, "%.2f",
         "Controls hue and saturation handling in highlights. 0 uses "
         "per-channel RGB curves; higher values favor the ICtCp color treatment."}});
+    if (!sdrProfile) return changed;
+    const auto defaultValue = DefaultSdrSettings().sdrGt7ExposureCompensation;
+    auto& compensation = settings.sdrGt7ExposureCompensation;
+    changed |= ImGui::Checkbox("Exposure Compensation (-0.22 EV)", &compensation);
+    ImGui::SetItemTooltip("Lowers GT7's scene exposure by 0.22 EV to match the game's SDR brightness.\n"
+        "Adds to Exposure in the Image tab.");
+    if (detail::DrawRestoreDefaultButton("gt7-exposure-compensation", compensation != defaultValue))
+    {
+        compensation = defaultValue;
+        changed = true;
+    }
     return changed;
 }
 
