@@ -59,6 +59,7 @@ inline constexpr std::array kHdrOnlyProfileKeys{
 
 // SDR-only keys of those sections, ignored in the HDR sections.
 inline constexpr std::array kSdrOnlyProfileKeys{
+    SdrExcludedKey{"ToneMapper", "AutomaticWeatherResponse"},
     SdrExcludedKey{"GT7", "ExposureCompensation"}};
 
 [[nodiscard]] constexpr bool IsSdrOnlyProfileKey(std::string_view base, std::string_view key) noexcept

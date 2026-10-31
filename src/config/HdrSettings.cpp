@@ -520,6 +520,7 @@ HdrSettings DefaultSdrSettings() noexcept
     settings.vanillaGradeColorPercent = 100.0;
     settings.weatherGradeResponse.enabled = false;
     settings.bloomStrengthPercent = 100.0;
+    settings.sdrOperatorWeatherResponse = true;
     settings.sdrGt7ExposureCompensation = true;
     return settings;
 }
@@ -542,7 +543,7 @@ bool SdrGradeControlsNeutral(const HdrSettings& settings) noexcept
     return settings.vanillaColorGradingStrengthPercent == 100.0 &&
         settings.vanillaGradeLuminancePercent == 100.0 &&
         settings.vanillaGradeColorPercent == 100.0 &&
-        !settings.weatherGradeResponse.enabled;
+        !EffectiveWeatherGradeResponse(settings).enabled;
 }
 
 }  // namespace fo4hdr

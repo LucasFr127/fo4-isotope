@@ -20,7 +20,7 @@ WeatherGradeResponseCache g_weatherGradeResponses;
 void RefreshWeatherGradeResponses() noexcept
 {
     (void)g_weatherGradeResponses.Refresh(ReadWeatherGradeCatalog(),
-        g_activeSettings.weatherGradeResponse);
+        EffectiveWeatherGradeResponse(g_activeSettings));
 }
 
 std::array<LutSnapshot, 4> g_lutInspectorLuts{};
@@ -244,14 +244,14 @@ bool PrepareLutProfileInspector(ID3D11DeviceContext* context, const DrawObservat
     if (!IsLutProfileDrawCurrent(context, record, native)) return false;
 
     if (!ValidateLutProfileIdentity(context, native)) return false;
-    if (!g_activeSettings.weatherGradeResponse.enabled)
+    const auto response = EffectiveWeatherGradeResponse(g_activeSettings);
+    if (!response.enabled)
     {
         g_lutInspectorStatus = "Automatic weather response is disabled; global controls are used.";
         g_lutInspectorFallbackReasons.fill("Automatic response is disabled");
         return false;
     }
-    if (!g_weatherGradeResponses.Matches(ReadWeatherGradeCatalog(),
-            g_activeSettings.weatherGradeResponse))
+    if (!g_weatherGradeResponses.Matches(ReadWeatherGradeCatalog(), response))
     {
         g_lutInspectorStatus = "Weather response cache is pending; global controls are used.";
         g_lutInspectorFallbackReasons.fill("Weather response cache is pending");

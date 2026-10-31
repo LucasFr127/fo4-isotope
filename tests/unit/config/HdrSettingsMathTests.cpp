@@ -46,7 +46,8 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
-// GT7 adds its exposure compensation only while it is selected.
+// The SDR-only switches: GT7 adds its exposure compensation, and by default an
+// SDR operator turns the weather response on while Native does not.
 void CheckSdrOperatorSwitches(const HdrSettings& sdr)
 {
     for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
@@ -61,8 +62,15 @@ void CheckSdrOperatorSwitches(const HdrSettings& sdr)
             std::exp2(1.0 + compensation));
         selected.sdrGt7ExposureCompensation = false;
         FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
+        FO4HDR_CHECK(EffectiveWeatherGradeResponse(selected).enabled);
+        FO4HDR_CHECK(!selected.weatherGradeResponse.enabled);
+        FO4HDR_CHECK(!SdrGradeControlsNeutral(selected));
     }
-    // The HDR profile keeps its exposure.
+    FO4HDR_CHECK(!EffectiveWeatherGradeResponse(sdr).enabled);
+    // The HDR profile keeps its own weather setting and exposure.
+    auto hdr = HdrSettings{};
+    hdr.weatherGradeResponse.enabled = false;
+    FO4HDR_CHECK(!EffectiveWeatherGradeResponse(hdr).enabled);
     FO4HDR_CHECK(DeriveHdrSettingsMath(HdrSettings{}).sceneExposureMultiplier == 1.0);
 }
 
@@ -111,7 +119,10 @@ void TestSdrProfileDefaults()
         return SdrSceneControlsNeutral(settings) && !SdrGradeControlsNeutral(settings);
     };
     for (const Edit edit : {Edit{[](HdrSettings& s) { s.exposureEv = 0.1; }},
-             Edit{[](HdrSettings& s) { s.productionAlgorithm = ProductionToneMapperAlgorithm::agX; }},
+             Edit{[](HdrSettings& s) {
+                 s.productionAlgorithm = ProductionToneMapperAlgorithm::agX;
+                 s.sdrOperatorWeatherResponse = false;
+             }},
              Edit{[](HdrSettings& s) { s.bloomStrengthPercent = 99.0; }},
              Edit{[](HdrSettings& s) { s.contrast = 1.0; }},
              Edit{[](HdrSettings& s) { s.blacks = -1.0; }},

@@ -195,8 +195,10 @@ void CheckSdrProfileRewrite()
     FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
     FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.22\n") != std::string::npos);
-    // The SDR-only key is written only to its SDR section.
+    // SDR-only keys are written only to their SDR sections.
+    FO4HDR_CHECK(section("[SdrToneMapper]").find("AutomaticWeatherResponse=1\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrGT7]").find("ExposureCompensation=0\n") != std::string::npos);
+    FO4HDR_CHECK(saved.find("AutomaticWeatherResponse=") == saved.rfind("AutomaticWeatherResponse="));
     FO4HDR_CHECK(saved.find("ExposureCompensation=") == saved.rfind("ExposureCompensation="));
     // The SDR shoulder minimum survives the saved 0.001 precision.
     FO4HDR_CHECK(section("[SdrGT7]").find("ShoulderStart=0.216\n") != std::string::npos);

@@ -60,7 +60,7 @@ struct PersistedKey
     bool HdrSettings::*flag{};
 };
 
-constexpr std::array<PersistedKey, 52> kPersistedKeys{{
+constexpr std::array<PersistedKey, 53> kPersistedKeys{{
     {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
         &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
@@ -102,6 +102,7 @@ constexpr std::array<PersistedKey, 52> kPersistedKeys{{
     {"Output", "UiPaperWhiteNits", &HdrSettings::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", &HdrSettings::videoWhiteNits},
     {"ToneMapper", "Algorithm", nullptr, nullptr, true},
+    {.section = "ToneMapper", .key = "AutomaticWeatherResponse", .flag = &HdrSettings::sdrOperatorWeatherResponse},
     {"ACES2", "ContrastLookStrength", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::acesLookStrength},
     {"AgX", "MiddleGrayOffsetEV", nullptr, nullptr, false, false, false,

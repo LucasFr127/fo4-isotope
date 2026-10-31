@@ -199,7 +199,10 @@ bool DrawWeatherLutResponsePanel(HdrSettings& settings,
     }
     ImGui::TextWrapped("Each ImageSpace has one fixed response from all referencing weather slots. "
         "Native LUT weights blend these responses during weather transitions.");
-    DrawQualification(view, response.enabled);
+    const auto active = EffectiveWeatherGradeResponse(settings).enabled;
+    if (active && !response.enabled)
+        ImGui::TextWrapped("On with the SDR tone mapper: Automatic Weather Response with Tone Mappers is on in Output.");
+    DrawQualification(view, active);
     changed |= DrawBasicChannel("Luminance", response.luminance, defaults.luminance);
     changed |= DrawBasicChannel("Color", response.color, defaults.color);
     if (ImGui::CollapsingHeader("Advanced Formula"))

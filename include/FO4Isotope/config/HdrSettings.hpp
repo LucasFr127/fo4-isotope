@@ -237,11 +237,24 @@ struct HdrSettings
     double vanillaGradeColorPercent{67.0};
     WeatherGradeResponseSettings weatherGradeResponse{};
     double bloomStrengthPercent{50.0};
-    // SDR profile only; the HDR profile keeps it off. It applies
-    // kSdrGt7ExposureCompensationEv while GT7 replaces the SDR curve.
+    // SDR profile only; the HDR profile keeps both off. The first turns the
+    // weather response on while an operator replaces the SDR curve; the second
+    // applies kSdrGt7ExposureCompensationEv while GT7 does.
+    bool sdrOperatorWeatherResponse{};
     bool sdrGt7ExposureCompensation{};
     bool operator==(const HdrSettings&) const = default;
 };
+
+// The weather response the renderer applies. The operator switch leaves the saved
+// Enabled value alone, so Native keeps following it.
+[[nodiscard]] constexpr WeatherGradeResponseSettings EffectiveWeatherGradeResponse(
+    const HdrSettings& settings) noexcept
+{
+    auto response = settings.weatherGradeResponse;
+    response.enabled = response.enabled || (settings.sdrOperatorWeatherResponse &&
+        settings.productionAlgorithm != ProductionToneMapperAlgorithm::native);
+    return response;
+}
 
 // Live interface policy is intentionally separate from HdrSettings. Window
 // geometry, scale and hotkey changes do not publish shader constants, rebuild

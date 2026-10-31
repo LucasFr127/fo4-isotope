@@ -234,6 +234,22 @@ struct ColorSettingsTabs
         return settings.productionAlgorithm != current;
     }
 
+    // Native follows the Effects tab's weather response setting.
+    [[nodiscard]] bool DrawSdrOperatorWeatherResponse() noexcept
+    {
+        const auto defaultValue = DefaultSdrSettings().sdrOperatorWeatherResponse;
+        auto& value = settings.sdrOperatorWeatherResponse;
+        bool changed = ImGui::Checkbox("Automatic Weather Response with Tone Mappers", &value);
+        ImGui::SetItemTooltip("Turns on the automatic weather LUT response while ACES 2, AgX or GT7\n"
+            "replaces the game's curve. Native follows the Effects tab setting.");
+        if (DrawRestoreDefaultButton("sdr-operator-weather", value != defaultValue))
+        {
+            value = defaultValue;
+            changed = true;
+        }
+        return changed;
+    }
+
     // Appears once an operator joins Native. SDR tables have a fixed white, so
     // the pending request names no peak.
     void DrawSdrToneCurve() noexcept
@@ -257,6 +273,7 @@ struct ColorSettingsTabs
             changed = true;
         }
         changed |= DrawToneMapperPanel(settings, true);
+        changed |= DrawSdrOperatorWeatherResponse();
         if (changed) commitRequested = true;
         if (view.lutPending)
             ImGui::Text("Requested: %s settings", SettingsOperatorDisplayName(view.pendingAlgorithm));
