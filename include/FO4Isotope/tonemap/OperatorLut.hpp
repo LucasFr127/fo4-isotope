@@ -90,7 +90,7 @@ struct OperatorLutCancellation
 // The operator's SDR configuration at its fixed white.
 [[nodiscard]] OperatorLutData BuildSdrOperatorLut(
     ProductionToneMapperAlgorithm algorithm,
-    const ToneMapperParameters& parameters = {},
+    const ToneMapperParameters& parameters = kDefaultSdrToneMapperParameters,
     OperatorLutCancellation cancellation = {}) noexcept;
 
 // Final containment of an interpolated SDR sample. ACES2 clamps each channel

@@ -585,11 +585,13 @@ bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
     return nullptr;
 }
 
-// The HDR ranges with the SDR AgX Middle Gray limit.
+// The HDR ranges with the SDR AgX Middle Gray and GT7 Shoulder Start limits.
 [[nodiscard]] constexpr std::array<double, 2> SdrNumericRange(RequiredKey key) noexcept
 {
     if (key == RequiredKey::agxMiddleGrayEv)
         return {kMinimumAgxMiddleGrayEv, kMaximumSdrAgxMiddleGrayEv};
+    if (key == RequiredKey::gt7ShoulderStart)
+        return {kMinimumSdrGt7ShoulderStart, kMaximumGt7ShoulderStart};
     return NumericRange(key);
 }
 

@@ -220,8 +220,10 @@ struct PreparedOperator
 
 [[nodiscard]] bool MatchesAlgorithm(const OperatorLutData& data) noexcept
 {
-    return IsLutAlgorithm(data.algorithm) &&
-        ValidateToneMapperParameters(data.algorithm, data.toneMapperParameters) &&
+    const auto validParameters = data.target == OperatorLutTarget::sdr ?
+        ValidateSdrToneMapperParameters(data.algorithm, data.toneMapperParameters) :
+        ValidateToneMapperParameters(data.algorithm, data.toneMapperParameters);
+    return IsLutAlgorithm(data.algorithm) && validParameters &&
         data.toneMapperParameters == ActiveToneMapperParameters(
             data.algorithm, data.toneMapperParameters);
 }

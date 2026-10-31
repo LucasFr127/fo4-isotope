@@ -126,6 +126,13 @@ void TestSdrProfileConfiguration()
         PluginConfigurationError::valueOutOfRange);
     FO4HDR_CHECK(SdrConfigurationError("[SdrAgX]\nMiddleGrayOffsetEV=-0.5\n") ==
         PluginConfigurationError::none);
+    // SDR GT7's shoulder may start where its toe ends, below the HDR minimum.
+    FO4HDR_CHECK(SdrConfigurationError("[SdrGT7]\nShoulderStart=0.216\n") ==
+        PluginConfigurationError::none);
+    FO4HDR_CHECK(SdrConfigurationError("[SdrGT7]\nShoulderStart=0.215\n") ==
+        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(SdrConfigurationError("[GT7]\nShoulderStart=0.216\n") ==
+        PluginConfigurationError::valueOutOfRange);
 
     // SDR offers the native curve plus each operator once it is selectable.
     FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=Vanilla\n") ==

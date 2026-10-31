@@ -471,6 +471,15 @@ struct OperatorMeasurements
                maximumNeutralDrawdownPqCodes <= neutralRippleBoundPqCodes;
     }
 
+    // Each target's own default profile qualifies size.
+    bool MeasuresDefaults() const
+    {
+        const auto defaultParameters =
+            sdrReference != nullptr ? fo4hdr::kDefaultSdrToneMapperParameters : fo4hdr::ToneMapperParameters{};
+        return fo4hdr::ActiveToneMapperParameters(algorithm, parameters) ==
+               fo4hdr::ActiveToneMapperParameters(algorithm, defaultParameters);
+    }
+
     OperatorVerdict Evaluate()
     {
         const auto broadEnd = dataset.broadEnd, holdoutBegin = dataset.holdoutBegin, holdoutEnd = dataset.holdoutEnd;
@@ -479,8 +488,7 @@ struct OperatorMeasurements
         const auto total = totalQuality.Summary();
         const auto approximation = approximationQuality.Summary();
         const auto sampler = samplerQuality.Summary();
-        const bool defaults = fo4hdr::ActiveToneMapperParameters(algorithm, parameters) ==
-            fo4hdr::ActiveToneMapperParameters(algorithm, {});
+        const bool defaults = MeasuresDefaults();
         // Qualify CPU approximation and GPU total independently; sampling is diagnostic.
         // Full control ranges remain usable beyond the default-only quality envelope.
         const bool passed = contained && total.available && approximation.available &&
@@ -812,6 +820,7 @@ fo4hdr::ToneMapperParameters Gt7CornerParameters(unsigned corner)
 
 // SDR corners check safety and report quality; defaults alone qualify size.
 // SDR AgX Middle Gray tops out at zero, and Shoulder Power has no SDR effect.
+// SDR GT7's shoulder may start lower, where its toe ends.
 int VerifySdrCorners(const OperatorExecution &execution)
 {
     const auto sdrCase = [](Algorithm algorithm, const fo4hdr::ToneMapperParameters &parameters) {
@@ -825,7 +834,10 @@ int VerifySdrCorners(const OperatorExecution &execution)
         auto agx = AgxCornerParameters(corner);
         agx.agxMiddleGrayEv = std::min(agx.agxMiddleGrayEv, fo4hdr::kMaximumSdrAgxMiddleGrayEv);
         failures += VerifyCase(execution, sdrCase(Algorithm::agX, agx));
-        failures += VerifyCase(execution, sdrCase(Algorithm::gt7, Gt7CornerParameters(corner)));
+        auto gt7 = Gt7CornerParameters(corner);
+        if ((corner & 2U) == 0U)
+            gt7.gt7ShoulderStart = fo4hdr::kMinimumSdrGt7ShoulderStart;
+        failures += VerifyCase(execution, sdrCase(Algorithm::gt7, gt7));
     }
     return failures;
 }
@@ -880,14 +892,14 @@ TickOutcome MeasureTick(const OperatorExecution &execution, const OperatorCase &
 }
 
 // One SDR control swept at its displayed precision. The other controls keep
-// the base values: defaults, unless the control acts only beside another.
+// the base values: SDR defaults, unless the control acts only beside another.
 struct SweepControl
 {
     Algorithm algorithm;
     const char *name;
     double fo4hdr::ToneMapperParameters::*parameter;
     double minimum, maximum, ticksPerUnit;
-    fo4hdr::ToneMapperParameters base{};
+    fo4hdr::ToneMapperParameters base{fo4hdr::kDefaultSdrToneMapperParameters};
 };
 
 using Parameters = fo4hdr::ToneMapperParameters;
@@ -903,7 +915,7 @@ constexpr std::array<SweepControl, 7> kSdrSweepControls{{
      fo4hdr::kMaximumAgxHdrPurity, 100.0, {.agxMiddleGrayEv = fo4hdr::kMinimumAgxMiddleGrayEv}},
     {Algorithm::gt7, "Shadow Toe", &Parameters::gt7ToeStrength, fo4hdr::kMinimumGt7ToeStrength,
      fo4hdr::kMaximumGt7ToeStrength, 100.0},
-    {Algorithm::gt7, "Shoulder Start", &Parameters::gt7ShoulderStart, fo4hdr::kMinimumGt7ShoulderStart,
+    {Algorithm::gt7, "Shoulder Start", &Parameters::gt7ShoulderStart, fo4hdr::kMinimumSdrGt7ShoulderStart,
      fo4hdr::kMaximumGt7ShoulderStart, 1000.0},
     {Algorithm::gt7, "Color Blend", &Parameters::gt7ColorBlend, fo4hdr::kMinimumGt7ColorBlend,
      fo4hdr::kMaximumGt7ColorBlend, 100.0},
@@ -992,8 +1004,8 @@ int VerifyOperatorLutSampling(ID3D11Device &device, ID3D11DeviceContext &context
             failures += VerifyCase(execution, {algorithm, peak, benchmark});
         }
         // Each SDR configuration qualifies its defaults at its fixed white.
-        failures += VerifyCase(execution, {algorithm, fo4hdr::SdrOperatorWhiteNits(algorithm), benchmark, {},
-                                           fo4hdr::OperatorLutTarget::sdr});
+        failures += VerifyCase(execution, {algorithm, fo4hdr::SdrOperatorWhiteNits(algorithm), benchmark,
+                                           fo4hdr::kDefaultSdrToneMapperParameters, fo4hdr::OperatorLutTarget::sdr});
     }
     failures += VerifySdrCorners(execution);
     // Configured corners check safety and report quality; defaults alone qualify size.

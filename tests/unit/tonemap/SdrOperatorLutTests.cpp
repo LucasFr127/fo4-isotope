@@ -180,6 +180,8 @@ void TestSdrBuildRequests()
         {.agxContrast = kMaximumAgxContrast + 0.1}).IsValid());
     FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::agX,
         {.agxMiddleGrayEv = 0.1}).IsValid());
+    FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::gt7,
+        {.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart - 0.001}).IsValid());
 }
 
 }  // namespace

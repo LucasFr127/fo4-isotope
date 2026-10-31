@@ -193,6 +193,8 @@ void CheckSdrProfileRewrite()
     FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
     FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);
+    // The SDR shoulder minimum survives the saved 0.001 precision.
+    FO4HDR_CHECK(section("[SdrGT7]").find("ShoulderStart=0.216\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrImage]\nExposureEV=-0.5\nContrast=15\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrEffects]\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("BloomStrength=60\n") != std::string::npos);

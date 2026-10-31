@@ -370,7 +370,7 @@ Gt7TransformHandle CreateGt7Transform(
 
 Gt7TransformHandle CreateSdrGt7Transform(const ToneMapperParameters& parameters) noexcept
 {
-    if (!ValidateToneMapperParameters(ProductionToneMapperAlgorithm::gt7, parameters)) return {};
+    if (!ValidateSdrToneMapperParameters(ProductionToneMapperAlgorithm::gt7, parameters)) return {};
     constexpr float peak = static_cast<float>(kGt7SdrPaperWhiteNits) / kReferenceLuminance;
     constexpr float white =
         static_cast<float>(kGt7SdrWhiteScene * kSceneReferenceWhiteNits) / kReferenceLuminance;

@@ -68,13 +68,6 @@ void TestSdrProfileDefaults()
     auto brighter = sdr;
     brighter.exposureEv = 1.0;
     FO4HDR_CHECK(DeriveHdrSettingsMath(brighter).sceneExposureMultiplier == 2.0);
-    // AgX can only lower middle gray at the SDR white, even while not selected.
-    auto raisedGray = sdr;
-    raisedGray.toneMapperParameters.agxMiddleGrayEv = 0.1;
-    FO4HDR_CHECK(ValidateProfileSettings(raisedGray, true) ==
-        HdrSettingsValidationError::toneMapperParametersOutOfRange);
-    raisedGray.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
-    FO4HDR_CHECK(ValidateHdrSettings(raisedGray) == HdrSettingsValidationError::none);
     FO4HDR_CHECK(sdr.bloomStrengthPercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeLuminancePercent == 100.0);
     FO4HDR_CHECK(sdr.vanillaGradeColorPercent == 100.0);
@@ -120,6 +113,30 @@ void TestSdrProfileDefaults()
     auto selective = sdr;
     selective.selectiveColor.enabled = true;
     FO4HDR_CHECK(SdrSceneControlsNeutral(selective));
+}
+
+// SDR operator limits apply even while the operator is not selected.
+void TestSdrOperatorLimits()
+{
+    const auto sdr = DefaultSdrSettings();
+    // AgX can only lower middle gray at the SDR white.
+    auto raisedGray = sdr;
+    raisedGray.toneMapperParameters.agxMiddleGrayEv = 0.1;
+    FO4HDR_CHECK(ValidateProfileSettings(raisedGray, true) ==
+        HdrSettingsValidationError::toneMapperParametersOutOfRange);
+    raisedGray.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
+    raisedGray.toneMapperParameters.gt7ShoulderStart = kMinimumGt7ShoulderStart;
+    FO4HDR_CHECK(ValidateHdrSettings(raisedGray) == HdrSettingsValidationError::none);
+    // SDR GT7 starts its shoulder where its toe ends, below the HDR minimum.
+    FO4HDR_CHECK(sdr.toneMapperParameters == kDefaultSdrToneMapperParameters);
+    auto toeEndShoulder = sdr;
+    toeEndShoulder.productionAlgorithm = ProductionToneMapperAlgorithm::gt7;
+    FO4HDR_CHECK(ValidateProfileSettings(toeEndShoulder, true) == HdrSettingsValidationError::none);
+    FO4HDR_CHECK(ValidateHdrSettings(toeEndShoulder) ==
+        HdrSettingsValidationError::toneMapperParametersOutOfRange);
+    toeEndShoulder.toneMapperParameters.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart - 0.001;
+    FO4HDR_CHECK(ValidateProfileSettings(toeEndShoulder, true) ==
+        HdrSettingsValidationError::toneMapperParametersOutOfRange);
 }
 
 void TestSettingsEquality()
@@ -310,6 +327,7 @@ void TestSettingsDefaultsAndMath()
     TestLiveSettingsThreads();
     TestDefaultSettingsValues();
     TestSdrProfileDefaults();
+    TestSdrOperatorLimits();
     TestSettingsEquality();
     TestActiveOperatorParameters();
     TestDefaultSettingsMath();

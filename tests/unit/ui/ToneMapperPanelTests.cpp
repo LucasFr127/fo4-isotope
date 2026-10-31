@@ -196,7 +196,8 @@ void TestSdrToneMapperRecommendedRanges()
     FO4HDR_CHECK(middleGray.available && middleGray.minimum == -0.5 && middleGray.maximum == 0.0);
     const auto shoulder = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::gt7,
         &ToneMapperParameters::gt7ShoulderStart);
-    FO4HDR_CHECK(shoulder.available && shoulder.minimum == 0.35 && shoulder.maximum == 0.6);
+    FO4HDR_CHECK(shoulder.available && shoulder.minimum == kMinimumSdrGt7ShoulderStart &&
+        shoulder.maximum == 0.6);
     // Shoulder Power has no SDR effect; native and mismatched controls have no range.
     FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
         &ToneMapperParameters::agxHdrShoulderPower).available);

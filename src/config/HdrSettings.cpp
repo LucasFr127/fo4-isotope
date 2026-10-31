@@ -271,12 +271,13 @@ bool ValidateAgxParameters(const ToneMapperParameters& parameters) noexcept
                 kMaximumAgxHdrShoulderPower);
 }
 
-bool ValidateGt7Parameters(const ToneMapperParameters& parameters) noexcept
+bool ValidateGt7Parameters(const ToneMapperParameters& parameters,
+    double minimumShoulderStart = kMinimumGt7ShoulderStart) noexcept
 {
     return InRange(parameters.gt7ToeStrength,
                    kMinimumGt7ToeStrength, kMaximumGt7ToeStrength) &&
             InRange(parameters.gt7ShoulderStart,
-                kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart) &&
+                minimumShoulderStart, kMaximumGt7ShoulderStart) &&
             InRange(parameters.gt7ColorBlend,
                 kMinimumGt7ColorBlend, kMaximumGt7ColorBlend);
 }
@@ -305,6 +306,8 @@ bool ValidateSdrToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
     const ToneMapperParameters& parameters) noexcept
 {
+    if (algorithm == ProductionToneMapperAlgorithm::gt7)
+        return ValidateGt7Parameters(parameters, kMinimumSdrGt7ShoulderStart);
     return ValidateToneMapperParameters(algorithm, parameters) &&
         (algorithm != ProductionToneMapperAlgorithm::agX ||
             parameters.agxMiddleGrayEv <= kMaximumSdrAgxMiddleGrayEv);
@@ -509,6 +512,7 @@ HdrSettings DefaultSdrSettings() noexcept
 {
     HdrSettings settings{};
     settings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
+    settings.toneMapperParameters = kDefaultSdrToneMapperParameters;
     settings.vanillaGradeLuminancePercent = 100.0;
     settings.vanillaGradeColorPercent = 100.0;
     settings.weatherGradeResponse.enabled = false;

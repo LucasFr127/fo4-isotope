@@ -217,26 +217,43 @@ void TestExtendedSdrShoulder(const ToneMapperParameters& parameters)
 
 void TestExtendedSdrConfiguration()
 {
-    for (const auto shoulder : {kMinimumGt7ShoulderStart, 0.444, kMaximumGt7ShoulderStart})
+    for (const auto shoulder : {kMinimumSdrGt7ShoulderStart, kMinimumGt7ShoulderStart, 0.444,
+             kMaximumGt7ShoulderStart})
         TestExtendedSdrShoulder({.gt7ShoulderStart = shoulder});
+    // The SDR minimum is the first saved 0.001 step where the official 0.538 toe has ended.
+    constexpr double toeEnd = 0.538 * 100.0 / kGt7SdrPaperWhiteNits;
+    FO4HDR_CHECK(kMinimumSdrGt7ShoulderStart >= toeEnd &&
+        kMinimumSdrGt7ShoulderStart - 0.001 < toeEnd);
+    FO4HDR_CHECK(!CreateSdrGt7Transform({.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart - 0.001}));
     FO4HDR_CHECK(!CreateSdrGt7Transform({.gt7ToeStrength = kMaximumGt7ToeStrength + 0.1}));
+    // The sample's linear section still matches it below the sample's 0.444 shoulder start.
+    if (const auto linear = CreateSdrGt7Transform(ToneMapperParameters{}))
+        for (const auto& scene : {LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.4, 0.2}})
+            CheckOfficialSdrParity(*linear, scene);
     const auto transform = CreateSdrGt7Transform();
+    FO4HDR_CHECK(transform != nullptr);
     if (!transform) return;
+    // The default keeps the sample's toe and middle gray up to where the toe ends.
     for (const auto& scene : {LinearRgb{}, LinearRgb{0.001, 0.001, 0.001},
-             LinearRgb{0.18, 0.18, 0.18}, LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.4, 0.2}})
+             LinearRgb{0.18, 0.18, 0.18}, LinearRgb{0.25, 0.1, 0.05}, LinearRgb{0.05, 0.2, 0.1}})
         CheckOfficialSdrParity(*transform, scene);
     // Local regression of the default shoulder.
-    for (const auto& [scene, expected] : {std::pair{1.0, 0.6681}, std::pair{1.81, 0.8168},
-             std::pair{2.8, 0.8962}, std::pair{3.84, 0.9449}})
+    for (const auto& [scene, expected] : {std::pair{1.0, 0.5630}, std::pair{1.81, 0.7236},
+             std::pair{2.8, 0.8325}, std::pair{3.84, 0.9081}})
         FO4HDR_CHECK(test::Approx(SdrNeutral(*transform, scene), expected, 1.0e-3));
+}
+
+[[nodiscard]] LinearRgb SdrRelative(const Gt7Transform& transform, LinearRgb scene)
+{
+    const auto nits = ConvertBt2020ToBt709(EvaluateGt7LutNits(transform, scene));
+    return {nits.red / kGt7SdrPaperWhiteNits, nits.green / kGt7SdrPaperWhiteNits,
+        nits.blue / kGt7SdrPaperWhiteNits};
 }
 
 [[nodiscard]] LinearRgb SdrDisplay(const Gt7Transform& transform, LinearRgb scene)
 {
-    const auto nits = ConvertBt2020ToBt709(EvaluateGt7LutNits(transform, scene));
     return ContainSdrOperatorOutput(ProductionToneMapperAlgorithm::gt7,
-        {nits.red / kGt7SdrPaperWhiteNits, nits.green / kGt7SdrPaperWhiteNits,
-            nits.blue / kGt7SdrPaperWhiteNits});
+        SdrRelative(transform, scene));
 }
 
 [[nodiscard]] double Saturation(LinearRgb value)
@@ -260,7 +277,11 @@ void TestExtendedSdrColor()
     if (!transform) return;
     FO4HDR_CHECK(Saturation(SdrDisplay(*transform, {3.0, 2.2, 1.6})) > 0.2);
     FO4HDR_CHECK(Saturation(SdrDisplay(*transform, {40.0, 18.0, 6.0})) < 0.1);
-    FO4HDR_CHECK(Bt709Luminance(SdrDisplay(*transform, {0.6, 0.6, 2.4})) > 0.45);
+    // Light over white keeps nearly all its luminance; scaling RGB down keeps only 0.73-0.83.
+    constexpr LinearRgb overWhite{0.6, 0.6, 2.4};
+    FO4HDR_CHECK(SdrRelative(*transform, overWhite).blue > 1.0);
+    FO4HDR_CHECK(Bt709Luminance(SdrDisplay(*transform, overWhite)) >
+        0.95 * Bt709Luminance(SdrRelative(*transform, overWhite)));
     for (const auto& ray : {LinearRgb{1.0, 0.45, 0.15}, LinearRgb{0.25, 0.25, 1.0},
              LinearRgb{1.0, 0.68, 0.53}})
     {

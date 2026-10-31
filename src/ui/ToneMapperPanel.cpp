@@ -99,6 +99,12 @@ struct ToneMapperPanel
     HdrSettings& settings;
     bool sdrProfile;
 
+    // Reset restores the active profile's defaults.
+    [[nodiscard]] ToneMapperParameters Defaults() const noexcept
+    {
+        return sdrProfile ? kDefaultSdrToneMapperParameters : ToneMapperParameters{};
+    }
+
     [[nodiscard]] bool DrawSlider(const ToneMapperControl& control) noexcept;
     [[nodiscard]] bool DrawAces2() noexcept;
     [[nodiscard]] bool DrawAgx() noexcept;
@@ -637,7 +643,7 @@ namespace {
 
 bool ToneMapperPanel::DrawAces2() noexcept
 {
-    const ToneMapperParameters defaults{};
+    const auto defaults = Defaults();
     return DrawSlider({
         "Contrast Look Strength", &ToneMapperParameters::acesLookStrength, {
         defaults.acesLookStrength,
@@ -651,7 +657,7 @@ bool ToneMapperPanel::DrawAces2() noexcept
 // response acts only away from neutral Middle Gray.
 bool ToneMapperPanel::DrawAgx() noexcept
 {
-    const ToneMapperParameters defaults{};
+    const auto defaults = Defaults();
     bool changed{};
     changed |= DrawSlider({
         "Middle Gray", &ToneMapperParameters::agxMiddleGrayEv, {
@@ -681,9 +687,10 @@ bool ToneMapperPanel::DrawAgx() noexcept
     return changed;
 }
 
+// SDR lets the shoulder start lower, where the toe ends.
 bool ToneMapperPanel::DrawGt7() noexcept
 {
-    const ToneMapperParameters defaults{};
+    const auto defaults = Defaults();
     bool changed{};
     changed |= DrawSlider({
         "Shadow Toe", &ToneMapperParameters::gt7ToeStrength, {
@@ -693,7 +700,8 @@ bool ToneMapperPanel::DrawGt7() noexcept
     changed |= DrawSlider({
         "Shoulder Start", &ToneMapperParameters::gt7ShoulderStart, {
         defaults.gt7ShoulderStart,
-        kMinimumGt7ShoulderStart, kMaximumGt7ShoulderStart,
+        sdrProfile ? kMinimumSdrGt7ShoulderStart : kMinimumGt7ShoulderStart,
+        kMaximumGt7ShoulderStart,
         100.0, "%.1f%%",
         "Sets where the GT7 highlight shoulder begins as a fraction of display peak."}});
     changed |= DrawSlider({

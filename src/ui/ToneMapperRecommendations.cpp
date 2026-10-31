@@ -64,7 +64,7 @@ constexpr std::array kSdrControlRanges{
     ControlRange{ProductionToneMapperAlgorithm::gt7,
         &ToneMapperParameters::gt7ToeStrength, 1.0, 1.5},
     ControlRange{ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::gt7ShoulderStart, 0.35, 0.6},
+        &ToneMapperParameters::gt7ShoulderStart, 0.216, 0.6},
     ControlRange{ProductionToneMapperAlgorithm::gt7,
         &ToneMapperParameters::gt7ColorBlend, 0.0, 1.0}};
 

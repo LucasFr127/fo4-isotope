@@ -74,6 +74,9 @@ inline constexpr double kMinimumGt7ToeStrength{1.0};
 inline constexpr double kMaximumGt7ToeStrength{1.5};
 inline constexpr double kMinimumGt7ShoulderStart{0.35};
 inline constexpr double kMaximumGt7ShoulderStart{0.60};
+// In SDR, GT7's shoulder may start where its toe ends: the toe's 0.538 extent is
+// 21.52% of the 250-nit SDR white, rounded up to the saved 0.001 precision.
+inline constexpr double kMinimumSdrGt7ShoulderStart{0.216};
 inline constexpr double kMinimumGt7ColorBlend{0.0};
 inline constexpr double kMaximumGt7ColorBlend{1.0};
 inline constexpr double kMinimumImageAdjustment{-100.0};
@@ -173,6 +176,11 @@ struct ToneMapperParameters
     double gt7ColorBlend{0.6};
     bool operator==(const ToneMapperParameters&) const = default;
 };
+
+// The SDR profile's operator defaults. GT7 starts its shoulder where its toe
+// ends; at its HDR default, SDR daylight ran about 0.45 EV above the game's curve.
+inline constexpr ToneMapperParameters kDefaultSdrToneMapperParameters{
+    .gt7ShoulderStart = kMinimumSdrGt7ShoulderStart};
 
 [[nodiscard]] constexpr ToneMapperParameters ActiveToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
@@ -305,14 +313,15 @@ struct HdrSettingsMath
 [[nodiscard]] bool ValidateToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
     const ToneMapperParameters& parameters) noexcept;
-// The HDR ranges with the SDR AgX Middle Gray limit.
+// The HDR ranges with the SDR AgX Middle Gray and GT7 Shoulder Start limits.
 [[nodiscard]] bool ValidateSdrToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,
     const ToneMapperParameters& parameters) noexcept;
 [[nodiscard]] HdrSettingsMath DeriveHdrSettingsMath(
     const HdrSettings& settings) noexcept;
-// SDR profile: vanilla-neutral defaults for the creative controls and the native
-// tone curve. Its output and grading-method fields keep HDR defaults and are unused.
+// SDR profile: vanilla-neutral defaults for the creative controls, the native
+// tone curve and kDefaultSdrToneMapperParameters. Its output and grading-method
+// fields keep HDR defaults and are unused.
 [[nodiscard]] HdrSettings DefaultSdrSettings() noexcept;
 // A neutral SDR pass reproduces vanilla, so its original shader draws.
 [[nodiscard]] bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept;
