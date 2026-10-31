@@ -30,8 +30,7 @@ std::atomic<std::size_t> g_readIndex{};
 std::atomic<std::uint64_t> g_overflowCount{};
 std::atomic<std::uint32_t> g_toggleCount{};
 std::atomic<bool> g_focusLoss{};
-std::atomic<std::uint32_t> g_toggleHotkey{
-    kDefaultSettingsToggleVirtualKey | (kSettingsHotkeyAlt << 8U)};
+std::atomic<std::uint32_t> g_toggleHotkey{kDefaultSettingsToggleVirtualKey};
 std::atomic<bool> g_hotkeyCapture{};
 std::atomic<std::uint32_t> g_capturedHotkey{};
 std::atomic<std::uint32_t> g_shortcutReset{};

@@ -267,7 +267,7 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey ==
         kDefaultSettingsToggleVirtualKey);
     FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers ==
-        kSettingsHotkeyAlt);
+        0U);
     FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.25);
     FO4HDR_CHECK(parsed.value.interfaceSettings.windowWidth == 700.0);
     FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);

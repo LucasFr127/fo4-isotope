@@ -468,7 +468,7 @@ void TestHotkeyFormatting()
             FO4HDR_CHECK(ParseHdrSettingsHotkey(name.data(), parsed));
             FO4HDR_CHECK(parsed == original);
         }
-    FO4HDR_CHECK(std::string_view(FormatHdrSettingsHotkey({}).data()) == "Alt+H");
+    FO4HDR_CHECK(std::string_view(FormatHdrSettingsHotkey({}).data()) == "F8");
     for (const auto value : {"-0.5", "-2", "nan", "65536"})
         FO4HDR_CHECK(!ParsePluginConfiguration(
             MinimalProductionConfiguration() + "\n[Interface]\nWindowX=" +

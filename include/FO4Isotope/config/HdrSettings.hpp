@@ -99,7 +99,7 @@ inline constexpr double kShadowMaskZeroAt{0.18};
 inline constexpr double kHighlightMaskZeroBelow{1.0};
 inline constexpr double kHighlightMaskFullAt{4.0};
 inline constexpr double kMaximumSelectiveExposureEv{2.0};
-inline constexpr std::uint32_t kDefaultSettingsToggleVirtualKey{0x48U};
+inline constexpr std::uint32_t kDefaultSettingsToggleVirtualKey{0x77U};
 inline constexpr std::uint32_t kSettingsHotkeyControl{1U};
 inline constexpr std::uint32_t kSettingsHotkeyAlt{2U};
 inline constexpr std::uint32_t kSettingsHotkeyShift{4U};
@@ -107,7 +107,7 @@ inline constexpr std::uint32_t kSettingsHotkeyShift{4U};
 struct HdrSettingsHotkey
 {
     std::uint32_t virtualKey{kDefaultSettingsToggleVirtualKey};
-    std::uint32_t modifiers{kSettingsHotkeyAlt};
+    std::uint32_t modifiers{};
     bool operator==(const HdrSettingsHotkey&) const = default;
 };
 
