@@ -575,6 +575,42 @@ void TestInvalidParametersFailBlack()
     return largest / kAgxSdrPeakNits;
 }
 
+// Local regression: BT.2020 luminance in nits of the ratio-1 SDR response, which
+// the SDR response keeps while taking its RGB ratios from the HDR reference.
+struct SdrLuminanceReference
+{
+    ToneMapperParameters parameters;
+    LinearRgb input;
+    double nits;
+};
+constexpr ToneMapperParameters kMovedSdrParameters{
+    .agxMiddleGrayEv = -0.5, .agxContrast = 2.2, .agxHdrPurity = 0.6};
+constexpr std::array kSdrLuminanceReferences{
+    SdrLuminanceReference{{}, {4.0, 1.0, 0.25}, 130.61534798386344},
+    SdrLuminanceReference{{}, {0.0, 1.0, 0.0}, 94.53941924210045},
+    SdrLuminanceReference{{}, {1.0, 0.0, 0.0}, 37.10386663805216},
+    SdrLuminanceReference{{}, {20.0, 0.0, 0.0}, 160.7056319159436},
+    SdrLuminanceReference{{}, {0.02, 0.05, 0.01}, 5.0998089375788265},
+    SdrLuminanceReference{kMovedSdrParameters, {4.0, 1.0, 0.25}, 101.97742133616698},
+    SdrLuminanceReference{kMovedSdrParameters, {1.0, 0.0, 0.0}, 27.17066478167192},
+    SdrLuminanceReference{kMovedSdrParameters, {0.02, 0.05, 0.01}, 5.027639397119497}};
+
+// SDR keeps its own luminance and takes the RGB ratios of the same settings at
+// the reference peak.
+void CheckSdrReferenceColor(const SdrLuminanceReference& expected)
+{
+    const auto sdr = CreateSdrAgxTransform(expected.parameters);
+    const auto reference = CreateAgxTransform(kAgxSdrColorReferencePeakNits, expected.parameters);
+    FO4HDR_CHECK(sdr.has_value() && reference.has_value());
+    if (!sdr || !reference) return;
+    const auto mapped = EvaluateAgxLutNits(*sdr, expected.input);
+    const auto luminance = Bt2020Luminance(mapped);
+    FO4HDR_CHECK(std::abs(luminance / expected.nits - 1.0) <= 1.0e-9);
+    const auto color = EvaluateAgxLutNits(*reference, expected.input);
+    const auto scale = luminance / Bt2020Luminance(color);
+    CheckRgb(mapped, {color.red * scale, color.green * scale, color.blue * scale}, 1.0e-9);
+}
+
 void TestSdrConfiguration()
 {
     const auto sdr = CreateSdrAgxTransform();
@@ -582,19 +618,21 @@ void TestSdrConfiguration()
     if (!sdr) return;
     FO4HDR_CHECK(sdr->DisplayPeakNits() == kAgxSdrPeakNits);
     FO4HDR_CHECK(sdr->HdrSdrRatio() == 1.0);
-    // At ratio 1 Shoulder Power has no effect, Middle Gray can only fall, and
-    // HDR Color Response acts only once it does; Middle Gray and Contrast act.
+    FO4HDR_CHECK(sdr->ColorReference() != nullptr &&
+        sdr->ColorReference()->DisplayPeakNits() == kAgxSdrColorReferencePeakNits &&
+        sdr->ColorReference()->ColorReference() == nullptr);
+    const auto hdr = CreateAgxTransform(kAgxSdrColorReferencePeakNits);
+    FO4HDR_CHECK(hdr.has_value() && hdr->ColorReference() == nullptr);
+    for (const auto& expected : kSdrLuminanceReferences)
+        CheckSdrReferenceColor(expected);
+    // Shoulder Power has no SDR effect and Middle Gray can only fall; Middle
+    // Gray, Contrast and HDR Color Response act.
     FO4HDR_CHECK(SdrResponseDifference({.agxHdrShoulderPower = kMinimumAgxHdrShoulderPower},
         {.agxHdrShoulderPower = kMaximumAgxHdrShoulderPower}) == 0.0);
     FO4HDR_CHECK(!CreateSdrAgxTransform({.agxMiddleGrayEv = 0.01}));
     FO4HDR_CHECK(CreateSdrAgxTransform({.agxMiddleGrayEv = kMaximumSdrAgxMiddleGrayEv}));
-    const auto neutralGrayPurity = SdrResponseDifference(
-        {.agxHdrPurity = kMinimumAgxHdrPurity}, {.agxHdrPurity = kMaximumAgxHdrPurity});
-    const auto movedGrayPurity = SdrResponseDifference(
-        {.agxMiddleGrayEv = kMinimumAgxMiddleGrayEv, .agxHdrPurity = kMinimumAgxHdrPurity},
-        {.agxMiddleGrayEv = kMinimumAgxMiddleGrayEv, .agxHdrPurity = kMaximumAgxHdrPurity});
-    FO4HDR_CHECK(neutralGrayPurity < 1.0e-6);
-    FO4HDR_CHECK(movedGrayPurity > 1.0e-3);
+    FO4HDR_CHECK(SdrResponseDifference(
+        {.agxHdrPurity = kMinimumAgxHdrPurity}, {.agxHdrPurity = kMaximumAgxHdrPurity}) > 1.0e-3);
     // Local regression: middle gray stays at 0.18 of the SDR white.
     FO4HDR_CHECK(std::abs(EvaluateAgxLutNits(*sdr, {0.18, 0.18, 0.18}).green /
         kAgxSdrPeakNits - 0.18) <= 1.0e-6);

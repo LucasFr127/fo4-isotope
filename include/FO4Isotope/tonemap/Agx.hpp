@@ -4,6 +4,7 @@
 #include "FO4Isotope/output/Hdr10Color.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
 
+#include <memory>
 #include <optional>
 
 namespace fo4hdr {
@@ -35,6 +36,8 @@ public:
     [[nodiscard]] double HdrPurity() const noexcept;
     [[nodiscard]] const Sigmoid& FormationSigmoid() const noexcept;
     [[nodiscard]] const Sigmoid& DarkeningSigmoid() const noexcept;
+    // The SDR configuration's color source; null for an HDR transform.
+    [[nodiscard]] const AgxTransform* ColorReference() const noexcept;
 
 private:
     friend std::optional<AgxTransform> CreateAgxTransform(
@@ -52,6 +55,7 @@ private:
     double hdrPurity_{};
     Sigmoid formationSigmoid_{};
     Sigmoid darkeningSigmoid_{};
+    std::shared_ptr<const AgxTransform> colorReference_;
 };
 
 [[nodiscard]] std::optional<AgxTransform> CreateAgxTransform(
@@ -59,9 +63,14 @@ private:
     const ToneMapperParameters& parameters = {}) noexcept;
 
 // SDR configuration: an HDR/SDR ratio of 1, so the peak is the fixed scene
-// reference white. Shoulder Power then has no effect, HDR Color Response acts
-// only when Middle Gray moves, and Middle Gray can only fall (to 0 EV at most).
+// reference white and Middle Gray can only fall (to 0 EV at most). The response
+// keeps that configuration's BT.2020 luminance but takes its RGB ratios from the
+// same settings at kAgxSdrColorReferencePeakNits, so SDR shows AgX's HDR color
+// and HDR Color Response acts as in HDR. The reference keeps the default
+// Shoulder Power, which has no SDR effect.
 inline constexpr double kAgxSdrPeakNits{kSceneReferenceWhiteNits};
+// The shipped default display peak.
+inline constexpr double kAgxSdrColorReferencePeakNits{1000.0};
 [[nodiscard]] std::optional<AgxTransform> CreateSdrAgxTransform(
     const ToneMapperParameters& parameters = {}) noexcept;
 

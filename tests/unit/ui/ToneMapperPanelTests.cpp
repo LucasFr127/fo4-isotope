@@ -143,13 +143,15 @@ int AgxPanelVertices(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
     return vertices;
 }
 
-// SDR hides Highlight Shoulder, and HDR Color Response at neutral Middle Gray.
+// SDR hides Highlight Shoulder but shows HDR Color Response at any Middle Gray:
+// moving Middle Gray changes only its value text, far less than one slider.
 void CheckSdrAgxControls(ImVec2 windowSize)
 {
     const auto hdr = AgxPanelVertices(-0.25, false, windowSize);
     const auto sdr = AgxPanelVertices(-0.25, true, windowSize);
     const auto sdrNeutral = AgxPanelVertices(0.0, true, windowSize);
-    FO4HDR_CHECK(sdrNeutral < sdr && sdr < hdr);
+    FO4HDR_CHECK(sdr < hdr);
+    FO4HDR_CHECK(std::abs(sdr - sdrNeutral) < hdr - sdr);
 }
 
 // Vertices of one frame showing the SDR Output tab for a tone curve.

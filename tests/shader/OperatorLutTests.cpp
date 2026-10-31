@@ -891,15 +891,13 @@ TickOutcome MeasureTick(const OperatorExecution &execution, const OperatorCase &
     return outcome;
 }
 
-// One SDR control swept at its displayed precision. The other controls keep
-// the base values: SDR defaults, unless the control acts only beside another.
+// One SDR control swept at its displayed precision, the others at SDR defaults.
 struct SweepControl
 {
     Algorithm algorithm;
     const char *name;
     double fo4hdr::ToneMapperParameters::*parameter;
     double minimum, maximum, ticksPerUnit;
-    fo4hdr::ToneMapperParameters base{fo4hdr::kDefaultSdrToneMapperParameters};
 };
 
 using Parameters = fo4hdr::ToneMapperParameters;
@@ -910,9 +908,8 @@ constexpr std::array<SweepControl, 7> kSdrSweepControls{{
      fo4hdr::kMaximumSdrAgxMiddleGrayEv, 100.0},
     {Algorithm::agX, "Contrast", &Parameters::agxContrast, fo4hdr::kMinimumAgxContrast, fo4hdr::kMaximumAgxContrast,
      100.0},
-    // SDR color response acts only away from neutral Middle Gray.
     {Algorithm::agX, "HDR Color Response", &Parameters::agxHdrPurity, fo4hdr::kMinimumAgxHdrPurity,
-     fo4hdr::kMaximumAgxHdrPurity, 100.0, {.agxMiddleGrayEv = fo4hdr::kMinimumAgxMiddleGrayEv}},
+     fo4hdr::kMaximumAgxHdrPurity, 100.0},
     {Algorithm::gt7, "Shadow Toe", &Parameters::gt7ToeStrength, fo4hdr::kMinimumGt7ToeStrength,
      fo4hdr::kMaximumGt7ToeStrength, 100.0},
     {Algorithm::gt7, "Shoulder Start", &Parameters::gt7ShoulderStart, fo4hdr::kMinimumSdrGt7ShoulderStart,
@@ -950,8 +947,9 @@ void CheckPassingRunPolicy()
 
 int SweepSdrControl(const OperatorExecution &execution, const SweepControl &control)
 {
-    const auto &[algorithm, name, parameter, minimum, maximum, ticksPerUnit, base] = control;
+    const auto &[algorithm, name, parameter, minimum, maximum, ticksPerUnit] = control;
     const auto firstTick = std::lround(minimum * ticksPerUnit);
+    const auto &base = fo4hdr::kDefaultSdrToneMapperParameters;
     const auto defaultValue = base.*parameter;
     const auto defaultTick = std::lround(defaultValue * ticksPerUnit);
     CheckQualityVerdict(static_cast<double>(defaultTick) / ticksPerUnit == defaultValue,

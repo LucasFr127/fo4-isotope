@@ -654,7 +654,7 @@ bool ToneMapperPanel::DrawAces2() noexcept
 }
 
 // SDR keeps Middle Gray at or below neutral and has no HDR shoulder; its color
-// response acts only away from neutral Middle Gray.
+// comes from the HDR response, so HDR Color Response acts in both profiles.
 bool ToneMapperPanel::DrawAgx() noexcept
 {
     const auto defaults = Defaults();
@@ -675,15 +675,14 @@ bool ToneMapperPanel::DrawAgx() noexcept
             defaults.agxHdrShoulderPower,
             kMinimumAgxHdrShoulderPower, kMaximumAgxHdrShoulderPower,
             1.0, "%.2fx", "Adjusts AgX highlight compression near the display peak."}});
-    if (!sdrProfile || settings.toneMapperParameters.agxMiddleGrayEv != 0.0)
-        changed |= DrawSlider({
-            "HDR Color Response", &ToneMapperParameters::agxHdrPurity, {
-            defaults.agxHdrPurity,
-            kMinimumAgxHdrPurity, kMaximumAgxHdrPurity,
-            1.0, "%.2f",
-            "Balances hue and saturation before and after AgX's HDR remapping. "
-            "Higher values favor the remapped response and can also shift "
-            "scene brightness."}});
+    changed |= DrawSlider({
+        "HDR Color Response", &ToneMapperParameters::agxHdrPurity, {
+        defaults.agxHdrPurity,
+        kMinimumAgxHdrPurity, kMaximumAgxHdrPurity,
+        1.0, "%.2f",
+        "Balances hue and saturation before and after AgX's HDR remapping. "
+        "Higher values favor the remapped response and can also shift "
+        "scene brightness."}});
     return changed;
 }
 

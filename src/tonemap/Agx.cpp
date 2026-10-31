@@ -377,6 +377,12 @@ constexpr double kBt2020GreenLuminance = 0.6780;
 constexpr double kBt2020BlueLuminance = 0.0593;
 constexpr double kGamutScaleKnee = 0.05;
 
+[[nodiscard]] double Bt2020Luminance(LinearRgb value) noexcept
+{
+    return kBt2020RedLuminance * value.red + kBt2020GreenLuminance * value.green +
+        kBt2020BlueLuminance * value.blue;
+}
+
 [[nodiscard]] double SmoothMinimum(
     double first, double second, double knee) noexcept
 {
@@ -400,9 +406,7 @@ constexpr double kGamutScaleKnee = 0.05;
 
 [[nodiscard]] LinearRgb ContainNegativeChroma(LinearRgb value) noexcept
 {
-    const auto luminance = kBt2020RedLuminance * value.red +
-        kBt2020GreenLuminance * value.green +
-        kBt2020BlueLuminance * value.blue;
+    const auto luminance = Bt2020Luminance(value);
     const auto center = std::max(luminance, 0.0);
     const LinearRgb chroma{
         value.red - luminance,
@@ -459,13 +463,27 @@ constexpr double kGamutScaleKnee = 0.05;
     return ContainHighlightChroma(ContainNegativeChroma(value), displayPeakNits);
 }
 
+// The SDR response keeps its own luminance with the reference's RGB ratios.
+[[nodiscard]] LinearRgb WithReferenceColor(
+    LinearRgb relativeDisplay, LinearRgb reference) noexcept
+{
+    const auto luminance = Bt2020Luminance(relativeDisplay);
+    const auto referenceLuminance = Bt2020Luminance(reference);
+    if (!(luminance > 0.0) || !(referenceLuminance > 0.0)) return relativeDisplay;
+    const auto scale = luminance / referenceLuminance;
+    return {reference.red * scale, reference.green * scale, reference.blue * scale};
+}
+
 [[nodiscard]] LinearRgb EvaluateSourceLutNits(
     const AgxTransform& transform,
     LinearRgb sceneLinear) noexcept
 {
     const LinearRgb containedBt709 = SanitizeScene(sceneLinear);
     const auto rec2020 = ConvertBt709ToBt2020(containedBt709);
-    const auto relativeDisplay = ApplyNeutralAgx(rec2020, transform);
+    auto relativeDisplay = ApplyNeutralAgx(rec2020, transform);
+    if (const auto* reference = transform.ColorReference())
+        relativeDisplay = WithReferenceColor(relativeDisplay,
+            ApplyNeutralAgx(rec2020, *reference));
 
     return {
         relativeDisplay.red * kSceneReferenceWhiteNits,
@@ -506,6 +524,11 @@ const AgxTransform::Sigmoid& AgxTransform::DarkeningSigmoid() const noexcept
     return darkeningSigmoid_;
 }
 
+const AgxTransform* AgxTransform::ColorReference() const noexcept
+{
+    return colorReference_.get();
+}
+
 std::optional<AgxTransform> CreateAgxTransform(
     double displayPeakNits,
     const ToneMapperParameters& parameters) noexcept
@@ -519,7 +542,21 @@ std::optional<AgxTransform> CreateSdrAgxTransform(
 {
     if (!ValidateSdrToneMapperParameters(ProductionToneMapperAlgorithm::agX, parameters))
         return std::nullopt;
-    return AgxTransform::Prepare(kAgxSdrPeakNits, parameters);
+    auto referenceParameters = parameters;
+    referenceParameters.agxHdrShoulderPower = ToneMapperParameters{}.agxHdrShoulderPower;
+    auto transform = AgxTransform::Prepare(kAgxSdrPeakNits, parameters);
+    const auto reference = AgxTransform::Prepare(
+        kAgxSdrColorReferencePeakNits, referenceParameters);
+    if (!transform || !reference) return std::nullopt;
+    try
+    {
+        transform->colorReference_ = std::make_shared<const AgxTransform>(*reference);
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+    return transform;
 }
 
 std::optional<AgxTransform> AgxTransform::Prepare(

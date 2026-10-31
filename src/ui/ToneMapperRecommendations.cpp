@@ -50,8 +50,7 @@ constexpr std::array kControlRanges{
         &ToneMapperParameters::gt7ColorBlend, 0.0, 1.0}};
 
 // Measured at each SDR configuration's fixed white with the other controls at
-// defaults, HDR Color Response at Middle Gray -0.5. AgX Shoulder Power has no
-// SDR effect.
+// defaults. AgX Shoulder Power has no SDR effect.
 constexpr std::array kSdrControlRanges{
     ControlRange{ProductionToneMapperAlgorithm::aces2,
         &ToneMapperParameters::acesLookStrength, 0.0, 1.0},
