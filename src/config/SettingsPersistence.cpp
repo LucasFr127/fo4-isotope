@@ -1082,7 +1082,8 @@ bool SameInterfaceControls(const HdrInterfaceSettings& left,
     const HdrInterfaceSettings& right) noexcept
 {
     return left.scale == right.scale && left.windowWidth == right.windowWidth &&
-        left.windowHeight == right.windowHeight && left.toggleKey == right.toggleKey;
+        left.windowHeight == right.windowHeight && left.toggleKey == right.toggleKey &&
+        left.hdrEnabled == right.hdrEnabled;
 }
 }  // namespace
 

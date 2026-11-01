@@ -688,6 +688,9 @@ void TestSettingsAutosaveDebounce(PersistenceFixture& fixture)
     interfaceSettings.windowX = 321.0;
     interfaceSettings.windowY = 234.0;
     FO4HDR_CHECK(!autosave.Dirty({settings}, interfaceSettings));
+    auto hdrRequest = interfaceSettings;
+    hdrRequest.hdrEnabled = !hdrRequest.hdrEnabled;
+    FO4HDR_CHECK(autosave.Dirty({settings}, hdrRequest));
     const auto generation = ReadSettingsPersistenceSnapshot().generation;
     settings.exposureEv = 1.25;
     autosave.Update({settings}, interfaceSettings, {100, true, true});
