@@ -739,7 +739,7 @@ private:
         {
             RestoreShader();
             g_affineStatus =
-                "RGB Ratio fallback: native LUT inputs or draw state are unsupported.";
+                "RGB Ratio fallback: vanilla LUT inputs or draw state are unsupported.";
             return false;
         }
         DispatchAffinePrepare(context_, context1, inputs_, resources);

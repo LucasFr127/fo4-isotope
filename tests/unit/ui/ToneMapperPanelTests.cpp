@@ -143,7 +143,7 @@ int AgxPanelVertices(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
     return vertices;
 }
 
-// SDR hides Highlight Shoulder but shows HDR Color Response at any Middle Gray:
+// SDR hides Highlight Shoulder but shows Color Response at any Middle Gray:
 // moving Middle Gray changes only its value text, far less than one slider.
 void CheckSdrAgxControls(ImVec2 windowSize)
 {
@@ -181,7 +181,7 @@ int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize
     return ImGui::GetDrawData()->TotalVtxCount;
 }
 
-// The SDR Tone Curve choice is followed by the selected operator's controls, and
+// The SDR Tone Mapper choice is followed by the selected operator's controls, and
 // only an HDR request with a status draws more than the unchecked box.
 void CheckSdrOperatorControls(ImVec2 windowSize)
 {

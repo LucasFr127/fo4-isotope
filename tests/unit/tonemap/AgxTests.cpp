@@ -626,7 +626,7 @@ void TestSdrConfiguration()
     for (const auto& expected : kSdrLuminanceReferences)
         CheckSdrReferenceColor(expected);
     // Shoulder Power has no SDR effect and Middle Gray can only fall; Middle
-    // Gray, Contrast and HDR Color Response act.
+    // Gray, Curve Contrast and Color Response act.
     FO4HDR_CHECK(SdrResponseDifference({.agxHdrShoulderPower = kMinimumAgxHdrShoulderPower},
         {.agxHdrShoulderPower = kMaximumAgxHdrShoulderPower}) == 0.0);
     FO4HDR_CHECK(!CreateSdrAgxTransform({.agxMiddleGrayEv = 0.01}));

@@ -38,7 +38,7 @@ void DrawResponseStatus(const char* status) noexcept
     ImGui::SeparatorText(name);
     bool changed = detail::DrawSettingsPanelSlider("Baseline", channel.base, {
         defaults.base, 0.0, 100.0, 1.0, "%.1f%%",
-        "Retention when response amount is zero. 100% keeps the full native LUT response."});
+        "Retention when response amount is zero. 100% keeps the full vanilla LUT response."});
     changed |= detail::DrawSettingsPanelSlider("Response Amount", channel.gain, {
         defaults.gain, 0.0, kMaximumWeatherGradeGain, 1.0, "%.2fx",
         "Scales the formula's change from full retention. Zero uses the baseline; one uses the calibrated response."});
@@ -83,7 +83,7 @@ void DrawQualification(const WeatherLutResponseView& view, bool enabled) noexcep
     if (!enabled)
         ImGui::TextWrapped("Disabled: global grade controls apply. Automatic response settings remain editable.");
     else if (view.validatedSlots == 0)
-        ImGui::TextWrapped("Waiting for a qualified native LUT draw. Global grade controls apply.");
+        ImGui::TextWrapped("Waiting for a qualified vanilla LUT draw. Global grade controls apply.");
     else if (view.automaticSlots == 0)
         ImGui::TextWrapped("Global fallback: no complete qualified weather response for this draw.");
     else if ((view.automaticSlots & view.validatedSlots) != view.validatedSlots)
@@ -158,7 +158,7 @@ void DrawContributorRow(
     if (IsValidNativeWeight(weight))
         ImGui::Text("Weight %.1f%%", static_cast<double>(weight) * 100.0);
     else
-        ImGui::TextDisabled("Invalid native weight");
+        ImGui::TextDisabled("Invalid vanilla weight");
     ImGui::TableSetColumnIndex(wide ? 2 : 1);
     DrawContributorResponse(view, index);
     ImGui::PopID();
@@ -167,14 +167,14 @@ void DrawContributorRow(
 void DrawContributors(const WeatherLutResponseView& view) noexcept
 {
     const bool wide = ImGui::GetContentRegionAvail().x >=
-        ImGui::CalcTextSize("ImageSpace native weight resolved response").x +
+        ImGui::CalcTextSize("ImageSpace vanilla weight resolved response").x +
             ImGui::GetStyle().CellPadding.x * 6.0F;
     if (ImGui::BeginTable("##weather-response-contributors", wide ? 3 : 2,
             ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg |
                 ImGuiTableFlags_SizingStretchProp))
     {
         ImGui::TableSetupColumn("ImageSpace");
-        if (wide) ImGui::TableSetupColumn("Native Weight");
+        if (wide) ImGui::TableSetupColumn("Vanilla Weight");
         ImGui::TableSetupColumn("Resolved Response");
         ImGui::TableHeadersRow();
         for (std::size_t index = 0; index < view.currentLuts.size(); ++index)
@@ -198,7 +198,7 @@ bool DrawWeatherLutResponsePanel(HdrSettings& settings,
         changed = true;
     }
     ImGui::TextWrapped("Each ImageSpace has one fixed response from all referencing weather slots. "
-        "Native LUT weights blend these responses during weather transitions.");
+        "Vanilla LUT weights blend these responses during weather transitions.");
     const auto active = EffectiveWeatherGradeResponse(settings).enabled;
     if (active && !response.enabled)
         ImGui::TextWrapped("On with the SDR tone mapper: Automatic Weather Response with Tone Mappers is on in Output.");

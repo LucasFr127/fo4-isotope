@@ -66,7 +66,7 @@ private:
 // reference white and Middle Gray can only fall (to 0 EV at most). The response
 // keeps that configuration's BT.2020 luminance but takes its RGB ratios from the
 // same settings at kAgxSdrColorReferencePeakNits, so SDR shows AgX's HDR color
-// and HDR Color Response acts as in HDR. The reference keeps the default
+// and Color Response acts as in HDR. The reference keeps the default
 // Shoulder Power, which has no SDR effect.
 inline constexpr double kAgxSdrPeakNits{kSceneReferenceWhiteNits};
 // The shipped default display peak.

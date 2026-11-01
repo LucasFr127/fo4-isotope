@@ -46,7 +46,7 @@ struct SettingsWindowState {
 void DrawExposureLockDiagnostic(SettingsWindowView& view, const SettingsWindowActions& actions) noexcept
 {
     bool lockExposure = view.exposureRequested;
-    if (ImGui::Checkbox("Lock Native Exposure (Session Only)", &lockExposure))
+    if (ImGui::Checkbox("Lock Vanilla Exposure (Session Only)", &lockExposure))
     {
         actions.requestExposure(lockExposure);
         actions.refreshView(view);
@@ -56,7 +56,7 @@ void DrawExposureLockDiagnostic(SettingsWindowView& view, const SettingsWindowAc
         "Focus loss, loading, or HDR retirement releases it.\nInvalid GPU samples "
         "use live exposure; no numeric readback is performed.");
     if (view.exposureFailed)
-        ImGui::TextWrapped("Exposure lock unavailable: resources or native source qualification failed.");
+        ImGui::TextWrapped("Exposure lock unavailable: resources or vanilla source qualification failed.");
     else if (view.exposureRequested && !view.exposureActive)
         ImGui::TextUnformatted("Exposure lock: waiting for qualified scene capture");
 }

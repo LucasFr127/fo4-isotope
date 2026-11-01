@@ -41,22 +41,22 @@ const char* NativeLutObserverMessage() noexcept
     constexpr std::array messages{
         std::pair{NativeLutObserverStatus::ready, "Waiting for a color grading draw."},
         std::pair{NativeLutObserverStatus::unsupportedRuntime, "LUT identity observation is unavailable for this runtime."},
-        std::pair{NativeLutObserverStatus::invalidTarget, "Native LUT boundary could not be validated; global controls are used."},
-        std::pair{NativeLutObserverStatus::conflictingHook, "Native LUT boundary is owned by another hook; global controls are used."}};
+        std::pair{NativeLutObserverStatus::invalidTarget, "Vanilla LUT boundary could not be validated; global controls are used."},
+        std::pair{NativeLutObserverStatus::conflictingHook, "Vanilla LUT boundary is owned by another hook; global controls are used."}};
     const auto status = GetNativeLutObserverStatus();
     const auto found = std::find_if(messages.begin(), messages.end(),
         [status](const auto& entry) { return entry.first == status; });
-    return found == messages.end() ? "Native LUT observer unavailable; global controls are used." : found->second;
+    return found == messages.end() ? "Vanilla LUT observer unavailable; global controls are used." : found->second;
 
 }
 
 void PublishImageSpaceStatus(const NativeLutObservation& native) noexcept
 {
     constexpr std::array messages{
-        std::pair{ImageSpaceObservationStatus::matched, "ImageSpace contributors matched the native LUT transfer."},
+        std::pair{ImageSpaceObservationStatus::matched, "ImageSpace contributors matched the vanilla LUT transfer."},
         std::pair{ImageSpaceObservationStatus::catalogUnavailable, "ImageSpace record catalog unavailable; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::differentThread, "ImageSpace producer and draw threads are not qualified; LUT/global controls are used."},
-        std::pair{ImageSpaceObservationStatus::overrideActive, "A native ImageSpace override is active; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::overrideActive, "A vanilla ImageSpace override is active; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::unqualifiedSource, "Room, direct or unidentified ImageSpace blend; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::updating, "ImageSpace observation is updating; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::stale, "ImageSpace transfer is stale or changed; LUT/global controls are used."},
@@ -187,7 +187,7 @@ ID3D11Buffer* UploadLutProfileConstants(ID3D11DeviceContext* context, OperatorCo
     {
         if (!UpdateLutProfileBuffer(context, buffer, constants)) return fallback;
     }
-    g_lutInspectorStatus = "Fixed weather responses follow the native blend; other slots use global controls.";
+    g_lutInspectorStatus = "Fixed weather responses follow the vanilla blend; other slots use global controls.";
     return buffer;
 
 }
