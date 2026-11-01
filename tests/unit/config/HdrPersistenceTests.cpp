@@ -222,7 +222,7 @@ void CheckSdrProfileRewrite()
         const auto end = saved.find("\n[", begin);
         return saved.substr(begin, end == std::string::npos ? end : end + 1 - begin);
     };
-    FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Native\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Vanilla\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
     FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);

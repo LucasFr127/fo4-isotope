@@ -102,7 +102,7 @@ void TestSdrProfileConfiguration()
         "[SdrEffects]\nBloomStrength=40\nVanillaGradeColorStrength=20\n"
         "[SdrSelectiveColor]\nEnabled=1\nRedHue=5\n"
         "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n"
-        "[SdrToneMapper]\nAlgorithm=Native\n"
+        "[SdrToneMapper]\nAlgorithm=Vanilla\n"
         "[SdrAgX]\nContrast=2.5\nShoulderPower=1.8\n");
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(!parsed.value.sdrEnabled);
@@ -154,19 +154,17 @@ void TestSdrProfileConfiguration()
         PluginConfigurationError::valueOutOfRange);
     CheckSdrOnlySwitches();
 
-    // SDR offers the native curve plus each operator once it is selectable.
-    FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=Vanilla\n") ==
-        PluginConfigurationError::unsupportedAlgorithm);
+    // SDR offers the vanilla curve plus each operator once it is selectable.
     for (const auto [name, algorithm] : {std::pair{"ACES2", ProductionToneMapperAlgorithm::aces2},
              std::pair{"AgX", ProductionToneMapperAlgorithm::agX},
              std::pair{"GT7", ProductionToneMapperAlgorithm::gt7}})
         FO4HDR_CHECK(SdrConfigurationError("[SdrToneMapper]\nAlgorithm=" + std::string(name) + "\n") ==
             (IsSelectableSdrToneMapper(algorithm) ? PluginConfigurationError::none :
                 PluginConfigurationError::unsupportedAlgorithm));
-    // The HDR profile never takes the native curve.
-    auto hdrNative = MinimalProductionConfiguration();
-    hdrNative.replace(hdrNative.find("Algorithm=ACES2"), 15, "Algorithm=Native");
-    FO4HDR_CHECK(ParsePluginConfiguration(hdrNative).error == PluginConfigurationError::unsupportedAlgorithm);
+    // The HDR profile never takes the vanilla curve.
+    auto hdrVanilla = MinimalProductionConfiguration();
+    hdrVanilla.replace(hdrVanilla.find("Algorithm=ACES2"), 15, "Algorithm=Vanilla");
+    FO4HDR_CHECK(ParsePluginConfiguration(hdrVanilla).error == PluginConfigurationError::unsupportedAlgorithm);
 }
 
 void TestProductionConfiguration()

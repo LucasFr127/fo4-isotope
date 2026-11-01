@@ -60,8 +60,6 @@ void DrawSettingsControlLabel(std::string_view label) noexcept
 
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept
 {
-    // The menu calls the game's own curve Vanilla; the INI token stays Native.
-    if (algorithm == ProductionToneMapperAlgorithm::native) return "Vanilla";
     return algorithm == ProductionToneMapperAlgorithm::aces2 ?
         "ACES 2" : ToString(algorithm).data();
 }

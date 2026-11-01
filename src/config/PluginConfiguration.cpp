@@ -533,12 +533,12 @@ PluginConfigurationError ParseAlgorithm(std::string_view value,
     return PluginConfigurationError::none;
 }
 
-// The SDR profile adds the native curve and offers only selectable operators.
+// The SDR profile adds the vanilla curve and offers only selectable operators.
 PluginConfigurationError ParseSdrAlgorithm(std::string_view value,
     ProductionToneMapperAlgorithm& target) noexcept
 {
     auto algorithm = ProductionToneMapperAlgorithm::native;
-    if (value != "Native" && ParseAlgorithm(value, algorithm) != PluginConfigurationError::none)
+    if (value != "Vanilla" && ParseAlgorithm(value, algorithm) != PluginConfigurationError::none)
         return PluginConfigurationError::unsupportedAlgorithm;
     if (!IsSelectableSdrToneMapper(algorithm)) return PluginConfigurationError::unsupportedAlgorithm;
     target = algorithm;
@@ -837,7 +837,7 @@ std::string_view ToString(
     case ProductionToneMapperAlgorithm::aces2: return "ACES2";
     case ProductionToneMapperAlgorithm::agX: return "AgX";
     case ProductionToneMapperAlgorithm::gt7: return "GT7";
-    case ProductionToneMapperAlgorithm::native: return "Native";
+    case ProductionToneMapperAlgorithm::native: return "Vanilla";
     }
     return "unknown";
 }
