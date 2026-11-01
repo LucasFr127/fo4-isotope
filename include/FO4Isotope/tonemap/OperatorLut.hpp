@@ -15,10 +15,18 @@ namespace fo4hdr {
 inline constexpr std::uint32_t kAces2OperatorLutEdge{119};
 inline constexpr std::uint32_t kAgxOperatorLutEdge{81};
 inline constexpr std::uint32_t kGt7OperatorLutEdge{64};
+// Smallest measured SDR grids, starting at 32 per edge, at which every SDR
+// control keeps its full recommended range.
+inline constexpr std::uint32_t kSdrAces2OperatorLutEdge{58};
+inline constexpr std::uint32_t kSdrAgxOperatorLutEdge{49};
+inline constexpr std::uint32_t kSdrGt7OperatorLutEdge{51};
 inline constexpr std::uint32_t kOperatorLutCoefficientPadding{2};
 inline constexpr double kOperatorLutSceneMaximum{65504.0};
 
 [[nodiscard]] std::uint32_t OperatorLutEdge(
+    ProductionToneMapperAlgorithm algorithm) noexcept;
+
+[[nodiscard]] std::uint32_t SdrOperatorLutEdge(
     ProductionToneMapperAlgorithm algorithm) noexcept;
 
 [[nodiscard]] double OperatorLutInputOffset(

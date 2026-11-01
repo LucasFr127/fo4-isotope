@@ -145,7 +145,8 @@ void CheckSdrOperatorLut(ProductionToneMapperAlgorithm algorithm)
     if (!lut.IsValid()) return;
     FO4HDR_CHECK(lut.target == OperatorLutTarget::sdr);
     FO4HDR_CHECK(lut.displayPeakNits == SdrOperatorWhiteNits(algorithm));
-    FO4HDR_CHECK(lut.edge == OperatorLutEdge(algorithm));
+    FO4HDR_CHECK(lut.edge == SdrOperatorLutEdge(algorithm));
+    FO4HDR_CHECK(lut.edge >= 32U);
     const auto shaper = OperatorLutShaperParameters(algorithm, lut.displayPeakNits);
     FO4HDR_CHECK(std::isfinite(shaper[0]) && shaper[0] > 0.0F && shaper[0] < 1.0F);
     // An SDR table is never valid as an HDR table or at another white.
@@ -172,9 +173,20 @@ void CheckSdrOperatorLut(ProductionToneMapperAlgorithm algorithm)
     CheckSdrNeutral(lut);
 }
 
+// SDR AgX gives the logarithmic shaper term 0.5 of the coordinate; HDR keeps 0.3.
+void TestSdrAgxShaperWeight()
+{
+    constexpr auto agx = ProductionToneMapperAlgorithm::agX;
+    const auto logSpan = std::log2(kOperatorLutSceneMaximum + OperatorLutInputOffset(agx)) + 16.0;
+    FO4HDR_CHECK(test::Approx(OperatorLutShaperParameters(agx, SdrOperatorWhiteNits(agx))[3],
+        0.5 / logSpan, 1.0e-8));
+    FO4HDR_CHECK(test::Approx(OperatorLutShaperParameters(agx, 1000.0)[3], 0.3 / logSpan, 1.0e-8));
+}
+
 void TestSdrBuildRequests()
 {
     FO4HDR_CHECK(SdrOperatorWhiteNits(ProductionToneMapperAlgorithm::native) == 0.0);
+    FO4HDR_CHECK(SdrOperatorLutEdge(ProductionToneMapperAlgorithm::native) == 0U);
     FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::native).IsValid());
     FO4HDR_CHECK(!BuildSdrOperatorLut(ProductionToneMapperAlgorithm::agX,
         {.agxContrast = kMaximumAgxContrast + 0.1}).IsValid());
@@ -189,6 +201,7 @@ void TestSdrBuildRequests()
 void RunSdrOperatorLutTests()
 {
     TestSdrContainment();
+    TestSdrAgxShaperWeight();
     TestSdrBuildRequests();
     for (const auto algorithm : kSdrAlgorithms)
         CheckSdrOperatorLut(algorithm);

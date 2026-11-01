@@ -189,6 +189,13 @@ struct PreparedOperator
         peak <= kMaximumDisplayPeakNits;
 }
 
+[[nodiscard]] std::uint32_t TargetLutEdge(
+    ProductionToneMapperAlgorithm algorithm, OperatorLutTarget target) noexcept
+{
+    return target == OperatorLutTarget::sdr ?
+        SdrOperatorLutEdge(algorithm) : OperatorLutEdge(algorithm);
+}
+
 [[nodiscard]] bool MatchesTargetPeak(const OperatorLutData& data) noexcept
 {
     if (data.target == OperatorLutTarget::sdr)
@@ -242,8 +249,14 @@ struct PreparedOperator
     return algorithm == ProductionToneMapperAlgorithm::gt7 ? 2.5 : 3.0;
 }
 
-[[nodiscard]] double LogarithmicWeight(ProductionToneMapperAlgorithm algorithm) noexcept
+[[nodiscard]] double LogarithmicWeight(
+    ProductionToneMapperAlgorithm algorithm, double peak) noexcept
 {
+    // SDR AgX gives its deep shadows more knots: at the HDR weight, dark blues
+    // near black need 73 knots per edge before every SDR control keeps its
+    // full recommended range.
+    if (algorithm == ProductionToneMapperAlgorithm::agX && peak == kAgxSdrPeakNits)
+        return 0.5;
     return IsAces2Algorithm(algorithm) ? 0.25 :
         (algorithm == ProductionToneMapperAlgorithm::agX ? 0.3 : 0.4);
 }
@@ -264,7 +277,7 @@ struct ShaperBounds
     const auto logSpan = std::log2(kOperatorLutSceneMaximum +
         OperatorLutInputOffset(algorithm)) + 16.0;
     return std::lerp(normalizedAngle, (logarithm + 16.0) / logSpan,
-        LogarithmicWeight(algorithm));
+        LogarithmicWeight(algorithm, peak));
 }
 
 [[nodiscard]] LinearRgb Add(LinearRgb left, LinearRgb right) noexcept
@@ -547,13 +560,22 @@ std::uint32_t OperatorLutEdge(
             kAgxOperatorLutEdge : kGt7OperatorLutEdge);
 }
 
+std::uint32_t SdrOperatorLutEdge(
+    ProductionToneMapperAlgorithm algorithm) noexcept
+{
+    if (!IsLutAlgorithm(algorithm)) return 0U;
+    return IsAces2Algorithm(algorithm) ? kSdrAces2OperatorLutEdge :
+        (algorithm == ProductionToneMapperAlgorithm::agX ?
+            kSdrAgxOperatorLutEdge : kSdrGt7OperatorLutEdge);
+}
+
 bool OperatorLutData::IsValid() const noexcept
 {
     constexpr std::size_t channels{4};
     const auto expected = static_cast<std::size_t>(textureEdge) * textureEdge * textureEdge *
         channels;
     return MatchesAlgorithm(*this) &&
-        edge == OperatorLutEdge(algorithm) &&
+        edge == TargetLutEdge(algorithm, target) &&
         textureEdge == edge + kOperatorLutCoefficientPadding &&
         MatchesTargetPeak(*this) &&
         MatchesShaper(*this) &&
@@ -638,7 +660,7 @@ std::array<float, 4> OperatorLutShaperParameters(
     const auto minimum = OperatorLutInputShaperMinimum(algorithm, peak);
     const auto maximum = OperatorLutInputShaperMaximum(algorithm, peak);
     if (!(maximum > minimum)) return {};
-    const auto weight = LogarithmicWeight(algorithm);
+    const auto weight = LogarithmicWeight(algorithm, peak);
     const auto angleGain = (1.0 - weight) / (maximum - minimum);
     const auto logGain = weight / (std::log2(kOperatorLutSceneMaximum +
         OperatorLutInputOffset(algorithm)) + 16.0);
@@ -657,7 +679,7 @@ namespace {
     const ToneMapperParameters& parameters) noexcept
 {
     OperatorLutData result;
-    result.edge = OperatorLutEdge(algorithm);
+    result.edge = TargetLutEdge(algorithm, target);
     result.textureEdge = result.edge;
     result.inputShaperMinimum =
         OperatorLutInputShaperMinimum(algorithm, displayPeakNits);

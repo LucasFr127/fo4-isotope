@@ -8,9 +8,15 @@
 #endif
 
 // These dimensions must match the CPU lattice and coefficient texture.
+#if FO4HDR_SDR_OPERATOR_OUTPUT
+static const float kFo4HdrAces2OperatorLutEdge = 58.0f;
+static const float kFo4HdrAgxOperatorLutEdge = 49.0f;
+static const float kFo4HdrGt7OperatorLutEdge = 51.0f;
+#else
 static const float kFo4HdrAces2OperatorLutEdge = 119.0f;
 static const float kFo4HdrAgxOperatorLutEdge = 81.0f;
 static const float kFo4HdrGt7OperatorLutEdge = 64.0f;
+#endif
 
 
 float Fo4HdrSanitizeOperatorInput(float value, uint productionMode)
