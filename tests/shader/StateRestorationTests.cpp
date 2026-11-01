@@ -9,7 +9,7 @@
 #include "d3d11/BorrowedFullscreenState.hpp"
 #include <array>
 #include <cstdint>
-#include "passes/NativeReferenceGradePass.hpp"
+#include "passes/AffineGradePass.hpp"
 #include <cmath>
 #include "d3d11/ScopedD3D11PixelBindings.hpp"
 #include "d3d11/ContextQuerySafety.hpp"
@@ -569,8 +569,8 @@ void VerifyPresentationState(Device& device)
 
 namespace fo4hdr::tests::gpu {
 
-void VerifyNativeReferenceReadback(ID3D11Device& gpu,
-    ID3D11DeviceContext& context, const NativeReferenceResources& prepared)
+void VerifyAffineReadback(ID3D11Device& gpu,
+    ID3D11DeviceContext& context, const AffineResources& prepared)
 {
     D3D11_TEXTURE3D_DESC readbackDescription{};
     prepared.preblendTexture->GetDesc(&readbackDescription);
@@ -579,11 +579,11 @@ void VerifyNativeReferenceReadback(ID3D11Device& gpu,
     readbackDescription.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     ComPtr<ID3D11Texture3D> readback;
     CheckHresult(gpu.CreateTexture3D(&readbackDescription, nullptr, &readback),
-        "Native Reference preparation readback");
+        "Affine preparation readback");
     context.CopyResource(readback.Get(), prepared.preblendTexture.Get());
     D3D11_MAPPED_SUBRESOURCE mapped{};
     CheckHresult(context.Map(readback.Get(), 0, D3D11_MAP_READ, 0, &mapped),
-        "Read Native Reference preparation");
+        "Read Affine preparation");
     const auto* firstTexel = static_cast<const float*>(mapped.pData);
     FO4HDR_WARP_CHECK(std::abs(firstTexel[0] - 32.0F / 255.0F) < 1.0e-6F);
     FO4HDR_WARP_CHECK(std::abs(firstTexel[1] - 64.0F / 255.0F) < 1.0e-6F);
@@ -591,7 +591,7 @@ void VerifyNativeReferenceReadback(ID3D11Device& gpu,
     context.Unmap(readback.Get(), 0);
 }
 
-ComPtr<ID3D11ShaderResourceView> CreateNativeReferenceStateLut(ID3D11Device& gpu)
+ComPtr<ID3D11ShaderResourceView> CreateAffineStateLut(ID3D11Device& gpu)
 {
     std::array<std::uint32_t, 16 * 16 * 16> pixels;
     pixels.fill(0xFF804020U);
@@ -605,33 +605,33 @@ ComPtr<ID3D11ShaderResourceView> CreateNativeReferenceStateLut(ID3D11Device& gpu
     ComPtr<ID3D11Texture3D> nativeTexture;
     ComPtr<ID3D11ShaderResourceView> nativeView;
     CheckHresult(gpu.CreateTexture3D(&nativeDescription, &nativeData, &nativeTexture),
-        "Native Reference native LUT");
+        "Affine native LUT");
     CheckHresult(gpu.CreateShaderResourceView(nativeTexture.Get(), nullptr, &nativeView),
-        "Native Reference native LUT view");
+        "Affine native LUT view");
     return nativeView;
 }
 
-void VerifyNativeReferencePredication(ID3D11Device& gpu,
+void VerifyAffinePredication(ID3D11Device& gpu,
     ID3D11DeviceContext& context, ID3D11DeviceContext1& context1,
-    NativeReferenceInputs& rejected)
+    AffineInputs& rejected)
 {
     D3D11_QUERY_DESC predicateDescription{D3D11_QUERY_OCCLUSION_PREDICATE, 0};
     ComPtr<ID3D11Predicate> predicate;
-    CheckHresult(gpu.CreatePredicate(&predicateDescription, &predicate), "Native Reference predicate");
+    CheckHresult(gpu.CreatePredicate(&predicateDescription, &predicate), "Affine predicate");
     context.Begin(predicate.Get());
     context.End(predicate.Get());
     context.SetPredication(predicate.Get(), FALSE);
 
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(&context, &context1, rejected));
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(&context, &context1, rejected));
     ComPtr<ID3D11Predicate> restoredPredicate;
     BOOL restoredValue = TRUE;
     context.GetPredication(&restoredPredicate, &restoredValue);
     FO4HDR_WARP_CHECK(restoredPredicate == predicate && restoredValue == FALSE);
     context.SetPredication(nullptr, FALSE);
-    FO4HDR_WARP_CHECK(CaptureNativeReferenceInputs(&context, &context1, rejected));
+    FO4HDR_WARP_CHECK(CaptureAffineInputs(&context, &context1, rejected));
 }
 
-void CheckNativeReferenceViews(ID3D11DeviceContext& context,
+void CheckAffineViews(ID3D11DeviceContext& context,
     const ComPtr<ID3D11ShaderResourceView>& nativeView)
 {
     for (UINT slot = 0; slot < 4; ++slot)
@@ -646,7 +646,7 @@ void CheckNativeReferenceViews(ID3D11DeviceContext& context,
 }
 
 template <class GetBuffer>
-void CheckNativeReferenceBuffer(const GetBuffer& getBuffer,
+void CheckAffineBuffer(const GetBuffer& getBuffer,
     const ComPtr<ID3D11Buffer>& expected, UINT first, UINT count)
 {
     ComPtr<ID3D11Buffer> restoredBuffer;
@@ -656,51 +656,51 @@ void CheckNativeReferenceBuffer(const GetBuffer& getBuffer,
     FO4HDR_WARP_CHECK(restoredFirst == first && restoredCount == count);
 }
 
-void VerifyNativeReferenceDeferredRejection(ID3D11Device& gpu,
-    NativeReferenceInputs& rejected)
+void VerifyAffineDeferredRejection(ID3D11Device& gpu,
+    AffineInputs& rejected)
 {
     ComPtr<ID3D11DeviceContext> deferred;
     ComPtr<ID3D11DeviceContext1> deferred1;
-    CheckHresult(gpu.CreateDeferredContext(0, &deferred), "Native Reference deferred context");
-    CheckHresult(deferred.As(&deferred1), "Native Reference deferred context1");
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(deferred.Get(), deferred1.Get(), rejected));
+    CheckHresult(gpu.CreateDeferredContext(0, &deferred), "Affine deferred context");
+    CheckHresult(deferred.As(&deferred1), "Affine deferred context1");
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(deferred.Get(), deferred1.Get(), rejected));
 }
 
-void VerifyNativeReferenceRebuild(ID3D11Device& gpu,
-    NativeReferenceResources& prepared)
+void VerifyAffineRebuild(ID3D11Device& gpu,
+    AffineResources& prepared)
 {
     const auto oldTexture = prepared.preblendTexture;
-    FO4HDR_WARP_CHECK(!BuildNativeReferenceResources(nullptr, prepared));
+    FO4HDR_WARP_CHECK(!BuildAffineResources(nullptr, prepared));
     FO4HDR_WARP_CHECK(prepared.preblendTexture == oldTexture);
-    FO4HDR_WARP_CHECK(BuildNativeReferenceResources(&gpu, prepared));
+    FO4HDR_WARP_CHECK(BuildAffineResources(&gpu, prepared));
     FO4HDR_WARP_CHECK(prepared.preblendTexture != oldTexture);
 }
 
-void VerifyNativeReferenceRetirement(NativeReferenceResources& resources)
+void VerifyAffineRetirement(AffineResources& resources)
 {
-    FO4HDR_WARP_CHECK(NativeReferenceResourcesReady(resources));
-    ResetNativeReferenceResources(resources);
-    FO4HDR_WARP_CHECK(!NativeReferenceResourcesReady(resources));
+    FO4HDR_WARP_CHECK(AffineResourcesReady(resources));
+    ResetAffineResources(resources);
+    FO4HDR_WARP_CHECK(!AffineResourcesReady(resources));
     FO4HDR_WARP_CHECK(!resources.shader && !resources.preblendShader);
     FO4HDR_WARP_CHECK(!resources.preblendTexture && !resources.preblendSrv && !resources.preblendUav);
-    ResetNativeReferenceResources(resources);
-    FO4HDR_WARP_CHECK(!NativeReferenceResourcesReady(resources));
+    ResetAffineResources(resources);
+    FO4HDR_WARP_CHECK(!AffineResourcesReady(resources));
 }
 
-void VerifyNativeReferenceState(Device& device)
+void VerifyAffineState(Device& device)
 {
     auto& gpu = *device.device.Get();
     auto& context = *device.context.Get();
     context.ClearState();
     ComPtr<ID3D11DeviceContext1> context1;
-    CheckHresult(device.context.As(&context1), "Native Reference context1");
-    NativeReferenceResources prepared, foreign;
-    FO4HDR_WARP_CHECK(BuildNativeReferenceResources(&gpu, prepared));
-    FO4HDR_WARP_CHECK(BuildNativeReferenceResources(&gpu, foreign));
+    CheckHresult(device.context.As(&context1), "Affine context1");
+    AffineResources prepared, foreign;
+    FO4HDR_WARP_CHECK(BuildAffineResources(&gpu, prepared));
+    FO4HDR_WARP_CHECK(BuildAffineResources(&gpu, foreign));
     if (!prepared.shader || !foreign.shader) return;
-    VerifyNativeReferenceRebuild(gpu, prepared);
+    VerifyAffineRebuild(gpu, prepared);
 
-    const auto nativeView = CreateNativeReferenceStateLut(gpu);
+    const auto nativeView = CreateAffineStateLut(gpu);
     std::array<ID3D11ShaderResourceView*, 4> nativeViews;
     nativeViews.fill(nativeView.Get());
     context.PSSetShaderResources(3, 4, nativeViews.data());
@@ -710,8 +710,8 @@ void VerifyNativeReferenceState(Device& device)
     auto* weightsBinding = weights.Get();
     constexpr UINT nativeFirst = 16, nativeCount = 16;
     context1->PSSetConstantBuffers1(2, 1, &weightsBinding, &nativeFirst, &nativeCount);
-    NativeReferenceInputs inputs;
-    FO4HDR_WARP_CHECK(CaptureNativeReferenceInputs(device.context.Get(), context1.Get(), inputs));
+    AffineInputs inputs;
+    FO4HDR_WARP_CHECK(CaptureAffineInputs(device.context.Get(), context1.Get(), inputs));
     FO4HDR_WARP_CHECK(inputs.constants == weights);
     FO4HDR_WARP_CHECK(inputs.firstConstant == nativeFirst && inputs.constantCount == nativeCount);
 
@@ -723,43 +723,43 @@ void VerifyNativeReferenceState(Device& device)
     context.CSSetShaderResources(0, 4, nativeViews.data());
     auto* foreignUav = foreign.preblendUav.Get();
     context.CSSetUnorderedAccessViews(0, 1, &foreignUav, nullptr);
-    DispatchNativeReferencePrepare(device.context.Get(), context1.Get(), inputs, prepared);
+    DispatchAffinePrepare(device.context.Get(), context1.Get(), inputs, prepared);
     ComPtr<ID3D11ComputeShader> restoredShader;
     context.CSGetShader(&restoredShader, nullptr, nullptr);
     FO4HDR_WARP_CHECK(restoredShader == foreign.preblendShader);
     ComPtr<ID3D11UnorderedAccessView> restoredUav;
     context.CSGetUnorderedAccessViews(0, 1, &restoredUav);
     FO4HDR_WARP_CHECK(restoredUav == foreign.preblendUav);
-    CheckNativeReferenceViews(context, nativeView);
-    CheckNativeReferenceBuffer([&](auto* buffer, auto* first, auto* count) {
+    CheckAffineViews(context, nativeView);
+    CheckAffineBuffer([&](auto* buffer, auto* first, auto* count) {
         context1->CSGetConstantBuffers1(2, 1, buffer, first, count);
     }, foreignConstants, foreignFirst, foreignCount);
-    CheckNativeReferenceBuffer([&](auto* buffer, auto* first, auto* count) {
+    CheckAffineBuffer([&](auto* buffer, auto* first, auto* count) {
         context1->PSGetConstantBuffers1(2, 1, buffer, first, count);
     }, weights, nativeFirst, nativeCount);
 
-    VerifyNativeReferenceReadback(gpu, context, prepared);
+    VerifyAffineReadback(gpu, context, prepared);
 
-    NativeReferenceInputs rejected;
-    VerifyNativeReferencePredication(gpu, context, *context1.Get(), rejected);
+    AffineInputs rejected;
+    VerifyAffinePredication(gpu, context, *context1.Get(), rejected);
 
     ID3D11ShaderResourceView* missing{};
     context.PSSetShaderResources(3, 1, &missing);
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(device.context.Get(), context1.Get(), rejected));
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(device.context.Get(), context1.Get(), rejected));
     auto* unsupported = prepared.preblendSrv.Get();
     context.PSSetShaderResources(3, 1, &unsupported);
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(device.context.Get(), context1.Get(), rejected));
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(device.context.Get(), context1.Get(), rejected));
     context.PSSetShaderResources(3, 4, nativeViews.data());
     const auto shortConstants = CreateConstantBuffer(gpu, std::array<float, 4>{});
     auto* shortBinding = shortConstants.Get();
     context.PSSetConstantBuffers(2, 1, &shortBinding);
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(device.context.Get(), context1.Get(), rejected));
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(device.context.Get(), context1.Get(), rejected));
     context1->PSSetConstantBuffers1(2, 1, &weightsBinding, &nativeFirst, &nativeCount);
-    FO4HDR_WARP_CHECK(CaptureNativeReferenceInputs(device.context.Get(), context1.Get(), rejected));
-    FO4HDR_WARP_CHECK(!CaptureNativeReferenceInputs(device.context.Get(), nullptr, rejected));
-    VerifyNativeReferenceDeferredRejection(gpu, rejected);
+    FO4HDR_WARP_CHECK(CaptureAffineInputs(device.context.Get(), context1.Get(), rejected));
+    FO4HDR_WARP_CHECK(!CaptureAffineInputs(device.context.Get(), nullptr, rejected));
+    VerifyAffineDeferredRejection(gpu, rejected);
     context.ClearState();
-    VerifyNativeReferenceRetirement(prepared);
+    VerifyAffineRetirement(prepared);
 }
 
 }  // namespace fo4hdr::tests::gpu

@@ -461,14 +461,16 @@ struct ColorSettingsTabs
     void DrawColorGradingMethod() noexcept
     {
         const HdrSettings defaults{};
-        const char* gradingMethods[]{"Radial", "Native Reference"};
+        const char* gradingMethods[]{"RGB Ratio", "Affine"};
         int gradingMethod = settings.colorGradingMethod ==
-            ColorGradingMethod::nativeReference ? 1 : 0;
+            ColorGradingMethod::affine ? 1 : 0;
         DrawSettingsControlLabel("Color Grading Method");
         bool methodChanged = ImGui::Combo("##color-grading-method", &gradingMethod,
             gradingMethods, static_cast<int>(std::size(gradingMethods)));
-        ImGui::SetItemTooltip("Radial scales colors into the game's LUTs, then restores HDR intensity.\n"
-            "Native Reference extends grading using sampled color, neutral and black responses.");
+        ImGui::SetItemTooltip("RGB Ratio grades a dimmed copy of each color, then scales it back.\n"
+            "The copy keeps the color's channel ratios; lifted blacks grow with brightness.\n"
+            "Affine fits the grade as a matrix plus offset and applies it to the HDR color.\n"
+            "Lifted blacks stay constant.");
         if (DrawRestoreDefaultButton("color-grading-method",
                 settings.colorGradingMethod != defaults.colorGradingMethod))
         {
@@ -478,12 +480,12 @@ struct ColorSettingsTabs
         if (methodChanged)
         {
             settings.colorGradingMethod = gradingMethod == 1 ?
-                ColorGradingMethod::nativeReference : ColorGradingMethod::radial;
+                ColorGradingMethod::affine : ColorGradingMethod::rgbRatio;
             commitRequested = true;
         }
-        if (view.activeSettings.colorGradingMethod == ColorGradingMethod::nativeReference &&
-            view.nativeReferenceStatus)
-            ImGui::TextWrapped("%s", view.nativeReferenceStatus);
+        if (view.activeSettings.colorGradingMethod == ColorGradingMethod::affine &&
+            view.affineStatus)
+            ImGui::TextWrapped("%s", view.affineStatus);
     }
 
     void DrawColorGradingCurve() noexcept

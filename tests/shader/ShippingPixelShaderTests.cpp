@@ -29,12 +29,12 @@ void VerifyShippingPixelShaders(Device& device)
     VerifyDeveloperExposureLock(device, vertexShader.Get(), sampler.Get());
     VerifyNativeGradeColorChain(device, vertexShader.Get(), sampler.Get());
     VerifyImageControls(device, vertexShader.Get(), sampler.Get());
-    VerifyRadialVanillaGradeRemoval(
+    VerifyRgbRatioVanillaGradeRemoval(
         device, vertexShader.Get(), sampler.Get());
     VerifyLutProfileGradeRemoval(
         device, vertexShader.Get(), sampler.Get());
     VerifyHdrGradeTransfer(device, vertexShader.Get(), sampler.Get());
-    VerifyNativeReferenceGrade(device, vertexShader.Get(), sampler.Get());
+    VerifyAffineGrade(device, vertexShader.Get(), sampler.Get());
     VerifyBloomStrengthPixelShader(
         device, vertexShader.Get(), sampler.Get());
     VerifyVideoPixelShader(device, vertexShader.Get(), sampler.Get());

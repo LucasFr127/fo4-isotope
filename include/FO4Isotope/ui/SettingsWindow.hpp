@@ -74,7 +74,7 @@ struct SettingsWindowView
     bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
     ProductionToneMapperAlgorithm pendingAlgorithm{};
     double pendingPeakNits{};
-    const char* nativeReferenceStatus{};
+    const char* affineStatus{};
     const char* armorEncodedStatus{"Off"};
     const char* rendererFailure{"none"};
     std::uint64_t resourceGeneration{}, frame{}, settingsGeneration{}, desiredSettingsGeneration{}, lutRequestGeneration{};

@@ -37,14 +37,14 @@ void VerifyHdrGradeTransfer(Device& device,
 
 void VerifyImageControls(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler);
 
-void VerifyRadialVanillaGradeRemoval(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler);
+void VerifyRgbRatioVanillaGradeRemoval(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler);
 
 void VerifyLutProfileGradeRemoval(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler);
 
 void VerifyNativeGradeColorChain(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sceneSampler);
 
-void VerifyNativeReferenceGrade(Device& device,
+void VerifyAffineGrade(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sceneSampler);
 
 struct TemporalVariant

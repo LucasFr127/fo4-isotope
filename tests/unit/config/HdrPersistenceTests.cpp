@@ -16,6 +16,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <tuple>
 
 namespace fo4hdr::tests {
 
@@ -39,7 +40,7 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
         std::string::npos);
     FO4HDR_CHECK(rewritten.find("VideoWhiteNits=220\r\n") !=
         std::string::npos);
-    FO4HDR_CHECK(rewritten.find("ColorGradingMethod=NativeReference\r\n") !=
+    FO4HDR_CHECK(rewritten.find("ColorGradingMethod=Affine\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find("ColorGradingCurve=sRGB\r\n") !=
         std::string::npos);
@@ -137,7 +138,7 @@ void CheckRewrittenWindowPosition(const HdrSettings& settings, const HdrInterfac
     FO4HDR_CHECK(positionOnly.find("ToggleKey=Ctrl+J\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("DisplayPeakNits=430\r\n") != std::string::npos);
     FO4HDR_CHECK(positionOnly.find("ExposureEV=0.25\r\n") != std::string::npos);
-    FO4HDR_CHECK(positionOnly.find("ColorGradingMethod=NativeReference\r\n") !=
+    FO4HDR_CHECK(positionOnly.find("ColorGradingMethod=Affine\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(positionOnly.find("ColorGradingCurve=sRGB\r\n") !=
         std::string::npos);
@@ -159,6 +160,23 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(migrated.find("ExposureEV=0.25") != std::string::npos);
     FO4HDR_CHECK(RewriteHdrWindowPositionIni(retiredGradeTransfer, 1, 2)
         .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
+
+    // Former method names still load, and a full save writes the current names.
+    for (const auto& [former, method, current] : {
+             std::tuple{"Radial", ColorGradingMethod::rgbRatio, "RgbRatio"},
+             std::tuple{"NativeReference", ColorGradingMethod::affine, "Affine"}})
+    {
+        const auto text = MinimalProductionConfiguration() +
+            "[Image]\nColorGradingMethod=" + former + "\n";
+        const auto loaded = ParsePluginConfiguration(text);
+        FO4HDR_CHECK(loaded.valid);
+        FO4HDR_CHECK(loaded.value.colorGradingMethod == method);
+        const HdrSettings loadedSettings = loaded.value;
+        const auto saved = RewriteHdrSettingsIni(text, {loadedSettings}, interfaceSettings);
+        FO4HDR_CHECK(saved.find(std::string("ColorGradingMethod=") + current + "\n") !=
+            std::string::npos);
+        FO4HDR_CHECK(saved.find(former) == std::string::npos);
+    }
 
     auto precise = settings;
     precise.exposureEv = 0.123456;
@@ -231,9 +249,9 @@ void CheckSdrProfileRewrite()
 
     // An existing SDR section is rewritten in place; foreign and HDR-only names stay.
     constexpr std::string_view existing =
-        "[SdrImage]\nExposureEV=1\nColorGradingMethod=NativeReference\nThirdParty=kept\n";
+        "[SdrImage]\nExposureEV=1\nColorGradingMethod=Affine\nThirdParty=kept\n";
     FO4HDR_CHECK(RewriteHdrSettingsIni(existing, profiles, {}).find(
-        "[SdrImage]\nExposureEV=-0.5\nColorGradingMethod=NativeReference\nThirdParty=kept\n") !=
+        "[SdrImage]\nExposureEV=-0.5\nColorGradingMethod=Affine\nThirdParty=kept\n") !=
         std::string::npos);
     // Position-only saves leave the SDR sections untouched.
     FO4HDR_CHECK(RewriteHdrWindowPositionIni(existing, 1, 2).find("ExposureEV=1\n") !=
@@ -254,7 +272,7 @@ void TestSettingsPersistenceRewrite()
         .gt7ToeStrength = 1.4,
         .gt7ShoulderStart = 0.52,
         .gt7ColorBlend = 0.3};
-    settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingMethod = ColorGradingMethod::affine;
     settings.colorGradingCurve = ColorGradingCurve::srgb;
     settings.displayPeakNits = 430.0;
     settings.uiPaperWhiteNits = 180.0;
@@ -293,7 +311,7 @@ void TestSettingsPersistenceRewrite()
     settings.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         original, {settings}, interfaceSettings) == original);
-    settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingMethod = ColorGradingMethod::affine;
     settings.colorGradingCurve = static_cast<ColorGradingCurve>(0xFF);
     FO4HDR_CHECK(RewriteHdrSettingsIni(
         original, {settings}, interfaceSettings) == original);
@@ -416,7 +434,7 @@ PersistenceFixture CreatePersistenceFixture()
         .gt7ToeStrength = 1.5,
         .gt7ShoulderStart = 0.5,
         .gt7ColorBlend = 0.2};
-    settings.colorGradingMethod = ColorGradingMethod::nativeReference;
+    settings.colorGradingMethod = ColorGradingMethod::affine;
     settings.colorGradingCurve = ColorGradingCurve::srgb;
     HdrInterfaceSettings interfaceSettings{};
     interfaceSettings.scale = 1.5;

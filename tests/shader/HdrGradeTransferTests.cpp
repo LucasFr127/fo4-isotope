@@ -97,7 +97,7 @@ struct HdrGradeTransferSample
     const HdrGradeTransferCase& test, std::uint32_t curve, double strength)
 {
     return curve == kHdrGradeCurveSrgb ?
-        TransferRadialSrgbGrade(test.scene, test.codes, test.black, strength) :
+        TransferRgbRatioSrgbGrade(test.scene, test.codes, test.black, strength) :
         DecodeAndTransferNativeGrade(test.scene, test.codes, strength);
 }
 
@@ -109,7 +109,7 @@ void CheckHdrGradeTransferMath(const Float4& pixel,
     const double tolerance = 3.0e-5 * std::max({expected[0], expected[1], expected[2], 1.0e-12});
     for (std::size_t c = 0; c < 3; ++c) {
         const bool parity = std::abs(actual[c] - expected[c]) <= tolerance;
-        if (!parity) std::cerr << "Radial grading curve=" << sample.curve << " case=" << sample.index
+        if (!parity) std::cerr << "RGB Ratio grading curve=" << sample.curve << " case=" << sample.index
             << " strength=" << sample.strength << " channel=" << c
             << " expected=" << expected[c] << " actual=" << actual[c] << '\n';
         FO4HDR_WARP_CHECK(parity);
@@ -150,7 +150,7 @@ struct HdrGradeTransferTarget
     device.context->CopyResource(output.staging.Get(), output.texture.Get());
     D3D11_MAPPED_SUBRESOURCE mapped{};
     CheckHresult(device.context->Map(output.staging.Get(), 0,
-        D3D11_MAP_READ, 0, &mapped), "Radial grading math readback");
+        D3D11_MAP_READ, 0, &mapped), "RGB Ratio grading math readback");
     const auto pixel = *static_cast<const Float4*>(mapped.pData);
     device.context->Unmap(output.staging.Get(), 0);
     return pixel;
@@ -247,7 +247,7 @@ void CheckHdrGradeIntegrationChannels(const HdrGradeRgb& source,
         // Includes FP32 gamma/decode arithmetic; sampler error has
         // already been isolated by observing the actual samples.
         const double error = std::abs(actual[c] - expected[c]);
-        if (error > tolerance) std::cerr << "Radial grading integration curve=" << sample.curve
+        if (error > tolerance) std::cerr << "RGB Ratio grading integration curve=" << sample.curve
             << " black_luts=" << sample.black << " weights=" << sample.mix[0] << ',' << sample.mix[1]
             << ',' << sample.mix[2] << ',' << sample.mix[3] << " strength=" << sample.strength
             << " blacks=" << sample.blacks << " pixel=" << sample.pixel << " channel=" << c

@@ -27,7 +27,7 @@ namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
 
 ReplacementShaderSet g_replacements;
-const char* g_nativeReferenceStatus = "Waiting for a color grading draw.";
+const char* g_affineStatus = "Waiting for a color grading draw.";
 
 struct ReplacementProgram
 {
@@ -96,13 +96,13 @@ void ResetReplacementShaders() noexcept
 {
     g_replacements.configurationReady = false;
     g_replacements.configurationGeneration = 0;
-    g_nativeReferenceStatus = "Waiting for a color grading draw.";
+    g_affineStatus = "Waiting for a color grading draw.";
     g_replacements.toneMapA.Reset();
     g_replacements.toneMapB.Reset();
     g_replacements.toneMapNewA.Reset();
     g_replacements.toneMapNewB.Reset();
     g_replacements.lut.Reset();
-    ResetNativeReferenceResources(g_replacements.nativeReference);
+    ResetAffineResources(g_replacements.affine);
     g_replacements.temporalAa.Reset();
     g_replacements.temporalAa2.Reset();
     g_replacements.fxaa.Reset();
@@ -330,8 +330,8 @@ void PublishReplacementConfiguration(
     if (device == nullptr) return false;
     ReplacementShaderSet candidate;
     if (!CreateReplacementPrograms(device, candidate, kReplacementPrograms)) return false;
-    // A failed optional grading allocation keeps the Radial renderer available.
-    (void)BuildNativeReferenceResources(device, candidate.nativeReference);
+    // A failed optional grading allocation keeps the RGB Ratio renderer available.
+    (void)BuildAffineResources(device, candidate.affine);
     return PublishReplacementSet(device, candidate);
 }
 

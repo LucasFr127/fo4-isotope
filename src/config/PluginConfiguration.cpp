@@ -550,8 +550,9 @@ PluginConfigurationError ParseSdrAlgorithm(std::string_view value,
 PluginConfigurationError ParseGradingMethod(std::string_view value,
     ColorGradingMethod& target) noexcept
 {
-    if (value == "Radial") target = ColorGradingMethod::radial;
-    else if (value == "NativeReference") target = ColorGradingMethod::nativeReference;
+    // Radial and NativeReference are the former names; a full save rewrites them.
+    if (value == "RgbRatio" || value == "Radial") target = ColorGradingMethod::rgbRatio;
+    else if (value == "Affine" || value == "NativeReference") target = ColorGradingMethod::affine;
     else return PluginConfigurationError::unsupportedColorGradingMethod;
     return PluginConfigurationError::none;
 }
@@ -838,8 +839,8 @@ std::string_view ToString(
 {
     switch (method)
     {
-    case ColorGradingMethod::radial: return "Radial";
-    case ColorGradingMethod::nativeReference: return "NativeReference";
+    case ColorGradingMethod::rgbRatio: return "RgbRatio";
+    case ColorGradingMethod::affine: return "Affine";
     }
     return "unknown";
 }

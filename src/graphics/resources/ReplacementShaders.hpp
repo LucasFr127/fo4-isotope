@@ -6,7 +6,7 @@
 #include "../OperatorLutWorker.hpp"
 #include "../RenoDxShaderIdentity.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
-#include "NativeReferenceResources.hpp"
+#include "AffineResources.hpp"
 #include <d3d11.h>
 #include <wrl/client.h>
 
@@ -19,7 +19,7 @@ struct ReplacementShaderSet
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewA;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewB;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> lut;
-    NativeReferenceResources nativeReference;
+    AffineResources affine;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> temporalAa;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> temporalAa2;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> fxaa;
@@ -48,7 +48,7 @@ struct ReplacementShaderSet
 };
 
 extern ReplacementShaderSet g_replacements;
-extern const char* g_nativeReferenceStatus;
+extern const char* g_affineStatus;
 bool ReplacementProgramsReady() noexcept;
 bool ReplacementConstantBuffersReady() noexcept;
 bool ReplacementSetMatchesConfiguration() noexcept;

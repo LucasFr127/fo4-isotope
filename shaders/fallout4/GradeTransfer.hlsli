@@ -102,7 +102,7 @@ float Fo4HdrNativeCurve(float value)
         (value * (0.15f * value + 0.5f) + 0.06f);
 }
 
-float Fo4HdrRadialGuideScale(float peak)
+float Fo4HdrRgbRatioGuideScale(float peak)
 {
     // Factor f(peak)/peak so the inverse scale remains finite at exact black.
     // Only lookup exposure is bounded at native white; scene RGB is retained.
@@ -112,13 +112,13 @@ float Fo4HdrRadialGuideScale(float peak)
         ((value * (0.15f * value + 0.5f) + 0.06f) * Fo4HdrNativeCurve(11.2f));
 }
 
-float3 Fo4HdrRadialCoordinates(float3 scene)
+float3 Fo4HdrRgbRatioCoordinates(float3 scene)
 {
-    return pow(saturate(scene * Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene))),
+    return pow(saturate(scene * Fo4HdrRgbRatioGuideScale(Fo4HdrLargestGradeChannel(scene))),
         1.0f / 2.2f);
 }
 
-float3 Fo4HdrTransferRadialGrade(float3 input, float3 weightedCodes, float strength)
+float3 Fo4HdrTransferRgbRatioGrade(float3 input, float3 weightedCodes, float strength)
 {
     const float3 scene = Fo4HdrGradeCleanScene(input);
     const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
@@ -126,16 +126,16 @@ float3 Fo4HdrTransferRadialGrade(float3 input, float3 weightedCodes, float stren
     if (!(amount > 0.0f)) return scene;
 
     // Match the lookup's gamma encoding, then restore its common RGB scale.
-    // This radial extension also scales authored black lift with scene peak.
+    // This ratio extension also scales authored black lift with scene peak.
     const float3 decoded = pow(Fo4HdrGradeCleanScene(weightedCodes), 2.2f);
-    const float3 restored = decoded / Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
+    const float3 restored = decoded / Fo4HdrRgbRatioGuideScale(Fo4HdrLargestGradeChannel(scene));
     // Uniform scaling can round its maximum one FP32 ULP above the FP16 limit.
     const float3 endpoint = min(restored * min(1.0f,
         65504.0f / max(Fo4HdrLargestGradeChannel(restored), 65504.0f)), 65504.0f);
     return lerp(scene, endpoint, amount);
 }
 
-float3 Fo4HdrTransferRadialGradeSrgb(float3 input, float3 weightedCodes,
+float3 Fo4HdrTransferRgbRatioGradeSrgb(float3 input, float3 weightedCodes,
     float3 blackCodes, float strength)
 {
     const float3 scene = Fo4HdrGradeCleanScene(input);
@@ -147,7 +147,7 @@ float3 Fo4HdrTransferRadialGradeSrgb(float3 input, float3 weightedCodes,
     // ratio collapses near black and erases lift and cross-channel grading.
     // Keep the gamma-2.2 response above the look's black, rescale it by one
     // luminance tonal ratio, and add the sRGB-decoded black separately.
-    const float scale = Fo4HdrRadialGuideScale(Fo4HdrLargestGradeChannel(scene));
+    const float scale = Fo4HdrRgbRatioGuideScale(Fo4HdrLargestGradeChannel(scene));
     const float3 codes = Fo4HdrGradeCleanScene(weightedCodes);
     const float3 black = Fo4HdrGradeCleanScene(blackCodes);
     const float3 above = Fo4HdrGradeDecode(codes, Fo4HdrGradeCurveGamma22) -
@@ -155,7 +155,7 @@ float3 Fo4HdrTransferRadialGradeSrgb(float3 input, float3 weightedCodes,
     const float3 blackLight = Fo4HdrGradeDecode(black, Fo4HdrGradeCurveSrgb);
     const float response = dot(abs(above), Fo4HdrGradeLuma);
     const float reference = dot(Fo4HdrGradeDecode(
-        Fo4HdrRadialCoordinates(scene), Fo4HdrGradeCurveSrgb), Fo4HdrGradeLuma);
+        Fo4HdrRgbRatioCoordinates(scene), Fo4HdrGradeCurveSrgb), Fo4HdrGradeLuma);
     // The above-black term vanishes as the scene approaches black, so exact
     // black keeps only the look's black even if its codes differ from texel 0.
     const float tonalRatio = response > 0.0f && reference > 0.0f

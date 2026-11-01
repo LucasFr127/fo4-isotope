@@ -123,7 +123,7 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
 {
     RetireFrameTrace();
     if (!retainPresentationBuffer) SetSharedUiPauseResourcesReady(false);
-    g_nativeReferenceStatus = "Waiting for a color grading draw.";
+    g_affineStatus = "Waiting for a color grading draw.";
     CloseArmorEncodedCompositionForLifecycle();
     UnbindPresentationProxy();
     ResetSceneTracking();

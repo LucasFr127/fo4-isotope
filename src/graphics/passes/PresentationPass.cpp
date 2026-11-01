@@ -158,7 +158,7 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.threadCompatible = g_liveSettingsThreadCompatible.load();
     result.pendingAlgorithm = g_pendingLutRequest.algorithm;
     result.pendingPeakNits = g_pendingLutRequest.displayPeakNits;
-    result.nativeReferenceStatus = g_nativeReferenceStatus;
+    result.affineStatus = g_affineStatus;
     result.armorEncodedStatus = g_armor.armorEncodedStatus;
     result.rendererFailure = GraphicsObservationFailureName(static_cast<GraphicsObservationFailure>(g_evidence.failure.load()));
     result.resourceGeneration = g_evidence.resourceGeneration.load();

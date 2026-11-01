@@ -6,7 +6,7 @@
 
 namespace fo4hdr {
 
-struct NativeReferenceResources
+struct AffineResources
 {
     Microsoft::WRL::ComPtr<ID3D11PixelShader> shader;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> preblendShader;
@@ -15,11 +15,11 @@ struct NativeReferenceResources
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> preblendUav;
 };
 
-[[nodiscard]] bool BuildNativeReferenceResources(ID3D11Device* device,
-    NativeReferenceResources& resources) noexcept;
+[[nodiscard]] bool BuildAffineResources(ID3D11Device* device,
+    AffineResources& resources) noexcept;
 
-void ResetNativeReferenceResources(NativeReferenceResources& resources) noexcept;
+void ResetAffineResources(AffineResources& resources) noexcept;
 
-[[nodiscard]] bool NativeReferenceResourcesReady(const NativeReferenceResources& resources) noexcept;
+[[nodiscard]] bool AffineResourcesReady(const AffineResources& resources) noexcept;
 
 } // namespace fo4hdr

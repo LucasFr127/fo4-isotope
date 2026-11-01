@@ -3,7 +3,7 @@
 #include "ImageControls.hlsli"
 #include "SelectiveColor.hlsli"
 #include "GradeTransfer.hlsli"
-#include "NativeReferenceGrade.hlsli"
+#include "AffineGrade.hlsli"
 
 Texture2D<float4> SceneTexture : register(t0);
 Texture3D<float4> OperatorLut : register(t7);
@@ -23,10 +23,10 @@ float4 main(float4 position : SV_Position, float2 uv : TEXCOORD0) : SV_Target0
     // the decode helpers compiles every decode to both curves and a select.
     float3 result;
     [branch] if (Fo4HdrColorGradingCurve == Fo4HdrGradeCurveSrgb)
-        result = Fo4HdrNativeReferenceGrade(
+        result = Fo4HdrAffineGrade(
             hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrGradeCurveSrgb);
     else
-        result = Fo4HdrNativeReferenceGrade(
+        result = Fo4HdrAffineGrade(
             hdrLinear, Fo4HdrVanillaGradeStrength, Fo4HdrGradeCurveGamma22);
     float luminanceRemoval;
     float colorRemoval;

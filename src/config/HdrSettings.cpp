@@ -317,7 +317,7 @@ namespace {
 
 HdrSettingsValidationError ValidateColorGrading(const HdrSettings& settings) noexcept
 {
-    constexpr std::array methods{ColorGradingMethod::radial, ColorGradingMethod::nativeReference};
+    constexpr std::array methods{ColorGradingMethod::rgbRatio, ColorGradingMethod::affine};
     if (std::ranges::find(methods, settings.colorGradingMethod) == methods.end())
         return HdrSettingsValidationError::unsupportedColorGradingMethod;
     constexpr std::array curves{ColorGradingCurve::gamma22, ColorGradingCurve::srgb};

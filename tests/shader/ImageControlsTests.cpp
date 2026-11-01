@@ -506,14 +506,14 @@ void VerifyImageControls(Device &device, ID3D11VertexShader *vertexShader, ID3D1
                  "checked\n";
 }
 
-struct RadialRemovalPixel
+struct RgbRatioRemovalPixel
 {
     Float4 source, baseline, actual;
     std::array<float, 2> removal;
     std::size_t index;
 };
 
-void CheckRadialRemovalInvariants(const RadialRemovalPixel &test, const NativeGradeRgb &hdr,
+void CheckRgbRatioRemovalInvariants(const RgbRatioRemovalPixel &test, const NativeGradeRgb &hdr,
                                   const std::array<float, 3> &channels, const NativeGradeRgb &expected)
 {
     constexpr NativeGradeRgb luma{0.212500006, 0.715399981, 0.0720999986};
@@ -526,7 +526,7 @@ void CheckRadialRemovalInvariants(const RadialRemovalPixel &test, const NativeGr
         FO4HDR_WARP_CHECK(std::abs(dot(channels) - dot(hdr)) <= 3.0e-5 * std::max(1.0, dot(hdr)));
 }
 
-void CheckRadialRemovalPixel(const RadialRemovalPixel &test)
+void CheckRgbRatioRemovalPixel(const RgbRatioRemovalPixel &test)
 {
     const NativeGradeRgb hdr{test.source.red, test.source.green, test.source.blue};
     const NativeGradeRgb graded{test.baseline.red, test.baseline.green, test.baseline.blue};
@@ -544,7 +544,7 @@ void CheckRadialRemovalPixel(const RadialRemovalPixel &test)
             FO4HDR_WARP_CHECK(channels[channel] == hdr[channel]);
     }
     FO4HDR_WARP_CHECK(test.actual.alpha == test.source.alpha);
-    CheckRadialRemovalInvariants(test, hdr, channels, expected);
+    CheckRgbRatioRemovalInvariants(test, hdr, channels, expected);
 }
 
 void CheckPureGainRemoval(const std::array<Float4, kWidth> &corpus)
@@ -563,7 +563,7 @@ void CheckPureGainRemoval(const std::array<Float4, kWidth> &corpus)
 }
 
 template <class Render>
-void CheckRadialBlackRemoval(const Render &render, const std::array<Float4, kWidth> &corpus,
+void CheckRgbRatioBlackRemoval(const Render &render, const std::array<Float4, kWidth> &corpus,
                              const std::array<std::array<float, 4>, 3> &looks)
 {
     const auto tintedBlack = render(looks[1], 1, 0, 0);
@@ -584,7 +584,7 @@ void CheckRadialBlackRemoval(const Render &render, const std::array<Float4, kWid
     FO4HDR_WARP_CHECK(std::abs(restoredCrush[1].blue - corpus[1].blue) <= 1.0e-7F);
 }
 
-template <class Render> void CheckRadialRemovalScenarios(const Render &render, const std::array<Float4, kWidth> &corpus)
+template <class Render> void CheckRgbRatioRemovalScenarios(const Render &render, const std::array<Float4, kWidth> &corpus)
 {
     constexpr std::array<std::array<float, 4>, 3> looks{{{{0.5F, 0, 0, 0}}, {{0, 1, 0, 0}}, {{0, 0, 0, 0}}}};
     constexpr std::array<std::array<float, 2>, 5> removals{{{{0, 0}}, {{0.35F, 0.65F}}, {{1, 0}}, {{0, 1}}, {{1, 1}}}};
@@ -594,17 +594,17 @@ template <class Render> void CheckRadialRemovalScenarios(const Render &render, c
             for (const auto removal : removals) {
                 const auto actual = render(weights, strength, removal[0], removal[1]);
                 for (std::size_t index = 0; index < kWidth; ++index) {
-                    CheckRadialRemovalPixel({corpus[index], baseline[index], actual[index], removal, index});
+                    CheckRgbRatioRemovalPixel({corpus[index], baseline[index], actual[index], removal, index});
                 }
             }
         }
 
     CheckPureGainRemoval(corpus);
 
-    CheckRadialBlackRemoval(render, corpus, looks);
+    CheckRgbRatioBlackRemoval(render, corpus, looks);
 }
 
-void VerifyRadialVanillaGradeRemoval(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler)
+void VerifyRgbRatioVanillaGradeRemoval(Device &device, ID3D11VertexShader *vertexShader, ID3D11SamplerState *sceneSampler)
 {
     constexpr std::array<Float4, kWidth> corpus{{{0, 0, 0, 0.125F},
                                                  {0.00001F, 0.0000025F, 0, 0.25F},
@@ -644,14 +644,14 @@ void VerifyRadialVanillaGradeRemoval(Device &device, ID3D11VertexShader *vertexS
         device.context->CopyResource(output.staging.Get(), output.texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         CheckHresult(device.context->Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
-                     "Map radial grade removal");
+                     "Map RGB Ratio grade removal");
         std::array<Float4, kWidth> result{};
         std::copy_n(static_cast<const Float4 *>(mapped.pData), kWidth, result.begin());
         device.context->Unmap(output.staging.Get(), 0);
         return result;
     };
 
-    CheckRadialRemovalScenarios(render, corpus);
+    CheckRgbRatioRemovalScenarios(render, corpus);
 }
 
 struct LutProfileRemovalCase
@@ -703,7 +703,7 @@ float MaximumProfileWeight(const std::array<float, 4> &weights)
 
 struct LutProfileReadback
 {
-    bool nativeMethod;
+    bool affineMethod;
     std::size_t caseIndex;
     const std::array<float, 2> &expectedRemoval;
     const LutProfileRemovalCase &test;
@@ -721,7 +721,7 @@ struct LutProfileReadback
             FO4HDR_WARP_CHECK(std::isfinite(actualChannels[channel]));
             if (!mismatchReported && difference > tolerance) {
                 mismatchReported = true;
-                std::cerr << "LUT profile mismatch method=" << (nativeMethod ? "native" : "radial")
+                std::cerr << "LUT profile mismatch method=" << (affineMethod ? "affine" : "rgb-ratio")
                           << " case=" << caseIndex << " removal=" << expectedRemoval[0] << ',' << expectedRemoval[1]
                           << " pixel=" << pixel << " channel=" << channel << " actual=" << actualChannels[channel]
                           << " reference=" << referenceChannels[channel] << " difference=" << difference
@@ -752,13 +752,13 @@ void CheckLutProfileScenarios(const Render &render, const std::array<Float4, kWi
 {
     std::array<std::array<float, 2>, 2> permutationResults{};
     std::array<std::array<float, 2>, 2> scaleResults{};
-    for (const bool nativeMethod : {false, true})
+    for (const bool affineMethod : {false, true})
         for (std::size_t caseIndex = 0; caseIndex < cases.size(); ++caseIndex) {
             const auto &test = cases[caseIndex];
             const auto expectedRemoval = ResolveLutProfileRemovalOracle(test);
-            const auto actual = render(nativeMethod, test, test.active, test.global);
-            const auto reference = render(nativeMethod, test, false, expectedRemoval);
-            LutProfileReadback{nativeMethod, caseIndex, expectedRemoval, test, corpus, actual, reference}.Verify();
+            const auto actual = render(affineMethod, test, test.active, test.global);
+            const auto reference = render(affineMethod, test, false, expectedRemoval);
+            LutProfileReadback{affineMethod, caseIndex, expectedRemoval, test, corpus, actual, reference}.Verify();
             if (caseIndex == 4 || caseIndex == 5)
                 permutationResults[caseIndex - 4] = expectedRemoval;
             if (caseIndex == 7 || caseIndex == 8)
@@ -810,8 +810,8 @@ struct LutProfileRenderer
     const Texture &scene;
     const Texture3D &look;
     const ComPtr<ID3D11SamplerState> &linear;
-    const ComPtr<ID3D11PixelShader> &radial;
-    const ComPtr<ID3D11PixelShader> &native;
+    const ComPtr<ID3D11PixelShader> &rgbRatio;
+    const ComPtr<ID3D11PixelShader> &affine;
     const ComPtr<ID3D11ComputeShader> &prepare;
     Texture &output;
     Texture3D &prepared;
@@ -836,7 +836,7 @@ struct LutProfileRenderer
         device.context->CSSetShader(nullptr, nullptr, 0);
     }
 
-    std::array<Float4, kWidth> Render(bool nativeMethod, const LutProfileRemovalCase &test, bool profilesActive,
+    std::array<Float4, kWidth> Render(bool affineMethod, const LutProfileRemovalCase &test, bool profilesActive,
                                       const std::array<float, 2> &global) const
     {
         LutConstants lut{};
@@ -853,19 +853,19 @@ struct LutProfileRenderer
         settings.lutProfilesActive = profilesActive ? 1U : 0U;
         const auto constants = CreateConstantBuffer(*device.device.Get(), settings);
 
-        if (nativeMethod)
+        if (affineMethod)
             Prepare(lutBuffer.Get());
 
-        auto *additionalLook = nativeMethod ? nullptr : look.srv.Get();
-        auto *lookSampler = nativeMethod ? nullptr : linear.Get();
+        auto *additionalLook = affineMethod ? nullptr : look.srv.Get();
+        auto *lookSampler = affineMethod ? nullptr : linear.Get();
         std::array<ID3D11ShaderResourceView *, 8> resources{
-            scene.srv.Get(), nullptr,        nullptr,        nativeMethod ? prepared.srv.Get() : look.srv.Get(),
+            scene.srv.Get(), nullptr,        nullptr,        affineMethod ? prepared.srv.Get() : look.srv.Get(),
             additionalLook,  additionalLook, additionalLook, nullptr};
         std::array<ID3D11SamplerState *, 8> samplers{sceneSampler, nullptr,     nullptr,     lookSampler,
                                                      lookSampler,  lookSampler, lookSampler, nullptr};
         auto *target = output.rtv.Get();
         DrawFullscreen(*device.context.Get(),
-                       {vertexShader, nativeMethod ? native.Get() : radial.Get(), lutBuffer.Get(), constants.Get(),
+                       {vertexShader, affineMethod ? affine.Get() : rgbRatio.Get(), lutBuffer.Get(), constants.Get(),
                         resources.data(), 8, samplers.data(), 8, &target, 1});
         device.context->CopyResource(output.staging.Get(), output.texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -893,9 +893,9 @@ void VerifyLutProfileGradeRemoval(Device &device, ID3D11VertexShader *vertexShad
         CreateTexture(*device.device.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_SHADER_RESOURCE, &sceneData);
     const auto look = CreateNativeGrade(*device.device.Get(), 1);
     const auto linear = CreateClampLinearSampler(*device.device.Get());
-    const auto radial = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kCreativeGradeLut);
-    const auto native = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kNativeReferenceGrade);
-    const auto prepare = CreateShader(*device.device.Get(), fo4hdr::generated::kNativeReferencePrepare);
+    const auto rgbRatio = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kCreativeGradeLut);
+    const auto affine = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kAffineGrade);
+    const auto prepare = CreateShader(*device.device.Get(), fo4hdr::generated::kAffinePrepare);
     auto output = CreateTexture(*device.device.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_RENDER_TARGET);
 
     D3D11_TEXTURE3D_DESC preparedDescription{};
@@ -917,11 +917,11 @@ void VerifyLutProfileGradeRemoval(Device &device, ID3D11VertexShader *vertexShad
 
     const auto cases = LutProfileRemovalCases();
 
-    const LutProfileRenderer renderer{device, vertexShader, sceneSampler, scene,  look,     linear,
-                                      radial, native,       prepare,      output, prepared, preparedUav};
-    const auto render = [&](bool nativeMethod, const LutProfileRemovalCase &test, bool active,
+    const LutProfileRenderer renderer{device,   vertexShader, sceneSampler, scene,  look,     linear,
+                                      rgbRatio, affine,       prepare,      output, prepared, preparedUav};
+    const auto render = [&](bool affineMethod, const LutProfileRemovalCase &test, bool active,
                             const std::array<float, 2> &global) {
-        return renderer.Render(nativeMethod, test, active, global);
+        return renderer.Render(affineMethod, test, active, global);
     };
 
     CheckLutProfileScenarios(render, corpus, cases);

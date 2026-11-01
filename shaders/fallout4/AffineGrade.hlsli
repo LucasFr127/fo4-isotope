@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
-#ifndef FO4HDR_NATIVE_REFERENCE_GRADE_HLSLI
-#define FO4HDR_NATIVE_REFERENCE_GRADE_HLSLI
+#ifndef FO4HDR_AFFINE_GRADE_HLSLI
+#define FO4HDR_AFFINE_GRADE_HLSLI
 
 #include "GradeTransfer.hlsli"
 
@@ -117,7 +117,7 @@ float4 ChromaProbe(float3 H, float3 R, float epsilon, float pivot, out float alo
     return float4(pivot + radius * direction, magnitude / radius);
 }
 
-float3 NativeReferenceTransfer(float3 H, float3 R, float3 G, float3 N, float3 B,
+float3 AffineTransfer(float3 H, float3 R, float3 G, float3 N, float3 B,
     float3 P, float3 Q, float along, float across, float3 U)
 {
     const float referenceY = dot(R, Fo4HdrGradeLuma);
@@ -148,7 +148,7 @@ float3 NativeNeutralCodes(float code)
     return mad(t, mad(t, mad(t, d, c), b), a);
 }
 
-float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
+float3 Fo4HdrAffineGrade(float3 input, float strength, uint curve)
 {
     const float3 scene = Fo4HdrGradeCleanScene(input);
     const float amount = (asuint(strength) & 0x7fffffffu) > 0x7f800000u
@@ -176,7 +176,7 @@ float3 Fo4HdrNativeReferenceGrade(float3 input, float strength, uint curve)
     [branch] if (probe.w > 0.0f)
         second = Fo4HdrGradeCleanScene(Fo4HdrGradeDecode(
             Fo4HdrGradeCleanScene(NativeWeightedCodes(probeCodes)), curve));
-    const float3 endpoint = NativeReferenceTransfer(scene, reference, graded, neutral, black,
+    const float3 endpoint = AffineTransfer(scene, reference, graded, neutral, black,
         probeReference, second, along, probe.w, neutralReference);
     // H + amount*(endpoint-H) loses a small constant look at large H.
     // Preserve the full-strength endpoint before allowing arithmetic fusion.

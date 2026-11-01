@@ -7,6 +7,8 @@
 #include "SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -24,7 +26,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);
-    FO4HDR_CHECK(shipped.value.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(shipped.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
     FO4HDR_CHECK(shipped.value.colorGradingCurve == ColorGradingCurve::gamma22);
     FO4HDR_CHECK(shipped.value.exposureEv == 0.0);
     FO4HDR_CHECK(shipped.value.displayPeakNits == 1000.0);
@@ -61,6 +63,12 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!shipped.value.forceHdrSwapChainFailure);
     FO4HDR_CHECK(shipped.value.sdrEnabled);
     FO4HDR_CHECK(shipped.value.sdrSettings == DefaultSdrSettings());
+    // The parser still accepts the former method names; the template must not use them.
+    std::ifstream input("config/FO4Isotope.ini", std::ios::binary);
+    const std::string text(std::istreambuf_iterator<char>(input), {});
+    FO4HDR_CHECK(text.find("ColorGradingMethod=RgbRatio") != std::string::npos);
+    FO4HDR_CHECK(text.find("Radial") == std::string::npos);
+    FO4HDR_CHECK(text.find("NativeReference") == std::string::npos);
 }
 
 [[nodiscard]] PluginConfigurationError SdrConfigurationError(std::string_view extra)
@@ -203,9 +211,9 @@ void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
     FO4HDR_CHECK(sourceContrastReloaded.valid);
     FO4HDR_CHECK(
         sourceContrastReloaded.value.toneMapperParameters.agxContrast == 2.4);
-    FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::radial);
-    for (const auto method : {ColorGradingMethod::radial,
-             ColorGradingMethod::nativeReference})
+    FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
+    for (const auto method : {ColorGradingMethod::rgbRatio,
+             ColorGradingMethod::affine})
     {
         auto settings = static_cast<HdrSettings>(parsed.value);
         settings.colorGradingMethod = method;
@@ -219,7 +227,7 @@ void TestDefaultRoundTrip(const PluginConfigurationResult& parsed)
         const auto reset = ParsePluginConfiguration(
             RewriteHdrSettingsIni(saved, {settings}, {}));
         FO4HDR_CHECK(reset.valid);
-        FO4HDR_CHECK(reset.value.colorGradingMethod == ColorGradingMethod::radial);
+        FO4HDR_CHECK(reset.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
     }
 }
 
@@ -334,7 +342,7 @@ void TestExtendedConfiguration()
     parsed = ParsePluginConfiguration(
         ExtendedProductionConfiguration());
     FO4HDR_CHECK(parsed.valid);
-    FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::nativeReference);
+    FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::affine);
     FO4HDR_CHECK(parsed.value.colorGradingCurve == ColorGradingCurve::srgb);
     FO4HDR_CHECK(parsed.value.toneMapperParameters.acesLookStrength == 0.25);
     FO4HDR_CHECK(parsed.value.toneMapperParameters.agxMiddleGrayEv == -0.25);
@@ -402,7 +410,8 @@ void TestConfigurationCurveErrors()
 
 void TestConfigurationMethodErrors()
 {
-    for (const auto token : {"Independent", "Native Reference", "radial", "999"})
+    for (const auto token : {"Independent", "Native Reference", "radial", "RGB Ratio", "affine",
+             "999"})
     {
         const auto parsed = ParsePluginConfiguration(
             MinimalProductionConfiguration() +
@@ -410,13 +419,13 @@ void TestConfigurationMethodErrors()
         FO4HDR_CHECK(!parsed.valid);
         FO4HDR_CHECK(parsed.error ==
             PluginConfigurationError::unsupportedColorGradingMethod);
-        FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::radial);
+        FO4HDR_CHECK(parsed.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
         FO4HDR_CHECK(!parsed.value.productionRequested);
     }
     const auto duplicateMethod = ParsePluginConfiguration(
         MinimalProductionConfiguration() +
-        "\n[Image]\nColorGradingMethod=Radial\n"
-        "ColorGradingMethod=NativeReference\n");
+        "\n[Image]\nColorGradingMethod=RgbRatio\n"
+        "ColorGradingMethod=Affine\n");
     FO4HDR_CHECK(!duplicateMethod.valid);
     FO4HDR_CHECK(duplicateMethod.error == PluginConfigurationError::duplicateKey);
     const auto duplicateParameter = ParsePluginConfiguration(

@@ -22,7 +22,7 @@
 #include "ShaderTestSuite.hpp"
 #include <d3d11_1.h>
 #include "reference/ImageControlReference.hpp"
-#include "passes/NativeReferenceGradePass.hpp"
+#include "passes/AffineGradePass.hpp"
 
 namespace fo4hdr::tests::gpu {
 
@@ -65,7 +65,7 @@ NativeGradeRgb ReferenceNeutralExpected(const std::array<Float4, 16 * 16 * 16>& 
     return expected;
 }
 
-void CheckNativeReferenceNeutralCoefficients(ID3D11DeviceContext& context,
+void CheckAffineNeutralCoefficients(ID3D11DeviceContext& context,
     ID3D11Texture3D& readback, ID3D11Texture3D& prepared,
     const std::array<Float4, 16 * 16 * 16>& nodes)
 {
@@ -89,13 +89,13 @@ void CheckNativeReferenceNeutralCoefficients(ID3D11DeviceContext& context,
     context.Unmap(&readback, 0);
 }
 
-bool IsNativeReferenceContained(double value)
+bool IsAffineContained(double value)
 {
     return std::isfinite(value) && value >= 0 && value <= 65504;
 }
 
 template <class Render>
-void VerifyNativeReferenceHostile(const Render& render, ID3D11PixelShader* shader,
+void VerifyAffineHostile(const Render& render, ID3D11PixelShader* shader,
     ToneMapConstants& settings)
 {
     const auto nan = std::numeric_limits<float>::quiet_NaN();
@@ -108,7 +108,7 @@ void VerifyNativeReferenceHostile(const Render& render, ID3D11PixelShader* shade
     const auto contained = render(shader, hostile, settings, nullptr);
     for (std::size_t i = 0; i < kWidth; ++i) {
         for (const float value : {contained[i].red, contained[i].green, contained[i].blue})
-            FO4HDR_WARP_CHECK(IsNativeReferenceContained(value));
+            FO4HDR_WARP_CHECK(IsAffineContained(value));
         FO4HDR_WARP_CHECK(contained[i].alpha == hostile[i].alpha);
     }
     settings.vanillaGradeStrength = nan;
@@ -138,12 +138,12 @@ void QuantizeReferenceLookNodes(std::array<Float4, 16 * 16 * 16>& nodes,
     }
 }
 
-struct NativeReferenceLook
+struct AffineLook
 {
     std::array<Float4, 16 * 16 * 16> nodes{};
     Texture3D look;
 
-    NativeReferenceLook(ID3D11Device& gpu, D3D11_TEXTURE3D_DESC desc, unsigned kind)
+    AffineLook(ID3D11Device& gpu, D3D11_TEXTURE3D_DESC desc, unsigned kind)
     {
         std::array<std::array<std::uint8_t, 4>, 16 * 16 * 16> unormNodes{};
         nodes = MakeReferenceLookNodes(kind);
@@ -159,20 +159,20 @@ struct NativeReferenceLook
             desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
             data = {unormNodes.data(), 16 * 4U, 256 * 4U};
         }
-        CheckHresult(gpu.CreateTexture3D(&desc, &data, &look.texture), "Native reference fixture");
-        CheckHresult(gpu.CreateShaderResourceView(look.texture.Get(), nullptr, &look.srv), "Native reference fixture SRV");
+        CheckHresult(gpu.CreateTexture3D(&desc, &data, &look.texture), "Affine fixture");
+        CheckHresult(gpu.CreateShaderResourceView(look.texture.Get(), nullptr, &look.srv), "Affine fixture SRV");
     }
 };
 
-struct NativeReferenceStrengthSample
+struct AffineStrengthSample
 {
     unsigned kind;
     float strength;
     std::uint32_t curve;
 };
 
-void CheckNativeReferenceKind(double value, double input, unsigned c,
-    const NativeReferenceStrengthSample& sample)
+void CheckAffineKind(double value, double input, unsigned c,
+    const AffineStrengthSample& sample)
 {
     if (sample.kind == 0) FO4HDR_WARP_CHECK(std::abs(value - input) <= 0.0001 + 0.0001 * input);
     if (sample.strength != 1) return;
@@ -184,18 +184,18 @@ void CheckNativeReferenceKind(double value, double input, unsigned c,
     FO4HDR_WARP_CHECK(std::abs(value - black) < 1.0e-4);
 }
 
-void CheckNativeReferenceStrength(const std::array<Float4, kWidth>& actual,
-    const std::array<Float4, kWidth>& full, const NativeReferenceStrengthSample& sample)
+void CheckAffineStrength(const std::array<Float4, kWidth>& actual,
+    const std::array<Float4, kWidth>& full, const AffineStrengthSample& sample)
 {
     for (std::size_t i = 0; i < kWidth; ++i) {
         const NativeGradeRgb input{kReferenceGradeCorpus[i].red, kReferenceGradeCorpus[i].green, kReferenceGradeCorpus[i].blue};
         const NativeGradeRgb end{full[i].red, full[i].green, full[i].blue};
         const NativeGradeRgb value{actual[i].red, actual[i].green, actual[i].blue};
         for (unsigned c = 0; c < 3; ++c) {
-            FO4HDR_WARP_CHECK(IsNativeReferenceContained(value[c]));
+            FO4HDR_WARP_CHECK(IsAffineContained(value[c]));
             FO4HDR_WARP_CHECK(std::abs(value[c] - ((1 - sample.strength) * input[c] + sample.strength * end[c])) <= 2.0e-6 * std::max(1.0, input[c]));
             if (sample.strength == 0) FO4HDR_WARP_CHECK(value[c] == input[c]);
-            CheckNativeReferenceKind(value[c], input[c], c, sample);
+            CheckAffineKind(value[c], input[c], c, sample);
         }
         if (sample.kind == 3 && sample.strength == 1)
             FO4HDR_WARP_CHECK(std::max({value[0], value[1], value[2]}) - std::min({value[0], value[1], value[2]}) < 1.0e-4 * std::max(1.0, input[0]));
@@ -204,7 +204,7 @@ void CheckNativeReferenceStrength(const std::array<Float4, kWidth>& actual,
 }
 
 template <class Render>
-std::array<Float4, kWidth> VerifyNativeReferenceStrength(const Render& render,
+std::array<Float4, kWidth> VerifyAffineStrength(const Render& render,
     ID3D11PixelShader* shader, ToneMapConstants& settings, unsigned kind)
 {
     settings.vanillaGradeStrength = 1;
@@ -212,21 +212,21 @@ std::array<Float4, kWidth> VerifyNativeReferenceStrength(const Render& render,
     for (const float strength : {0.0F, 0.5F, 1.0F}) {
         settings.vanillaGradeStrength = strength;
         const auto actual = render(shader, kReferenceGradeCorpus, settings, nullptr);
-        CheckNativeReferenceStrength(actual, full, {kind, strength, settings.colorGradingCurve});
+        CheckAffineStrength(actual, full, {kind, strength, settings.colorGradingCurve});
     }
     return full;
 }
 
-struct NativeReferenceOperatorTest
+struct AffineOperatorTest
 {
     ID3D11PixelShader* shader;
-    ID3D11PixelShader* radial;
+    ID3D11PixelShader* rgbRatio;
     const std::array<Float4, kWidth>& full;
 };
 
 template <class Render>
-void VerifyNativeReferenceOperators(Device& device, const Render& render,
-    ToneMapConstants& settings, const NativeReferenceOperatorTest& test)
+void VerifyAffineOperators(Device& device, const Render& render,
+    ToneMapConstants& settings, const AffineOperatorTest& test)
 {
     for (const auto mapper : {TestedToneMapper::aces2, TestedToneMapper::agX, TestedToneMapper::gt7}) {
         const auto algorithm = ProductionAlgorithm(mapper);
@@ -249,7 +249,7 @@ void VerifyNativeReferenceOperators(Device& device, const Render& render,
         settings.vanillaGradeStrength = 1;
         const auto actual = render(test.shader, kReferenceGradeCorpus, settings, op.srv.Get());
         settings.vanillaGradeStrength = 0;
-        const auto expected = render(test.radial, test.full, settings, op.srv.Get());
+        const auto expected = render(test.rgbRatio, test.full, settings, op.srv.Get());
         for (std::size_t i = 0; i < kWidth; ++i) {
             FO4HDR_WARP_CHECK(std::abs(actual[i].red - expected[i].red) < 2.0e-5F);
             FO4HDR_WARP_CHECK(std::abs(actual[i].green - expected[i].green) < 2.0e-5F);
@@ -259,14 +259,14 @@ void VerifyNativeReferenceOperators(Device& device, const Render& render,
     }
 }
 
-struct NativeReferencePreparation
+struct AffinePreparation
 {
     ID3D11ComputeShader* shader;
     ID3D11UnorderedAccessView* output;
 };
 
-void PrepareNativeReferenceLook(Device& device, ID3D11ShaderResourceView* look,
-    unsigned kind, const NativeReferencePreparation& preparation)
+void PrepareAffineLook(Device& device, ID3D11ShaderResourceView* look,
+    unsigned kind, const AffinePreparation& preparation)
 {
     LutConstants weights{};
     constexpr std::array<Float4, 7> mixtures{{
@@ -293,14 +293,14 @@ void PrepareNativeReferenceLook(Device& device, ID3D11ShaderResourceView* look,
     device.context->CSSetShader(nullptr, nullptr, 0);
 }
 
-struct NativeReferencePrepared
+struct AffinePrepared
 {
     D3D11_TEXTURE3D_DESC desc{};
     Texture3D prepared;
     ComPtr<ID3D11UnorderedAccessView> preparedUav;
     ComPtr<ID3D11Texture3D> readback;
 
-    explicit NativeReferencePrepared(ID3D11Device& gpu)
+    explicit AffinePrepared(ID3D11Device& gpu)
     {
         desc.Width = 20;
         desc.Height = desc.Depth = 16;
@@ -308,39 +308,39 @@ struct NativeReferencePrepared
         desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-        CheckHresult(gpu.CreateTexture3D(&desc, nullptr, &prepared.texture), "Native reference prepared texture");
-        CheckHresult(gpu.CreateShaderResourceView(prepared.texture.Get(), nullptr, &prepared.srv), "Native reference prepared SRV");
-        CheckHresult(gpu.CreateUnorderedAccessView(prepared.texture.Get(), nullptr, &preparedUav), "Native reference prepared UAV");
+        CheckHresult(gpu.CreateTexture3D(&desc, nullptr, &prepared.texture), "Affine prepared texture");
+        CheckHresult(gpu.CreateShaderResourceView(prepared.texture.Get(), nullptr, &prepared.srv), "Affine prepared SRV");
+        CheckHresult(gpu.CreateUnorderedAccessView(prepared.texture.Get(), nullptr, &preparedUav), "Affine prepared UAV");
         desc.Usage = D3D11_USAGE_STAGING;
         desc.BindFlags = 0;
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-        CheckHresult(gpu.CreateTexture3D(&desc, nullptr, &readback), "Native reference prepared staging");
+        CheckHresult(gpu.CreateTexture3D(&desc, nullptr, &readback), "Affine prepared staging");
         }
 };
 
-std::array<Float4, kWidth> ReadNativeReferenceOutput(ID3D11DeviceContext& context,
+std::array<Float4, kWidth> ReadAffineOutput(ID3D11DeviceContext& context,
     Texture& output)
 {
     context.CopyResource(output.staging.Get(), output.texture.Get());
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    CheckHresult(context.Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map Native Reference grade");
+    CheckHresult(context.Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped), "Map Affine grade");
     std::array<Float4, kWidth> values{};
     std::copy_n(static_cast<const Float4*>(mapped.pData), kWidth, values.begin());
     context.Unmap(output.staging.Get(), 0);
     return values;
 }
 
-struct RadialReferenceDraw
+struct RgbRatioReferenceDraw
 {
     ID3D11VertexShader* vertexShader;
     ID3D11SamplerState* sceneSampler;
     ID3D11SamplerState* lutSampler;
-    ID3D11PixelShader* radial;
+    ID3D11PixelShader* rgbRatio;
     ID3D11ShaderResourceView* look;
 };
 
-[[nodiscard]] std::array<Float4, kWidth> RenderRadialReference(Device& device,
-    Texture& output, const RadialReferenceDraw& draw, const ToneMapConstants& settings)
+[[nodiscard]] std::array<Float4, kWidth> RenderRgbRatioReference(Device& device,
+    Texture& output, const RgbRatioReferenceDraw& draw, const ToneMapConstants& settings)
 {
     D3D11_SUBRESOURCE_DATA data{kReferenceGradeCorpus.data(), sizeof(kReferenceGradeCorpus), 0};
     auto input = CreateTexture(*device.device.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT,
@@ -354,70 +354,70 @@ struct RadialReferenceDraw
     std::array<ID3D11SamplerState*, 8> samplers{draw.sceneSampler, nullptr, nullptr,
         draw.lutSampler, draw.lutSampler, draw.lutSampler, draw.lutSampler, nullptr};
     auto* target = output.rtv.Get();
-    DrawFullscreen(*device.context.Get(), {draw.vertexShader, draw.radial, lutConstants.Get(),
+    DrawFullscreen(*device.context.Get(), {draw.vertexShader, draw.rgbRatio, lutConstants.Get(),
         constants.Get(), resources.data(), 8, samplers.data(), 8, &target, 1});
-    return ReadNativeReferenceOutput(*device.context.Get(), output);
+    return ReadAffineOutput(*device.context.Get(), output);
 }
 
-void CheckNativeReferenceMatchesRadial(const std::array<Float4, kWidth>& nativeReference,
-    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+void CheckAffineMatchesRgbRatio(const std::array<Float4, kWidth>& affine,
+    const std::array<Float4, kWidth>& rgbRatio, std::uint32_t curve)
 {
     // On neutral input both methods transfer the same tonal response for each
     // grading curve. This look has no lifted black, whose scaling differs by design.
-    // Hardware filtering can quantize Radial's fixed-function lookup by one 8-bit
-    // subtexel step, while Native Reference interpolates its nodes in FP32.
-    const auto& native = nativeReference[2];
-    const auto& expected = radial[2];
-    for (const auto [actual, reference] : {std::pair{native.red, expected.red},
-            std::pair{native.green, expected.green}, std::pair{native.blue, expected.blue}}) {
+    // Hardware filtering can quantize RGB Ratio's fixed-function lookup by one 8-bit
+    // subtexel step, while Affine interpolates its nodes in FP32.
+    const auto& affinePixel = affine[2];
+    const auto& expected = rgbRatio[2];
+    for (const auto [actual, reference] : {std::pair{affinePixel.red, expected.red},
+            std::pair{affinePixel.green, expected.green}, std::pair{affinePixel.blue, expected.blue}}) {
         const bool agrees = std::abs(actual - reference) <= 3.0e-3F * reference;
-        if (!agrees) std::cerr << "Native Reference/Radial neutral curve=" << curve
-            << " native=" << actual << " radial=" << reference
+        if (!agrees) std::cerr << "Affine/RGB Ratio neutral curve=" << curve
+            << " affine=" << actual << " rgb_ratio=" << reference
             << " relative=" << std::abs(actual - reference) / reference << '\n';
         FO4HDR_WARP_CHECK(agrees);
     }
 }
 
-void CheckNativeReferenceLiftedBlack(const std::array<Float4, kWidth>& nativeReference,
-    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+void CheckAffineLiftedBlack(const std::array<Float4, kWidth>& affine,
+    const std::array<Float4, kWidth>& rgbRatio, std::uint32_t curve)
 {
-    // Native Reference adds the look's decoded black once; Radial divides it by
-    // the radial scale s. Without those black terms both responses agree at
+    // Affine adds the look's decoded black once; RGB Ratio divides it by
+    // the ratio scale s. Without those black terms both responses agree at
     // exact black and on neutral 0.18 for either grading curve.
     const double black = curve == 1U ? DecodeSrgb(0.03F) : std::pow(static_cast<double>(0.03F), 2.2);
     for (const std::size_t pixel : {std::size_t{0}, std::size_t{2}}) {
-        const auto& native = nativeReference[pixel];
-        const auto& graded = radial[pixel];
-        const double radialBlack = black / NativeGradeScale(kReferenceGradeCorpus[pixel].green);
-        for (const auto [nativeValue, radialValue] : {std::pair{native.red, graded.red},
-                std::pair{native.green, graded.green}, std::pair{native.blue, graded.blue}}) {
-            const double nativeAbove = nativeValue - black;
-            const double radialAbove = radialValue - radialBlack;
-            const bool agrees = std::abs(nativeAbove - radialAbove) <=
-                3.0e-3 * std::abs(nativeAbove) + 1.0e-5 * black;
-            if (!agrees) std::cerr << "Native Reference/Radial lifted black curve=" << curve
-                << " pixel=" << pixel << " native_above=" << nativeAbove
-                << " radial_above=" << radialAbove << '\n';
+        const auto& affinePixel = affine[pixel];
+        const auto& graded = rgbRatio[pixel];
+        const double rgbRatioBlack = black / NativeGradeScale(kReferenceGradeCorpus[pixel].green);
+        for (const auto [affineValue, rgbRatioValue] : {std::pair{affinePixel.red, graded.red},
+                std::pair{affinePixel.green, graded.green}, std::pair{affinePixel.blue, graded.blue}}) {
+            const double affineAbove = affineValue - black;
+            const double rgbRatioAbove = rgbRatioValue - rgbRatioBlack;
+            const bool agrees = std::abs(affineAbove - rgbRatioAbove) <=
+                3.0e-3 * std::abs(affineAbove) + 1.0e-5 * black;
+            if (!agrees) std::cerr << "Affine/RGB Ratio lifted black curve=" << curve
+                << " pixel=" << pixel << " affine_above=" << affineAbove
+                << " rgb_ratio_above=" << rgbRatioAbove << '\n';
             FO4HDR_WARP_CHECK(agrees);
         }
     }
 }
 
-void CheckNativeReferenceAgainstRadial(unsigned kind, const std::array<Float4, kWidth>& nativeReference,
-    const std::array<Float4, kWidth>& radial, std::uint32_t curve)
+void CheckAffineAgainstRgbRatio(unsigned kind, const std::array<Float4, kWidth>& affine,
+    const std::array<Float4, kWidth>& rgbRatio, std::uint32_t curve)
 {
-    if (kind == 6) CheckNativeReferenceLiftedBlack(nativeReference, radial, curve);
-    else CheckNativeReferenceMatchesRadial(nativeReference, radial, curve);
+    if (kind == 6) CheckAffineLiftedBlack(affine, rgbRatio, curve);
+    else CheckAffineMatchesRgbRatio(affine, rgbRatio, curve);
 }
 
-void VerifyNativeReferenceGrade(Device& device,
+void VerifyAffineGrade(Device& device,
     ID3D11VertexShader* vertexShader, ID3D11SamplerState* sceneSampler)
 {
-    const auto prepare = CreateShader(*device.device.Get(), fo4hdr::generated::kNativeReferencePrepare);
-    const auto shader = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kNativeReferenceGrade);
-    const auto radial = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kCreativeGradeLut);
+    const auto prepare = CreateShader(*device.device.Get(), fo4hdr::generated::kAffinePrepare);
+    const auto shader = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kAffineGrade);
+    const auto rgbRatio = CreatePixelShader(*device.device.Get(), fo4hdr::generated::kCreativeGradeLut);
     const auto linear = CreateClampLinearSampler(*device.device.Get());
-    NativeReferencePrepared preparation(*device.device.Get());
+    AffinePrepared preparation(*device.device.Get());
     auto& prepared = preparation.prepared;
     auto& preparedUav = preparation.preparedUav;
     auto& readback = preparation.readback;
@@ -436,31 +436,31 @@ void VerifyNativeReferenceGrade(Device& device,
         auto* target = output.rtv.Get();
         DrawFullscreen(*device.context.Get(), { vertexShader, ps, nullptr, constants.Get(),
             resources.data(), 8, samplers.data(), 8, &target, 1});
-        return ReadNativeReferenceOutput(*device.context.Get(), output);
+        return ReadAffineOutput(*device.context.Get(), output);
     };
     for (const std::uint32_t curve : {0U, 1U})
     for (unsigned kind = 0; kind < 7; ++kind) {
         ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
         settings.colorGradingCurve = curve;
-        NativeReferenceLook fixture(*device.device.Get(), desc, kind);
+        AffineLook fixture(*device.device.Get(), desc, kind);
         const auto& look = fixture.look;
         const auto& nodes = fixture.nodes;
-        PrepareNativeReferenceLook(device, look.srv.Get(), kind,
+        PrepareAffineLook(device, look.srv.Get(), kind,
             {prepare.Get(), preparedUav.Get()});
 
-        CheckNativeReferenceNeutralCoefficients(*device.context.Get(),
+        CheckAffineNeutralCoefficients(*device.context.Get(),
             *readback.Get(), *prepared.texture.Get(), nodes);
 
-        if (kind == 0) VerifyNativeReferenceHostile(render, shader.Get(), settings);
+        if (kind == 0) VerifyAffineHostile(render, shader.Get(), settings);
 
-        const auto full = VerifyNativeReferenceStrength(render, shader.Get(), settings, kind);
+        const auto full = VerifyAffineStrength(render, shader.Get(), settings, kind);
 
         if (kind >= 5)
-            CheckNativeReferenceAgainstRadial(kind, full, RenderRadialReference(device, output,
-                {vertexShader, sceneSampler, linear.Get(), radial.Get(), look.srv.Get()}, settings), curve);
+            CheckAffineAgainstRgbRatio(kind, full, RenderRgbRatioReference(device, output,
+                {vertexShader, sceneSampler, linear.Get(), rgbRatio.Get(), look.srv.Get()}, settings), curve);
         if (kind != 4) continue;
-        VerifyNativeReferenceOperators(device, render, settings,
-            {shader.Get(), radial.Get(), full});
+        VerifyAffineOperators(device, render, settings,
+            {shader.Get(), rgbRatio.Get(), full});
     }
 }
 
@@ -655,7 +655,7 @@ struct NativeGradeReadback
                     2.0 / (15.0 * 256.0) + 2.0e-6);
             // Observe sampler/guide precision independently of the
             // production grade result. The double-precision CPU oracle
-            // then evaluates gamma decode and inverse radial scaling; no grade
+            // then evaluates gamma decode and inverse ratio scaling; no grade
             // output is fed back as its own expected value.
             const auto sampledReference = DecodeAndTransferNativeGrade(source,sampled[i],test.strength);
             FO4HDR_WARP_CHECK(values[i].alpha == Binary16ToFloat(pixels[i][3]));
@@ -840,7 +840,7 @@ namespace fo4hdr::tests::gpu {
 struct NativeGradeDraw
 {
     Device& device;
-    NativeReferenceResources& prepared;
+    AffineResources& prepared;
     ID3D11VertexShader* vertexShader;
     ID3D11SamplerState* sampler;
     Texture& output;
@@ -865,7 +865,7 @@ struct NativeGradeDraw
         device.context->CopyResource(output.staging.Get(), output.texture.Get());
         D3D11_MAPPED_SUBRESOURCE mapped{};
         CheckHresult(device.context->Map(output.staging.Get(), 0,
-            D3D11_MAP_READ, 0, &mapped), "Map native grade removal");
+            D3D11_MAP_READ, 0, &mapped), "Map Affine grade removal");
         std::array<Float4, kWidth> result{};
         std::copy_n(static_cast<const Float4*>(mapped.pData), kWidth,
             result.begin());
@@ -972,7 +972,7 @@ void CheckNativeGradeCorners(NativeGradeCorners results,
         }
 }
 
-void PrepareNativeGrades(Device& device, std::array<Texture3D, 4>& grades, NativeReferenceInputs& inputs)
+void PrepareNativeGrades(Device& device, std::array<Texture3D, 4>& grades, AffineInputs& inputs)
 {
     for (unsigned grade = 0; grade < grades.size(); ++grade)
         grades[grade] = CreateNativeGrade(*device.device.Get(), grade);
@@ -982,16 +982,16 @@ void PrepareNativeGrades(Device& device, std::array<Texture3D, 4>& grades, Nativ
 
 void VerifyNativeVanillaGradeRemoval(Device& device)
 {
-    NativeReferenceResources prepared;
-    FO4HDR_WARP_CHECK(BuildNativeReferenceResources(
+    AffineResources prepared;
+    FO4HDR_WARP_CHECK(BuildAffineResources(
         device.device.Get(), prepared));
     if (!prepared.shader || !prepared.preblendShader) return;
     ComPtr<ID3D11DeviceContext1> context1;
     CheckHresult(device.context.As(&context1),
-        "Query native grade-removal context1");
+        "Query Affine grade-removal context1");
 
     std::array<Texture3D, 4> grades;
-    NativeReferenceInputs inputs;
+    AffineInputs inputs;
     PrepareNativeGrades(device, grades, inputs);
     // D3D11.1 constant-buffer ranges use the production binding's
     // 16-constant granularity even though this shader reads two constants.
@@ -1024,7 +1024,7 @@ void VerifyNativeVanillaGradeRemoval(Device& device)
         std::array<Float4, 16> values{};
         values[1] = {weights[0], weights[1], weights[2], weights[3]};
         inputs.constants = CreateConstantBuffer(*device.device.Get(), values);
-        DispatchNativeReferencePrepare(device.context.Get(), context1.Get(),
+        DispatchAffinePrepare(device.context.Get(), context1.Get(),
             inputs, prepared);
         for (const float strength : {0.0F, 0.5F, 1.0F})
         {

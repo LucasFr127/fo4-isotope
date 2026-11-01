@@ -14,9 +14,9 @@ void main(uint3 id : SV_DispatchThreadID)
     const float4 grade = Grade.Load(int3(id.xy, 0));
     float3 result;
     [branch] if (grade.a == 1.0f)
-        result = Fo4HdrTransferRadialGradeSrgb(scene.rgb, grade.rgb,
+        result = Fo4HdrTransferRgbRatioGradeSrgb(scene.rgb, grade.rgb,
             Black.Load(int3(id.xy, 0)).rgb, scene.a);
     else
-        result = Fo4HdrTransferRadialGrade(scene.rgb, grade.rgb, scene.a);
+        result = Fo4HdrTransferRgbRatioGrade(scene.rgb, grade.rgb, scene.a);
     Output[id.xy] = float4(result, 1.0f);
 }

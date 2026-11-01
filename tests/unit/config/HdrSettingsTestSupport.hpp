@@ -38,7 +38,7 @@ Shadows=-75
 Saturation=125
 Temperature=20
 Tint=-30
-ColorGradingMethod=NativeReference
+ColorGradingMethod=Affine
 ColorGradingCurve=sRGB
 GradeTransfer=PreserveHDRColor
 [Effects]

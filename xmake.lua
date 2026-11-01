@@ -274,9 +274,9 @@ if has_config("fo4hdr_build_tests") then
         remove_files("tests/support/reference/Aces2LmtSourceOracle.cpp",
             "tests/support/reference/SelectiveColorSourceOracle.cpp")
         add_files("src/graphics/d3d11/**.cpp")
-        add_files("src/graphics/passes/ArmorEncodedComposition.cpp",
-            "src/graphics/passes/NativeReferenceGradePass.cpp",
-            "src/graphics/resources/NativeReferenceResources.cpp",
+        add_files("src/graphics/passes/AffineGradePass.cpp",
+            "src/graphics/passes/ArmorEncodedComposition.cpp",
+            "src/graphics/resources/AffineResources.cpp",
             "src/graphics/resources/SharedUiComposition.cpp")
         add_includedirs(
             "include", "src/graphics", "tests/support",

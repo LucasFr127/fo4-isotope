@@ -654,7 +654,7 @@ struct ObservedSceneFixture : PresentationContextFixture
         sceneA = CreateSceneTexture();
         sceneB = CreateSceneTexture();
         history = CreateSceneTexture();
-        g_activeSettings.colorGradingMethod = ColorGradingMethod::radial;
+        g_activeSettings.colorGradingMethod = ColorGradingMethod::rgbRatio;
         g_evidence.resourceGeneration = 1;
         g_frame = 1;
         g_observedPresentThread = 0;

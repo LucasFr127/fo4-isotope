@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
-#include "NativeReferenceGradePass.hpp"
+#include "AffineGradePass.hpp"
 
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 
@@ -12,7 +12,7 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-[[nodiscard]] bool IsNativeReferenceView(const D3D11_SHADER_RESOURCE_VIEW_DESC& description) noexcept
+[[nodiscard]] bool IsAffineView(const D3D11_SHADER_RESOURCE_VIEW_DESC& description) noexcept
 {
     return description.Format == DXGI_FORMAT_R8G8B8A8_UNORM &&
         description.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE3D &&
@@ -20,14 +20,14 @@ using Microsoft::WRL::ComPtr;
         description.Texture3D.MipLevels == 1;
 }
 
-[[nodiscard]] bool IsNativeReferenceTexture(const D3D11_TEXTURE3D_DESC& description) noexcept
+[[nodiscard]] bool IsAffineTexture(const D3D11_TEXTURE3D_DESC& description) noexcept
 {
     const bool cube = description.Width == 16 && description.Height == 16 && description.Depth == 16;
     return cube && description.MipLevels >= 1 && description.Format == DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 
-[[nodiscard]] bool CaptureNativeReferenceConstants(ID3D11DeviceContext1* context1,
-    NativeReferenceInputs& inputs) noexcept
+[[nodiscard]] bool CaptureAffineConstants(ID3D11DeviceContext1* context1,
+    AffineInputs& inputs) noexcept
 {
     ID3D11Buffer* constants{};
     context1->PSGetConstantBuffers1(2, 1, &constants,
@@ -40,10 +40,10 @@ using Microsoft::WRL::ComPtr;
         description.ByteWidth - inputs.firstConstant * 16 >= 32;
 }
 
-class ScopedNativeReferenceComputeState
+class ScopedAffineComputeState
 {
 public:
-    ScopedNativeReferenceComputeState(ID3D11DeviceContext* context,
+    ScopedAffineComputeState(ID3D11DeviceContext* context,
         ID3D11DeviceContext1* context1) noexcept : context_(context)
     {
         std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> instances{};
@@ -61,9 +61,9 @@ public:
         constant_.Capture(context_, context1, 2);
     }
 
-    ScopedNativeReferenceComputeState(const ScopedNativeReferenceComputeState&) = delete;
-    ScopedNativeReferenceComputeState& operator=(const ScopedNativeReferenceComputeState&) = delete;
-    ~ScopedNativeReferenceComputeState() noexcept { Restore(); }
+    ScopedAffineComputeState(const ScopedAffineComputeState&) = delete;
+    ScopedAffineComputeState& operator=(const ScopedAffineComputeState&) = delete;
+    ~ScopedAffineComputeState() noexcept { Restore(); }
 
     void Restore() noexcept
     {
@@ -98,23 +98,23 @@ private:
 
 } // namespace
 
-[[nodiscard]] bool IsQualifiedNativeReferenceLook(ID3D11ShaderResourceView* view) noexcept
+[[nodiscard]] bool IsQualifiedAffineLook(ID3D11ShaderResourceView* view) noexcept
 {
     if (!view) return false;
     D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
     view->GetDesc(&viewDescription);
-    if (!IsNativeReferenceView(viewDescription)) return false;
+    if (!IsAffineView(viewDescription)) return false;
     ComPtr<ID3D11Resource> resource;
     view->GetResource(&resource);
     ComPtr<ID3D11Texture3D> texture;
     if (!resource || FAILED(resource.As(&texture))) return false;
     D3D11_TEXTURE3D_DESC description{};
     texture->GetDesc(&description);
-    return IsNativeReferenceTexture(description);
+    return IsAffineTexture(description);
 }
 
-[[nodiscard]] bool CaptureNativeReferenceInputs(ID3D11DeviceContext* context,
-    ID3D11DeviceContext1* context1, NativeReferenceInputs& inputs) noexcept
+[[nodiscard]] bool CaptureAffineInputs(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, AffineInputs& inputs) noexcept
 {
     if (!context || !context1) return false;
     if (context->GetType() != D3D11_DEVICE_CONTEXT_IMMEDIATE) return false;
@@ -126,15 +126,15 @@ private:
     context->PSGetShaderResources(3, static_cast<UINT>(looks.size()), looks.data());
     for (std::size_t i = 0; i < looks.size(); ++i) inputs.looks[i].Attach(looks[i]);
     if (!std::ranges::all_of(inputs.looks,
-            [](const auto& view) { return IsQualifiedNativeReferenceLook(view.Get()); })) return false;
-    return CaptureNativeReferenceConstants(context1, inputs);
+            [](const auto& view) { return IsQualifiedAffineLook(view.Get()); })) return false;
+    return CaptureAffineConstants(context1, inputs);
 }
 
-void DispatchNativeReferencePrepare(ID3D11DeviceContext* context,
-    ID3D11DeviceContext1* context1, const NativeReferenceInputs& inputs,
-    const NativeReferenceResources& state) noexcept
+void DispatchAffinePrepare(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, const AffineInputs& inputs,
+    const AffineResources& state) noexcept
 {
-    ScopedNativeReferenceComputeState previous(context, context1);
+    ScopedAffineComputeState previous(context, context1);
     std::array<ID3D11ShaderResourceView*, 4> resources{};
     for (std::size_t i = 0; i < resources.size(); ++i) resources[i] = inputs.looks[i].Get();
     context->CSSetShaderResources(0, static_cast<UINT>(resources.size()), resources.data());

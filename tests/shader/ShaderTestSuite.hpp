@@ -37,7 +37,7 @@ void VerifyGt7OfficialReference(Device& device);
 
 void VerifyLayerTransferReference(Device& device);
 
-void VerifyNativeReferenceState(Device& device);
+void VerifyAffineState(Device& device);
 
 void VerifyNativeVanillaGradeRemoval(Device& device);
 

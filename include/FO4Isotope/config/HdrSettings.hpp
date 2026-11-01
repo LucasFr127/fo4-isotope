@@ -43,8 +43,8 @@ enum class ProductionToneMapperAlgorithm : std::uint8_t
 
 enum class ColorGradingMethod : std::uint8_t
 {
-    radial,
-    nativeReference
+    rgbRatio,
+    affine
 };
 
 // Display curve both grading methods use to read native LUT codes.
@@ -230,7 +230,7 @@ struct HdrSettings
     double temperature{};
     double tint{};
     SelectiveColorSettings selectiveColor{};
-    ColorGradingMethod colorGradingMethod{ColorGradingMethod::radial};
+    ColorGradingMethod colorGradingMethod{ColorGradingMethod::rgbRatio};
     ColorGradingCurve colorGradingCurve{ColorGradingCurve::gamma22};
     double vanillaColorGradingStrengthPercent{100.0};
     double vanillaGradeLuminancePercent{67.0};

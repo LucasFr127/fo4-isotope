@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 // Copyright (c) 2025 Carlos Lopez Jr.
 #include "LutProfileBindings.hpp"
-#include "passes/NativeReferenceGradePass.hpp"
+#include "passes/AffineGradePass.hpp"
 #include "resources/ReplacementShaders.hpp"
 #include "RendererLifetime.hpp"
 #include "LiveSettings.hpp"
@@ -73,7 +73,7 @@ bool MatchesNativeLutView(ID3D11ShaderResourceView* view, std::uint64_t expected
 {
     if (expected == 0) return false;
     if (expected != reinterpret_cast<std::uintptr_t>(view)) return false;
-    return IsQualifiedNativeReferenceLook(view);
+    return IsQualifiedAffineLook(view);
 }
 
 bool ValidateLutProfileViews(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept

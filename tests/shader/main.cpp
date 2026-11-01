@@ -106,7 +106,7 @@ struct ShippingShaderRun
         RunSection(options.filter, "output-dither", [&] { VerifyOutputDitherExperiment(device); });
         RunSection(options.filter, "presentation-state", [&] {
             VerifyPresentationState(device);
-            VerifyNativeReferenceState(device);
+            VerifyAffineState(device);
             VerifySharedUiFallback(device);
         });
         RunSection(options.filter, "scoped-pixel-binding-restoration", [&] {

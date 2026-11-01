@@ -269,7 +269,7 @@ void TestActiveOperatorParameters()
 void TestDefaultSettingsMath()
 {
     const HdrSettings defaults{};
-    FO4HDR_CHECK(defaults.colorGradingMethod == ColorGradingMethod::radial);
+    FO4HDR_CHECK(defaults.colorGradingMethod == ColorGradingMethod::rgbRatio);
     FO4HDR_CHECK(defaults.colorGradingCurve == ColorGradingCurve::gamma22);
     FO4HDR_CHECK(defaults.displayPeakNits == 1000.0);
     FO4HDR_CHECK(defaults.uiPaperWhiteNits == 203.0);
@@ -461,7 +461,7 @@ void TestColorGradingValidation()
     value.colorGradingMethod = static_cast<ColorGradingMethod>(0xFF);
     FO4HDR_CHECK(ValidateHdrSettings(value) ==
         HdrSettingsValidationError::unsupportedColorGradingMethod);
-    value.colorGradingMethod = ColorGradingMethod::nativeReference;
+    value.colorGradingMethod = ColorGradingMethod::affine;
     FO4HDR_CHECK(ValidateHdrSettings(value) == HdrSettingsValidationError::none);
     value.colorGradingCurve = static_cast<ColorGradingCurve>(0xFF);
     FO4HDR_CHECK(ValidateHdrSettings(value) ==

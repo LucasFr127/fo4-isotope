@@ -61,19 +61,19 @@ namespace fo4hdr::tests::gpu {
     return rgb[0] * 0.212500006 + rgb[1] * 0.715399981 + rgb[2] * 0.0720999986;
 }
 
-struct RadialSrgbTerms
+struct RgbRatioSrgbTerms
 {
     NativeGradeRgb above{};
     NativeGradeRgb blackLight{};
     double ratio{};
 };
 
-[[nodiscard]] RadialSrgbTerms RadialSrgbTransferTerms(const NativeGradeRgb& source,
+[[nodiscard]] RgbRatioSrgbTerms RgbRatioSrgbTransferTerms(const NativeGradeRgb& source,
     double scale, const NativeGradeRgb& graded, const NativeGradeRgb& black)
 {
-    // Independent double-precision form of the sRGB radial rule: the gamma-2.2
+    // Independent double-precision form of the sRGB RGB Ratio rule: the gamma-2.2
     // response above the look's black, one luminance tonal ratio, sRGB black.
-    RadialSrgbTerms terms{};
+    RgbRatioSrgbTerms terms{};
     NativeGradeRgb aboveMagnitude{}, srgbMagnitude{}, linearGuide{}, srgbGuide{};
     for (std::size_t c = 0; c < 3; ++c) {
         const double code = NativeGradeClean(graded[c]);
@@ -92,14 +92,14 @@ struct RadialSrgbTerms
     return terms;
 }
 
-[[nodiscard]] NativeGradeRgb TransferRadialSrgbGrade(
+[[nodiscard]] NativeGradeRgb TransferRgbRatioSrgbGrade(
     NativeGradeRgb source, NativeGradeRgb graded, NativeGradeRgb black, double strength)
 {
     for (double& channel : source) channel = NativeGradeClean(channel);
     strength = std::isnan(strength) ? 0.0 : std::clamp(strength, 0.0, 1.0);
     if (strength == 0) return source;
     const double scale = NativeGradeScale(*std::max_element(source.begin(), source.end()));
-    const auto terms = RadialSrgbTransferTerms(source, scale, graded, black);
+    const auto terms = RgbRatioSrgbTransferTerms(source, scale, graded, black);
     NativeGradeRgb restored{};
     for (std::size_t c = 0; c < 3; ++c)
         restored[c] = std::max(terms.above[c] * terms.ratio + terms.blackLight[c], 0.0) / scale;

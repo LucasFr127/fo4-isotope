@@ -5,7 +5,7 @@
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/shaders/draw.hlsl
 // Adapted for FO4Isotope from that shader and
 // src/shaders/tonemap.hlsl. Modification: retain Fallout 4's four weighted LUT
-// look through a project-owned radial HDR extension read with a selectable
+// look through a project-owned RGB Ratio HDR extension read with a selectable
 // gamma-2.2 or sRGB grading curve, and insert the selected
 // production operator exactly once before TAA. Apply a project-authored
 // grade-strength blend and BT.709 image controls
@@ -45,7 +45,7 @@ cbuffer Fallout4LutConstants : register(b2)
 
 float3 Fo4HdrSampleWeightedGrade(float3 scene)
 {
-    const float3 coordinate = (15.0f * Fo4HdrRadialCoordinates(scene) + 0.5f) / 16.0f;
+    const float3 coordinate = (15.0f * Fo4HdrRgbRatioCoordinates(scene) + 0.5f) / 16.0f;
     const float4x3 samples = float4x3(
         Lut0.SampleLevel(Lut0Sampler, coordinate, 0).rgb,
         Lut1.SampleLevel(Lut1Sampler, coordinate, 0).rgb,
@@ -74,17 +74,17 @@ void main(
     // Scene exposure was already applied by the qualified tone-map-family
     // replacement, before Fallout 4's later native HUD draws. Keeping this
     // seam exposure-neutral prevents the LUT/operator from dimming those UI
-    // pixels a second time. The radial guide bounds only the LUT lookup.
+    // pixels a second time. The RGB Ratio guide bounds only the LUT lookup.
     const float3 hdrLinear = Fo4HdrGradeCleanScene(sceneSample.rgb);
     float3 result = hdrLinear;
     if (Fo4HdrVanillaGradeStrength > 0.0f)
     {
         [branch] if (Fo4HdrColorGradingCurve == Fo4HdrGradeCurveSrgb)
-            result = Fo4HdrTransferRadialGradeSrgb(hdrLinear,
+            result = Fo4HdrTransferRgbRatioGradeSrgb(hdrLinear,
                 Fo4HdrSampleWeightedGrade(hdrLinear), Fo4HdrSampleWeightedBlack(),
                 Fo4HdrVanillaGradeStrength);
         else
-            result = Fo4HdrTransferRadialGrade(hdrLinear,
+            result = Fo4HdrTransferRgbRatioGrade(hdrLinear,
                 Fo4HdrSampleWeightedGrade(hdrLinear), Fo4HdrVanillaGradeStrength);
     }
     float luminanceRemoval;

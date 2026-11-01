@@ -13,7 +13,7 @@
 #include "ObservedDraw.hpp"
 #include "../FrameTrace.hpp"
 #include "ArmorCompositionPass.hpp"
-#include "NativeReferenceGradePass.hpp"
+#include "AffineGradePass.hpp"
 #include "../resources/SceneResources.hpp"
 #include "../resources/PresentationResources.hpp"
 #include "../resources/ArmorCompositionResources.hpp"
@@ -652,16 +652,16 @@ private:
     bool lut_{};
 };
 
-class ScopedNativeReferenceDraw
+class ScopedAffineDraw
 {
 public:
-    ScopedNativeReferenceDraw(ID3D11DeviceContext* context, DrawObservation& record,
+    ScopedAffineDraw(ID3D11DeviceContext* context, DrawObservation& record,
         bool production) noexcept : context_(context), record_(record)
     {
         if (GetCurrentThreadId() != g_observedPresentThread.load(std::memory_order_acquire))
             return;
         if (!Eligible(production)) return;
-        const auto& resources = g_replacements.nativeReference;
+        const auto& resources = g_replacements.affine;
         if (!ResourcesReady(resources)) return;
         const bool prepare = g_replacements.configurationKey.vanillaColorGradingStrength > 0.0F;
         auto* context1 = g_rendererDevice.activeContext1.Get();
@@ -669,10 +669,10 @@ public:
         ComPtr<ID3D11PixelShader> actual;
         if (!BindShader(resources, actual)) return;
         if (!Prepare(prepare, context1, resources)) return;
-        g_nativeReferenceStatus = nullptr;
+        g_affineStatus = nullptr;
     }
 
-    ~ScopedNativeReferenceDraw() noexcept
+    ~ScopedAffineDraw() noexcept
     {
         if (preparedBound_)
         {
@@ -682,21 +682,21 @@ public:
         RestoreShader();
     }
 
-    ScopedNativeReferenceDraw(const ScopedNativeReferenceDraw&) = delete;
-    ScopedNativeReferenceDraw& operator=(const ScopedNativeReferenceDraw&) = delete;
+    ScopedAffineDraw(const ScopedAffineDraw&) = delete;
+    ScopedAffineDraw& operator=(const ScopedAffineDraw&) = delete;
 
 private:
     [[nodiscard]] bool Eligible(bool production) const noexcept
     {
-        return g_activeSettings.colorGradingMethod == ColorGradingMethod::nativeReference &&
+        return g_activeSettings.colorGradingMethod == ColorGradingMethod::affine &&
             production && record_.currentPass == RenoDxShaderPass::lut &&
             record_.currentReplacementActive && HasOriginalPixelShaderSetter(context_);
     }
 
-    [[nodiscard]] static bool ResourcesReady(const NativeReferenceResources& resources) noexcept
+    [[nodiscard]] static bool ResourcesReady(const AffineResources& resources) noexcept
     {
-        const bool ready = NativeReferenceResourcesReady(resources);
-        if (!ready) g_nativeReferenceStatus = "Radial fallback: grading resources unavailable.";
+        const bool ready = AffineResourcesReady(resources);
+        if (!ready) g_affineStatus = "RGB Ratio fallback: grading resources unavailable.";
         return ready;
     }
 
@@ -709,10 +709,10 @@ private:
     [[nodiscard]] bool PreparationAvailable(bool prepare, ID3D11DeviceContext1* context1) const noexcept
     {
         if (!prepare || CanPrepare(context1)) return true;
-        g_nativeReferenceStatus = "Radial fallback: preparation is unavailable for this draw.";
+        g_affineStatus = "RGB Ratio fallback: preparation is unavailable for this draw.";
         return false;
     }
-    [[nodiscard]] bool BindShader(const NativeReferenceResources& resources,
+    [[nodiscard]] bool BindShader(const AffineResources& resources,
         ComPtr<ID3D11PixelShader>& actual) noexcept
     {
         BindOriginalPixelShader(context_, resources.shader.Get());
@@ -722,26 +722,27 @@ private:
         if (actual.Get() != resources.shader.Get())
         {
             RestoreShader();
-            g_nativeReferenceStatus = "Radial fallback: grading shader binding changed.";
+            g_affineStatus = "RGB Ratio fallback: grading shader binding changed.";
             return false;
         }
         return true;
     }
 
     [[nodiscard]] bool Prepare(bool prepare, ID3D11DeviceContext1* context1,
-        const NativeReferenceResources& resources) noexcept
+        const AffineResources& resources) noexcept
     {
         if (!prepare) return true;
         // Recheck after the captured shader-binding call: another hook may
         // change predication, query state or the native input bindings.
         if (!record_.computeQueries.CanDispatch() ||
-            !CaptureNativeReferenceInputs(context_, context1, inputs_))
+            !CaptureAffineInputs(context_, context1, inputs_))
         {
             RestoreShader();
-            g_nativeReferenceStatus = "Radial fallback: native LUT inputs or draw state are unsupported.";
+            g_affineStatus =
+                "RGB Ratio fallback: native LUT inputs or draw state are unsupported.";
             return false;
         }
-        DispatchNativeReferencePrepare(context_, context1, inputs_, resources);
+        DispatchAffinePrepare(context_, context1, inputs_, resources);
         auto* prepared = resources.preblendSrv.Get();
         context_->PSSetShaderResources(3, 1, &prepared);
         preparedBound_ = true;
@@ -758,7 +759,7 @@ private:
 
     ID3D11DeviceContext* context_{};
     DrawObservation& record_;
-    NativeReferenceInputs inputs_;
+    AffineInputs inputs_;
     bool swapped_{};
     bool preparedBound_{};
 };
@@ -861,7 +862,7 @@ void ExecuteObservedDraw(
             operatorBindings.UsesProductionOperator(), operatorBindings.UsesProductionSettings() ?
                 g_replacements.configurationKey.uiTransportWhiteNits : 0.0F);
         {
-            ScopedNativeReferenceDraw grading(context, record,
+            ScopedAffineDraw grading(context, record,
                 operatorBindings.UsesProductionSettings());
             draw();
         }
