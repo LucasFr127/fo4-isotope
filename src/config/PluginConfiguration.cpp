@@ -214,7 +214,6 @@ enum class RequiredKey : std::size_t
     weatherColorColorChange,
     sdrEnabled,
     sdrOperatorWeatherResponse,
-    sdrGt7ExposureCompensation,
     count
 };
 
@@ -283,7 +282,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"GT7", "ShoulderStart", RequiredKey::gt7ShoulderStart},
     {"GT7", "ColorBlend", RequiredKey::gt7ColorBlend},
     {"ToneMapper", "AutomaticWeatherResponse", RequiredKey::sdrOperatorWeatherResponse},
-    {"GT7", "ExposureCompensation", RequiredKey::sdrGt7ExposureCompensation},
     {"Image", "Contrast", RequiredKey::contrast},
     {"Image", "Blacks", RequiredKey::blacks},
     {"Image", "Highlights", RequiredKey::highlights},
@@ -588,7 +586,6 @@ bool* ProfileBooleanTarget(HdrSettings& profile, RequiredKey key) noexcept
     if (key == RequiredKey::weatherEnabled) return &profile.weatherGradeResponse.enabled;
     if (key == RequiredKey::selectiveColorEnabled) return &profile.selectiveColor.enabled;
     if (key == RequiredKey::sdrOperatorWeatherResponse) return &profile.sdrOperatorWeatherResponse;
-    if (key == RequiredKey::sdrGt7ExposureCompensation) return &profile.sdrGt7ExposureCompensation;
     return nullptr;
 }
 

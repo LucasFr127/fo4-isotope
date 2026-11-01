@@ -77,8 +77,6 @@ inline constexpr double kMaximumGt7ShoulderStart{0.60};
 // In SDR, GT7's shoulder may start where its toe ends: the toe's 0.538 extent is
 // 21.52% of the 250-nit SDR white, rounded up to the saved 0.001 precision.
 inline constexpr double kMinimumSdrGt7ShoulderStart{0.216};
-// Exposure offset that brings SDR GT7 close to the brightness of the game's own SDR curve.
-inline constexpr double kSdrGt7ExposureCompensationEv{-0.22};
 inline constexpr double kMinimumGt7ColorBlend{0.0};
 inline constexpr double kMaximumGt7ColorBlend{1.0};
 inline constexpr double kMinimumImageAdjustment{-100.0};
@@ -237,11 +235,9 @@ struct HdrSettings
     double vanillaGradeColorPercent{67.0};
     WeatherGradeResponseSettings weatherGradeResponse{};
     double bloomStrengthPercent{50.0};
-    // SDR profile only; the HDR profile keeps both off. The first turns the
-    // weather response on while an operator replaces the SDR curve; the second
-    // applies kSdrGt7ExposureCompensationEv while GT7 does.
+    // SDR profile only; the HDR profile keeps it off. It turns the weather
+    // response on while an operator replaces the SDR curve.
     bool sdrOperatorWeatherResponse{};
-    bool sdrGt7ExposureCompensation{};
     bool operator==(const HdrSettings&) const = default;
 };
 

@@ -61,7 +61,7 @@ struct PersistedKey
     bool HdrInterfaceSettings::*interfaceFlag{};
 };
 
-constexpr std::array<PersistedKey, 54> kPersistedKeys{{
+constexpr std::array<PersistedKey, 53> kPersistedKeys{{
     {.section = "General", .key = "HdrEnabled", .interfaceFlag = &HdrInterfaceSettings::hdrEnabled},
     {"WeatherLutResponse", "Enabled", nullptr, nullptr, false, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, nullptr, false, false, false, nullptr,
@@ -121,7 +121,6 @@ constexpr std::array<PersistedKey, 54> kPersistedKeys{{
         &ToneMapperParameters::gt7ShoulderStart},
     {"GT7", "ColorBlend", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::gt7ColorBlend},
-    {.section = "GT7", .key = "ExposureCompensation", .flag = &HdrSettings::sdrGt7ExposureCompensation},
     {"Image", "ExposureEV", &HdrSettings::exposureEv},
     {"Image", "Contrast", &HdrSettings::contrast},
     {"Image", "Blacks", &HdrSettings::blacks},

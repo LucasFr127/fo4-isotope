@@ -487,10 +487,7 @@ HdrSettingsMath DeriveHdrSettingsMath(
     if (ValidateProfileSettings(settings, false) != HdrSettingsValidationError::none &&
         ValidateProfileSettings(settings, true) != HdrSettingsValidationError::none)
         return result;
-    const auto compensation = settings.sdrGt7ExposureCompensation &&
-        settings.productionAlgorithm == ProductionToneMapperAlgorithm::gt7 ?
-        kSdrGt7ExposureCompensationEv : 0.0;
-    result.sceneExposureMultiplier = std::exp2(settings.exposureEv + compensation);
+    result.sceneExposureMultiplier = std::exp2(settings.exposureEv);
     // The full slider range maps to a reversible one-stop contrast slope.
     result.contrastSlope = std::exp2(settings.contrast / 100.0);
     result.blacksStrength = settings.blacks * 0.0075;
@@ -521,7 +518,6 @@ HdrSettings DefaultSdrSettings() noexcept
     settings.weatherGradeResponse.enabled = false;
     settings.bloomStrengthPercent = 100.0;
     settings.sdrOperatorWeatherResponse = true;
-    settings.sdrGt7ExposureCompensation = true;
     return settings;
 }
 

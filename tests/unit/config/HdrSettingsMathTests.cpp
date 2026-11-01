@@ -46,8 +46,8 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
-// The SDR-only switches: GT7 adds its exposure compensation, and by default an
-// SDR operator turns the weather response on while Native does not.
+// The SDR-only switch: by default an SDR operator turns the weather response on
+// while Native does not.
 void CheckSdrOperatorSwitches(const HdrSettings& sdr)
 {
     for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
@@ -55,23 +55,15 @@ void CheckSdrOperatorSwitches(const HdrSettings& sdr)
     {
         auto selected = sdr;
         selected.productionAlgorithm = algorithm;
-        selected.exposureEv = 1.0;
-        const auto compensation = algorithm == ProductionToneMapperAlgorithm::gt7 ?
-            kSdrGt7ExposureCompensationEv : 0.0;
-        FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier ==
-            std::exp2(1.0 + compensation));
-        selected.sdrGt7ExposureCompensation = false;
-        FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
         FO4HDR_CHECK(EffectiveWeatherGradeResponse(selected).enabled);
         FO4HDR_CHECK(!selected.weatherGradeResponse.enabled);
         FO4HDR_CHECK(!SdrGradeControlsNeutral(selected));
     }
     FO4HDR_CHECK(!EffectiveWeatherGradeResponse(sdr).enabled);
-    // The HDR profile keeps its own weather setting and exposure.
+    // The HDR profile keeps its own weather setting.
     auto hdr = HdrSettings{};
     hdr.weatherGradeResponse.enabled = false;
     FO4HDR_CHECK(!EffectiveWeatherGradeResponse(hdr).enabled);
-    FO4HDR_CHECK(DeriveHdrSettingsMath(HdrSettings{}).sceneExposureMultiplier == 1.0);
 }
 
 void TestSdrProfileDefaults()
@@ -91,7 +83,6 @@ void TestSdrProfileDefaults()
                 HdrSettingsValidationError::unsupportedAlgorithm));
         // An SDR profile that selects an operator keeps its scene controls.
         selected.exposureEv = 1.0;
-        selected.sdrGt7ExposureCompensation = false;
         FO4HDR_CHECK(DeriveHdrSettingsMath(selected).sceneExposureMultiplier == 2.0);
     }
     auto brighter = sdr;
