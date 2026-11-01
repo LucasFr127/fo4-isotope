@@ -49,24 +49,6 @@ constexpr std::array kControlRanges{
     ControlRange{ProductionToneMapperAlgorithm::gt7,
         &ToneMapperParameters::gt7ColorBlend, 0.0, 1.0}};
 
-// Measured at each SDR configuration's fixed white with the other controls at
-// defaults. AgX Shoulder Power has no SDR effect.
-constexpr std::array kSdrControlRanges{
-    ControlRange{ProductionToneMapperAlgorithm::aces2,
-        &ToneMapperParameters::acesLookStrength, 0.0, 1.0},
-    ControlRange{ProductionToneMapperAlgorithm::agX,
-        &ToneMapperParameters::agxMiddleGrayEv, -0.5, 0.0},
-    ControlRange{ProductionToneMapperAlgorithm::agX,
-        &ToneMapperParameters::agxContrast, 2.2, 3.0},
-    ControlRange{ProductionToneMapperAlgorithm::agX,
-        &ToneMapperParameters::agxHdrPurity, 0.25, 0.6},
-    ControlRange{ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::gt7ToeStrength, 1.0, 1.5},
-    ControlRange{ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::gt7ShoulderStart, 0.216, 0.6},
-    ControlRange{ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::gt7ColorBlend, 0.0, 1.0}};
-
 [[nodiscard]] const ControlRange* FindControlRange(std::span<const ControlRange> ranges,
     ProductionToneMapperAlgorithm algorithm, double ToneMapperParameters::* parameter) noexcept
 {
@@ -95,15 +77,6 @@ ToneMapperRecommendedRange GetToneMapperRecommendedRange(
     const auto minimum = algorithm == ProductionToneMapperAlgorithm::aces2 ?
         reference->acesLookMinimum : control->minimum;
     return {true, minimum, control->maximum, reference->nits};
-}
-
-ToneMapperRecommendedRange GetSdrToneMapperRecommendedRange(
-    ProductionToneMapperAlgorithm algorithm,
-    double ToneMapperParameters::* parameter) noexcept
-{
-    const auto* control = FindControlRange(kSdrControlRanges, algorithm, parameter);
-    if (control == nullptr) return {};
-    return {true, control->minimum, control->maximum, 0.0};
 }
 
 } // namespace fo4hdr

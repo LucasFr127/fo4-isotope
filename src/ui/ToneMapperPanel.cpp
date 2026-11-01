@@ -129,9 +129,10 @@ bool ToneMapperPanel::DrawSlider(const ToneMapperControl& control) noexcept
     const auto& [label, parameter, presentation] = control;
     auto& value = settings.toneMapperParameters.*parameter;
     const auto changed = detail::DrawSettingsPanelSlider(label, value, presentation);
-    const auto range = sdrProfile ?
-        GetSdrToneMapperRecommendedRange(settings.productionAlgorithm, parameter) :
-        GetToneMapperRecommendedRange(settings.productionAlgorithm, settings.displayPeakNits, parameter);
+    // Every SDR control qualifies across its full range, so SDR shows no recommendation.
+    if (sdrProfile) return changed;
+    const auto range = GetToneMapperRecommendedRange(
+        settings.productionAlgorithm, settings.displayPeakNits, parameter);
     if (range.available)
     {
         std::array<char, 32> minimum{}, maximum{};

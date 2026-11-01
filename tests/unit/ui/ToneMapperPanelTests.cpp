@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <string>
 #include <string_view>
 
 namespace fo4hdr::tests {
@@ -123,35 +124,39 @@ void RenderSdrSettingsFrames(HdrSettings& settings, ImVec2 windowSize)
     FO4HDR_CHECK(settings == before);
 }
 
-// Vertices one AgX panel draws; both profiles show recommended ranges here.
-int AgxPanelVertices(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
+// Text one AgX panel renders.
+std::string AgxPanelText(double middleGrayEv, bool sdrProfile, ImVec2 windowSize)
 {
     HdrSettings settings{};
     settings.productionAlgorithm = ProductionToneMapperAlgorithm::agX;
     settings.toneMapperParameters.agxMiddleGrayEv = middleGrayEv;
-    int vertices{};
+    std::string text;
     ImGui::NewFrame();
     ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
     if (ImGui::Begin("SDR AgX smoke", nullptr, ImGuiWindowFlags_NoSavedSettings))
     {
-        const auto before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        ImGui::LogToBuffer();
         FO4HDR_CHECK(!DrawToneMapperPanel(settings, sdrProfile));
-        vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size - before;
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
     }
     ImGui::End();
     ImGui::Render();
-    return vertices;
+    return text;
 }
 
-// SDR hides Highlight Shoulder but shows Color Response at any Middle Gray:
-// moving Middle Gray changes only its value text, far less than one slider.
+// SDR hides Highlight Shoulder and the recommended ranges but shows Color
+// Response at any Middle Gray.
 void CheckSdrAgxControls(ImVec2 windowSize)
 {
-    const auto hdr = AgxPanelVertices(-0.25, false, windowSize);
-    const auto sdr = AgxPanelVertices(-0.25, true, windowSize);
-    const auto sdrNeutral = AgxPanelVertices(0.0, true, windowSize);
-    FO4HDR_CHECK(sdr < hdr);
-    FO4HDR_CHECK(std::abs(sdr - sdrNeutral) < hdr - sdr);
+    const auto hdr = AgxPanelText(-0.25, false, windowSize);
+    FO4HDR_CHECK(hdr.contains("Highlight Shoulder") && hdr.contains("Recommended"));
+    for (const auto middleGrayEv : {-0.25, 0.0})
+    {
+        const auto sdr = AgxPanelText(middleGrayEv, true, windowSize);
+        FO4HDR_CHECK(sdr.contains("Color Response"));
+        FO4HDR_CHECK(!sdr.contains("Highlight Shoulder") && !sdr.contains("Recommended"));
+    }
 }
 
 // Vertices of one frame showing the SDR Output tab for a tone curve and HDR request.
@@ -214,27 +219,6 @@ void TestHdrRequestStatus()
     // HDR off at start: turning it on needs a restart.
     FO4HDR_CHECK(status(false, false, true).empty());
     FO4HDR_CHECK(status(true, false, true).starts_with("Restart the game to turn HDR on"));
-}
-
-void TestSdrToneMapperRecommendedRanges()
-{
-    const auto aces = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::aces2,
-        &ToneMapperParameters::acesLookStrength);
-    FO4HDR_CHECK(aces.available && aces.minimum == 0.0 && aces.maximum == 1.0);
-    const auto middleGray = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
-        &ToneMapperParameters::agxMiddleGrayEv);
-    FO4HDR_CHECK(middleGray.available && middleGray.minimum == -0.5 && middleGray.maximum == 0.0);
-    const auto shoulder = GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::gt7ShoulderStart);
-    FO4HDR_CHECK(shoulder.available && shoulder.minimum == kMinimumSdrGt7ShoulderStart &&
-        shoulder.maximum == 0.6);
-    // Shoulder Power has no SDR effect; native and mismatched controls have no range.
-    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
-        &ToneMapperParameters::agxHdrShoulderPower).available);
-    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::native,
-        &ToneMapperParameters::acesLookStrength).available);
-    FO4HDR_CHECK(!GetSdrToneMapperRecommendedRange(ProductionToneMapperAlgorithm::gt7,
-        &ToneMapperParameters::agxContrast).available);
 }
 
 void TestToneMapperRecommendationFloatEndpoints()
@@ -321,7 +305,6 @@ void TestToneMapperRecommendations()
     TestToneMapperRecommendationFloatEndpoints();
     TestToneMapperRecommendedPeaks();
     TestToneMapperRecommendedIntervals();
-    TestSdrToneMapperRecommendedRanges();
     TestHdrRequestStatus();
 }
 
