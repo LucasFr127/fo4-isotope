@@ -889,6 +889,23 @@ void RunCollectedRequest(ObservationRequest request) noexcept
     }
 }
 
+void ActivateSettingsInput(std::string_view name);
+
+// F4SE tasks run on the window thread, unlike lifecycle callbacks, so they
+// install input that device creation on another thread could not.
+void RetrySettingsInput(fo4hdr::GameLifecycleEvent event) noexcept
+{
+    if (fo4hdr::HdrSettingsInputInstalled()) return;
+    try
+    {
+        ActivateSettingsInput(LifecycleName(event));
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: settings input retry failed.\n");
+    }
+}
+
 class ObservationTask final : public F4SE::ITaskDelegate
 {
 public:
@@ -896,6 +913,7 @@ public:
 
     void Run() noexcept override
     {
+        RetrySettingsInput(request_.event);
         RunCollectedRequest(request_);
     }
 
@@ -1010,11 +1028,12 @@ void ActivateSettingsInput(std::string_view name)
     const auto activation =
         fo4hdr::TryActivateGraphicsSettingsInputOnCurrentThread();
     REX::INFO(
-        "settings_input event={} ready={} active={} "
+        "settings_input event={} ready={} active={} installed={} "
         "current_thread={} window_thread={}",
         name,
         activation.ready,
         activation.active,
+        fo4hdr::HdrSettingsInputInstalled(),
         activation.currentThreadId,
         activation.windowThreadId);
 }
