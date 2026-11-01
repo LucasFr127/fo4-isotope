@@ -286,16 +286,6 @@ struct SettingsTabs {
         DrawInterfaceDimension({"Window Height", "window-height", &HdrInterfaceSettings::windowHeight,
             {static_cast<float>(kMinimumSettingsWindowHeight), static_cast<float>(kMaximumSettingsWindowHeight),
                 "%.0f px", "Sets the settings window height before Interface Scale is applied."}});
-        if (ImGui::Button("Reset Size"))
-        {
-            state.uiInterfaceDraft.windowWidth =
-                kDefaultSettingsWindowWidth;
-            state.uiInterfaceDraft.windowHeight =
-                kDefaultSettingsWindowHeight;
-            state.interfaceWindowSizePending = true;
-        }
-        ImGui::SetItemTooltip("Restore the default window width and height.");
-        ImGui::SameLine();
         if (ImGui::Button("Center Window"))
             state.interfaceWindowCenterPending = true;
         ImGui::SetItemTooltip("Center the settings window on the current display.");
@@ -632,7 +622,7 @@ void RevertSettingsDraft() noexcept
 
 void DrawSettingsRestoreActions(bool narrowFooter) noexcept
 {
-    if (ImGui::Button(g_state.sdrProfile ? "SDR Defaults" : "HDR Defaults"))
+    if (ImGui::Button(g_state.sdrProfile ? "Restore SDR Defaults" : "Restore HDR Defaults"))
     {
         g_state.uiDraft = g_state.sdrProfile ? DefaultSdrSettings() : HdrSettings{};
         g_state.uiCommitRequested = true;
@@ -646,8 +636,8 @@ void DrawSettingsRestoreActions(bool narrowFooter) noexcept
         RevertSettingsDraft();
     }
     ImGui::SetItemTooltip("%s", g_state.sdrProfile ?
-        "Restore SDR and interface settings from when this window opened. Changes save automatically." :
-        "Restore HDR and interface settings from when this window opened. Changes save automatically.");
+        "Undo all SDR and interface changes made since this window opened." :
+        "Undo all HDR and interface changes made since this window opened.");
 
 }
 
@@ -676,7 +666,7 @@ struct SettingsWindowContents
         return g_view->liveSettingsError ||
                 g_state.settingsInteractionError ||
                 SaveFailed() ?
-            "Error" : g_view->lutPending ? "Preparing" : dirty ? "Save pending" :
+            "Error" : g_view->lutPending ? "Applying" : dirty ? "Save pending" :
             "Applied";
     }
 
@@ -694,7 +684,7 @@ struct SettingsWindowContents
             g_view->activeSettings.displayPeakNits,
             settingsStatus);
         if (g_view->developerMode && g_view->exposureActive)
-            ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F),
+            ImGui::TextColored(detail::kSettingsWarningColor,
                 "Developer exposure snapshot held (not saved)");
     
     }
@@ -716,11 +706,25 @@ struct SettingsWindowContents
         return "Changes save automatically";
     }
 
+    // Names the other causes of the summary's Error; save failures use SaveStatusText.
+    static const char* SettingsErrorText() noexcept
+    {
+        if (g_view->liveSettingsError)
+            return "The last change could not be applied; the previous settings stay active. "
+                "Change a setting to retry.";
+        if (g_state.settingsInteractionError)
+            return "The settings window could not take or release game input. "
+                "Press the settings shortcut to retry.";
+        return nullptr;
+    }
+
     void DrawSettingsSaveStatus() noexcept
     {
         ImGui::PushTextWrapPos();
+        if (const auto* error = SettingsErrorText())
+            ImGui::TextColored(detail::kSettingsErrorColor, "%s", error);
         if (SaveFailed())
-            ImGui::TextColored(ImVec4(1.0F, 0.35F, 0.35F, 1.0F), "%s", SaveStatusText());
+            ImGui::TextColored(detail::kSettingsErrorColor, "%s", SaveStatusText());
         else
             ImGui::TextDisabled("%s", SaveStatusText());
         if (persistence.positionState == SettingsPersistenceState::failed)
@@ -738,9 +742,11 @@ struct SettingsWindowContents
         auto footerHeight = ImGui::GetFrameHeightWithSpacing() * (narrowFooter ? 2.0F : 1.0F) +
             ImGui::CalcTextSize(SaveStatusText(), nullptr, false, width).y +
             ImGui::GetStyle().ItemSpacing.y * 2.0F;
-        if (persistence.positionState == SettingsPersistenceState::failed)
-            footerHeight += ImGui::CalcTextSize(kPositionSaveError, nullptr, false, width).y +
-                ImGui::GetStyle().ItemSpacing.y;
+        for (const auto* message : {SettingsErrorText(),
+                 persistence.positionState == SettingsPersistenceState::failed ? kPositionSaveError : nullptr})
+            if (message != nullptr)
+                footerHeight += ImGui::CalcTextSize(message, nullptr, false, width).y +
+                    ImGui::GetStyle().ItemSpacing.y;
         SettingsTabs{g_state, *g_view, *g_actions, footerHeight, persistence, interactionState}.Draw();
         DrawSettingsRestoreActions(narrowFooter);
         DrawSettingsSaveStatus();

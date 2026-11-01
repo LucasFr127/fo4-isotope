@@ -106,7 +106,8 @@ const char* SdrModeReasonText(const SettingsWindowView& view) noexcept
 const char* ToneMapperRecommendationStatus(
     double value, const ToneMapperRecommendedRange& range) noexcept
 {
-    if (!range.available) return "Recommended range unavailable for this control.";
+    // A control without a measured range shows no recommendation.
+    if (!range.available) return nullptr;
     if (!std::isfinite(value)) return "Control value is invalid.";
     // Slider edits round through float; include only that endpoint representation.
     const auto minimum = std::min(range.minimum,
@@ -114,7 +115,7 @@ const char* ToneMapperRecommendationStatus(
     const auto maximum = std::max(range.maximum,
         static_cast<double>(static_cast<float>(range.maximum)));
     if (value < minimum || value > maximum)
-        return "Outside recommended range: visible LUT differences are possible.";
+        return "Outside recommended range: may show banding or color steps.";
     return nullptr;
 }
 
@@ -286,7 +287,7 @@ struct ColorSettingsTabs
             hdrEnabled = true;
         const auto* status = HdrRequestStatus(hdrEnabled, view);
         if (status == nullptr) return;
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.8F, 0.2F, 1.0F));
+        ImGui::PushStyleColor(ImGuiCol_Text, detail::kSettingsWarningColor);
         ImGui::TextWrapped("%s", status);
         ImGui::PopStyleColor();
     }
@@ -296,7 +297,7 @@ struct ColorSettingsTabs
         const std::array messages{SdrModeReasonText(view), view.sdrControlsUnavailable ?
             "SDR color controls are unavailable this session: their shaders could not be built "
             "or bound. Restart the game to retry." : nullptr};
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.8F, 0.2F, 1.0F));
+        ImGui::PushStyleColor(ImGuiCol_Text, detail::kSettingsWarningColor);
         for (const auto* message : messages)
             if (message != nullptr) ImGui::TextWrapped("%s", message);
         ImGui::PopStyleColor();
@@ -307,8 +308,8 @@ struct ColorSettingsTabs
     {
         const auto defaultValue = DefaultSdrSettings().sdrOperatorWeatherResponse;
         auto& value = settings.sdrOperatorWeatherResponse;
-        bool changed = ImGui::Checkbox("Automatic Weather Response with Tone Mappers", &value);
-        ImGui::SetItemTooltip("Turns on the automatic weather LUT response while ACES 2, AgX or GT7\n"
+        bool changed = ImGui::Checkbox("Automatic Weather LUT Response with ACES 2, AgX or GT7", &value);
+        ImGui::SetItemTooltip("Turns on Automatic Weather LUT Response while ACES 2, AgX or GT7\n"
             "replaces the game's curve. Vanilla follows the Effects tab setting.");
         if (DrawRestoreDefaultButton("sdr-operator-weather", value != defaultValue))
         {
@@ -333,7 +334,7 @@ struct ColorSettingsTabs
             changed = DrawSdrToneCurveChoices();
             ImGui::EndCombo();
         }
-        ImGui::SetItemTooltip("Vanilla keeps the game's SDR curve; an operator replaces it.");
+        ImGui::SetItemTooltip("Vanilla keeps the game's SDR curve; ACES 2, AgX and GT7 replace it.");
         if (DrawRestoreDefaultButton("sdr-tone-curve",
                 settings.productionAlgorithm != defaultCurve))
         {
@@ -344,7 +345,7 @@ struct ColorSettingsTabs
         changed |= DrawSdrOperatorWeatherResponse();
         if (changed) commitRequested = true;
         if (view.lutPending)
-            ImGui::Text("Requested: %s settings", SettingsOperatorDisplayName(view.pendingAlgorithm));
+            ImGui::Text("Applying %s...", SettingsOperatorDisplayName(view.pendingAlgorithm));
     }
 
     void DrawOutputPeak() noexcept
@@ -391,13 +392,13 @@ struct ColorSettingsTabs
     {
         if (std::isfinite(view.display.sdrWhiteNits) && view.display.sdrWhiteNits > 0.0F)
         {
-            if (ImGui::Button("Use OS SDR White"))
+            if (ImGui::Button("Use Windows SDR White"))
             {
                 settings.uiPaperWhiteNits = std::clamp(
                     static_cast<double>(view.display.sdrWhiteNits), 100.0, 300.0);
                 commitRequested = true;
             }
-            ImGui::SetItemTooltip("Set Menu & HUD White to the OS SDR white level, within the supported range.");
+            ImGui::SetItemTooltip("Set Menu & HUD White to the Windows SDR white level, within the supported range.");
         }
     }
 
@@ -418,7 +419,7 @@ struct ColorSettingsTabs
         for (const auto& [label, nits] : std::array{
                  std::pair{"Reported peak", view.display.peakNits},
                  std::pair{"Reported full-frame", view.display.fullFrameNits},
-                 std::pair{"OS SDR white", view.display.sdrWhiteNits}})
+                 std::pair{"Windows SDR white", view.display.sdrWhiteNits}})
         {
             if (std::isfinite(nits) && nits > 0.0F)
                 ImGui::Text("%s: %.0f nits", label, nits);
@@ -486,9 +487,8 @@ struct ColorSettingsTabs
             ImGui::TableSetupColumn("Hue", ImGuiTableColumnFlags_WidthStretch, 1.0F);
             ImGui::TableSetupColumn("Saturation", ImGuiTableColumnFlags_WidthStretch, 1.0F);
             ImGui::TableSetupColumn("Brightness", ImGuiTableColumnFlags_WidthStretch, 1.0F);
-            ImGui::TableSetupColumn("Default", ImGuiTableColumnFlags_WidthFixed,
-                std::max(ImGui::CalcTextSize("Default").x,
-                    ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0F));
+            ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed,
+                ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2.0F);
             ImGui::TableHeadersRow();
             for (std::size_t index = 0; index < selective.regions.size(); ++index)
             {
@@ -536,7 +536,7 @@ struct ColorSettingsTabs
         DrawSettingsControlLabel("Color Grading Curve");
         bool curveChanged = ImGui::Combo("##color-grading-curve", &gradingCurve,
             gradingCurves, static_cast<int>(std::size(gradingCurves)));
-        ImGui::SetItemTooltip("How both methods read the game's LUT colors.\n"
+        ImGui::SetItemTooltip("Sets how both methods read the game's LUT colors.\n"
             "Gamma 2.2 matches most SDR monitors and keeps the look's deeper shadows.\n"
             "sRGB uses the piecewise standard curve and lifts graded shadows.");
         if (DrawRestoreDefaultButton("color-grading-curve",
@@ -562,7 +562,7 @@ struct ColorSettingsTabs
             {
                 ImGui::TextWrapped("SDR color controls are active on the game's own SDR image.");
                 if (SdrModeReasonText(view) == nullptr)
-                    ImGui::TextWrapped("HDR output and its brightness and tone-mapping controls need "
+                    ImGui::TextWrapped("HDR output and its brightness controls need "
                         "Enable HDR and an HDR10 display with Windows HDR on when the game starts.");
                 DrawSdrModeReason();
                 DrawHdrRequest();
@@ -579,12 +579,8 @@ struct ColorSettingsTabs
             DrawOutputWhite();
             ImGui::SeparatorText("Tone Mapping");
             DrawOutputToneMapper();
-            ImGui::Separator();
-            ImGui::Text("HDR10 output: %s",
-                view.hdrActive ? "active" :
-                    "inactive");
             if (view.lutPending)
-                ImGui::Text("Requested: %s settings at %.0f nits",
+                ImGui::Text("Applying %s at %.0f nits...",
                     SettingsOperatorDisplayName(
                         view.pendingAlgorithm),
                     view.pendingPeakNits);
@@ -605,28 +601,28 @@ struct ColorSettingsTabs
             ImGui::SeparatorText("Brightness & Detail");
             bool changed{};
             changed |= DrawImageSetting({"Exposure", "exposure", &HdrSettings::exposureEv,
-                {-4.0F, 4.0F, "%.2f EV", "Adjusts scene brightness before color grading. "
+                {-4.0F, 4.0F, "%+.2f EV", "Adjusts scene brightness before color grading. "
                     "+1 EV doubles brightness; -1 EV halves it."}});
             changed |= DrawImageSetting({"Contrast", "contrast", &HdrSettings::contrast,
-                {-100.0F, 100.0F, "%.0f",
+                {-100.0F, 100.0F, "%+.0f",
                     "Adjusts tonal separation around middle gray. 0 keeps it unchanged."}});
             changed |= DrawImageSetting({"Highlights", "highlights", &HdrSettings::highlights,
-                {-100.0F, 100.0F, "%.0f", "Adjusts bright scene detail. 0 keeps it unchanged."}});
+                {-100.0F, 100.0F, "%+.0f", "Adjusts bright scene detail. 0 keeps it unchanged."}});
             changed |= DrawImageSetting({"Shadows", "shadows", &HdrSettings::shadows,
-                {-100.0F, 100.0F, "%.0f", "Adjusts dark scene detail across a wider range than Blacks. "
+                {-100.0F, 100.0F, "%+.0f", "Adjusts dark scene detail across a wider range than Blacks. "
                     "0 keeps it unchanged."}});
             changed |= DrawImageSetting({"Blacks", "blacks", &HdrSettings::blacks,
-                {-100.0F, 100.0F, "%.0f", "Adjusts the darkest scene detail while preserving true black. "
+                {-100.0F, 100.0F, "%+.0f", "Adjusts the darkest scene detail while preserving true black. "
                     "0 keeps it unchanged."}});
             ImGui::SeparatorText("Color");
             changed |= DrawImageSetting({"Overall Saturation", "saturation", &HdrSettings::saturationPercent,
                 {0.0F, 200.0F, "%.0f%%", "Adjusts scene color intensity while preserving luminance. "
                     "100% keeps it unchanged."}});
             changed |= DrawImageSetting({"Temperature", "temperature", &HdrSettings::temperature,
-                {-100.0F, 100.0F, "%.0f",
+                {-100.0F, 100.0F, "%+.0f",
                     "Adjusts scene white balance between cool and warm. 0 keeps it unchanged."}});
             changed |= DrawImageSetting({"Tint", "tint", &HdrSettings::tint,
-                {-100.0F, 100.0F, "%.0f",
+                {-100.0F, 100.0F, "%+.0f",
                     "Adjusts scene white balance between green and magenta. 0 keeps it unchanged."}});
             if (changed) commitRequested = true;
 
@@ -642,7 +638,6 @@ struct ColorSettingsTabs
             ImGui::BeginChild("Selective Color-content", ImVec2(0.0F, -footerHeight));
             ImGui::TextWrapped("Adjust hue, saturation and brightness for individual colors. "
                 "Drag a value or Ctrl+click to type an exact value.");
-            ImGui::SeparatorText("Selective Color");
             const SelectiveColorSettings defaults{};
             auto& selective = settings.selectiveColor;
             bool changed = ImGui::Checkbox("Enable Selective Color",
@@ -688,8 +683,8 @@ struct ColorSettingsTabs
         {
             ImGui::BeginChild("Effects-content", ImVec2(0.0F, -footerHeight));
             ImGui::TextWrapped("Adjust bloom and the game's color grading. "
-                "Automatic weather response sets luminance and color for weather ImageSpaces; "
-                "the overall grading strength stays global.");
+                "Automatic Weather LUT Response sets the grade's luminance and color response per "
+                "weather ImageSpace; Vanilla Color Grading Strength applies to every scene.");
             ImGui::SeparatorText("Bloom");
             if (DrawImageSetting({"Bloom Strength", "bloom-strength", &HdrSettings::bloomStrengthPercent,
                     {0.0F, 100.0F, "%.0f%%", "Adjusts the bloom contribution. "
@@ -740,7 +735,7 @@ bool ToneMapperPanel::DrawAces2() noexcept
         defaults.acesLookStrength,
         kMinimumAcesLookStrength, kMaximumAcesLookStrength,
         100.0, "%.0f%%",
-        "Strength of the Contrast look before the adapted ACES 2 output "
+        "Sets the strength of the Contrast look applied before the ACES 2 output "
         "transform. 0% removes the look; 100% applies it fully."}});
 }
 
@@ -754,7 +749,7 @@ bool ToneMapperPanel::DrawAgx() noexcept
         "Middle Gray", &ToneMapperParameters::agxMiddleGrayEv, {
         defaults.agxMiddleGrayEv,
         kMinimumAgxMiddleGrayEv, sdrProfile ? kMaximumSdrAgxMiddleGrayEv : kMaximumAgxMiddleGrayEv,
-        1.0, "%.2f EV", sdrProfile ?
+        1.0, "%+.2f EV", sdrProfile ?
             "Adjusts AgX middle-gray brightness while keeping SDR white fixed." :
             "Adjusts AgX middle-gray brightness while keeping display peak fixed."}});
     changed |= DrawSlider({
@@ -831,9 +826,8 @@ bool ToneMapperPanel::DrawGt7() noexcept
         kMinimumVanillaColorGradingPercent,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
-        "Global fallback for disabled or unqualified automatic weather response. "
-        "Controls the vanilla grade's luminance response. "
-        "0% removes that response; 100% keeps it."});
+        "Sets the vanilla grade's luminance response wherever Automatic Weather LUT Response "
+        "is off or does not apply. 0% removes that response; 100% keeps it."});
     changed |= detail::DrawSettingsPanelSlider(
         "Global Grade Color",
         settings.vanillaGradeColorPercent, {
@@ -841,9 +835,8 @@ bool ToneMapperPanel::DrawGt7() noexcept
         kMinimumVanillaColorGradingPercent,
         kMaximumVanillaColorGradingPercent,
         1.0, "%.0f%%",
-        "Global fallback for disabled or unqualified automatic weather response. "
-        "Controls the vanilla grade's hue and saturation response. "
-        "0% retains the original scene colors rather than "
+        "Sets the vanilla grade's hue and saturation response wherever Automatic Weather LUT "
+        "Response is off or does not apply. 0% retains the original scene colors rather than "
         "making them gray; 100% keeps the full response."});
     return changed;
 }

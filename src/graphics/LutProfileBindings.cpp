@@ -26,7 +26,7 @@ void RefreshWeatherGradeResponses() noexcept
 std::array<LutSnapshot, 4> g_lutInspectorLuts{};
 std::array<ImageSpaceIdentity, 4> g_lutInspectorImageSpaces{};
 std::uint32_t g_lutInspectorImageSpaceSlots{};
-const char* g_lutInspectorImageSpaceStatus{"Waiting for a qualified ImageSpace blend."};
+const char* g_lutInspectorImageSpaceStatus{"Waiting for a recognized ImageSpace blend."};
 std::uint64_t g_lutInspectorFrame{};
 std::uint32_t g_lutInspectorValidatedSlots{};
 const char* g_lutInspectorStatus{"Waiting for a color grading draw."};
@@ -55,7 +55,7 @@ void PublishImageSpaceStatus(const NativeLutObservation& native) noexcept
     constexpr std::array messages{
         std::pair{ImageSpaceObservationStatus::matched, "ImageSpace contributors matched the vanilla LUT transfer."},
         std::pair{ImageSpaceObservationStatus::catalogUnavailable, "ImageSpace record catalog unavailable; LUT/global controls are used."},
-        std::pair{ImageSpaceObservationStatus::differentThread, "ImageSpace producer and draw threads are not qualified; LUT/global controls are used."},
+        std::pair{ImageSpaceObservationStatus::differentThread, "ImageSpace producer and draw threads do not match; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::overrideActive, "A vanilla ImageSpace override is active; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::unqualifiedSource, "Room, direct or unidentified ImageSpace blend; LUT/global controls are used."},
         std::pair{ImageSpaceObservationStatus::updating, "ImageSpace observation is updating; LUT/global controls are used."},
@@ -111,7 +111,7 @@ ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::
 
     g_lutInspectorFallbackReasons[i] =
         (g_lutInspectorImageSpaceSlots & (1U << i)) == 0 ?
-            "Weather source is not qualified" :
+            "Weather source is not recognized" :
         aggregate.referenceCount == 0 ? "No weather references" :
             "Weather aggregate is unavailable or incomplete";
     return global;
@@ -149,7 +149,7 @@ void MarkWeatherResponseBypassed() noexcept
     g_lutInspectorGradingBypassed = true;
     g_lutInspectorAutomaticSlots = 0;
     g_lutInspectorStatus = "Production binding failed; grading was bypassed for this draw.";
-    g_lutInspectorFallbackReasons.fill("Production grading was bypassed");
+    g_lutInspectorFallbackReasons.fill("Grading replacement was bypassed");
 }
 
 bool UpdateLutProfileBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer,
@@ -204,8 +204,8 @@ void ResetLutProfileInspector() noexcept
         g_activeSettings.vanillaGradeColorPercent});
     g_lutInspectorAutomaticSlots = 0;
     g_lutInspectorGradingBypassed = false;
-    g_lutInspectorFallbackReasons.fill("Weather source is not qualified");
-    g_lutInspectorImageSpaceStatus = "Waiting for a qualified ImageSpace blend.";
+    g_lutInspectorFallbackReasons.fill("Weather source is not recognized");
+    g_lutInspectorImageSpaceStatus = "Waiting for a recognized ImageSpace blend.";
     g_lutInspectorStatus = NativeLutObserverMessage();
 }
 

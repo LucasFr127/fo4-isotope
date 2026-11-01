@@ -29,8 +29,7 @@ void TestToneMapperRecommendationStatus()
         .starts_with("Outside recommended range"));
     FO4HDR_CHECK(std::string_view{ToneMapperRecommendationStatus(0.81, range)}
         .starts_with("Outside recommended range"));
-    FO4HDR_CHECK(std::string_view{ToneMapperRecommendationStatus(0.5, {})}
-        .starts_with("Recommended range unavailable"));
+    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.5, {}) == nullptr);
     FO4HDR_CHECK(std::string_view{ToneMapperRecommendationStatus(
         std::numeric_limits<double>::quiet_NaN(), range)}.starts_with("Control value is invalid"));
 }
@@ -223,7 +222,8 @@ void CheckSdrOutputReasons(ImVec2 windowSize)
     const auto failed = SdrOutputText(SdrModeReason::hdrCandidateRejected, true, windowSize);
     FO4HDR_CHECK(failed.contains("refused") && failed.contains("controls are unavailable"));
     const auto off = SdrOutputText(SdrModeReason::hdrOff, false, windowSize);
-    FO4HDR_CHECK(off.contains("need Enable HDR") && !off.contains("SDR is shown because"));
+    FO4HDR_CHECK(off.contains("need Enable HDR") && !off.contains("SDR is shown because") &&
+        !off.contains("tone-mapping"));
 }
 
 // The SDR Tone Mapper choice is followed by the selected operator's controls, and

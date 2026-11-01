@@ -123,10 +123,10 @@ void TestBypassedResponseStatus()
     ImVec2 checkboxPosition;
     std::string text;
     FO4HDR_CHECK(!DrawPanelFrame(settings, view, {ImVec2(900.0F, 1200.0F), checkboxPosition, &text}));
-    FO4HDR_CHECK(text.contains("Production grading bypassed"));
+    FO4HDR_CHECK(text.contains("Grading replacement bypassed"));
     FO4HDR_CHECK(text.contains("Production constants unavailable."));
     FO4HDR_CHECK(!text.contains("Automatic response active."));
-    FO4HDR_CHECK(!text.contains("Global fallback:"));
+    FO4HDR_CHECK(!text.contains("Global Grade fallback:"));
     FO4HDR_CHECK(!text.contains("L 65.0% / C 72.0%"));
     ImGui::DestroyContext();
 }

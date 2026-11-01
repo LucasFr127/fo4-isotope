@@ -38,13 +38,13 @@ void DrawResponseStatus(const char* status) noexcept
     ImGui::SeparatorText(name);
     bool changed = detail::DrawSettingsPanelSlider("Baseline", channel.base, {
         defaults.base, 0.0, 100.0, 1.0, "%.1f%%",
-        "Retention when response amount is zero. 100% keeps the full vanilla LUT response."});
+        "Sets retention when Response Amount is zero. 100% keeps the full vanilla LUT response."});
     changed |= detail::DrawSettingsPanelSlider("Response Amount", channel.gain, {
         defaults.gain, 0.0, kMaximumWeatherGradeGain, 1.0, "%.2fx",
-        "Scales the formula's change from full retention. Zero uses the baseline; one uses the calibrated response."});
+        "Scales the formula's change from full retention. 0x uses Baseline; 1x uses the calibrated response."});
     changed |= detail::DrawSettingsPanelSlider("Minimum Retention", channel.minimum, {
         defaults.minimum, 0.0, channel.maximum, 1.0, "%.1f%%",
-        "Lower bound applied after the formula, baseline and response amount."});
+        "Sets the lower bound applied after the formula, Baseline and Response Amount."});
     ImGui::PopID();
     return changed;
 }
@@ -57,18 +57,18 @@ void DrawResponseStatus(const char* status) noexcept
     ImGui::SeparatorText(name);
     bool changed = detail::DrawSettingsPanelSlider("Maximum Retention", channel.maximum, {
         defaults.maximum, channel.minimum, 100.0, 1.0, "%.1f%%",
-        "Upper bound applied after the formula, baseline and response amount."});
+        "Sets the upper bound applied after the formula, Baseline and Response Amount."});
     changed |= detail::DrawSettingsPanelSlider("Intercept", channel.intercept, {
         defaults.intercept, -kMaximumWeatherGradeCoefficient, kMaximumWeatherGradeCoefficient,
-        1.0, "%.3f", "Formula value before adding the four weighted weather inputs."});
+        1.0, "%+.3f", "Sets the formula value before the four weighted weather inputs are added."});
     constexpr std::array labels{
         "Sunlight Sensitivity", "Glare Sensitivity",
         "Ambient Sensitivity", "Sunlight Color Change Sensitivity"};
     for (std::size_t index = 0; index < labels.size(); ++index)
         changed |= detail::DrawSettingsPanelSlider(labels[index], channel.coefficients[index], {
             defaults.coefficients[index], -kMaximumWeatherGradeCoefficient,
-            kMaximumWeatherGradeCoefficient, 1.0, "%.3f",
-            "Signed weight for this averaged weather input. Negative weights reduce retention as the input increases."});
+            kMaximumWeatherGradeCoefficient, 1.0, "%+.3f",
+            "Sets the signed weight for this averaged weather input. Negative weights reduce retention as the input increases."});
     ImGui::PopID();
     return changed;
 }
@@ -77,17 +77,17 @@ void DrawQualification(const WeatherLutResponseView& view, bool enabled) noexcep
 {
     if (view.gradingBypassed)
     {
-        ImGui::TextWrapped("Production grading bypassed: LUT response adjustments are not applied.");
+        ImGui::TextWrapped("Grading replacement bypassed: LUT response adjustments are not applied.");
         return;
     }
     if (!enabled)
-        ImGui::TextWrapped("Disabled: global grade controls apply. Automatic response settings remain editable.");
+        ImGui::TextWrapped("Off: Global Grade controls apply. The response settings stay editable.");
     else if (view.validatedSlots == 0)
-        ImGui::TextWrapped("Waiting for a qualified vanilla LUT draw. Global grade controls apply.");
+        ImGui::TextWrapped("Waiting for a recognized vanilla LUT draw. Global Grade controls apply.");
     else if (view.automaticSlots == 0)
-        ImGui::TextWrapped("Global fallback: no complete qualified weather response for this draw.");
+        ImGui::TextWrapped("Global Grade fallback: no complete weather response is recognized for this draw.");
     else if ((view.automaticSlots & view.validatedSlots) != view.validatedSlots)
-        ImGui::TextWrapped("Partial response: some contributors use global fallback.");
+        ImGui::TextWrapped("Partial response: some contributors use the Global Grade fallback.");
     else
         ImGui::TextUnformatted("Automatic response active.");
     DrawResponseStatus(view.status);
@@ -132,7 +132,7 @@ void DrawContributorResponse(const WeatherLutResponseView& view, std::size_t ind
 {
     if (view.gradingBypassed)
     {
-        ImGui::TextDisabled("Production grading bypassed");
+        ImGui::TextDisabled("Grading replacement bypassed");
         DrawResponseStatus(view.fallbackReasons[index]);
         return;
     }
@@ -189,9 +189,9 @@ bool DrawWeatherLutResponsePanel(HdrSettings& settings,
     const WeatherLutResponseView& view, const WeatherGradeResponseSettings& defaults) noexcept
 {
     auto& response = settings.weatherGradeResponse;
-    bool changed = ImGui::Checkbox("Enable Automatic Weather Response", &response.enabled);
+    bool changed = ImGui::Checkbox("Enable Automatic Weather LUT Response", &response.enabled);
     ImGui::SetItemTooltip("Uses one fixed response per ImageSpace, averaged from all referencing weather slots.\n"
-        "Unqualified and non-weather sources use the global grade controls.");
+        "Unrecognized and non-weather sources use the Global Grade controls.");
     if (detail::DrawRestoreDefaultButton("weather-response-enabled", response.enabled != defaults.enabled))
     {
         response.enabled = defaults.enabled;
@@ -201,7 +201,7 @@ bool DrawWeatherLutResponsePanel(HdrSettings& settings,
         "Vanilla LUT weights blend these responses during weather transitions.");
     const auto active = EffectiveWeatherGradeResponse(settings).enabled;
     if (active && !response.enabled)
-        ImGui::TextWrapped("On with the SDR tone mapper: Automatic Weather Response with Tone Mappers is on in Output.");
+        ImGui::TextWrapped("On because Automatic Weather LUT Response with ACES 2, AgX or GT7 is on in Output.");
     DrawQualification(view, active);
     changed |= DrawBasicChannel("Luminance", response.luminance, defaults.luminance);
     changed |= DrawBasicChannel("Color", response.color, defaults.color);

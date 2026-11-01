@@ -16,8 +16,12 @@ struct SettingsSliderRange
     const char* help{};
 };
 
+inline constexpr ImVec4 kSettingsWarningColor{1.0F, 0.8F, 0.2F, 1.0F};
+inline constexpr ImVec4 kSettingsErrorColor{1.0F, 0.35F, 0.35F, 1.0F};
+
 inline constexpr SettingsSliderRange kDisplayPeakSlider{
-    400.0F, 2000.0F, "%.0f nits", "Match the display's HDR peak brightness."};
+    400.0F, 2000.0F, "%.0f nits",
+    "Sets the brightest level highlights reach. Match it to the display's HDR peak brightness."};
 inline constexpr SettingsSliderRange kUiWhiteSlider{
     100.0F, 300.0F, "%.0f nits", "Sets the brightness of white menu and HUD elements."};
 inline constexpr SettingsSliderRange kVideoWhiteSlider{
