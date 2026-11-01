@@ -180,7 +180,7 @@ struct ToneMapperParameters
 // SDR operator defaults, tuned in game separately from the HDR defaults.
 inline constexpr ToneMapperParameters kDefaultSdrToneMapperParameters{
     .acesLookStrength = 0.3,
-    .agxMiddleGrayEv = -0.44,
+    .agxMiddleGrayEv = -0.39,
     .gt7ShoulderStart = 0.28};
 
 [[nodiscard]] constexpr ToneMapperParameters ActiveToneMapperParameters(
