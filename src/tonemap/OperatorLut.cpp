@@ -244,21 +244,23 @@ struct PreparedOperator
 }
 
 [[nodiscard]] double ShaperWidth(
-    ProductionToneMapperAlgorithm algorithm) noexcept
+    ProductionToneMapperAlgorithm algorithm, double peak) noexcept
 {
+    // HDR ACES2 narrows the arctangent onto the bright saturated colors near its
+    // center; its SDR table keeps the width its 58-knot edge was measured with.
+    if (IsAces2Algorithm(algorithm) && peak != kAces2SdrPeakNits) return 2.0;
     return algorithm == ProductionToneMapperAlgorithm::gt7 ? 2.5 : 3.0;
 }
 
 [[nodiscard]] double LogarithmicWeight(
     ProductionToneMapperAlgorithm algorithm, double peak) noexcept
 {
-    // SDR AgX gives its deep shadows more knots: at the HDR weight, dark blues
-    // near black need 73 knots per edge before every SDR control keeps its
-    // full recommended range.
+    // Deep-shadow blues need logarithmic knots: weight 0.4 keeps every HDR AgX
+    // control's full recommended range at 66 knots where 0.3 needed 81, and SDR
+    // AgX's 0.5 keeps its range at 49 where 0.3 needed 73.
     if (algorithm == ProductionToneMapperAlgorithm::agX && peak == kAgxSdrPeakNits)
         return 0.5;
-    return IsAces2Algorithm(algorithm) ? 0.25 :
-        (algorithm == ProductionToneMapperAlgorithm::agX ? 0.3 : 0.4);
+    return IsAces2Algorithm(algorithm) ? 0.25 : 0.4;
 }
 
 struct ShaperBounds
@@ -272,7 +274,7 @@ struct ShaperBounds
     ShaperBounds bounds) noexcept
 {
     const auto angle = std::atan((logarithm - ShaperCenter(algorithm, peak)) /
-        ShaperWidth(algorithm));
+        ShaperWidth(algorithm, peak));
     const auto normalizedAngle = (angle - bounds.minimum) / (bounds.maximum - bounds.minimum);
     const auto logSpan = std::log2(kOperatorLutSceneMaximum +
         OperatorLutInputOffset(algorithm)) + 16.0;
@@ -590,7 +592,7 @@ double OperatorLutInputShaperMinimum(
         return 0.0;
     const double minimum = std::log2(OperatorLutInputOffset(algorithm));
     return std::atan((minimum - ShaperCenter(algorithm, displayPeakNits)) /
-        ShaperWidth(algorithm));
+        ShaperWidth(algorithm, displayPeakNits));
 }
 
 double OperatorLutInputShaperMaximum(
@@ -602,7 +604,7 @@ double OperatorLutInputShaperMaximum(
     const double maximum = kOperatorLutSceneMaximum;
     const double logarithm = std::log2(maximum + OperatorLutInputOffset(algorithm));
     return std::atan((logarithm - ShaperCenter(algorithm, displayPeakNits)) /
-        ShaperWidth(algorithm));
+        ShaperWidth(algorithm, displayPeakNits));
 }
 
 double DecodeOperatorLutCoordinate(

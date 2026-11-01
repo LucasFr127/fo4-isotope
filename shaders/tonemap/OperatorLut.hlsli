@@ -7,15 +7,18 @@
 #define FO4HDR_SDR_OPERATOR_OUTPUT 0
 #endif
 
-// These dimensions must match the CPU lattice and coefficient texture.
+// These dimensions and the ACES2 shaper width must match the CPU lattice and
+// coefficient texture.
 #if FO4HDR_SDR_OPERATOR_OUTPUT
 static const float kFo4HdrAces2OperatorLutEdge = 58.0f;
 static const float kFo4HdrAgxOperatorLutEdge = 49.0f;
 static const float kFo4HdrGt7OperatorLutEdge = 51.0f;
+static const float kFo4HdrAces2ShaperWidth = 3.0f;
 #else
-static const float kFo4HdrAces2OperatorLutEdge = 119.0f;
-static const float kFo4HdrAgxOperatorLutEdge = 81.0f;
+static const float kFo4HdrAces2OperatorLutEdge = 94.0f;
+static const float kFo4HdrAgxOperatorLutEdge = 66.0f;
 static const float kFo4HdrGt7OperatorLutEdge = 64.0f;
+static const float kFo4HdrAces2ShaperWidth = 2.0f;
 #endif
 
 
@@ -192,7 +195,8 @@ float3 Fo4HdrSampleOperatorLut(
     if (all(sceneLinear == 0.0f)) return 0.0f.xxx;
     float3 encoded = log2(sceneLinear + kInputOffset);
     const float center = shaperParameters.x;
-    const float width = productionMode == 3u ? 2.5f : 3.0f;
+    const float width = productionMode == 3u ? 2.5f :
+        (productionMode == 1u ? kFo4HdrAces2ShaperWidth : 3.0f);
     const float3 shaped = saturate(atan((encoded - center) / width) *
         shaperAngleGain + encoded * shaperParameters.y + shaperBias);
     float3 mapped = 0.0f;

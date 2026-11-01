@@ -11,9 +11,12 @@
 
 namespace fo4hdr {
 
-// Smallest measured default-qualified logical grids, starting at 64 per edge.
-inline constexpr std::uint32_t kAces2OperatorLutEdge{119};
-inline constexpr std::uint32_t kAgxOperatorLutEdge{81};
+// Measured HDR logical grids, starting at 64 per edge. AgX's is the smallest at
+// which every AgX control keeps its full recommended range, and GT7 qualifies at
+// the minimum. ACES2's smaller qualifying edges, 87 and 91, sit within 0.08 of
+// its cap.
+inline constexpr std::uint32_t kAces2OperatorLutEdge{94};
+inline constexpr std::uint32_t kAgxOperatorLutEdge{66};
 inline constexpr std::uint32_t kGt7OperatorLutEdge{64};
 // Smallest measured SDR grids, starting at 32 per edge, at which every SDR
 // control keeps its full recommended range.

@@ -298,15 +298,15 @@ void TestToneMapperRecommendedIntervals()
     const auto lowPeak = acesAt(1200.0);
     FO4HDR_CHECK(lowPeak.minimum == 0.0 && lowPeak.maximum == 1.0);
     const auto peak1500 = acesAt(1500.0);
-    FO4HDR_CHECK(peak1500.minimum == 0.98 && peak1500.maximum == 1.0);
-    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.98, peak1500) == nullptr);
-    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.97, peak1500) != nullptr);
+    FO4HDR_CHECK(peak1500.minimum == 0.97 && peak1500.maximum == 1.0);
+    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.97, peak1500) == nullptr);
+    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.96, peak1500) != nullptr);
     const auto peak2000 = acesAt(2000.0);
-    FO4HDR_CHECK(peak2000.minimum == 0.99 && peak2000.maximum == 1.0);
-    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.99, peak2000) == nullptr);
-    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.98, peak2000) != nullptr);
+    FO4HDR_CHECK(peak2000.minimum == 0.93 && peak2000.maximum == 1.0);
+    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.93, peak2000) == nullptr);
+    FO4HDR_CHECK(ToneMapperRecommendationStatus(0.92, peak2000) != nullptr);
     FO4HDR_CHECK(acesAt(1350.0).minimum == 0.0);
-    FO4HDR_CHECK(acesAt(std::nextafter(1350.0, 2000.0)).minimum == 0.98);
+    FO4HDR_CHECK(acesAt(std::nextafter(1350.0, 2000.0)).minimum == 0.97);
     const auto agx = GetToneMapperRecommendedRange(ProductionToneMapperAlgorithm::agX,
         2000.0, &ToneMapperParameters::agxContrast);
     FO4HDR_CHECK(agx.minimum == 2.2 && agx.maximum == 3.0);

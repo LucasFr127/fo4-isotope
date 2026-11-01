@@ -173,14 +173,26 @@ void CheckSdrOperatorLut(ProductionToneMapperAlgorithm algorithm)
     CheckSdrNeutral(lut);
 }
 
-// SDR AgX gives the logarithmic shaper term 0.5 of the coordinate; HDR keeps 0.3.
+// SDR AgX gives the logarithmic shaper term 0.5 of the coordinate; HDR gives 0.4.
 void TestSdrAgxShaperWeight()
 {
     constexpr auto agx = ProductionToneMapperAlgorithm::agX;
     const auto logSpan = std::log2(kOperatorLutSceneMaximum + OperatorLutInputOffset(agx)) + 16.0;
     FO4HDR_CHECK(test::Approx(OperatorLutShaperParameters(agx, SdrOperatorWhiteNits(agx))[3],
         0.5 / logSpan, 1.0e-8));
-    FO4HDR_CHECK(test::Approx(OperatorLutShaperParameters(agx, 1000.0)[3], 0.3 / logSpan, 1.0e-8));
+    FO4HDR_CHECK(test::Approx(OperatorLutShaperParameters(agx, 1000.0)[3], 0.4 / logSpan, 1.0e-8));
+}
+
+// The ACES2 arctangent spans width 3 at its SDR white and 2 at HDR peaks; the
+// shaper minimum at the 2^-16 input offset exposes it.
+void TestSdrAces2ShaperWidth()
+{
+    constexpr auto aces2 = ProductionToneMapperAlgorithm::aces2;
+    FO4HDR_CHECK(test::Approx(OperatorLutInputShaperMinimum(aces2, SdrOperatorWhiteNits(aces2)),
+        std::atan((-16.0 - 2.4) / 3.0), 1.0e-12));
+    for (const auto peak : {kMinimumDisplayPeakNits, kMaximumDisplayPeakNits})
+        FO4HDR_CHECK(test::Approx(OperatorLutInputShaperMinimum(aces2, peak),
+            std::atan((-16.0 - 2.4) / 2.0), 1.0e-12));
 }
 
 void TestSdrBuildRequests()
@@ -202,6 +214,7 @@ void RunSdrOperatorLutTests()
 {
     TestSdrContainment();
     TestSdrAgxShaperWeight();
+    TestSdrAces2ShaperWidth();
     TestSdrBuildRequests();
     for (const auto algorithm : kSdrAlgorithms)
         CheckSdrOperatorLut(algorithm);

@@ -21,7 +21,7 @@ constexpr std::array kReferencePeaks{
     ReferencePeak{400.0, 0.0}, ReferencePeak{430.0, 0.0},
     ReferencePeak{600.0, 0.0}, ReferencePeak{800.0, 0.0},
     ReferencePeak{1000.0, 0.0}, ReferencePeak{1200.0, 0.0},
-    ReferencePeak{1500.0, 0.98}, ReferencePeak{2000.0, 0.99}};
+    ReferencePeak{1500.0, 0.97}, ReferencePeak{2000.0, 0.93}};
 
 struct ControlRange
 {
