@@ -796,6 +796,17 @@ private:
 
 }  // namespace
 
+PluginConfiguration FallbackPluginConfiguration(const PluginConfiguration& parsed) noexcept
+{
+    PluginConfiguration fallback{};
+    fallback.sdrEnabled = true;
+    fallback.configurationDefaults = true;
+    fallback.interfaceSettings.hdrEnabled = false;
+    if (IsSupportedHdrSettingsHotkey(parsed.interfaceSettings.toggleKey))
+        fallback.interfaceSettings.toggleKey = parsed.interfaceSettings.toggleKey;
+    return fallback;
+}
+
 PluginConfigurationResult ParsePluginConfiguration(std::string_view text) noexcept
 {
     return ConfigurationParser{}.Parse(text);

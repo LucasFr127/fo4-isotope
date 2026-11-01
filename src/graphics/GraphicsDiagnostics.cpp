@@ -86,6 +86,12 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
         static_cast<HdrCandidateRejection>(g_evidence.hdrCandidateRejection.load());
     snapshot.candidateCreateResult = g_evidence.candidateCreateResult.load();
     snapshot.candidateCreatedFormat = g_evidence.candidateCreatedFormat.load();
+    snapshot.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load());
+    snapshot.rendererInstalled = g_evidence.rendererInstalled.load();
+    snapshot.settingsWindowReady = g_evidence.settingsWindowReady.load();
+    snapshot.settingsBackendFailed = g_evidence.settingsBackendFailed.load();
+    snapshot.sdrTargetFormat = g_evidence.sdrTargetFormat.load();
+    snapshot.sdrTargetSamples = g_evidence.sdrTargetSamples.load();
     snapshot.presentHookConflict = g_evidence.presentHookConflict.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();
     snapshot.qualifiedDrawThreadId = g_observedQualifiedDrawThread.load();

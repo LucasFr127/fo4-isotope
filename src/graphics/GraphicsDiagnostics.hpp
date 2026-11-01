@@ -40,6 +40,13 @@ struct AtomicEvidence
     std::atomic<std::uint8_t> hdrCandidateRejection{};
     std::atomic<std::int32_t> candidateCreateResult{};
     std::atomic<std::uint32_t> candidateCreatedFormat{};
+    // Settings-window availability facts, logged once from lifecycle callbacks.
+    std::atomic<std::uint8_t> sdrModeReason{};
+    std::atomic<bool> rendererInstalled{};
+    std::atomic<bool> settingsWindowReady{};
+    std::atomic<bool> settingsBackendFailed{};
+    std::atomic<std::uint32_t> sdrTargetFormat{};
+    std::atomic<std::uint32_t> sdrTargetSamples{};
     std::atomic<std::uint32_t> failure{};
     std::atomic<std::uint64_t> deviceCreateCount{};
     std::atomic<std::uint64_t> deviceNextCallCount{};

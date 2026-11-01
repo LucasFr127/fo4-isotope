@@ -308,6 +308,43 @@ void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphi
     }
 }
 
+// A cause that keeps the settings window off before the renderer installs.
+[[nodiscard]] const char* StartupSettingsWindowBlocker(
+    const fo4hdr::GraphicsObservationSnapshot& graphics, bool creationBypassed) noexcept
+{
+    if (creationBypassed) return "device-creation-bypassed";
+    if (!graphics.requested) return "hdr-and-sdr-disabled hint=set-SdrEnabled=1";
+    return graphics.initialized ? nullptr : "graphics-inactive";
+}
+
+// A cause on the installed owner chain; none before the first device creation.
+[[nodiscard]] const char* InstalledSettingsWindowBlocker(
+    const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
+{
+    if (graphics.successfulDeviceCreateCount == 0) return nullptr;
+    if (!graphics.rendererInstalled) return "renderer-not-installed";
+    if (graphics.settingsBackendFailed) return "imgui-init-failed";
+    // The developer HDR10 reference draws no window unless its overlay is requested.
+    if (!graphics.settingsWindowReady)
+        return graphics.developerReferenceRequested ? nullptr :
+            "settings-window-not-created hint=set-SdrEnabled=1";
+    return graphics.sdrTargetFormat != 0 ? "sdr-target-unsupported" : nullptr;
+}
+
+// Names the first cause that keeps the settings window from drawing at all.
+void ReportSettingsWindowAvailability(
+    const fo4hdr::GraphicsObservationSnapshot& graphics, bool creationBypassed) noexcept
+{
+    static std::atomic<bool> reported{};
+    const auto* reason = StartupSettingsWindowBlocker(graphics, creationBypassed);
+    if (reason == nullptr) reason = InstalledSettingsWindowBlocker(graphics);
+    if (reason == nullptr) return;
+    WarnOnceFormatted(reported,
+        "settings_window available=false reason={} failure={} sdr_target_format={} sdr_target_samples={}",
+        reason, fo4hdr::GraphicsObservationFailureName(graphics.failure),
+        graphics.sdrTargetFormat, graphics.sdrTargetSamples);
+}
+
 // Names the otherwise silent cases that keep HDR off or hide another mod's UI:
 // a higher import interposer, such as Community Shaders upscaling or frame
 // generation, created the device itself; creation skipped or released the HDR
@@ -317,16 +354,26 @@ void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexce
     static std::atomic<bool> bypassReported{};
     static std::atomic<bool> rejectionReported{};
     static std::atomic<bool> hookConflictReported{};
+    static std::atomic<bool> sdrModeReported{};
     const auto graphics = fo4hdr::ReadGraphicsObservation();
     const bool engineDeviceReady =
         snapshot.rendererInitialized && snapshot.rendererDeviceIdentity != 0;
-    if (fo4hdr::DeviceCreationBypassed(
-            graphics.initialized, graphics.deviceCreateCount, engineDeviceReady))
+    const bool creationBypassed = fo4hdr::DeviceCreationBypassed(
+        graphics.initialized, graphics.deviceCreateCount, engineDeviceReady);
+    if (creationBypassed)
     {
         WarnOnce(bypassReported, "renderer active=false reason=device-creation-bypassed "
                                  "hint=disable-community-shaders-upscaling-and-frame-generation");
     }
+    ReportSettingsWindowAvailability(graphics, creationBypassed);
     ReportSkippedHdrCandidate(graphics);
+    // HDR simply off needs no warning; every other SDR cause redirected from HDR or the INI.
+    if (graphics.sdrModeReason != fo4hdr::SdrModeReason::none &&
+        graphics.sdrModeReason != fo4hdr::SdrModeReason::hdrOff)
+    {
+        WarnOnceFormatted(sdrModeReported, "renderer sdr_mode=true reason={} hint=see-output-tab",
+            fo4hdr::SdrModeReasonName(graphics.sdrModeReason));
+    }
     // A created format other than R10 names a lower layer that replaced the chain.
     if (graphics.hdrCandidateRejection != fo4hdr::HdrCandidateRejection::none)
     {
@@ -426,7 +473,7 @@ namespace
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
         "overlay={} forced_failure={} enabled={} sdr_enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
-        "exposure_ev={} exposure_multiplier={}",
+        "exposure_ev={} exposure_multiplier={} toggle_key={}",
         diagnosticsConfiguration.valid,
         fo4hdr::ToString(diagnosticsConfiguration.error),
         diagnosticsConfiguration.line,
@@ -444,8 +491,22 @@ namespace
         diagnosticsConfiguration.value.displayPeakNits,
         diagnosticsConfiguration.value.uiPaperWhiteNits,
         diagnosticsConfiguration.value.exposureEv,
-        diagnosticsConfiguration.value.sceneExposureMultiplier);
+        diagnosticsConfiguration.value.sceneExposureMultiplier,
+        fo4hdr::FormatHdrSettingsHotkey(
+            diagnosticsConfiguration.value.interfaceSettings.toggleKey).data());
     return diagnosticsConfiguration;
+}
+
+// An unusable INI still starts SDR mode, so the settings window can open and
+// name the problem; the INI is left untouched because saving stays off.
+void UseFallbackConfiguration(fo4hdr::PluginConfigurationResult& configuration)
+{
+    if (configuration.valid) return;
+    configuration.value = fo4hdr::FallbackPluginConfiguration(configuration.value);
+    REX::WARN("configuration valid=false error={} line={} fallback=sdr-defaults toggle_key={} "
+              "hint=replace-FO4Isotope.ini-with-the-shipped-file",
+        fo4hdr::ToString(configuration.error), configuration.line,
+        fo4hdr::FormatHdrSettingsHotkey(configuration.value.interfaceSettings.toggleKey).data());
 }
 
 void ReportGameObserverStatus(bool observerActive) noexcept
@@ -472,8 +533,7 @@ void ReportGameObserverStatus(bool observerActive) noexcept
 // The SDR weather response reads the same native LUT provenance as HDR production.
 [[nodiscard]] bool LutObservationRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
 {
-    return ProductionRequested(configuration) ||
-        (configuration.valid && configuration.value.sdrEnabled);
+    return ProductionRequested(configuration) || configuration.value.sdrEnabled;
 }
 
 // Matches the renderer's HDR path request, which gates scene-target initialization.
@@ -631,6 +691,7 @@ void PrepareAdmittedStartup() noexcept
     {
         g_startup.executable = ExecutablePath();
         g_startup.configuration = LoadDiagnosticsConfiguration(g_startup.executable);
+        UseFallbackConfiguration(g_startup.configuration);
         // Non-Debug builds log per-item lifecycle detail only in developer mode.
         if (g_startup.configuration.valid && g_startup.configuration.value.developerMode)
         {
@@ -638,8 +699,7 @@ void PrepareAdmittedStartup() noexcept
             spdlog::flush_on(spdlog::level::debug);
         }
         g_startup.graphicsActive = fo4hdr::InitializeGraphicsObservation(
-            g_startup.configuration.valid ? g_startup.configuration.value :
-                fo4hdr::PluginConfiguration{});
+            g_startup.configuration.value);
         if (g_startup.graphicsActive) fo4hdr::SetFrameTraceAutoReportSink(&WriteGraphicsDiagnostic);
     }
     catch (...)

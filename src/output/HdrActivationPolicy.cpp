@@ -2,6 +2,9 @@
 
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 
+#include <array>
+#include <cstddef>
+
 namespace fo4hdr {
 namespace {
 
@@ -89,11 +92,48 @@ HdrCandidateDecision DecideHdrCandidate(const HdrCandidateInputs& inputs) noexce
     return HdrCandidateDecision::attempt;
 }
 
+namespace {
+
+// An HDR-requested owner chain without an HDR descriptor.
+[[nodiscard]] SdrModeReason HdrUnavailableReason(const SdrModeInputs& inputs) noexcept
+{
+    switch (inputs.hdrCandidate)
+    {
+    case HdrCandidateDecision::enbDetected: return SdrModeReason::enbDetected;
+    case HdrCandidateDecision::displayNotHdr10: return SdrModeReason::displayNotHdr10;
+    case HdrCandidateDecision::descriptorUnsupported: return SdrModeReason::descriptorUnsupported;
+    case HdrCandidateDecision::attempt: break;
+    }
+    return inputs.hdrInstallFailed ? SdrModeReason::hdrInstallFailed :
+        SdrModeReason::hdrCandidateRejected;
+}
+
+constexpr std::array kSdrModeReasonNames{"none", "hdr-off", "configuration-defaults",
+    "enb-detected", "display-not-hdr10", "swapchain-descriptor-unsupported",
+    "hdr-candidate-rejected", "hdr-install-failed"};
+static_assert(kSdrModeReasonNames.size() ==
+    static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
+
+}  // namespace
+
+SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept
+{
+    if (!inputs.requested || inputs.hdrChainCreated) return SdrModeReason::none;
+    if (inputs.configurationDefaults) return SdrModeReason::configurationDefaults;
+    // ENB prevents the HDR attempt but not SDR mode.
+    if (inputs.enbDetected) return SdrModeReason::enbDetected;
+    return inputs.hdrPathRequested ? HdrUnavailableReason(inputs) : SdrModeReason::hdrOff;
+}
+
 bool DecideSdrMode(const SdrModeInputs& inputs) noexcept
 {
-    if (!inputs.requested || inputs.enbDetected) return false;
-    return !inputs.hdrPathRequested ||
-        inputs.hdrCandidate == HdrCandidateDecision::displayNotHdr10;
+    return DecideSdrModeReason(inputs) != SdrModeReason::none;
+}
+
+const char* SdrModeReasonName(SdrModeReason reason) noexcept
+{
+    const auto index = static_cast<std::size_t>(reason);
+    return index < kSdrModeReasonNames.size() ? kSdrModeReasonNames[index] : "unknown";
 }
 
 namespace {

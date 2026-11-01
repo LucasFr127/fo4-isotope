@@ -16,34 +16,41 @@ namespace {
 constexpr std::size_t kDeviceCreateTexture3D{kDeviceCreateTexture2D + 1U};
 static_assert(kDeviceCreateTexture3D + 1U == kDeviceCreateSrv);
 
-// Fails CreateTexture3D on one device while alive. Like a production shadow,
-// the object points at a copy of its table that keeps the original RTTI header.
-class FailingTexture3DCreation
+// Fails one device creation method while alive. Like a production shadow, the
+// object points at a copy of its table that keeps the original RTTI header.
+class FailingDeviceCreation
 {
 public:
-    explicit FailingTexture3DCreation(ID3D11Device* device) noexcept :
+    FailingDeviceCreation(ID3D11Device* device, std::size_t slot, void* failure) noexcept :
         object_(reinterpret_cast<void***>(device)), original_(*object_)
     {
         std::copy_n(original_ - kShadowHeaderSlots, table_.size(), table_.begin());
-        table_[kShadowHeaderSlots + kDeviceCreateTexture3D] = reinterpret_cast<void*>(&Fail);
+        table_[kShadowHeaderSlots + slot] = failure;
         *object_ = table_.data() + kShadowHeaderSlots;
     }
-    ~FailingTexture3DCreation() { *object_ = original_; }
-    FailingTexture3DCreation(const FailingTexture3DCreation&) = delete;
-    FailingTexture3DCreation& operator=(const FailingTexture3DCreation&) = delete;
+    ~FailingDeviceCreation() { *object_ = original_; }
+    FailingDeviceCreation(const FailingDeviceCreation&) = delete;
+    FailingDeviceCreation& operator=(const FailingDeviceCreation&) = delete;
 
 private:
-    static HRESULT STDMETHODCALLTYPE Fail(ID3D11Device*, const D3D11_TEXTURE3D_DESC*,
-        const D3D11_SUBRESOURCE_DATA*, ID3D11Texture3D** texture) noexcept
-    {
-        if (texture != nullptr) *texture = nullptr;
-        return E_OUTOFMEMORY;
-    }
-
     void*** object_;
     void** original_;
     std::array<void*, kShadowHeaderSlots + kDeviceBaseSlots> table_{};
 };
+
+HRESULT STDMETHODCALLTYPE FailTexture3D(ID3D11Device*, const D3D11_TEXTURE3D_DESC*,
+    const D3D11_SUBRESOURCE_DATA*, ID3D11Texture3D** texture) noexcept
+{
+    if (texture != nullptr) *texture = nullptr;
+    return E_OUTOFMEMORY;
+}
+
+HRESULT STDMETHODCALLTYPE FailPixelShader(ID3D11Device*, const void*, SIZE_T,
+    ID3D11ClassLinkage*, ID3D11PixelShader** shader) noexcept
+{
+    if (shader != nullptr) *shader = nullptr;
+    return E_OUTOFMEMORY;
+}
 
 // SDR mode with an operator selected in the SDR profile. The renderer does not
 // gate selectability; the settings layer does.
@@ -203,7 +210,8 @@ void CheckFailedTableUpload(Device& device)
     FO4HDR_WARP_CHECK(InitializeOperatorLutWorker());
     SdrOperatorFixture::RetainSdrTable();
     {
-        const FailingTexture3DCreation failure(device.device.Get());
+        const FailingDeviceCreation failure(device.device.Get(), kDeviceCreateTexture3D,
+            reinterpret_cast<void*>(&FailTexture3D));
         FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true},
             device.device.Get(), device.context.Get()));
     }
@@ -216,6 +224,23 @@ void CheckFailedTableUpload(Device& device)
     FO4HDR_WARP_CHECK(g_replacements.configurationKey.mode == 2U && ReplacementSetMatchesConfiguration());
 }
 
+// Failed SDR replacements keep the mode for the settings window, without
+// substitution. The redirect after a rejected HDR attempt shares this path.
+void CheckFailedSdrShaderBuild(Device& device)
+{
+    SdrOperatorFixture fixture(device, ProductionToneMapperAlgorithm::native);
+    {
+        const FailingDeviceCreation failure(device.device.Get(), kDeviceCreatePixelShader,
+            reinterpret_cast<void*>(&FailPixelShader));
+        FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true, .hdrPathRequested = true},
+            device.device.Get(), device.context.Get()));
+    }
+    FO4HDR_WARP_CHECK(g_sdrModeActive.load() && g_replacements.sdrSubstitutionDisabled);
+    FO4HDR_WARP_CHECK(g_evidence.sdrModeReason.load() ==
+        static_cast<std::uint8_t>(SdrModeReason::hdrCandidateRejected));
+    ResetReplacementShaders();
+}
+
 }  // namespace
 
 void VerifySdrOperatorPresentation(Device& device)
@@ -225,6 +250,7 @@ void VerifySdrOperatorPresentation(Device& device)
     CheckProfileSwitchRetiresPendingTable(device);
     CheckRetainedTableAfterNativeCurve(device);
     CheckFailedTableUpload(device);
+    CheckFailedSdrShaderBuild(device);
 }
 
 }  // namespace fo4hdr::tests::gpu

@@ -649,19 +649,39 @@ void TestHdrCandidateDecision()
 
 void TestSdrModeDecision()
 {
-    // With HDR off, SDR mode follows its own request unless ENB is present.
+    const auto reason = [](SdrModeInputs inputs) { return DecideSdrModeReason(inputs); };
+    // SDR mode follows its own request, including under ENB.
     FO4HDR_CHECK(DecideSdrMode({.requested = true}));
+    FO4HDR_CHECK(reason({.requested = true}) == SdrModeReason::hdrOff);
     FO4HDR_CHECK(!DecideSdrMode({}));
-    FO4HDR_CHECK(!DecideSdrMode({.requested = true, .enbDetected = true}));
-    // With HDR requested, only an output that is not HDR10 leaves room for SDR mode.
-    FO4HDR_CHECK(DecideSdrMode({.requested = true, .hdrPathRequested = true,
-        .hdrCandidate = HdrCandidateDecision::displayNotHdr10}));
+    FO4HDR_CHECK(!DecideSdrMode({.enbDetected = true}));
+    FO4HDR_CHECK(reason({.requested = true, .enbDetected = true}) == SdrModeReason::enbDetected);
+    // A created HDR chain never enters SDR mode.
+    FO4HDR_CHECK(!DecideSdrMode({.requested = true, .hdrPathRequested = true, .hdrChainCreated = true}));
     FO4HDR_CHECK(!DecideSdrMode({.hdrPathRequested = true,
         .hdrCandidate = HdrCandidateDecision::displayNotHdr10}));
-    for (const auto decision : {HdrCandidateDecision::attempt, HdrCandidateDecision::enbDetected,
-             HdrCandidateDecision::descriptorUnsupported})
-        FO4HDR_CHECK(!DecideSdrMode({.requested = true, .hdrPathRequested = true,
-            .hdrCandidate = decision}));
+    // Every HDR-requested owner chain without an HDR descriptor names its cause.
+    const std::array<std::pair<HdrCandidateDecision, SdrModeReason>, 4> candidates{{
+        {HdrCandidateDecision::displayNotHdr10, SdrModeReason::displayNotHdr10},
+        {HdrCandidateDecision::descriptorUnsupported, SdrModeReason::descriptorUnsupported},
+        {HdrCandidateDecision::enbDetected, SdrModeReason::enbDetected},
+        {HdrCandidateDecision::attempt, SdrModeReason::hdrCandidateRejected}}};
+    for (const auto& [decision, expected] : candidates)
+        FO4HDR_CHECK(reason({.requested = true, .hdrPathRequested = true,
+            .hdrCandidate = decision}) == expected);
+    FO4HDR_CHECK(reason({.requested = true, .hdrPathRequested = true,
+        .hdrInstallFailed = true}) == SdrModeReason::hdrInstallFailed);
+    // Unusable configuration and ENB outrank the HDR request and candidate.
+    FO4HDR_CHECK(reason({.requested = true, .enbDetected = true,
+        .configurationDefaults = true}) == SdrModeReason::configurationDefaults);
+    FO4HDR_CHECK(reason({.requested = true, .hdrPathRequested = true,
+        .hdrCandidate = HdrCandidateDecision::descriptorUnsupported,
+        .enbDetected = true}) == SdrModeReason::enbDetected);
+    for (const auto value : {SdrModeReason::hdrOff, SdrModeReason::configurationDefaults,
+             SdrModeReason::enbDetected, SdrModeReason::displayNotHdr10,
+             SdrModeReason::descriptorUnsupported, SdrModeReason::hdrCandidateRejected,
+             SdrModeReason::hdrInstallFailed})
+        FO4HDR_CHECK(std::string_view{SdrModeReasonName(value)} != "unknown");
 }
 
 void TestHeartbeatFrameQualification(PipelineHeartbeat& heartbeat)

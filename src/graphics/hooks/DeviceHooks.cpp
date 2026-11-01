@@ -765,7 +765,7 @@ public:
         g_evidence.lastDeviceResult.store(result_, std::memory_order_release);
         if (FAILED(result_))
         {
-            ReleaseFailedCreationClaim();
+            if (owner_ && !attemptHdr_) g_rendererCreationClaimed.store(false, std::memory_order_release);
             return result_;
         }
         g_evidence.successfulDeviceCreateCount.fetch_add(1, std::memory_order_relaxed);
@@ -773,22 +773,14 @@ public:
         if (!owner_) return result_;
         InitializeRendererLifetime();
         RetirePreviousDevice();
-        const auto installed = InstallObjects();
-        if (installed.Complete()) PublishInstallation();
-        ReportInstallationFailure(installed);
-        if (!installed.Complete()) RollBackInstallation(installed);
+        InstallAndPublish();
         // Descriptor ownership only initializes the chain. Present publishes
         // HDR after ordered heartbeat, composition, color-space and output checks.
         g_evidence.hdrChainActive.store(false, std::memory_order_release);
         return result_;
     }
 
-private:    void ReleaseFailedCreationClaim()
-    {
-        if (owner_ && !attemptHdr_)
-            g_rendererCreationClaimed.store(false, std::memory_order_release);
-    }
-
+private:
     [[nodiscard]] bool ClaimRenderer()
     {
         if (request_.description == nullptr || request_.description->OutputWindow == nullptr) return false;
@@ -901,6 +893,22 @@ private:    void ReleaseFailedCreationClaim()
         ResetShaderRegistry();
     }
 
+    // A rolled-back HDR installation retried the original descriptor; that chain
+    // installs once more without HDR, so it runs SDR mode. It cannot recurse again.
+    void InstallAndPublish()
+    {
+        const auto installed = InstallObjects();
+        if (installed.Complete()) return PublishInstallation();
+        ReportInstallationFailure(installed);
+        const auto retry = hdrDescriptor_;
+        RollBackInstallation(installed);
+        if (!retry || FAILED(result_)) return;
+        hdrDescriptor_ = false;
+        hdrInstallFailed_ = true;
+        InitializeRendererLifetime();
+        InstallAndPublish();
+    }
+
     [[nodiscard]] InstalledRendererObjects InstallObjects()
     {
         InstalledRendererObjects installed;
@@ -934,8 +942,12 @@ private:    void ReleaseFailedCreationClaim()
         // SDR mode is ready before publication activates settings input below.
         (void)PrepareSdrMode({.requested = g_configuration.sdrEnabled,
             .hdrPathRequested = HdrPathRequested(), .hdrCandidate = candidateDecision_,
-            .enbDetected = LoadedModuleExports("ENBGetSDKVersion")},
+            .enbDetected = LoadedModuleExports("ENBGetSDKVersion"),
+            .hdrChainCreated = hdrDescriptor_, .hdrInstallFailed = hdrInstallFailed_,
+            .configurationDefaults = g_configuration.configurationDefaults},
             *request_.device, *request_.context);
+        g_evidence.settingsWindowReady.store(SettingsWindowBackendReady(), std::memory_order_release);
+        g_evidence.rendererInstalled.store(true, std::memory_order_release);
         g_rendererDevice.activeDevice = *request_.device;
         g_rendererDevice.activeContext = *request_.context;
         g_rendererDevice.activeContext1.Reset();
@@ -976,6 +988,7 @@ private:    void ReleaseFailedCreationClaim()
         if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
         ShutdownSettingsWindowBackend();
         SetSdrModeActive(false);
+        g_evidence.rendererInstalled.store(false, std::memory_order_release);
         ResetResources();
         ResetReplacementShaders();
         g_referenceHealthy = false;
@@ -998,6 +1011,7 @@ private:    void ReleaseFailedCreationClaim()
     bool owner_{};
     bool attemptHdr_{};
     bool hdrDescriptor_{};
+    bool hdrInstallFailed_{};
     HdrCandidateDecision candidateDecision_{HdrCandidateDecision::attempt};
     ComPtr<IDXGISwapChain> facade_;
     HRESULT result_{E_FAIL};

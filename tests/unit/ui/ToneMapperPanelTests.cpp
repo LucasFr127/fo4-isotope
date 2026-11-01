@@ -186,11 +186,52 @@ int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize
     return ImGui::GetDrawData()->TotalVtxCount;
 }
 
+// Text of the SDR Output tab for one SDR cause.
+std::string SdrOutputText(SdrModeReason reason, bool controlsUnavailable, ImVec2 windowSize)
+{
+    auto settings = DefaultSdrSettings();
+    SettingsWindowView view{};
+    view.activeSettings = settings;
+    view.sdrMode = true;
+    view.hdrEnabledAtStart = true;
+    view.sdrModeReason = reason;
+    view.sdrControlsUnavailable = controlsUnavailable;
+    bool commitRequested{}, hdrEnabled{true};
+    std::string text;
+    ImGui::NewFrame();
+    ImGui::SetNextWindowSize(windowSize, ImGuiCond_Always);
+    if (ImGui::Begin("SDR reason smoke", nullptr, ImGuiWindowFlags_NoSavedSettings) &&
+        ImGui::BeginTabBar("SDR reason tabs"))
+    {
+        ImGui::LogToBuffer();
+        DrawColorSettingsTabs({settings, commitRequested, hdrEnabled}, view, 0.0F);
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
+        ImGui::EndTabBar();
+    }
+    ImGui::End();
+    ImGui::Render();
+    FO4HDR_CHECK(!commitRequested);
+    return text;
+}
+
+void CheckSdrOutputReasons(ImVec2 windowSize)
+{
+    // The tab bar selects Output on its first frame and draws it from the next.
+    (void)SdrOutputText(SdrModeReason::hdrOff, false, windowSize);
+    FO4HDR_CHECK(SdrOutputText(SdrModeReason::enbDetected, false, windowSize).contains("ENB is installed"));
+    const auto failed = SdrOutputText(SdrModeReason::hdrCandidateRejected, true, windowSize);
+    FO4HDR_CHECK(failed.contains("refused") && failed.contains("controls are unavailable"));
+    const auto off = SdrOutputText(SdrModeReason::hdrOff, false, windowSize);
+    FO4HDR_CHECK(off.contains("need Enable HDR") && !off.contains("SDR is shown because"));
+}
+
 // The SDR Tone Mapper choice is followed by the selected operator's controls, and
 // only an HDR request with a status draws more than the unchecked box.
 void CheckSdrOperatorControls(ImVec2 windowSize)
 {
     CheckSdrAgxControls(windowSize);
+    CheckSdrOutputReasons(windowSize);
     (void)SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize);
     const auto native = SdrOutputVertices(ProductionToneMapperAlgorithm::native, windowSize);
     for (const auto algorithm : {ProductionToneMapperAlgorithm::aces2,
@@ -213,12 +254,35 @@ void TestHdrRequestStatus()
     // HDR session: turning HDR off needs a restart.
     FO4HDR_CHECK(status(true, true, false).empty());
     FO4HDR_CHECK(status(false, true, false).starts_with("Restart the game to turn HDR off"));
-    // HDR requested, but the session entered SDR mode: only the unavailable note.
-    FO4HDR_CHECK(status(true, true, true).starts_with("HDR is not active"));
+    // HDR requested, but the session entered SDR mode: the SDR reason explains it.
+    FO4HDR_CHECK(status(true, true, true).empty());
     FO4HDR_CHECK(status(false, true, true).empty());
     // HDR off at start: turning it on needs a restart.
     FO4HDR_CHECK(status(false, false, true).empty());
     FO4HDR_CHECK(status(true, false, true).starts_with("Restart the game to turn HDR on"));
+    // Defaults from an unusable INI cannot save the request, so no restart is offered.
+    SettingsWindowView fallback{};
+    fallback.sdrMode = true;
+    fallback.sdrModeReason = SdrModeReason::configurationDefaults;
+    FO4HDR_CHECK(HdrRequestStatus(true, fallback) == nullptr);
+}
+
+// Every handled cause of SDR mode names itself; HDR simply off needs no note.
+void TestSdrModeReasonText()
+{
+    const auto text = [](SdrModeReason reason) {
+        SettingsWindowView view{};
+        view.sdrMode = true;
+        view.sdrModeReason = reason;
+        const auto* message = SdrModeReasonText(view);
+        return std::string_view{message != nullptr ? message : ""};
+    };
+    FO4HDR_CHECK(text(SdrModeReason::none).empty() && text(SdrModeReason::hdrOff).empty());
+    FO4HDR_CHECK(text(SdrModeReason::enbDetected).contains("ENB"));
+    FO4HDR_CHECK(text(SdrModeReason::configurationDefaults).contains("FO4Isotope.ini"));
+    for (const auto reason : {SdrModeReason::displayNotHdr10, SdrModeReason::descriptorUnsupported,
+             SdrModeReason::hdrCandidateRejected, SdrModeReason::hdrInstallFailed})
+        FO4HDR_CHECK(text(reason).starts_with("SDR is shown because"));
 }
 
 void TestToneMapperRecommendationFloatEndpoints()
@@ -306,6 +370,7 @@ void TestToneMapperRecommendations()
     TestToneMapperRecommendedPeaks();
     TestToneMapperRecommendedIntervals();
     TestHdrRequestStatus();
+    TestSdrModeReasonText();
 }
 
 }  // namespace

@@ -34,8 +34,16 @@ struct PluginConfiguration : HdrSettings
     bool developerHdr10Reference{};
     bool showDeveloperOverlay{};
     bool forceHdrSwapChainFailure{};
+    // Startup took FallbackPluginConfiguration because the INI was unusable.
+    bool configurationDefaults{};
     bool operator==(const PluginConfiguration&) const = default;
 };
+
+// Neutral SDR-only settings for an unusable INI, so the settings window can
+// still open and name the problem. HDR, diagnostics and saving stay off; a
+// shortcut that parsed before the error is kept.
+[[nodiscard]] PluginConfiguration FallbackPluginConfiguration(
+    const PluginConfiguration& parsed) noexcept;
 
 // SDR profile sections reuse their HDR section's key names.
 struct SdrProfileSection { std::string_view sdr; std::string_view base; };

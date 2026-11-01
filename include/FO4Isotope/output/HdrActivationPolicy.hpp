@@ -93,8 +93,21 @@ struct HdrCandidateInputs
 [[nodiscard]] HdrCandidateDecision DecideHdrCandidate(
     const HdrCandidateInputs& inputs) noexcept;
 
-// SDR mode runs only where HDR was not attempted because HDR is off or
-// the output is not HDR10. ENB and HDR attempts, including failed ones, keep vanilla.
+// Why the owner chain runs SDR mode; none keeps vanilla or the HDR chain.
+enum class SdrModeReason : std::uint8_t
+{
+    none,
+    hdrOff,
+    configurationDefaults,
+    enbDetected,
+    displayNotHdr10,
+    descriptorUnsupported,
+    hdrCandidateRejected,
+    hdrInstallFailed
+};
+
+// SDR mode runs on every owner chain without an HDR descriptor, so the settings
+// window has a route to the screen whenever HDR is off or unavailable.
 struct SdrModeInputs
 {
     bool requested{};
@@ -102,9 +115,16 @@ struct SdrModeInputs
     // Meaningful only when the HDR path was requested.
     HdrCandidateDecision hdrCandidate{HdrCandidateDecision::attempt};
     bool enbDetected{};
+    bool hdrChainCreated{};
+    // An HDR chain whose installation rolled back to the original descriptor.
+    bool hdrInstallFailed{};
+    // FO4Isotope.ini was unusable, so startup took the SDR-only defaults.
+    bool configurationDefaults{};
 };
 
+[[nodiscard]] SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept;
 [[nodiscard]] bool DecideSdrMode(const SdrModeInputs& inputs) noexcept;
+[[nodiscard]] const char* SdrModeReasonName(SdrModeReason reason) noexcept;
 
 enum class HdrRendererState : std::uint8_t
 {

@@ -68,13 +68,39 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
 
 const char* HdrRequestStatus(bool hdrEnabled, const SettingsWindowView& view) noexcept
 {
+    // Defaults from an unusable INI cannot save the request; the reason names the fix.
+    if (view.sdrModeReason == SdrModeReason::configurationDefaults) return nullptr;
     if (hdrEnabled && !view.hdrEnabledAtStart) return "Restart the game to turn HDR on.";
     // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
     if (!hdrEnabled && !view.sdrMode) return "Restart the game to turn HDR off.";
-    if (hdrEnabled && view.sdrMode)
-        return "HDR is not active: Windows HDR was off or no HDR display was detected when the "
-            "game started. Turn on Use HDR in the Windows display settings, then restart the game.";
     return nullptr;
+}
+
+// Indexed by SdrModeReason; HDR simply off needs no note.
+constexpr std::array<const char*, 8> kSdrModeReasonTexts{
+    nullptr,
+    nullptr,
+    "FO4Isotope.ini is missing or has an invalid setting, so default settings are active "
+        "and changes are not saved. The F4SE log names the setting. Replace the INI with the one "
+        "from the FO4Isotope download, then restart the game.",
+    "SDR is shown because ENB is installed. HDR output is not available with ENB; "
+        "remove ENB to use HDR.",
+    "SDR is shown because Windows HDR was off or no HDR display was detected when the "
+        "game started. Turn on Use HDR in the Windows display settings, then restart the game.",
+    "SDR is shown because the game's swap chain cannot carry HDR: exclusive fullscreen "
+        "or a sequential swap effect, such as from High FPS Physics Fix. Use borderless or "
+        "windowed mode with a flip or discard swap effect, then restart the game.",
+    "SDR is shown because the HDR swap chain was refused by the graphics driver or "
+        "another graphics mod. The F4SE log names the failed check.",
+    "SDR is shown because HDR resources could not be created on this swap chain, "
+        "for example under another graphics mod. The F4SE log names the failure."};
+static_assert(kSdrModeReasonTexts.size() ==
+    static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
+
+const char* SdrModeReasonText(const SettingsWindowView& view) noexcept
+{
+    const auto index = static_cast<std::size_t>(view.sdrModeReason);
+    return index < kSdrModeReasonTexts.size() ? kSdrModeReasonTexts[index] : nullptr;
 }
 
 const char* ToneMapperRecommendationStatus(
@@ -262,6 +288,17 @@ struct ColorSettingsTabs
         if (status == nullptr) return;
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.8F, 0.2F, 1.0F));
         ImGui::TextWrapped("%s", status);
+        ImGui::PopStyleColor();
+    }
+
+    void DrawSdrModeReason() noexcept
+    {
+        const std::array messages{SdrModeReasonText(view), view.sdrControlsUnavailable ?
+            "SDR color controls are unavailable this session: their shaders could not be built "
+            "or bound. Restart the game to retry." : nullptr};
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0F, 0.8F, 0.2F, 1.0F));
+        for (const auto* message : messages)
+            if (message != nullptr) ImGui::TextWrapped("%s", message);
         ImGui::PopStyleColor();
     }
 
@@ -523,9 +560,11 @@ struct ColorSettingsTabs
             ImGui::BeginChild("Output-content", ImVec2(0.0F, -footerHeight));
             if (view.sdrMode)
             {
-                ImGui::TextWrapped("SDR color controls are active on the game's own SDR image. "
-                    "HDR output and its brightness and tone-mapping controls need Enable HDR "
-                    "and an HDR10 display with Windows HDR on when the game starts.");
+                ImGui::TextWrapped("SDR color controls are active on the game's own SDR image.");
+                if (SdrModeReasonText(view) == nullptr)
+                    ImGui::TextWrapped("HDR output and its brightness and tone-mapping controls need "
+                        "Enable HDR and an HDR10 display with Windows HDR on when the game starts.");
+                DrawSdrModeReason();
                 DrawHdrRequest();
                 DrawSdrToneCurve();
                 ImGui::EndChild();

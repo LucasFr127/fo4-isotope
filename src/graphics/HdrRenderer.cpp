@@ -150,8 +150,10 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
         ResetResources(false, ApplicationPresentationFacadeActive());
     if (creation != PresentationResourceCreation::ready) return false;
     EnsureArmorEncodedResources(device, context);
-    EnsureSettingsWindowBackend(g_configuration.productionRequested || g_configuration.showDeveloperOverlay,
-        g_outputWindow, device, context);
+    const auto settingsRequested = g_configuration.productionRequested || g_configuration.showDeveloperOverlay;
+    EnsureSettingsWindowBackend(settingsRequested, g_outputWindow, device, context);
+    g_evidence.settingsBackendFailed.store(settingsRequested && !SettingsWindowBackendReady(),
+        std::memory_order_release);
     if (CurrentWideGamutReadiness().Complete()) {
         g_presentation.colorDomainGeneration =
             g_evidence.resourceGeneration.load(std::memory_order_acquire);
@@ -270,6 +272,7 @@ void RetireLostDeviceGeneration() noexcept
     if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
     g_presentation.applicationFacadeChain = nullptr;
     g_sdrModeActive.store(false, std::memory_order_release);
+    g_evidence.rendererInstalled.store(false, std::memory_order_release);
     ResetResources();
     ResetReplacementShaders();
     ResetShaderRegistry();
@@ -766,17 +769,20 @@ bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
     ID3D11DeviceContext* context) noexcept
 {
     // The latch precedes the build so its constants omit the HDR operator mode.
-    const auto admitted = DecideSdrMode(inputs);
+    const auto reason = DecideSdrModeReason(inputs);
+    g_evidence.sdrModeReason.store(static_cast<std::uint8_t>(reason), std::memory_order_release);
+    const auto admitted = reason != SdrModeReason::none;
     SetSdrModeActive(admitted);
     if (!admitted) return false;
     DeferUnpreparedSdrOperator();
+    // A failed build keeps the mode for the settings window; nothing substitutes.
     if (!BuildSdrReplacementsOrDeferOperator(device))
     {
-        SetSdrModeActive(false);
+        DisableSdrSubstitution();
         RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
-        return false;
     }
     EnsureSettingsWindowBackend(true, g_outputWindow, device, context);
+    g_evidence.settingsBackendFailed.store(!SettingsWindowBackendReady(), std::memory_order_release);
     return true;
 }
 

@@ -83,6 +83,13 @@ struct GraphicsObservationSnapshot
     HdrCandidateRejection hdrCandidateRejection{HdrCandidateRejection::none};
     std::int32_t candidateCreateResult{};
     std::uint32_t candidateCreatedFormat{};
+    // Why SDR mode runs, and what keeps the settings window off the screen.
+    SdrModeReason sdrModeReason{SdrModeReason::none};
+    bool rendererInstalled{};
+    bool settingsWindowReady{};
+    bool settingsBackendFailed{};
+    std::uint32_t sdrTargetFormat{};
+    std::uint32_t sdrTargetSamples{};
     // A foreign Present hook runs before final HDR composition overwrites it.
     bool presentHookConflict{};
     bool liveSettingsThreadCompatible{};

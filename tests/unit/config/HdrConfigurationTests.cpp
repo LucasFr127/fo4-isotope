@@ -552,8 +552,26 @@ void TestConfigurationToggleKeys()
     }
 }
 
+// An unusable INI starts neutral SDR only and keeps a shortcut that parsed first.
+void TestFallbackConfiguration()
+{
+    auto parsed = ParsePluginConfiguration(
+        "[Interface]\nToggleKey=Alt+H\n[General]\nHdrEnabled=1\nDeveloperMode=1\n");
+    FO4HDR_CHECK(!parsed.valid && parsed.error == PluginConfigurationError::missingKey);
+    const auto fallback = FallbackPluginConfiguration(parsed.value);
+    FO4HDR_CHECK(fallback.sdrEnabled && fallback.configurationDefaults);
+    FO4HDR_CHECK(!fallback.enabled && !fallback.productionRequested && !fallback.developerMode);
+    FO4HDR_CHECK(!fallback.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(FormatHdrSettingsHotkey(fallback.interfaceSettings.toggleKey).data() ==
+        std::string_view{"Alt+H"});
+    FO4HDR_CHECK(fallback.sdrSettings == DefaultSdrSettings());
+    FO4HDR_CHECK(FallbackPluginConfiguration(PluginConfiguration{}).interfaceSettings.toggleKey ==
+        HdrInterfaceSettings{}.toggleKey);
+}
+
 void TestOptionalConfigurationFailures()
 {
+    TestFallbackConfiguration();
     TestConfigurationMethodErrors();
     TestConfigurationCurveErrors();
     TestConfigurationOperatorErrors();

@@ -431,19 +431,24 @@ void RetirePresentationOutput() noexcept
 
 namespace {
 
-// ImGui writes display codes, so the view must not apply an sRGB encode.
+// ImGui writes display codes, so the view must not apply an sRGB encode. A
+// lower layer's sRGB or FP16 chain keeps its own view format: the window's
+// colors shift there, but a visible window beats a hidden modal one.
 [[nodiscard]] DXGI_FORMAT SdrBackBufferViewFormat(DXGI_FORMAT format) noexcept
 {
-    switch (format)
-    {
-    case DXGI_FORMAT_R8G8B8A8_UNORM:
-    case DXGI_FORMAT_R8G8B8A8_TYPELESS: return DXGI_FORMAT_R8G8B8A8_UNORM;
-    case DXGI_FORMAT_B8G8R8A8_UNORM:
-    case DXGI_FORMAT_B8G8R8A8_TYPELESS: return DXGI_FORMAT_B8G8R8A8_UNORM;
-    case DXGI_FORMAT_R10G10B10A2_UNORM:
-    case DXGI_FORMAT_R10G10B10A2_TYPELESS: return DXGI_FORMAT_R10G10B10A2_UNORM;
-    default: return DXGI_FORMAT_UNKNOWN;
-    }
+    struct ViewFormat { DXGI_FORMAT texture; DXGI_FORMAT view; };
+    constexpr ViewFormat formats[]{
+        {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM},
+        {DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM},
+        {DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM},
+        {DXGI_FORMAT_B8G8R8A8_TYPELESS, DXGI_FORMAT_B8G8R8A8_UNORM},
+        {DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM},
+        {DXGI_FORMAT_R10G10B10A2_TYPELESS, DXGI_FORMAT_R10G10B10A2_UNORM},
+        {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB},
+        {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB},
+        {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT}};
+    const auto found = std::ranges::find(formats, format, &ViewFormat::texture);
+    return found == std::end(formats) ? DXGI_FORMAT_UNKNOWN : found->view;
 }
 
 // ImGui's rasterizer needs a single-sample render target.
@@ -467,7 +472,13 @@ bool EnsureSdrBackBufferTarget(IDXGISwapChain* swapChain, ID3D11Device* device) 
     if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) return false;
     D3D11_TEXTURE2D_DESC description{};
     backBuffer->GetDesc(&description);
-    if (!SdrBackBufferDrawable(description)) return false;
+    if (!SdrBackBufferDrawable(description))
+    {
+        // Named once by the lifecycle report; this runs once per generation.
+        g_evidence.sdrTargetSamples.store(description.SampleDesc.Count, std::memory_order_relaxed);
+        g_evidence.sdrTargetFormat.store(description.Format, std::memory_order_release);
+        return false;
+    }
     D3D11_RENDER_TARGET_VIEW_DESC view{};
     view.Format = SdrBackBufferViewFormat(description.Format);
     view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;

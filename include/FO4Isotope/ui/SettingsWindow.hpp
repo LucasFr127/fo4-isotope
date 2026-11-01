@@ -2,6 +2,7 @@
 #pragma once
 
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/output/NativeLutObservation.hpp"
 #include "FO4Isotope/output/WeatherGradeResponse.hpp"
 #ifndef NOMINMAX
@@ -71,6 +72,9 @@ struct SettingsWindowView
     bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{}, sdrMode{};
     // [General] HdrEnabled as this game session started.
     bool hdrEnabledAtStart{};
+    SdrModeReason sdrModeReason{};
+    // SDR mode kept the window after its replacement shaders failed to build.
+    bool sdrControlsUnavailable{};
     bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
     ProductionToneMapperAlgorithm pendingAlgorithm{};
     double pendingPeakNits{};
