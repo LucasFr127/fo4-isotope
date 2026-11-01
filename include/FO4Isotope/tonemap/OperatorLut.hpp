@@ -22,7 +22,7 @@ inline constexpr std::uint32_t kGt7OperatorLutEdge{64};
 // control keeps its full recommended range.
 inline constexpr std::uint32_t kSdrAces2OperatorLutEdge{58};
 inline constexpr std::uint32_t kSdrAgxOperatorLutEdge{49};
-inline constexpr std::uint32_t kSdrGt7OperatorLutEdge{51};
+inline constexpr std::uint32_t kSdrGt7OperatorLutEdge{53};
 inline constexpr std::uint32_t kOperatorLutCoefficientPadding{2};
 inline constexpr double kOperatorLutSceneMaximum{65504.0};
 

@@ -181,8 +181,7 @@ struct ToneMapperParameters
 inline constexpr ToneMapperParameters kDefaultSdrToneMapperParameters{
     .acesLookStrength = 0.3,
     .agxMiddleGrayEv = -0.44,
-    .gt7ToeStrength = 1.22,
-    .gt7ShoulderStart = 0.378};
+    .gt7ShoulderStart = 0.28};
 
 [[nodiscard]] constexpr ToneMapperParameters ActiveToneMapperParameters(
     ProductionToneMapperAlgorithm algorithm,

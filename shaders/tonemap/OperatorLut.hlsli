@@ -12,7 +12,7 @@
 #if FO4HDR_SDR_OPERATOR_OUTPUT
 static const float kFo4HdrAces2OperatorLutEdge = 58.0f;
 static const float kFo4HdrAgxOperatorLutEdge = 49.0f;
-static const float kFo4HdrGt7OperatorLutEdge = 51.0f;
+static const float kFo4HdrGt7OperatorLutEdge = 53.0f;
 static const float kFo4HdrAces2ShaperWidth = 3.0f;
 #else
 static const float kFo4HdrAces2OperatorLutEdge = 94.0f;

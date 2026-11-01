@@ -225,7 +225,7 @@ void CheckSdrProfileRewrite()
     FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Native\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
     FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
-    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.22\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);
     // The SDR-only key is written only to its SDR section.
     FO4HDR_CHECK(section("[SdrToneMapper]").find("AutomaticWeatherResponse=1\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("AutomaticWeatherResponse=") == saved.rfind("AutomaticWeatherResponse="));
