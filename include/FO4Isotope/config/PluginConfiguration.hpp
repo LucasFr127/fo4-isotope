@@ -32,7 +32,6 @@ struct PluginConfiguration : HdrSettings
     bool measurePerformance{};
     // Numerical/display reference validation is independent of production HDR.
     bool developerHdr10Reference{};
-    bool showDeveloperOverlay{};
     bool forceHdrSwapChainFailure{};
     // Startup took FallbackPluginConfiguration because the INI was unusable.
     bool configurationDefaults{};

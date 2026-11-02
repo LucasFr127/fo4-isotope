@@ -612,7 +612,8 @@ private:
         // A full save performs one-way migration of retired names.
         if (positionOnly_ || sdrProfile_) return false;
         return (section_ == "Image" && name == "GradeTransfer") ||
-            (section_ == "Effects" && name == "GradeProfilesEnabled");
+            (section_ == "Effects" && name == "GradeProfilesEnabled") ||
+            (section_ == "Debug" && name == "ShowDeveloperOverlay");
     }
 
     [[nodiscard]] static bool NamesKey(const PersistedKey& key, std::string_view name) noexcept

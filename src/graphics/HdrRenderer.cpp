@@ -150,7 +150,7 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
         ResetResources(false, ApplicationPresentationFacadeActive());
     if (creation != PresentationResourceCreation::ready) return false;
     EnsureArmorEncodedResources(device, context);
-    const auto settingsRequested = g_configuration.productionRequested || g_configuration.showDeveloperOverlay;
+    const auto settingsRequested = g_configuration.productionRequested || g_configuration.developerHdr10Reference;
     EnsureSettingsWindowBackend(settingsRequested, g_outputWindow, device, context);
     g_evidence.settingsBackendFailed.store(settingsRequested && !SettingsWindowBackendReady(),
         std::memory_order_release);

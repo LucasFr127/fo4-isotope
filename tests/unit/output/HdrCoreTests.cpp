@@ -989,16 +989,15 @@ DeveloperMode=1
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=1
-ShowDeveloperOverlay=1
 ForceHdrSwapChainFailure=0
 )ini";
     auto parsed = ParsePluginConfiguration(enabled);
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(parsed.value.developerHdr10Reference);
-    FO4HDR_CHECK(parsed.value.showDeveloperOverlay);
     FO4HDR_CHECK(!parsed.value.forceHdrSwapChainFailure);
 
-    constexpr std::string_view overlayWithoutReference = R"ini(
+    // The retired overlay switch is ignored, even without the reference.
+    constexpr std::string_view retiredOverlay = R"ini(
 [General]
 DeveloperMode=1
 [Debug]
@@ -1007,11 +1006,9 @@ DeveloperHdr10Reference=0
 ShowDeveloperOverlay=1
 ForceHdrSwapChainFailure=0
 )ini";
-    parsed = ParsePluginConfiguration(overlayWithoutReference);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(
-        parsed.error ==
-        PluginConfigurationError::invalidCombination);
+    parsed = ParsePluginConfiguration(retiredOverlay);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(!parsed.value.developerHdr10Reference);
 
     constexpr std::string_view referenceWithoutDeveloper = R"ini(
 [General]
@@ -1019,7 +1016,6 @@ DeveloperMode=0
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=1
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
     parsed = ParsePluginConfiguration(referenceWithoutDeveloper);
@@ -1034,7 +1030,6 @@ DeveloperMode=1
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=1
 )ini";
     parsed = ParsePluginConfiguration(failureWithoutReference);

@@ -59,7 +59,6 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
     FO4HDR_CHECK(!shipped.value.measurePerformance);
     FO4HDR_CHECK(!shipped.value.developerHdr10Reference);
-    FO4HDR_CHECK(!shipped.value.showDeveloperOverlay);
     FO4HDR_CHECK(!shipped.value.forceHdrSwapChainFailure);
     FO4HDR_CHECK(shipped.value.sdrEnabled);
     FO4HDR_CHECK(shipped.value.sdrSettings == DefaultSdrSettings());

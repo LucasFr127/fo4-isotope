@@ -423,7 +423,6 @@ ExposureEV=0
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
 }
@@ -538,7 +537,6 @@ DeveloperMode=1
 [Debug]
 TraceRenderPipeline=1
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
     parsed = ParsePluginConfiguration(diagnosticOnly);

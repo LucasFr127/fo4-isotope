@@ -161,11 +161,14 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(RewriteHdrWindowPositionIni(retiredGradeTransfer, 1, 2)
         .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
 
-    // A full save renames HdrColorResponse in place in both profiles.
+    // A full save renames HdrColorResponse in place in both profiles and drops
+    // the retired overlay switch.
     constexpr std::string_view formerNames =
-        "[AgX]\nHdrColorResponse=0.4\n[SdrAgX]\nHdrColorResponse=0.4\n";
+        "[AgX]\nHdrColorResponse=0.4\n[SdrAgX]\nHdrColorResponse=0.4\n"
+        "[Debug]\nShowDeveloperOverlay=0\n";
     const auto renamed = RewriteHdrSettingsIni(formerNames, {settings}, interfaceSettings);
     FO4HDR_CHECK(renamed.find("HdrColorResponse") == std::string::npos);
+    FO4HDR_CHECK(renamed.find("ShowDeveloperOverlay") == std::string::npos);
     FO4HDR_CHECK(renamed.find("[AgX]\nColorResponse=0.55\n") != std::string::npos);
     FO4HDR_CHECK(renamed.find("[SdrAgX]\nColorResponse=") != std::string::npos);
 

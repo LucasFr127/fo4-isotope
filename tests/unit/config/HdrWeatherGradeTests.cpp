@@ -53,7 +53,7 @@ void TestNeutralWeatherGradeConfiguration()
     for (const auto reference : {"0", "1"})
     {
         const auto text = std::string{"[General]\nDeveloperMode=1\n"
-            "[Debug]\nTraceRenderPipeline=1\nShowDeveloperOverlay=0\n"
+            "[Debug]\nTraceRenderPipeline=1\n"
             "ForceHdrSwapChainFailure=0\nDeveloperHdr10Reference="} + reference + "\n";
         const auto parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(parsed.valid);

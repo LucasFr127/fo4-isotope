@@ -19,7 +19,6 @@ DeveloperMode=0
 [Debug]
 TraceRenderPipeline=0
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
 
@@ -37,7 +36,6 @@ DeveloperMode=1
 TraceRenderPipeline=0
 MeasurePerformance=1
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
     parsed = ParsePluginConfiguration(enabled);
@@ -52,7 +50,6 @@ DeveloperMode=0
 TraceRenderPipeline=0
 MeasurePerformance=1
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
     parsed = ParsePluginConfiguration(withoutDeveloperMode);
@@ -69,7 +66,6 @@ TraceRenderPipeline=0
 MeasurePerformance=0
 MeasurePerformance=1
 DeveloperHdr10Reference=0
-ShowDeveloperOverlay=0
 ForceHdrSwapChainFailure=0
 )ini";
     parsed = ParsePluginConfiguration(duplicate);

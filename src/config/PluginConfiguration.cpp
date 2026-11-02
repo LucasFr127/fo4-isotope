@@ -133,7 +133,6 @@ enum class RequiredKey : std::size_t
     developerMode,
     traceRenderPipeline,
     developerHdr10Reference,
-    showDeveloperOverlay,
     forceHdrSwapChainFailure,
     requiredCount,
     enabled = requiredCount,
@@ -265,7 +264,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Debug", "TraceRenderPipeline", RequiredKey::traceRenderPipeline},
     {"Debug", "MeasurePerformance", RequiredKey::measurePerformance},
     {"Debug", "DeveloperHdr10Reference", RequiredKey::developerHdr10Reference},
-    {"Debug", "ShowDeveloperOverlay", RequiredKey::showDeveloperOverlay},
     {"Debug", "ForceHdrSwapChainFailure", RequiredKey::forceHdrSwapChainFailure},
     {"General", "HdrEnabled", RequiredKey::enabled},
     {"General", "SdrEnabled", RequiredKey::sdrEnabled},
@@ -576,7 +574,6 @@ bool& BooleanTarget(PluginConfiguration& parsed, RequiredKey key) noexcept
         {RequiredKey::traceRenderPipeline, &parsed.traceRenderPipeline},
         {RequiredKey::measurePerformance, &parsed.measurePerformance},
         {RequiredKey::developerHdr10Reference, &parsed.developerHdr10Reference},
-        {RequiredKey::showDeveloperOverlay, &parsed.showDeveloperOverlay},
         {RequiredKey::forceHdrSwapChainFailure, &parsed.forceHdrSwapChainFailure},
         {RequiredKey::sdrEnabled, &parsed.sdrEnabled}};
     const auto found = std::ranges::find(targets, key, &Target::key);
@@ -640,14 +637,13 @@ PluginConfigurationError ParseSetting(PluginConfiguration& parsed,
 bool HasDiagnosticRequest(const PluginConfiguration& parsed) noexcept
 {
     const std::array flags{parsed.traceRenderPipeline, parsed.measurePerformance,
-        parsed.developerHdr10Reference, parsed.showDeveloperOverlay,
-        parsed.forceHdrSwapChainFailure};
+        parsed.developerHdr10Reference, parsed.forceHdrSwapChainFailure};
     return std::ranges::find(flags, true) != flags.end();
 }
 
 bool DiagnosticReferenceAvailable(const PluginConfiguration& parsed) noexcept
 {
-    if (!parsed.showDeveloperOverlay && !parsed.forceHdrSwapChainFailure) return true;
+    if (!parsed.forceHdrSwapChainFailure) return true;
     return parsed.developerHdr10Reference || parsed.productionRequested;
 }
 

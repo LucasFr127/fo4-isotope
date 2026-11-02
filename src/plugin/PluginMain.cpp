@@ -471,7 +471,7 @@ namespace
     REX::INFO(
         "diagnostics_configuration valid={} error={} line={} "
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
-        "overlay={} forced_failure={} enabled={} sdr_enabled={} production_requested={} "
+        "forced_failure={} enabled={} sdr_enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
         "exposure_ev={} exposure_multiplier={} toggle_key={}",
         diagnosticsConfiguration.valid,
@@ -482,7 +482,6 @@ namespace
         diagnosticsConfiguration.value.measurePerformance,
         diagnosticsConfiguration.value.productionRequested,
         diagnosticsConfiguration.value.developerHdr10Reference,
-        diagnosticsConfiguration.value.showDeveloperOverlay,
         diagnosticsConfiguration.value.forceHdrSwapChainFailure,
         diagnosticsConfiguration.value.enabled,
         diagnosticsConfiguration.value.sdrEnabled,
