@@ -771,6 +771,7 @@ bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
     // The latch precedes the build so its constants omit the HDR operator mode.
     const auto reason = DecideSdrModeReason(inputs);
     g_evidence.sdrModeReason.store(static_cast<std::uint8_t>(reason), std::memory_order_release);
+    g_evidence.enbDetected.store(inputs.enbDetected, std::memory_order_release);
     const auto admitted = reason != SdrModeReason::none;
     SetSdrModeActive(admitted);
     if (!admitted) return false;

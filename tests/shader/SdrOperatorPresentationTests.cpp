@@ -242,6 +242,25 @@ void CheckFailedSdrShaderBuild(Device& device)
     ResetReplacementShaders();
 }
 
+// ENB applies its effects only when it receives the game's own shaders, so SDR
+// mode keeps them bound under ENB even with an operator selected.
+void CheckEnbKeepsGameShaders(Device& device)
+{
+    SdrOperatorFixture fixture(device, ProductionToneMapperAlgorithm::gt7);
+    SdrOperatorFixture::RetainSdrTable();
+    // ENB first, so the last preparation leaves substitution on for later checks.
+    for (const bool enb : {true, false})
+    {
+        FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true, .enbDetected = enb},
+            device.device.Get(), device.context.Get()));
+        auto* game = fixture.hudShader.Get();
+        FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) ==
+            (enb ? game : g_replacements.toneMapASdr.Get()));
+        FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::lut) ==
+            (enb ? game : g_replacements.lutSdr.Get()));
+    }
+}
+
 // ID3D11DeviceContext declaration order.
 constexpr std::size_t kContextPsGetShader{74};
 constexpr std::size_t kContextVsGetShader{76};
@@ -359,6 +378,7 @@ void VerifySdrOperatorPresentation(Device& device)
     CheckRetainedTableAfterNativeCurve(device);
     CheckFailedTableUpload(device);
     CheckFailedSdrShaderBuild(device);
+    CheckEnbKeepsGameShaders(device);
     CheckClassInstanceOverrun(device);
 }
 

@@ -154,6 +154,7 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.hdrEnabledAtStart = g_configuration.enabled;
     result.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load(std::memory_order_acquire));
     result.sdrControlsUnavailable = g_replacements.sdrSubstitutionDisabled;
+    result.enbDetected = g_evidence.enbDetected.load(std::memory_order_acquire);
     result.exposureRequested = g_developerExposure.state.Requested();
     result.exposureActive = g_developerExposure.state.Active();
     result.exposureFailed = g_developerExposure.failed;

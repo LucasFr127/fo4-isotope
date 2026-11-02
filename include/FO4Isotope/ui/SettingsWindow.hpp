@@ -75,6 +75,8 @@ struct SettingsWindowView
     SdrModeReason sdrModeReason{};
     // SDR mode kept the window after its replacement shaders failed to build.
     bool sdrControlsUnavailable{};
+    // ENB is loaded, so SDR mode substitutes no shader and the controls have no effect.
+    bool enbDetected{};
     bool exposureRequested{}, exposureActive{}, exposureFailed{}, threadCompatible{};
     ProductionToneMapperAlgorithm pendingAlgorithm{};
     double pendingPeakNits{};

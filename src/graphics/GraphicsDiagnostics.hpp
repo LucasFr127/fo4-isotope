@@ -40,6 +40,8 @@ struct AtomicEvidence
     std::atomic<std::uint8_t> hdrCandidateRejection{};
     std::atomic<std::int32_t> candidateCreateResult{};
     std::atomic<std::uint32_t> candidateCreatedFormat{};
+    // ENB was loaded at device creation, so SDR mode substitutes no shader.
+    std::atomic<bool> enbDetected{};
     // Settings-window availability facts, logged once from lifecycle callbacks.
     std::atomic<std::uint8_t> sdrModeReason{};
     std::atomic<bool> rendererInstalled{};

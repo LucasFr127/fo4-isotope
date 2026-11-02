@@ -67,10 +67,12 @@ constexpr ReplacementProgram kSdrReplacementPrograms[]{
     return (g_replacements.*program->destination).Get();
 }
 
+// ENB applies its effects only when it receives the game's own shaders.
 [[nodiscard]] bool SdrReplacementsReady() noexcept
 {
     return g_sdrModeActive.load(std::memory_order_acquire) &&
         !g_replacements.sdrSubstitutionDisabled &&
+        !g_evidence.enbDetected.load(std::memory_order_acquire) &&
         g_replacements.device == g_rendererDevice.activeDevice &&
         ReplacementConstantBuffersReady() && ReplacementSetMatchesConfiguration();
 }

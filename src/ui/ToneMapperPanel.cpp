@@ -558,7 +558,10 @@ struct ColorSettingsTabs
             ImGui::BeginChild("Output-content", ImVec2(0.0F, -footerHeight));
             if (view.sdrMode)
             {
-                ImGui::TextWrapped("SDR color controls are active on the game's own SDR image.");
+                ImGui::TextWrapped("%s", view.enbDetected ?
+                    "SDR color controls have no effect while ENB is installed, so ENB's effects "
+                    "stay intact; remove ENB to use them." :
+                    "SDR color controls are active on the game's own SDR image.");
                 if (SdrModeReasonText(view) == nullptr)
                     ImGui::TextWrapped("HDR output and its brightness controls need "
                         "Enable HDR and an HDR10 display with Windows HDR on when the game starts.");

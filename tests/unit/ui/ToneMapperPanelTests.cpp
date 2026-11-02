@@ -186,7 +186,8 @@ int SdrOutputVertices(ProductionToneMapperAlgorithm algorithm, ImVec2 windowSize
 }
 
 // Text of the SDR Output tab for one SDR cause.
-std::string SdrOutputText(SdrModeReason reason, bool controlsUnavailable, ImVec2 windowSize)
+std::string SdrOutputText(SdrModeReason reason, bool controlsUnavailable, ImVec2 windowSize,
+    bool enbDetected = false)
 {
     auto settings = DefaultSdrSettings();
     SettingsWindowView view{};
@@ -195,6 +196,7 @@ std::string SdrOutputText(SdrModeReason reason, bool controlsUnavailable, ImVec2
     view.hdrEnabledAtStart = true;
     view.sdrModeReason = reason;
     view.sdrControlsUnavailable = controlsUnavailable;
+    view.enbDetected = enbDetected;
     bool commitRequested{}, hdrEnabled{true};
     std::string text;
     ImGui::NewFrame();
@@ -218,7 +220,12 @@ void CheckSdrOutputReasons(ImVec2 windowSize)
 {
     // The tab bar selects Output on its first frame and draws it from the next.
     (void)SdrOutputText(SdrModeReason::hdrOff, false, windowSize);
-    FO4HDR_CHECK(SdrOutputText(SdrModeReason::enbDetected, false, windowSize).contains("ENB is installed"));
+    const auto enb = SdrOutputText(SdrModeReason::enbDetected, false, windowSize, true);
+    FO4HDR_CHECK(enb.contains("SDR is shown because ENB is installed") &&
+        enb.contains("no effect while ENB") && !enb.contains("controls are active"));
+    // An unusable INI outranks ENB as the cause; ENB still keeps the controls off.
+    FO4HDR_CHECK(SdrOutputText(SdrModeReason::configurationDefaults, false, windowSize, true)
+        .contains("no effect while ENB"));
     const auto failed = SdrOutputText(SdrModeReason::hdrCandidateRejected, true, windowSize);
     FO4HDR_CHECK(failed.contains("refused") && failed.contains("controls are unavailable"));
     const auto off = SdrOutputText(SdrModeReason::hdrOff, false, windowSize);
