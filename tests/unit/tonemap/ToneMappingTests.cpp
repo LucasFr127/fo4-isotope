@@ -533,6 +533,7 @@ void CheckConfigurationModes()
     PluginConfigurationResult parsed;
     constexpr std::string_view diagnosticOnly = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 [Debug]
 TraceRenderPipeline=1

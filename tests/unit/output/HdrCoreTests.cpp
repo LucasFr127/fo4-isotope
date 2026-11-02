@@ -985,6 +985,7 @@ void TestDeveloperConfiguration()
 {
     constexpr std::string_view enabled = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 [Debug]
 TraceRenderPipeline=0
@@ -999,6 +1000,7 @@ ForceHdrSwapChainFailure=0
     // The retired overlay switch is ignored, even without the reference.
     constexpr std::string_view retiredOverlay = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 [Debug]
 TraceRenderPipeline=0
@@ -1012,6 +1014,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view referenceWithoutDeveloper = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=0
 [Debug]
 TraceRenderPipeline=0
@@ -1026,6 +1029,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view failureWithoutReference = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 [Debug]
 TraceRenderPipeline=0

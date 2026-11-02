@@ -275,6 +275,18 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);
 }
 
+// DeveloperMode and the Debug keys default to off when omitted.
+void TestOptionalDiagnosticKeys()
+{
+    const auto parsed = ParsePluginConfiguration(
+        "[General]\nHdrEnabled=1\n[Output]\nDisplayPeakNits=1000\nUiPaperWhiteNits=203\n"
+        "[ToneMapper]\nAlgorithm=AgX\n[Image]\nExposureEV=0\n");
+    FO4HDR_CHECK(parsed.valid && parsed.value.productionRequested);
+    FO4HDR_CHECK(!parsed.value.developerMode && !parsed.value.traceRenderPipeline);
+    FO4HDR_CHECK(!parsed.value.measurePerformance && !parsed.value.developerHdr10Reference);
+    FO4HDR_CHECK(!parsed.value.forceHdrSwapChainFailure);
+}
+
 // The former AgX name still loads; a file with both names is a duplicate.
 void TestFormerAgxColorResponseName()
 {
@@ -389,6 +401,7 @@ void TestOptionalConfigurationValues()
     TestProductionConfiguration();
     TestMinimalConfiguration();
     TestFormerAgxColorResponseName();
+    TestOptionalDiagnosticKeys();
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();
@@ -569,8 +582,9 @@ void TestConfigurationToggleKeys()
 // An unusable INI starts neutral SDR only and keeps a shortcut that parsed first.
 void TestFallbackConfiguration()
 {
+    // HdrEnabled is the one required key.
     auto parsed = ParsePluginConfiguration(
-        "[Interface]\nToggleKey=Alt+H\n[General]\nHdrEnabled=1\nDeveloperMode=1\n");
+        "[Interface]\nToggleKey=Alt+H\n[General]\nDeveloperMode=1\n");
     FO4HDR_CHECK(!parsed.valid && parsed.error == PluginConfigurationError::missingKey);
     const auto fallback = FallbackPluginConfiguration(parsed.value);
     FO4HDR_CHECK(fallback.sdrEnabled && fallback.configurationDefaults);

@@ -138,6 +138,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view enabled = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 [Debug]
 TraceRenderPipeline=1
@@ -151,6 +152,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view unsafe = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=0
 [Debug]
 TraceRenderPipeline=1
@@ -165,6 +167,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view duplicate = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 DeveloperMode=1
 [Debug]

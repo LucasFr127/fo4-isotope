@@ -14,6 +14,7 @@ namespace {
 
 constexpr std::string_view kBaseConfiguration = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=0
 
 [Debug]
@@ -30,6 +31,7 @@ void TestOptionalPerformanceConfiguration()
 
     constexpr std::string_view enabled = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 
 [Debug]
@@ -44,6 +46,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view withoutDeveloperMode = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=0
 
 [Debug]
@@ -59,6 +62,7 @@ ForceHdrSwapChainFailure=0
 
     constexpr std::string_view duplicate = R"ini(
 [General]
+HdrEnabled=1
 DeveloperMode=1
 
 [Debug]

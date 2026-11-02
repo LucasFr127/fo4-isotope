@@ -130,12 +130,12 @@ namespace {
 
 enum class RequiredKey : std::size_t
 {
-    developerMode,
+    enabled,
+    requiredCount,
+    developerMode = requiredCount,
     traceRenderPipeline,
     developerHdr10Reference,
     forceHdrSwapChainFailure,
-    requiredCount,
-    enabled = requiredCount,
     displayPeakNits,
     uiPaperWhiteNits,
     algorithm,
@@ -672,8 +672,7 @@ class ConfigurationParser
 public:
     ConfigurationParser() noexcept
     {
-        // Files containing only diagnostic keys remain valid, but cannot request a production operator.
-        output_.value.enabled = true;
+        // Only HdrEnabled is required; omitted switches and diagnostics stay off.
         output_.value.sdrEnabled = true;
     }
 
@@ -766,8 +765,7 @@ private:
             Seen(RequiredKey::algorithm), Seen(RequiredKey::exposureEv)};
         const auto present = std::ranges::find(productionKeys, true) != productionKeys.end();
         const auto complete = std::ranges::find(productionKeys, false) == productionKeys.end();
-        const auto missing = !Seen(RequiredKey::enabled) || !complete;
-        if (present && missing) return PluginConfigurationError::missingKey;
+        if (present && !complete) return PluginConfigurationError::missingKey;
         auto& parsed = output_.value;
         // An explicit diagnostic reference request suppresses the production path.
         parsed.productionRequested = parsed.enabled && present && !parsed.developerHdr10Reference;

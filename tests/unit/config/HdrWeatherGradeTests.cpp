@@ -52,7 +52,7 @@ void TestNeutralWeatherGradeConfiguration()
 {
     for (const auto reference : {"0", "1"})
     {
-        const auto text = std::string{"[General]\nDeveloperMode=1\n"
+        const auto text = std::string{"[General]\nHdrEnabled=1\nDeveloperMode=1\n"
             "[Debug]\nTraceRenderPipeline=1\n"
             "ForceHdrSwapChainFailure=0\nDeveloperHdr10Reference="} + reference + "\n";
         const auto parsed = ParsePluginConfiguration(text);
