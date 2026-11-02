@@ -2,6 +2,7 @@
 
 #include "ShaderTestSuite.hpp"
 #include "d3d11/PresentationContextFixture.hpp"
+#include "d3d11/BorrowedFullscreenState.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "FO4Isotope/ui/SettingsWindow.hpp"
 
@@ -241,6 +242,113 @@ void CheckFailedSdrShaderBuild(Device& device)
     ResetReplacementShaders();
 }
 
+// ID3D11DeviceContext declaration order.
+constexpr std::size_t kContextPsGetShader{74};
+constexpr std::size_t kContextVsGetShader{76};
+constexpr std::size_t kContextGsGetShader{82};
+constexpr std::size_t kContextHsGetShader{98};
+constexpr std::size_t kContextDsGetShader{102};
+constexpr std::size_t kContextCsGetShader{107};
+
+// Counts releases of a pointer the context never handed out.
+struct ForeignClassInstance : ID3D11ClassInstance
+{
+    ULONG releases{};
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** object) override
+    {
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+    ULONG STDMETHODCALLTYPE Release() override { return ++releases; }
+    void STDMETHODCALLTYPE GetDevice(ID3D11Device** device) override { *device = nullptr; }
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID, UINT*, void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID, UINT, const void*) override
+    {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID, const IUnknown*) override
+    {
+        return E_NOTIMPL;
+    }
+    void STDMETHODCALLTYPE GetClassLinkage(ID3D11ClassLinkage** linkage) override
+    {
+        *linkage = nullptr;
+    }
+    void STDMETHODCALLTYPE GetDesc(D3D11_CLASS_INSTANCE_DESC* description) override
+    {
+        *description = {};
+    }
+    void STDMETHODCALLTYPE GetInstanceName(LPSTR, SIZE_T* length) override { *length = 0; }
+    void STDMETHODCALLTYPE GetTypeName(LPSTR, SIZE_T* length) override { *length = 0; }
+};
+
+ForeignClassInstance g_foreignInstance;
+void* const* g_overrunNext{};
+
+// Like ENB's context, writes an unowned pointer after the instances it returns.
+template <class Shader, std::size_t Slot>
+void STDMETHODCALLTYPE OverrunGetShader(ID3D11DeviceContext* context, Shader** shader,
+    ID3D11ClassInstance** instances, UINT* count) noexcept
+{
+    using Getter = void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*, Shader**,
+        ID3D11ClassInstance**, UINT*);
+    const auto capacity = (instances && count) ? *count : 0U;
+    reinterpret_cast<Getter>(g_overrunNext[Slot])(context, shader, instances, count);
+    if (capacity > 0 && *count < capacity) instances[*count] = &g_foreignInstance;
+}
+
+// Overruns every stage's shader getter while alive, like FailingDeviceCreation.
+class OverrunningShaderGetters
+{
+public:
+    explicit OverrunningShaderGetters(ID3D11DeviceContext* context) noexcept :
+        object_(reinterpret_cast<void***>(context)), original_(*object_)
+    {
+        std::copy_n(original_ - kShadowHeaderSlots, table_.size(), table_.begin());
+        g_overrunNext = original_;
+        Overrun<ID3D11VertexShader, kContextVsGetShader>();
+        Overrun<ID3D11HullShader, kContextHsGetShader>();
+        Overrun<ID3D11DomainShader, kContextDsGetShader>();
+        Overrun<ID3D11GeometryShader, kContextGsGetShader>();
+        Overrun<ID3D11PixelShader, kContextPsGetShader>();
+        Overrun<ID3D11ComputeShader, kContextCsGetShader>();
+        *object_ = table_.data() + kShadowHeaderSlots;
+    }
+    ~OverrunningShaderGetters() { *object_ = original_; }
+    OverrunningShaderGetters(const OverrunningShaderGetters&) = delete;
+    OverrunningShaderGetters& operator=(const OverrunningShaderGetters&) = delete;
+
+private:
+    template <class Shader, std::size_t Slot>
+    void Overrun() noexcept
+    {
+        table_[kShadowHeaderSlots + Slot] =
+            reinterpret_cast<void*>(&OverrunGetShader<Shader, Slot>);
+    }
+
+    void*** object_;
+    void** original_;
+    std::array<void*, kShadowHeaderSlots + kContextBaseSlots> table_{};
+};
+
+// ENB keeps SDR mode, and the settings overlay borrows state through its
+// context; borrowed state must release only the class instances returned.
+void CheckClassInstanceOverrun(Device& device)
+{
+    auto destination = CreateTexture(*device.device.Get(), DXGI_FORMAT_R8G8B8A8_UNORM,
+        D3D11_BIND_RENDER_TARGET);
+    g_foreignInstance.releases = 0;
+    {
+        // Without context1 the borrowed scope stays within the base interface's slots.
+        const OverrunningShaderGetters overrun(device.context.Get());
+        BorrowedFullscreenState saved(device.context.Get(), nullptr, destination.texture.Get());
+        FO4HDR_WARP_CHECK(saved.Ready());
+    }
+    FO4HDR_WARP_CHECK(g_foreignInstance.releases == 0);
+}
+
 }  // namespace
 
 void VerifySdrOperatorPresentation(Device& device)
@@ -251,6 +359,7 @@ void VerifySdrOperatorPresentation(Device& device)
     CheckRetainedTableAfterNativeCurve(device);
     CheckFailedTableUpload(device);
     CheckFailedSdrShaderBuild(device);
+    CheckClassInstanceOverrun(device);
 }
 
 }  // namespace fo4hdr::tests::gpu

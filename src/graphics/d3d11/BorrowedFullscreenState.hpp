@@ -33,7 +33,9 @@ private:
         void Restore(ID3D11DeviceContext* context, Setter setter) noexcept
         {
             (context->*setter)(shader.Get(), classes.data(), count);
-            for (auto* instance : classes) if (instance) instance->Release();
+            // Slots past the returned count are not owned; ENB's context leaves a pointer there.
+            for (UINT index = 0; index < count; ++index)
+                if (auto* instance = classes[index]) instance->Release();
         }
     };
 

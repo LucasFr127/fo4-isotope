@@ -15,10 +15,11 @@ namespace {
 using Microsoft::WRL::ComPtr;
 
 template <class Interface, std::size_t Size>
-void ReleaseArmorCapturedViews(const std::array<Interface*, Size>& views) noexcept
+void ReleaseArmorCapturedViews(const std::array<Interface*, Size>& views,
+    std::size_t count = Size) noexcept
 {
-    for (auto* view : views)
-        if (view) view->Release();
+    for (std::size_t slot = 0; slot < count; ++slot)
+        if (auto* view = views[slot]) view->Release();
 }
 
 bool ReleaseArmorUavs(
@@ -66,7 +67,8 @@ struct ArmorEncodedComputeState
         }
         for (auto& stage : srvs) ReleaseArmorCapturedViews(stage);
         ReleaseArmorCapturedViews(rtvs);
-        ReleaseArmorCapturedViews(classes);
+        // A wrapping context may write past the instances CSGetShader returns.
+        ReleaseArmorCapturedViews(classes, classCount);
     }
     void SetTargets(UINT targetCount, ID3D11RenderTargetView* const* targets,
         ID3D11DepthStencilView* depthView) noexcept

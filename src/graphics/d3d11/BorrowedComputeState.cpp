@@ -98,7 +98,7 @@ BorrowedComputeState::~BorrowedComputeState() noexcept
     ReleaseViews(csUavs_);
     ReleaseViews(srvs_[5], csSrvCount_);
     ReleaseGraphicsSrvs();
-    ReleaseViews(classes_);
+    ReleaseViews(classes_, classCount_);
 }
 
 void BorrowedComputeState::UnbindOutputs() noexcept
