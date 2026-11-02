@@ -56,7 +56,7 @@ ContrastLookStrength=0.25
 [AgX]
 MiddleGrayOffsetEV=-0.25
 Contrast=2.9
-HdrColorResponse=0.6
+ColorResponse=0.6
 ShoulderPower=2.1
 [GT7]
 ToeStrength=1.4

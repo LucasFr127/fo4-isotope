@@ -59,6 +59,8 @@ struct PersistedKey
     bool colorGradingCurve{};
     bool HdrSettings::*flag{};
     bool HdrInterfaceSettings::*interfaceFlag{};
+    // A released former name, rewritten in place under the current one.
+    std::string_view formerKey{};
 };
 
 constexpr std::array<PersistedKey, 53> kPersistedKeys{{
@@ -111,8 +113,8 @@ constexpr std::array<PersistedKey, 53> kPersistedKeys{{
         &ToneMapperParameters::agxMiddleGrayEv},
     {"AgX", "Contrast", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::agxContrast},
-    {"AgX", "HdrColorResponse", nullptr, nullptr, false, false, false,
-        &ToneMapperParameters::agxHdrPurity},
+    {.section = "AgX", .key = "ColorResponse",
+        .toneMapperNumber = &ToneMapperParameters::agxHdrPurity, .formerKey = "HdrColorResponse"},
     {"AgX", "ShoulderPower", nullptr, nullptr, false, false, false,
         &ToneMapperParameters::agxHdrShoulderPower},
     {"GT7", "ToeStrength", nullptr, nullptr, false, false, false,
@@ -613,6 +615,11 @@ private:
             (section_ == "Effects" && name == "GradeProfilesEnabled");
     }
 
+    [[nodiscard]] static bool NamesKey(const PersistedKey& key, std::string_view name) noexcept
+    {
+        return name == key.key || (!key.formerKey.empty() && name == key.formerKey);
+    }
+
     [[nodiscard]] bool Writes(const PersistedKey& key) const noexcept
     {
         if (positionOnly_ && !IsPositionKey(key)) return false;
@@ -626,7 +633,7 @@ private:
         {
             const auto& key = kPersistedKeys[index];
             if (!Writes(key)) continue;
-            if (section_ != key.section || name != key.key) continue;
+            if (section_ != key.section || !NamesKey(key, name)) continue;
             result_.append(KeyValue(key, settings_, interfaceSettings_));
             seen_[index] = true;
             return true;

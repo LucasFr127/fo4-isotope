@@ -52,7 +52,7 @@ void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRe
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "[AgX]\r\nMiddleGrayOffsetEV=-0.25\r\nContrast=2.8\r\n"
-        "HdrColorResponse=0.55\r\nShoulderPower=2.05\r\n") !=
+        "ColorResponse=0.55\r\nShoulderPower=2.05\r\n") !=
         std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "[GT7]\r\nToeStrength=1.4\r\nShoulderStart=0.52\r\n"
@@ -160,6 +160,14 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(migrated.find("ExposureEV=0.25") != std::string::npos);
     FO4HDR_CHECK(RewriteHdrWindowPositionIni(retiredGradeTransfer, 1, 2)
         .find("GradeTransfer=PreserveHDRColor") != std::string::npos);
+
+    // A full save renames HdrColorResponse in place in both profiles.
+    constexpr std::string_view formerNames =
+        "[AgX]\nHdrColorResponse=0.4\n[SdrAgX]\nHdrColorResponse=0.4\n";
+    const auto renamed = RewriteHdrSettingsIni(formerNames, {settings}, interfaceSettings);
+    FO4HDR_CHECK(renamed.find("HdrColorResponse") == std::string::npos);
+    FO4HDR_CHECK(renamed.find("[AgX]\nColorResponse=0.55\n") != std::string::npos);
+    FO4HDR_CHECK(renamed.find("[SdrAgX]\nColorResponse=") != std::string::npos);
 
     // Former method names still load, and a full save writes the current names.
     for (const auto& [former, method, current] : {

@@ -69,6 +69,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(text.find("ColorGradingMethod=RgbRatio") != std::string::npos);
     FO4HDR_CHECK(text.find("Radial") == std::string::npos);
     FO4HDR_CHECK(text.find("NativeReference") == std::string::npos);
+    FO4HDR_CHECK(text.find("HdrColorResponse") == std::string::npos);
 }
 
 [[nodiscard]] PluginConfigurationError SdrConfigurationError(std::string_view extra)
@@ -275,6 +276,20 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);
 }
 
+// The former AgX name still loads; a file with both names is a duplicate.
+void TestFormerAgxColorResponseName()
+{
+    for (const auto* key : {"ColorResponse", "HdrColorResponse"})
+    {
+        const auto parsed = ParsePluginConfiguration(
+            MinimalProductionConfiguration() + "[AgX]\n" + key + "=0.4\n");
+        FO4HDR_CHECK(parsed.valid && parsed.value.toneMapperParameters.agxHdrPurity == 0.4);
+    }
+    const auto both = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "[AgX]\nColorResponse=0.4\nHdrColorResponse=0.4\n");
+    FO4HDR_CHECK(!both.valid && both.error == PluginConfigurationError::duplicateKey);
+}
+
 void TestToneMapperConfigurationRanges()
 {
     for (const auto parameters : {
@@ -374,6 +389,7 @@ void TestOptionalConfigurationValues()
     TestSdrProfileConfiguration();
     TestProductionConfiguration();
     TestMinimalConfiguration();
+    TestFormerAgxColorResponseName();
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();
@@ -452,8 +468,9 @@ void TestConfigurationOperatorErrors()
              "[AgX]\nMiddleGrayOffsetEV=0.51\n",
              "[AgX]\nContrast=2.19\n",
              "[AgX]\nContrast=3.51\n",
+             "[AgX]\nColorResponse=0.24\n",
+             "[AgX]\nColorResponse=1.01\n",
              "[AgX]\nHdrColorResponse=0.24\n",
-             "[AgX]\nHdrColorResponse=1.01\n",
              "[AgX]\nShoulderPower=0.99\n",
              "[AgX]\nShoulderPower=2.26\n",
              "[GT7]\nToeStrength=2.01\n",

@@ -276,6 +276,8 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"ACES2", "ContrastLookStrength", RequiredKey::acesLookStrength},
     {"AgX", "MiddleGrayOffsetEV", RequiredKey::agxMiddleGrayEv},
     {"AgX", "Contrast", RequiredKey::agxContrast},
+    {"AgX", "ColorResponse", RequiredKey::agxHdrPurity},
+    // The former name; a full save rewrites it.
     {"AgX", "HdrColorResponse", RequiredKey::agxHdrPurity},
     {"AgX", "ShoulderPower", RequiredKey::agxHdrShoulderPower},
     {"GT7", "ToeStrength", RequiredKey::gt7ToeStrength},
