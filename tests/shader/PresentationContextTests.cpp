@@ -1067,6 +1067,25 @@ struct SettingsOverlayWindow
     }
 };
 
+// Feature level 9_1 rejects the backend's vs_4_0 shaders, so the backend must
+// stay unavailable instead of publishing a window that cannot draw.
+void CheckSettingsBackendShaderFailure()
+{
+    Device legacy;
+    constexpr D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_9_1;
+    CheckHresult(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, &level, 1,
+        D3D11_SDK_VERSION, &legacy.device, nullptr, &legacy.context),
+        "D3D11CreateDevice(WARP 9_1)");
+    const HWND window = CreateWindowExW(0, L"STATIC", L"FO4Isotope settings backend test", WS_POPUP,
+        0, 0, kWidth, kHeight, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    FO4HDR_WARP_CHECK(window != nullptr);
+    InitializeSettingsWindow(HdrSettingsProfiles{}, HdrInterfaceSettings{});
+    EnsureSettingsWindowBackend(true, window, legacy.device.Get(), legacy.context.Get());
+    FO4HDR_WARP_CHECK(!SettingsWindowBackendReady());
+    FO4HDR_WARP_CHECK(!TryActivateSettingsWindowInput().ready);
+    if (window) DestroyWindow(window);
+}
+
 float SettingsLayerAlpha(SharedPresentationContextFixture& fixture, UINT x)
 {
     auto* context = fixture.device.context.Get();
@@ -1172,6 +1191,8 @@ void VerifyPresentationContext(Device& device)
         for (const bool empty : {false, true})
             CheckRetainedPartialCopy(native, productionDisabled, empty);
     CheckOutputRecovery(native);
+    // The overlay check then proves the failed attempt left no backend state behind.
+    CheckSettingsBackendShaderFailure();
     CheckSettingsOverlayFallback(native);
 }
 

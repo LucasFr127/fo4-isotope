@@ -785,6 +785,17 @@ struct SettingsWindowContents
     return true;
 }
 
+// The DX11 backend otherwise compiles its shaders lazily in NewFrame; a failed
+// compile there leaves an open window that draws nothing yet still takes input.
+[[nodiscard]] bool InitializeRendererBackend(ID3D11Device* device,
+    ID3D11DeviceContext* context) noexcept
+{
+    if (!ImGui_ImplDX11_Init(device, context)) return false;
+    if (ImGui_ImplDX11_CreateDeviceObjects()) return true;
+    ImGui_ImplDX11_Shutdown();
+    return false;
+}
+
 } // namespace
 
 void InitializeSettingsWindow(const HdrSettingsProfiles& settings,
@@ -837,7 +848,7 @@ void EnsureSettingsWindowBackend(bool requested, HWND window,
         ImGui::DestroyContext();
         return;
     }
-    if (!ImGui_ImplDX11_Init(device, context)) {
+    if (!InitializeRendererBackend(device, context)) {
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
         return;
