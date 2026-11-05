@@ -21,6 +21,11 @@ void RecordFailure(GraphicsObservationFailure value) noexcept
         static_cast<std::uint32_t>(value), std::memory_order_release);
 }
 
+void RecordForeignPass(RenoDxShaderPass pass) noexcept
+{
+    g_evidence.foreignShaderMask.fetch_or(RenoDxShaderBit(pass), std::memory_order_relaxed);
+}
+
 void RecordAbiException() noexcept
 {
     g_evidence.abiExceptionCount.fetch_add(1, std::memory_order_relaxed);
@@ -163,6 +168,7 @@ void ReadResourceStateSnapshot(GraphicsObservationSnapshot& snapshot) noexcept
     snapshot.colorDomainMismatchCount = g_evidence.colorDomainMismatchCount.load();
     snapshot.colorDomain = static_cast<LinearColorDomain>( g_evidence.colorDomain.load());
     snapshot.knownShaderMask = g_evidence.knownShaderMask.load();
+    snapshot.foreignShaderMask = g_evidence.foreignShaderMask.load();
     snapshot.lastKnownShaderCrc32 = g_evidence.lastKnownShaderCrc32.load();
     snapshot.lastDeviceResult = g_evidence.lastDeviceResult.load();
     snapshot.lastPixelShaderResult = g_evidence.lastPixelShaderResult.load();
@@ -639,25 +645,28 @@ void ReportRendererStatus(const fo4hdr::GraphicsObservationSnapshot& graphics, G
 
 }
 
+template <class Report>
+void ReportNewPasses(std::uint32_t mask, std::atomic<std::uint32_t>& reported, Report report)
+{
+    const auto newlyObserved = mask & ~reported.exchange(mask, std::memory_order_acq_rel);
+    for (const auto& descriptor : fo4hdr::kRenoDxFallout4Shaders)
+        if ((newlyObserved & fo4hdr::RenoDxShaderBit(descriptor.pass)) != 0) report(descriptor);
+}
+
 void ReportNewShaders(const fo4hdr::GraphicsObservationSnapshot& graphics, GraphicsDiagnosticSink sink)
 {
-    static std::atomic<std::uint32_t> reportedShaderMask{};
-    const auto previousMask = reportedShaderMask.exchange(
-        graphics.knownShaderMask,
-        std::memory_order_acq_rel);
-    const auto newlyObserved = graphics.knownShaderMask & ~previousMask;
-    for (const auto& descriptor : fo4hdr::kRenoDxFallout4Shaders)
-    {
-        if ((newlyObserved & fo4hdr::RenoDxShaderBit(descriptor.pass)) != 0)
-        {
-            sink(std::format(
-                "known_shader pass={} crc32={:#010x} "
-                "scene_input_slot={} domain=renodx-raw-dxbc-crc32",
-                descriptor.name,
-                descriptor.crc32,
-                descriptor.sceneInputSlot));
-        }
-    }
+    static std::atomic<std::uint32_t> reportedShaderMask{}, reportedForeignMask{};
+    ReportNewPasses(graphics.knownShaderMask, reportedShaderMask, [sink](const auto& descriptor) {
+        sink(std::format(
+            "known_shader pass={} crc32={:#010x} "
+            "scene_input_slot={} domain=renodx-raw-dxbc-crc32",
+            descriptor.name,
+            descriptor.crc32,
+            descriptor.sceneInputSlot));
+    });
+    ReportNewPasses(graphics.foreignShaderMask, reportedForeignMask, [sink](const auto& descriptor) {
+        sink(std::format("foreign_pass pass={} source=engine-image-space-scope", descriptor.name));
+    });
 }
 
 } // namespace

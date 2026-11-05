@@ -21,6 +21,8 @@ struct DrawObservation
     bool currentSinglePresentationTarget{};
     RenoDxShaderPass currentPass{};
     bool currentPassKnown{};
+    // Known through an engine pass scope, not stock bytecode; never original SDR evidence.
+    bool currentPassForeign{};
     bool currentReplacementActive{};
     ID3D11PixelShader* expectedBoundShader{};
     // Retain the native binding only while substituted so production can disable between draws.

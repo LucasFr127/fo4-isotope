@@ -15,8 +15,14 @@
       "stage": "pixel",
       "dxbcHash": "555f3384-af6f2066-90145fc6-aa1e8b3a",
       "signal": "linear-bt709-relative",
-      "draw": { "kind": "indexed", "indexCount": 3 },
-      "target": { "format": "R16G16B16A16_FLOAT", "extent": "presentation" },
+      "draw": {
+        "kind": "indexed",
+        "indexCount": 3
+      },
+      "target": {
+        "format": "R16G16B16A16_FLOAT",
+        "extent": "presentation"
+      },
       "role": "initialize-depth-tested-scene-target",
       "evidenceQualification": "User-supplied AE gameplay capture SHA256 0e7ac0d4d5e81a350ac35ea88f22b19b5bdde8f9848a66653a22fcc3f31145b8: event 4948 is the first use of the single-mip, single-sample, full-resolution FP16 scene target. Solid full-screen indexed triangle, unpredicated, full RGB writes, no blending or alpha-to-coverage, GREATER depth test with no depth writes or stencil, and no scissor or depth bias. Pixel (1281,712) fails at depth 1 and retains RGB (16512,27648,50432) before bloom. Capture qualifies the shader and target-initialization seam; fixed-DLL gameplay and release validation remain pending."
     },
@@ -49,7 +55,7 @@
     "status": "unvalidated",
     "scope": "synchronous-gamma-correct-lut-render",
     "abi": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)",
-    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset.",
+    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset. The same target and offset also qualify Render slot1 of the HDRTonemapBlendCinematic and HDRTonemapBlendCinematicFade secondary vtables, which FO4Isotope hooks as engine pass scopes.",
     "lifetime": "Native synchronous Render scope; bounded guarded copies; filename and NiTexture name plus rendererTexture agreement; same-draw SRV comparison required.",
     "effectSubobjectOffset": 400,
     "target": {
@@ -83,7 +89,7 @@
         0
       ]
     },
-    "evidenceQualification": "Exact Fallout4.exe 1.11.240.0 disk PE and matching Address Library V0. Named GammaCorrectLUT secondary vtable ID1254393 resolves to RVA0x0290AF88; RTTI locator RVA0x02AE88F8 has secondary offset0x190 and named type descriptor ID4863301/RVA0x030DD178; Render slot1 resolves to ID2319297/RVA0x0224E820. Target disassembly subtracts0x190 from the effect pointer before primary virtual calls. Manager constructor at RVA0x02184BB0 constructs LUT data at0x130 and clears override pointer at0x1A0. No live integration or shader binding test performed."
+    "evidenceQualification": "Exact Fallout4.exe 1.11.240.0 disk PE and matching Address Library V0. Named GammaCorrectLUT secondary vtable ID1254393 resolves to RVA0x0290AF88; RTTI locator RVA0x02AE88F8 has secondary offset0x190 and named type descriptor ID4863301/RVA0x030DD178; Render slot1 resolves to ID2319297/RVA0x0224E820. Target disassembly subtracts0x190 from the effect pointer before primary virtual calls. Manager constructor at RVA0x02184BB0 constructs LUT data at0x130 and clears override pointer at0x1A0. No live integration or shader binding test performed. HDRTonemapBlendCinematic and HDRTonemapBlendCinematicFade secondary vtables ID1182576/ID1075500 resolve to RVA0x0290BC30/RVA0x0290BDB8; their RTTI locators RVA0x02AE9168/RVA0x02AE9258 have offset0x190 and Render slot1 holds RVA0x0224E820. ImageSpaceEffectHDR Render (RVA0x02209D70) calls the selected tone-map child through slot1."
   },
   "experimentalScreenUiObserver": {
     "status": "unvalidated",

@@ -13,6 +13,7 @@
 #include "ShaderRegistry.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "RenoDxShaderIdentity.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/hooks/HookOwnership.hpp"
 
 #include "FO4Isotope/runtime/RuntimeProfile.hpp"
@@ -22,6 +23,7 @@
 #include <atomic>
 #include <cstring>
 #include <span>
+#include <utility>
 
 namespace fo4hdr {
 namespace {
@@ -37,7 +39,24 @@ std::array<ShaderRecord, kMaximumShaders> g_shaders{};
 std::array<std::atomic<ID3D11PixelShader*>, kMaximumObjects> g_lateGameUiShaders{};
 std::array<std::atomic<ID3D11PixelShader*>, kMaximumObjects> g_lateGameUiBackdropShaders{};
 std::atomic_flag g_shaderLock = ATOMIC_FLAG_INIT;
+thread_local NativeImageSpacePass g_imageSpacePass{};
+
+std::uint32_t RegisteredShaderPassMask() noexcept
+{
+    std::uint32_t mask{};
+    // A cleared slot keeps a stale pass, so only a live shader counts.
+    for (const auto& entry : g_shaders)
+        if (entry.shader.load(std::memory_order_acquire) != nullptr) mask |= RenoDxShaderBit(entry.pass);
+    return mask;
+}
 }  // namespace
+
+NativeImageSpacePass EnterNativeImageSpacePass(NativeImageSpacePass pass) noexcept
+{
+    return std::exchange(g_imageSpacePass, pass);
+}
+
+void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept { g_imageSpacePass = previous; }
 
 [[nodiscard]] const RenoDxShaderDescriptor* FindShaderDescriptor(
     RenoDxShaderPass pass) noexcept
@@ -60,6 +79,17 @@ std::atomic_flag g_shaderLock = ATOMIC_FLAG_INIT;
         }
     }
     return nullptr;
+}
+
+BoundShaderIdentity IdentifyBoundShader(ID3D11PixelShader* shader) noexcept
+{
+    if (shader == nullptr) return {};
+    // The engine binds a pass's shader once inside its Render; later binds stay stock-only.
+    const auto scope = std::exchange(g_imageSpacePass, NativeImageSpacePass::none);
+    if (const auto* descriptor = FindShader(shader)) return {descriptor};
+    if (scope == NativeImageSpacePass::none) return {};
+    const auto pass = ResolveNativeImageSpacePass(scope, RegisteredShaderPassMask());
+    return {pass ? FindShaderDescriptor(*pass) : nullptr, pass.has_value()};
 }
 
 [[nodiscard]] bool MatchesDxbcHash(const void* bytecode,

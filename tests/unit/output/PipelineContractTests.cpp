@@ -119,6 +119,29 @@ void TestHeartbeat()
     FO4HDR_CHECK(!heartbeat.Evaluate(8, 1).ready);
 }
 
+void TestNativeImageSpacePassResolution()
+{
+    constexpr auto bits = [](auto... passes) { return (RenoDxShaderBit(passes) | ...); };
+    using enum RenoDxShaderPass;
+    using Scope = NativeImageSpacePass;
+    constexpr auto updated = bits(toneMapNewA, toneMapNewB, lut);
+    constexpr auto original = bits(toneMapA, toneMapB, lut);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::toneMapCinematic, updated) == toneMapNewA);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::toneMapCinematicFade, updated) == toneMapNewB);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::lut, updated) == lut);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::toneMapCinematic, original) == toneMapA);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::toneMapCinematicFade, original) == toneMapB);
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::lut, original | bits(taa)) == lut);
+
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::none, updated));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::toneMapCinematic, bits(toneMapNewA, toneMapNewB)));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::toneMapCinematic, bits(toneMapNewA, lut)));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::toneMapCinematic, bits(toneMapNewA, toneMapB, lut)));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, updated | original));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, updated | bits(toneMapA)));
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, bits(lut, taa, fxaa)));
+}
+
 void TestDeveloperConfiguration()
 {
     constexpr std::string_view disabled = R"ini(
@@ -190,6 +213,7 @@ void RunPipelineContractTests()
     TestTrustedCatalog();
     TestUnknownOutcomes();
     TestHeartbeat();
+    TestNativeImageSpacePassResolution();
     TestDeveloperConfiguration();
 }
 

@@ -183,6 +183,7 @@ void ResetCommandListObservation(DrawObservation& observation, bool retained) no
     observation.currentSinglePresentationTarget = false;
     observation.currentPass = {};
     observation.currentPassKnown = false;
+    observation.currentPassForeign = false;
     observation.currentReplacementActive = false;
     observation.expectedBoundShader = nullptr;
     observation.nativePixelShader.Reset();
@@ -264,17 +265,21 @@ ID3D11PixelShader* SelectReplacement(RenoDxShaderPass pass)
 void SelectPixelShader(ID3D11DeviceContext* context, ID3D11PixelShader* shader,
     DrawObservation& record, ID3D11PixelShader*& selectedShader)
 {
-    const auto* descriptor = FindShader(shader);
+    const auto identity = IdentifyBoundShader(shader);
+    const auto* descriptor = identity.descriptor;
     if (!descriptor)
     {
         record.currentPassKnown = false;
+        record.currentPassForeign = false;
         record.currentRequirement =
             PipelinePassRequirement::untracked;
         return;
     }
     if (!g_armor.armorEncodedSharedSrgb) CloseConflictingArmorScope(context);
+    if (identity.foreign) RecordForeignPass(descriptor->pass);
     record.currentPass = descriptor->pass;
     record.currentPassKnown = true;
+    record.currentPassForeign = identity.foreign;
     record.currentRequirement = descriptor->requirement;
     if (auto* replacement = SelectReplacement(descriptor->pass))
         selectedShader = replacement;
@@ -298,6 +303,7 @@ void STDMETHODCALLTYPE HookPsSetShader(
     {
         ApplyGraphicsLifecycleBeforeDraw(context);
         record->currentPassKnown = false;
+        record->currentPassForeign = false;
         record->currentRequirement = PipelinePassRequirement::untracked;
         if (classCount == 0) SelectPixelShader(context, shader, *record, selectedShader);
         record->currentReplacementActive = selectedShader != shader;
@@ -307,6 +313,7 @@ void STDMETHODCALLTYPE HookPsSetShader(
     catch (...)
     {
         record->currentPassKnown = false;
+        record->currentPassForeign = false;
         record->currentReplacementActive = false;
         record->expectedBoundShader = nullptr;
         record->nativePixelShader.Reset();
@@ -335,6 +342,7 @@ bool RestoreNativePixelShader(ID3D11DeviceContext* context, DrawObservation& rec
     record.expectedBoundShader = actual.Get();
     if (actual.Get() == native.Get()) return true;
     record.currentPassKnown = false;
+    record.currentPassForeign = false;
     record.currentRequirement = PipelinePassRequirement::untracked;
     return false;
 }
@@ -362,6 +370,7 @@ bool RestoreNativePixelShader(ID3D11DeviceContext* context, DrawObservation& rec
         RecordFailure(GraphicsObservationFailure::requiredHeartbeatMissing);
     }
     record.currentPassKnown = false;
+    record.currentPassForeign = false;
     record.currentReplacementActive = false;
     record.expectedBoundShader = actual.Get();
     record.nativePixelShader.Reset();

@@ -154,6 +154,8 @@ ComPtr<ID3D11Resource> OriginalLutResource(ID3D11RenderTargetView* view) noexcep
 
 bool ActualOriginalShader(ID3D11DeviceContext* context, const DrawObservation& observation) noexcept
 {
+    // A scope-identified foreign shader is not the game's original SDR producer.
+    if (observation.currentPassForeign) return false;
     if (observation.currentReplacementActive || !observation.expectedBoundShader)
         return false;
     ComPtr<ID3D11PixelShader> actual;

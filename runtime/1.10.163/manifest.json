@@ -19,13 +19,90 @@
     "target": {
       "addressLibraryId": 230711,
       "rva": "0x02043A80",
-      "expectedBytes": [72, 137, 92, 36, 8, 72, 137, 116, 36, 24, 87, 72, 131, 236, 32, 139, 21, 31, 13, 111, 4, 101, 72, 139, 4, 37, 88, 0, 0, 0, 72, 139]
+      "expectedBytes": [
+        72,
+        137,
+        92,
+        36,
+        8,
+        72,
+        137,
+        116,
+        36,
+        24,
+        87,
+        72,
+        131,
+        236,
+        32,
+        139,
+        21,
+        31,
+        13,
+        111,
+        4,
+        101,
+        72,
+        139,
+        4,
+        37,
+        88,
+        0,
+        0,
+        0,
+        72,
+        139
+      ]
     },
     "calls": [
-      { "callerAddressLibraryId": 1422240, "callerRva": "0x00D3E4D0", "rva": "0x00D3E4DB", "expectedBytes": [232, 160, 85, 48, 1] },
-      { "callerAddressLibraryId": 135719, "callerRva": "0x01297BE0", "rva": "0x01298000", "expectedBytes": [232, 123, 186, 218, 0] },
-      { "callerAddressLibraryId": 408683, "callerRva": "0x00D3CBE0", "rva": "0x00D3CDE9", "expectedBytes": [232, 146, 108, 48, 1] },
-      { "callerAddressLibraryId": 1075087, "callerRva": "0x00D38700", "rva": "0x00D389B6", "expectedBytes": [232, 197, 176, 48, 1] }
+      {
+        "callerAddressLibraryId": 1422240,
+        "callerRva": "0x00D3E4D0",
+        "rva": "0x00D3E4DB",
+        "expectedBytes": [
+          232,
+          160,
+          85,
+          48,
+          1
+        ]
+      },
+      {
+        "callerAddressLibraryId": 135719,
+        "callerRva": "0x01297BE0",
+        "rva": "0x01298000",
+        "expectedBytes": [
+          232,
+          123,
+          186,
+          218,
+          0
+        ]
+      },
+      {
+        "callerAddressLibraryId": 408683,
+        "callerRva": "0x00D3CBE0",
+        "rva": "0x00D3CDE9",
+        "expectedBytes": [
+          232,
+          146,
+          108,
+          48,
+          1
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1075087,
+        "callerRva": "0x00D38700",
+        "rva": "0x00D389B6",
+        "expectedBytes": [
+          232,
+          197,
+          176,
+          48,
+          1
+        ]
+      }
     ]
   },
   "nativeUiResources": {
@@ -44,11 +121,52 @@
     "target": {
       "addressLibraryId": 43433,
       "rva": "0x01D30E90",
-      "expectedBytes": [64, 86, 87, 65, 86, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254, 255]
+      "expectedBytes": [
+        64,
+        86,
+        87,
+        65,
+        86,
+        72,
+        131,
+        236,
+        64,
+        72,
+        199,
+        68,
+        36,
+        32,
+        254,
+        255
+      ]
     },
     "calls": [
-      { "callerAddressLibraryId": 1118299, "callerRva": "0x02896680", "rva": "0x02896E7F", "slot": 24, "expectedBytes": [232, 12, 160, 73, 255] },
-      { "callerAddressLibraryId": 1118299, "callerRva": "0x02896680", "rva": "0x02896E97", "slot": 25, "expectedBytes": [232, 244, 159, 73, 255] }
+      {
+        "callerAddressLibraryId": 1118299,
+        "callerRva": "0x02896680",
+        "rva": "0x02896E7F",
+        "slot": 24,
+        "expectedBytes": [
+          232,
+          12,
+          160,
+          73,
+          255
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1118299,
+        "callerRva": "0x02896680",
+        "rva": "0x02896E97",
+        "slot": 25,
+        "expectedBytes": [
+          232,
+          244,
+          159,
+          73,
+          255
+        ]
+      }
     ]
   },
   "sceneCompositeObserver": {
@@ -87,7 +205,34 @@
       "keyStorageReferenceOffset": 19,
       "keyGetterAddressLibraryId": 1111569,
       "keyGetterRva": "0x0204B490",
-      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 124, 196, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 102, 196, 82, 4],
+      "keyGetterExpectedBytes": [
+        64,
+        83,
+        72,
+        131,
+        236,
+        32,
+        139,
+        5,
+        124,
+        196,
+        82,
+        4,
+        168,
+        1,
+        117,
+        52,
+        131,
+        200,
+        1,
+        72,
+        141,
+        29,
+        102,
+        196,
+        82,
+        4
+      ],
       "modelConstructorRva": "0x00A02DF0",
       "modelSetupRva": "0x00A030A0",
       "modelDestructorRva": "0x00A02F50",
@@ -105,7 +250,34 @@
       "keyStorageReferenceOffset": 19,
       "keyGetterAddressLibraryId": 607213,
       "keyGetterRva": "0x0204B2B0",
-      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 252, 197, 82, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 230, 197, 82, 4],
+      "keyGetterExpectedBytes": [
+        64,
+        83,
+        72,
+        131,
+        236,
+        32,
+        139,
+        5,
+        252,
+        197,
+        82,
+        4,
+        168,
+        1,
+        117,
+        52,
+        131,
+        200,
+        1,
+        72,
+        141,
+        29,
+        230,
+        197,
+        82,
+        4
+      ],
       "modelConstructorRva": "0x00A01D00",
       "modelSetupRva": "0x00A01FB0",
       "modelDestructorRva": "0x00A01E60",
@@ -123,7 +295,34 @@
       "keyStorageReferenceOffset": 19,
       "keyGetterAddressLibraryId": 160459,
       "keyGetterRva": "0x0127D8E0",
-      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 12, 225, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 246, 224, 133, 4],
+      "keyGetterExpectedBytes": [
+        64,
+        83,
+        72,
+        131,
+        236,
+        32,
+        139,
+        5,
+        12,
+        225,
+        133,
+        4,
+        168,
+        1,
+        117,
+        52,
+        131,
+        200,
+        1,
+        72,
+        141,
+        29,
+        246,
+        224,
+        133,
+        4
+      ],
       "modelConstructorRva": "0x01279EA0",
       "modelSetupRva": "0x0127B640",
       "modelDestructorRva": "0x0127A000",
@@ -141,7 +340,34 @@
       "keyStorageReferenceOffset": 19,
       "keyGetterAddressLibraryId": 1210792,
       "keyGetterRva": "0x0127D940",
-      "keyGetterExpectedBytes": [64, 83, 72, 131, 236, 32, 139, 5, 188, 224, 133, 4, 168, 1, 117, 52, 131, 200, 1, 72, 141, 29, 166, 224, 133, 4],
+      "keyGetterExpectedBytes": [
+        64,
+        83,
+        72,
+        131,
+        236,
+        32,
+        139,
+        5,
+        188,
+        224,
+        133,
+        4,
+        168,
+        1,
+        117,
+        52,
+        131,
+        200,
+        1,
+        72,
+        141,
+        29,
+        166,
+        224,
+        133,
+        4
+      ],
       "modelConstructorRva": "0x01279EA0",
       "modelSetupRva": "0x0127AE00",
       "modelDestructorRva": "0x0127A000",
@@ -158,7 +384,47 @@
       "keyStorageSection": ".data",
       "keyInitializerAddressLibraryId": 1434874,
       "keyInitializerRva": "0x02A8E510",
-      "keyInitializerExpectedBytes": [72, 131, 236, 40, 72, 141, 21, 253, 173, 41, 0, 72, 141, 13, 70, 172, 253, 2, 232, 25, 56, 11, 255, 72, 141, 13, 210, 61, 20, 0, 72, 131, 196, 40, 233, 149, 134, 234, 255],
+      "keyInitializerExpectedBytes": [
+        72,
+        131,
+        236,
+        40,
+        72,
+        141,
+        21,
+        253,
+        173,
+        41,
+        0,
+        72,
+        141,
+        13,
+        70,
+        172,
+        253,
+        2,
+        232,
+        25,
+        56,
+        11,
+        255,
+        72,
+        141,
+        13,
+        210,
+        61,
+        20,
+        0,
+        72,
+        131,
+        196,
+        40,
+        233,
+        149,
+        134,
+        234,
+        255
+      ],
       "keyDestructorRva": "0x02BD2300",
       "rendererSetupRva": "0x00BF7630",
       "menuDestructorRva": "0x00BEF1E0",
@@ -226,13 +492,40 @@
     "status": "unvalidated",
     "scope": "synchronous-gamma-correct-lut-render",
     "abi": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)",
-    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset.",
+    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset. The same target and offset also qualify Render slot1 of the HDRTonemapBlendCinematic and HDRTonemapBlendCinematicFade secondary vtables, which FO4Isotope hooks as engine pass scopes.",
+    "evidenceQualification": "The exact OG 1.10.163 executable's code is encrypted on disk and no decoded text was retained. Only the live slot-target and RTTI-offset checks before mutation verify the GammaCorrectLUT and both tone-map slots; native gameplay validation remains pending.",
     "lifetime": "native synchronous Render scope; bounded guarded copies; filename and NiTexture name plus rendererTexture agreement; same-draw SRV comparison required",
     "effectSubobjectOffset": 280,
     "target": {
       "addressLibraryId": 1388477,
       "rva": "0x028C8B30",
-      "expectedBytes": [72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0]
+      "expectedBytes": [
+        72,
+        137,
+        92,
+        36,
+        16,
+        72,
+        137,
+        108,
+        36,
+        24,
+        86,
+        87,
+        65,
+        84,
+        65,
+        86,
+        65,
+        87,
+        72,
+        129,
+        236,
+        160,
+        0,
+        0,
+        0
+      ]
     }
   },
   "imageSpaceObserver": {
@@ -244,7 +537,11 @@
     "weatherGrade": {
       "sunlightColorIndex": 4,
       "glareColorIndex": 15,
-      "rgbByteShifts": [0, 8, 16],
+      "rgbByteShifts": [
+        0,
+        8,
+        16
+      ],
       "loadedColorSemantics": "NAM0 clears the full color array before copying eight-slot data or expanding legacy four-slot data with bytewise neighboring-slot means. DALC legacy data similarly expands to eight initialized slots. Loaded black is valid; serialized leaf absence is not a runtime missing-value marker."
     },
     "globals": {
@@ -503,8 +800,14 @@
       "stage": "pixel",
       "dxbcHash": "f97c127c-d49c4526-1a87d341-2a3edc35",
       "signal": "linear-bt709-relative",
-      "draw": { "kind": "indexed", "indexCount": 3 },
-      "target": { "format": "R16G16B16A16_FLOAT", "extent": "presentation" },
+      "draw": {
+        "kind": "indexed",
+        "indexCount": 3
+      },
+      "target": {
+        "format": "R16G16B16A16_FLOAT",
+        "extent": "presentation"
+      },
       "role": "initialize-depth-tested-scene-target"
     },
     {
@@ -538,7 +841,11 @@
       "status": "static-reviewed-native-unvalidated",
       "event": "RE::MenuModeChangeEvent",
       "semantics": "enteringMenuMode reports UI::menuMode crossing zero; only menus with kPausesGame contribute, not every kModal menu",
-      "notificationRvas": ["0x02042A2C", "0x020430DB", "0x0204422F"],
+      "notificationRvas": [
+        "0x02042A2C",
+        "0x020430DB",
+        "0x0204422F"
+      ],
       "cursorMenuConstructorRva": "0x0126AB10",
       "cursorMenuFlags": "0x02800800",
       "evidenceQualification": "Static review of retained loaded 1.10.163 text; not pristine-text parity or current-artifact in-game validation. Cursor registration and CursorMenu construction do not contribute a pausing-menu count in the inspected paths.",
@@ -574,18 +881,46 @@
         }
       },
       "activeData": [
-        { "field": "eyeAdaptSpeed" },
-        { "field": "bloomBlurRadius", "xeditAlias": "Tonemap E" },
-        { "field": "bloomThreshold" },
-        { "field": "bloomScale" },
-        { "field": "receiveBloomThreshold", "xeditAlias": "Auto Exposure Max" },
-        { "field": "white", "xeditAlias": "Auto Exposure Min" },
-        { "field": "sunlightScale" },
-        { "field": "skyScale" },
-        { "field": "eyeAdaptStrength", "xeditAlias": "Middle Gray" },
-        { "field": "cinematicSaturation" },
-        { "field": "cinematicBrightness" },
-        { "field": "cinematicContrast" }
+        {
+          "field": "eyeAdaptSpeed"
+        },
+        {
+          "field": "bloomBlurRadius",
+          "xeditAlias": "Tonemap E"
+        },
+        {
+          "field": "bloomThreshold"
+        },
+        {
+          "field": "bloomScale"
+        },
+        {
+          "field": "receiveBloomThreshold",
+          "xeditAlias": "Auto Exposure Max"
+        },
+        {
+          "field": "white",
+          "xeditAlias": "Auto Exposure Min"
+        },
+        {
+          "field": "sunlightScale"
+        },
+        {
+          "field": "skyScale"
+        },
+        {
+          "field": "eyeAdaptStrength",
+          "xeditAlias": "Middle Gray"
+        },
+        {
+          "field": "cinematicSaturation"
+        },
+        {
+          "field": "cinematicBrightness"
+        },
+        {
+          "field": "cinematicContrast"
+        }
       ]
     },
     "relocations": [

@@ -27,6 +27,13 @@ inline constexpr GUID kFrameTraceShaderCrc{0xa9074e87, 0xf4b9, 0x4398,
     {0x9a, 0xb4, 0xa0, 0x42, 0x7a, 0xcb, 0x7f, 0x56}};
 [[nodiscard]] const RenoDxShaderDescriptor* FindShaderDescriptor(RenoDxShaderPass pass) noexcept;
 [[nodiscard]] const RenoDxShaderDescriptor* FindShader(ID3D11PixelShader* shader) noexcept;
+struct BoundShaderIdentity
+{
+    const RenoDxShaderDescriptor* descriptor{};
+    bool foreign{};
+};
+// Stock bytecode first; otherwise the engine pass scope open on this thread.
+[[nodiscard]] BoundShaderIdentity IdentifyBoundShader(ID3D11PixelShader* shader) noexcept;
 [[nodiscard]] bool IsLateGameUiShader(ID3D11PixelShader* shader) noexcept;
 [[nodiscard]] bool IsLateGameUiBackdropShader(ID3D11PixelShader* shader) noexcept;
 [[nodiscard]] bool IsNativeSceneCompositeShader(ID3D11PixelShader* shader) noexcept;

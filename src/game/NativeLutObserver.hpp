@@ -3,4 +3,6 @@
 
 namespace fo4hdr::game {
 [[nodiscard]] bool InitializeNativeLutObserver(bool requested) noexcept;
+// The LUT and both tone-map Render slots carry engine pass scopes.
+[[nodiscard]] bool NativeImageSpacePassesInstalled() noexcept;
 }

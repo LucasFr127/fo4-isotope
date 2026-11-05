@@ -128,7 +128,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_11_240.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "25759ed8fb110ff3ce79f174d2acf15aa82834179d9e69c53d3fb9f59176a2ef";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-11-240-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06";
-inline constexpr std::string_view kManifestSha256 = "2625006ca7fc4523b0301fa150febd61ff0e737697fd976e12439b301308cdbf";
+inline constexpr std::string_view kManifestSha256 = "fdc12c0bdfdf57e1246020dbd575b2be378b1551c2790f4f114ef65f9e7df4e2";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{

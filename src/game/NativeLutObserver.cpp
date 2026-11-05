@@ -3,11 +3,13 @@
 #include "DirectCallPatch.hpp"
 #include "ImageSpaceObserver.hpp"
 #include "FO4Isotope/config/HdrSettings.hpp"
+#include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "FO4Isotope/output/NativeLutObservation.hpp"
 #include <RE/Fallout.h>
 #include <REL/Offset2ID.h>
 #include <REX/FModule.h>
 #include <Windows.h>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -17,10 +19,28 @@
 
 namespace {
 using Render = void (*)(RE::ImageSpaceEffect*, RE::BSTriShape*, RE::ImageSpaceEffectParam*);
+using fo4hdr::NativeImageSpacePass;
 std::atomic<bool> g_attempted{};
 std::atomic<Render> g_next{};
+std::atomic<bool> g_passScopesReady{};
 RE::ImageSpaceManager** g_manager{};
 std::uintptr_t g_vtable{};
+
+// Opens the D3D-side pass scope only once the LUT and both tone-map slots are installed.
+class PassScope
+{
+public:
+    explicit PassScope(NativeImageSpacePass pass) noexcept :
+        active_(g_passScopesReady.load(std::memory_order_acquire)),
+        previous_(active_ ? fo4hdr::EnterNativeImageSpacePass(pass) : NativeImageSpacePass::none) {}
+    ~PassScope() { if (active_) fo4hdr::ExitNativeImageSpacePass(previous_); }
+    PassScope(const PassScope&) = delete;
+    PassScope& operator=(const PassScope&) = delete;
+
+private:
+    bool active_;
+    NativeImageSpacePass previous_;
+};
 static_assert(offsetof(RE::ImageSpaceManager, lutData) == 0x130);
 static_assert(offsetof(RE::ImageSpaceManager, overrideLUTData) == 0x1A0);
 static_assert(offsetof(RE::ImageSpaceLUTData, texture) == 0x50);
@@ -168,6 +188,7 @@ void RenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
         if (fo4hdr::GetNativeLutObserverStatus() == fo4hdr::NativeLutObserverStatus::ready &&
             !Observe(effect, observation)) observation = {};
         fo4hdr::NativeLutScope scope(observation);
+        const PassScope pass(NativeImageSpacePass::lut);
         next(effect, geometry, parameters);
     } catch (...) {
         fo4hdr::SetNativeLutObserverStatus(fo4hdr::NativeLutObserverStatus::unavailable);
@@ -234,33 +255,80 @@ bool ReadRenderSlot(void** slot, void*& original)
     if (reinterpret_cast<std::uintptr_t>(slot) % alignof(void*) != 0) return false;
     return Read(slot, &original, sizeof(original));
 }
-void RestoreRenderSlot(void** slot, void* original, bool replaced)
+void RestoreRenderSlot(void** slot, void* original, void* hook, bool replaced)
 {
     DWORD writablePrior{};
-    if (replaced && ::VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &writablePrior))
-        ::InterlockedCompareExchangePointer(slot, original, reinterpret_cast<void*>(&RenderHook));
+    if (!replaced || !::VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &writablePrior)) return;
+    ::InterlockedCompareExchangePointer(slot, original, hook);
+    DWORD ignored{};
+    ::VirtualProtect(slot, sizeof(void*), writablePrior, &ignored);
+}
+
+enum class SlotSwap { installed, conflicting, failed };
+
+SlotSwap SwapRenderSlot(void** slot, void* original, void* hook)
+{
+    DWORD prior{};
+    if (!::VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &prior)) return SlotSwap::failed;
+    // F4SE startup precedes render dispatch. The process-lifetime callback
+    // remains callable on rollback failure; never overwrite a foreign owner.
+    const auto replaced = ::InterlockedCompareExchangePointer(slot, hook, original) == original;
+    DWORD ignored{};
+    const auto restored = ::VirtualProtect(slot, sizeof(void*), prior, &ignored) != FALSE;
+    if (replaced && restored) return SlotSwap::installed;
+    RestoreRenderSlot(slot, original, hook, replaced);
+    if (!restored) ::VirtualProtect(slot, sizeof(void*), prior, &ignored);
+    return replaced ? SlotSwap::failed : SlotSwap::conflicting;
 }
 
 bool InstallRenderSlot(void** slot, void* original)
 {
     using fo4hdr::SetNativeLutObserverStatus;
     using Status = fo4hdr::NativeLutObserverStatus;
-    DWORD prior{};
-    if (!::VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &prior)) return false;
-    // F4SE startup precedes render dispatch. The process-lifetime callback
-    // remains callable on rollback failure; never overwrite a foreign owner.
-    const auto replaced = ::InterlockedCompareExchangePointer(slot,
-        reinterpret_cast<void*>(&RenderHook), original) == original;
-    DWORD ignored{};
-    const auto restored = ::VirtualProtect(slot, sizeof(void*), prior, &ignored) != FALSE;
-    if (!replaced || !restored) {
-        RestoreRenderSlot(slot, original, replaced);
-        if (!restored) ::VirtualProtect(slot, sizeof(void*), prior, &ignored);
-        SetNativeLutObserverStatus(replaced ? Status::invalidTarget : Status::conflictingHook);
-        return false;
-    }
+    const auto swapped = SwapRenderSlot(slot, original, reinterpret_cast<void*>(&RenderHook));
+    if (swapped == SlotSwap::installed) return true;
+    SetNativeLutObserverStatus(swapped == SlotSwap::conflicting ? Status::conflictingHook : Status::invalidTarget);
+    return false;
+}
 
-    return true;
+template <NativeImageSpacePass Pass>
+void PassRenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
+    RE::ImageSpaceEffectParam* parameters) noexcept
+{
+    const auto next = g_next.load(std::memory_order_acquire);
+    if (!next || next == &PassRenderHook<Pass>) return;
+    try {
+        const PassScope scope(Pass);
+        next(effect, geometry, parameters);
+    } catch (...) {
+        g_passScopesReady.store(false, std::memory_order_release);
+    }
+}
+
+// Both tone-map classes inherit the LUT's image-space Render, so the
+// same target and sub-object offset qualify their slots, which swap as a pair.
+bool InstallPassSlots(const REX::FModule& module, const REL::Offset2ID& mappings,
+    std::uintptr_t target, const LutIdentity& identity)
+{
+    struct PassSlot { std::uint64_t vtableId; void* hook; void** slot{}; };
+    std::array slots{
+        PassSlot{RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematic[2].id(),
+            reinterpret_cast<void*>(&PassRenderHook<NativeImageSpacePass::toneMapCinematic>)},
+        PassSlot{RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematicFade[2].id(),
+            reinterpret_cast<void*>(&PassRenderHook<NativeImageSpacePass::toneMapCinematicFade>)}};
+    auto* const expected = reinterpret_cast<void*>(target);
+    for (auto& entry : slots) {
+        const auto table = Resolve(mappings, module.GetBaseAddress(), entry.vtableId);
+        if (!InSection(module, ".rdata", table - sizeof(void*), 3 * sizeof(void*))) return false;
+        if (!ValidLocator(module, table, identity)) return false;
+        entry.slot = reinterpret_cast<void**>(table + sizeof(void*));
+        void* original{};
+        if (!ReadRenderSlot(entry.slot, original) || original != expected) return false;
+    }
+    if (SwapRenderSlot(slots[0].slot, expected, slots[0].hook) != SlotSwap::installed) return false;
+    if (SwapRenderSlot(slots[1].slot, expected, slots[1].hook) == SlotSwap::installed) return true;
+    RestoreRenderSlot(slots[0].slot, expected, slots[0].hook, true);
+    return false;
 }
 bool InstallQualifiedTarget(std::uintptr_t table, std::uintptr_t manager, std::uintptr_t target)
 {
@@ -294,11 +362,19 @@ bool ResolveAndInstall(const REX::FModule& module, const LutIdentity& identity)
     if (!InSection(module, ".data", manager, sizeof(void*))) return false;
     if (!ValidRenderTarget(module, target)) return false;
     if (!ValidLocator(module, table, identity)) return false;
-    return InstallQualifiedTarget(table, manager, target);
+    if (!InstallQualifiedTarget(table, manager, target)) return false;
+    // Foreign identity needs every scope: a lone tone map would feed a foreign LUT.
+    g_passScopesReady.store(InstallPassSlots(module, mappings, target, identity), std::memory_order_release);
+    return true;
 }
 }
 
 namespace fo4hdr::game {
+bool NativeImageSpacePassesInstalled() noexcept
+{
+    return g_passScopesReady.load(std::memory_order_acquire);
+}
+
 bool InitializeNativeLutObserver(bool requested) noexcept
 {
     using Status = NativeLutObserverStatus;

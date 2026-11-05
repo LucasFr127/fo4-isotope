@@ -108,6 +108,7 @@ struct ShippingShaderRun
             VerifyPresentationState(device);
             VerifyAffineState(device);
             VerifySharedUiFallback(device);
+            VerifyEnginePassScopes(device);
         });
         RunSection(options.filter, "scoped-pixel-binding-restoration", [&] {
             VerifyScopedPixelBindingRestoration(device);

@@ -97,6 +97,7 @@ struct AtomicEvidence
     std::atomic<std::uint64_t> colorDomainMismatchCount{};
     std::atomic<std::uint32_t> colorDomain{};
     std::atomic<std::uint32_t> knownShaderMask{};
+    std::atomic<std::uint32_t> foreignShaderMask{};
     std::atomic<std::uint32_t> lastKnownShaderCrc32{};
     std::atomic<std::int32_t> lastDeviceResult{E_FAIL};
     std::atomic<std::int32_t> lastPixelShaderResult{E_FAIL};
@@ -104,6 +105,8 @@ struct AtomicEvidence
 
 extern AtomicEvidence g_evidence;
 void RecordFailure(GraphicsObservationFailure value) noexcept;
+// A foreign pixel shader took this pass through an engine pass scope.
+void RecordForeignPass(RenoDxShaderPass pass) noexcept;
 void RecordAbiException() noexcept;
 // The caller's descriptor fields let a skipped-candidate warning name its blocker.
 void RecordHdrCandidateDecision(HdrCandidateDecision decision,

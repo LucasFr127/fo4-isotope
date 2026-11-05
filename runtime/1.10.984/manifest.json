@@ -278,7 +278,7 @@
     "status": "unvalidated",
     "scope": "synchronous-gamma-correct-lut-render",
     "abi": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)",
-    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset.",
+    "authorityGap": "Pinned CommonLibF4 names the GammaCorrectLUT secondary vtable, ImageSpaceEffect Render ABI and BSGraphics::Texture SRV layout but omits the Render target mapping and secondary-base offset. The same target and offset also qualify Render slot1 of the HDRTonemapBlendCinematic and HDRTonemapBlendCinematicFade secondary vtables, which FO4Isotope hooks as engine pass scopes.",
     "lifetime": "Native synchronous Render scope; bounded guarded copies; filename and NiTexture name plus rendererTexture agreement; same-draw SRV comparison required.",
     "effectSubobjectOffset": 400,
     "target": {
@@ -312,7 +312,7 @@
         0
       ]
     },
-    "evidenceQualification": "Static review of exact NG1.10.984 Address Library and independently offline-decoded .text from the exact supplied executable. Live fingerprint, hook ownership and native/gameplay validation remain unverified. Named GammaCorrectLUT secondary vtable ID1254393 resolves to RVA0x026F4038; RTTI locator RVA0x028BAE28 has offset0x190 and type descriptor RVA0x02E5EA38 matching named NG RTTI ID2787419. Render slot1 independently resolves to ID2319297/RVA0x020F1710. Target subtracts0x190 from RCX at RVA0x020F1BEC before the primary virtual call. Manager constructor RVA0x02027A10 constructs LUT data at0x130 and clears override pointer at0x1A0. No live binding test performed."
+    "evidenceQualification": "Static review of exact NG1.10.984 Address Library and independently offline-decoded .text from the exact supplied executable. Live fingerprint, hook ownership and native/gameplay validation remain unverified. Named GammaCorrectLUT secondary vtable ID1254393 resolves to RVA0x026F4038; RTTI locator RVA0x028BAE28 has offset0x190 and type descriptor RVA0x02E5EA38 matching named NG RTTI ID2787419. Render slot1 independently resolves to ID2319297/RVA0x020F1710. Target subtracts0x190 from RCX at RVA0x020F1BEC before the primary virtual call. Manager constructor RVA0x02027A10 constructs LUT data at0x130 and clears override pointer at0x1A0. No live binding test performed. HDRTonemapBlendCinematic and HDRTonemapBlendCinematicFade secondary vtables ID1182576/ID1075500 resolve to RVA0x026F4CE0/RVA0x026F4E68; their RTTI locators RVA0x028BB698/RVA0x028BB788 have offset0x190 and Render slot1 holds RVA0x020F1710. ImageSpaceEffectHDR Render (RVA0x020ACBD0) calls the selected tone-map child through slot1."
   },
   "experimentalScreenUiObserver": {
     "status": "unvalidated",
@@ -1141,8 +1141,14 @@
       "stage": "pixel",
       "dxbcHash": "555f3384-af6f2066-90145fc6-aa1e8b3a",
       "signal": "linear-bt709-relative",
-      "draw": { "kind": "indexed", "indexCount": 3 },
-      "target": { "format": "R16G16B16A16_FLOAT", "extent": "presentation" },
+      "draw": {
+        "kind": "indexed",
+        "indexCount": 3
+      },
+      "target": {
+        "format": "R16G16B16A16_FLOAT",
+        "extent": "presentation"
+      },
       "role": "initialize-depth-tested-scene-target",
       "evidenceQualification": "User-supplied NG gameplay capture SHA256 af84a120dddf0317fdcd3c5585756e5e0cecfc6960bf6a6db073e5b578f3883c: event 4943 is the first use of the single-mip, single-sample, full-resolution FP16 scene target. Solid full-screen indexed triangle, unpredicated, full RGB writes, no blending or alpha-to-coverage, GREATER depth test with no depth writes or stencil, and no scissor or depth bias. Pixel (1286,712) fails at depth 1 and retains RGB (14392,24480,34016) before bloom. Capture qualifies the shader and target-initialization seam; fixed-DLL gameplay and release validation remain pending."
     },

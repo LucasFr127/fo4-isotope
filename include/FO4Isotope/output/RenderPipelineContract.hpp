@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace fo4hdr {
@@ -301,6 +302,41 @@ private:
     RenoDxShaderPass pass) noexcept
 {
     return std::uint32_t{1} << static_cast<std::uint8_t>(pass);
+}
+
+// Engine image-space effect whose Render call scopes a pixel-shader bind,
+// identifying a recompiled shader that matches no RenoDX identity.
+enum class NativeImageSpacePass : std::uint8_t
+{
+    none,
+    toneMapCinematic,
+    toneMapCinematicFade,
+    lut
+};
+
+// A scoped foreign shader joins only a whole stock set registered by the
+// device: the LUT and exactly one tone-map family, with no member of the other.
+// Returns that family's offset in the pass table below.
+[[nodiscard]] constexpr std::optional<std::size_t> RegisteredStockFamily(std::uint32_t registeredPasses) noexcept
+{
+    using enum RenoDxShaderPass;
+    constexpr auto original = RenoDxShaderBit(toneMapA) | RenoDxShaderBit(toneMapB) | RenoDxShaderBit(lut);
+    constexpr auto updated = RenoDxShaderBit(toneMapNewA) | RenoDxShaderBit(toneMapNewB) | RenoDxShaderBit(lut);
+    const auto stock = registeredPasses & (original | updated);
+    if (stock == original) return 0;
+    if (stock == updated) return 3;
+    return std::nullopt;
+}
+
+[[nodiscard]] constexpr std::optional<RenoDxShaderPass> ResolveNativeImageSpacePass(
+    NativeImageSpacePass pass, std::uint32_t registeredPasses) noexcept
+{
+    using enum RenoDxShaderPass;
+    if (pass == NativeImageSpacePass::none || pass > NativeImageSpacePass::lut) return std::nullopt;
+    const auto family = RegisteredStockFamily(registeredPasses);
+    if (!family) return std::nullopt;
+    constexpr std::array<RenoDxShaderPass, 6> passes{toneMapA, toneMapB, lut, toneMapNewA, toneMapNewB, lut};
+    return passes[*family + static_cast<std::size_t>(pass) - 1U];
 }
 
 }  // namespace fo4hdr

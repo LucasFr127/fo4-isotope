@@ -142,6 +142,7 @@ struct GraphicsObservationSnapshot
     std::uint64_t colorDomainMismatchCount{};
     LinearColorDomain colorDomain{LinearColorDomain::unknown};
     std::uint32_t knownShaderMask{};
+    std::uint32_t foreignShaderMask{};
     std::uint32_t lastKnownShaderCrc32{};
     std::int32_t lastDeviceResult{};
     std::int32_t lastPixelShaderResult{};
@@ -166,6 +167,11 @@ void DisableSharedUiPauseResources() noexcept;
 // shader, such as a Community Shaders replacement, under its other checks.
 void EnterNativeSceneCompositePass() noexcept;
 void ExitNativeSceneCompositePass() noexcept;
+// The game observer scopes the native tone-map and LUT effect Render calls on
+// their calling thread. The first pixel-shader bind inside one, if no stock
+// identity matches, takes that pass. Exit restores the previous pass.
+[[nodiscard]] NativeImageSpacePass EnterNativeImageSpacePass(NativeImageSpacePass pass) noexcept;
+void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept;
 // Initial Win32 subclass installation must run on the exact HWND owner thread.
 // F4SE lifecycle callbacks provide bounded, D3D-free retry opportunities after
 // the render thread has published the initialized ImGui window. The input
