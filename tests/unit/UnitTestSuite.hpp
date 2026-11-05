@@ -9,6 +9,7 @@ void RunBoundedWaitReleaseTests();
 void RunHdrSettingsTests();
 void TestHdrShortcutInput();
 void TestHdrShortcutWindowProcedure();
+void TestHdrSubclassKeepsAnsiWindow();
 void RunDirectCallPatchTests();
 void RunNativeUiResourcesTests();
 void RunSnapshotTests();

@@ -18,6 +18,7 @@ void RunHdrSettingsTests()
     TestDeveloperExposureLockFramePolicy();
     TestHdrShortcutInput();
     TestHdrShortcutWindowProcedure();
+    TestHdrSubclassKeepsAnsiWindow();
     TestHotkeyFormatting();
     TestSettingsDefaultsAndMath();
     TestSettingsValidation();

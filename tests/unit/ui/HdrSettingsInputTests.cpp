@@ -456,6 +456,70 @@ void TestHdrShortcutWindowProcedure()
     std::jthread testThread(RunHdrShortcutWindowProcedureTest);
 }
 
+unsigned g_ansiBaseIconRequests{};
+unsigned g_ansiLaterIconRequests{};
+WNDPROC g_ansiLaterPrevious{};
+
+LRESULT CALLBACK AnsiBaseTestWindow(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message != WM_GETICON) return DefWindowProcA(window, message, wParam, lParam);
+    ++g_ansiBaseIconRequests;
+    return 7;
+}
+
+// Calls its predecessor directly instead of through CallWindowProcA, which only
+// works while the predecessor is a procedure pointer rather than a CallProc handle.
+LRESULT CALLBACK AnsiDirectCallTestWindow(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    if (message == WM_GETICON) ++g_ansiLaterIconRequests;
+    return g_ansiLaterPrevious(window, message, wParam, lParam);
+}
+
+void SubclassAnsiWindowAfterInput(HWND window)
+{
+    const auto ansi = IsWindowUnicode(window) == FALSE;
+    FO4HDR_CHECK(ansi);
+    if (!ansi) return;
+    g_ansiLaterPrevious = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(
+        window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(AnsiDirectCallTestWindow)));
+    FO4HDR_CHECK(g_ansiLaterPrevious != nullptr);
+    if (!g_ansiLaterPrevious) return;
+    FO4HDR_CHECK(SendMessageA(window, WM_GETICON, ICON_SMALL2, 120) == 7);
+    FO4HDR_CHECK(g_ansiLaterIconRequests == 1);
+    FO4HDR_CHECK(g_ansiBaseIconRequests == 1);
+}
+
+void RunHdrSubclassAnsiWindowTest()
+{
+    const auto instance = GetModuleHandleW(nullptr);
+    WNDCLASSA windowClass{};
+    windowClass.lpfnWndProc = AnsiBaseTestWindow;
+    windowClass.hInstance = instance;
+    windowClass.lpszClassName = "FO4Isotope.AnsiSubclassTest";
+    const auto registered = RegisterClassA(&windowClass);
+    FO4HDR_CHECK(registered != 0);
+    if (!registered) return;
+    const auto window = CreateWindowExA(0, windowClass.lpszClassName, "", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, instance, nullptr);
+    FO4HDR_CHECK(window != nullptr);
+    if (window)
+    {
+        FO4HDR_CHECK(InitializeHdrSettingsInput(window));
+        SubclassAnsiWindowAfterInput(window);
+        FO4HDR_CHECK(DestroyWindow(window));
+        FO4HDR_CHECK(!HdrSettingsInputInstalled());
+    }
+    FO4HDR_CHECK(UnregisterClassA(windowClass.lpszClassName, instance));
+    g_ansiBaseIconRequests = 0;
+    g_ansiLaterIconRequests = 0;
+    g_ansiLaterPrevious = nullptr;
+}
+
+void TestHdrSubclassKeepsAnsiWindow()
+{
+    std::jthread testThread(RunHdrSubclassAnsiWindowTest);
+}
+
 void TestHotkeyFormatting()
 {
     for (std::uint32_t vk = 0; vk < 256; ++vk)

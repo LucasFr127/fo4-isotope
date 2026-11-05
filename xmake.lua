@@ -216,7 +216,7 @@ target("fo4hdr-renderer")
     if not has_config("fo4hdr_frame_trace") then
         add_defines("FO4HDR_DISABLE_FRAME_TRACE=1", { public = true })
     end
-    add_syslinks("d3d11", "dxgi", "dxguid", "user32", "comctl32", { public = true })
+    add_syslinks("d3d11", "dxgi", "dxguid", "user32", { public = true })
 
 target_end()
 
@@ -250,7 +250,7 @@ if has_config("fo4hdr_build_tests") then
             "tests/support/reference/SelectiveColorSourceOracle.cpp")
         add_files("tests/shader/ShaderTestOptions.cpp")
         add_files("src/game/ImageSpaceState.cpp")
-        add_syslinks("bcrypt", "d3d11", "user32", "comctl32")
+        add_syslinks("bcrypt", "d3d11", "user32")
         add_packages("imgui")
         add_files("src/ui/HdrSettingsInput.cpp")
         add_files("src/ui/ToneMapperPanel.cpp", "src/ui/ToneMapperRecommendations.cpp",

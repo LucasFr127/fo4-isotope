@@ -3,7 +3,6 @@
 #include "FO4Isotope/ui/HdrSettingsInput.hpp"
 
 #include <imgui.h>
-#include <CommCtrl.h>
 
 #include <algorithm>
 #include <array>
@@ -41,6 +40,9 @@ HdrSettingsHotkey g_capturePending{};
 bool g_capturePendingValid{};
 std::uint32_t g_seenShortcutReset{};
 std::array<bool, 256> g_swallowedKeys{};
+// Only the owning window thread installs, forwards through or removes this procedure.
+WNDPROC g_previousProcedure{};
+bool g_unicodeWindow{};
 std::atomic<bool> g_resetRequested{};
 std::atomic<bool> g_windowOpen{};
 std::atomic<bool> g_captureKeyboard{};
@@ -60,7 +62,6 @@ std::atomic<std::uint64_t> g_nativeMenuStatus{
 constexpr std::uint64_t kInteractionStateMask = 0xFFU;
 constexpr wchar_t kInteractionMessageName[] =
     L"FO4Isotope.SettingsInteraction.v1";
-constexpr UINT_PTR kSettingsSubclassId = 1;
 
 void ResetQueue() noexcept;
 
@@ -285,6 +286,7 @@ void AddKeyboardEvent(ImGuiIO& io, const InputMessage& record) noexcept
 
 void AddCharacterEvent(ImGuiIO& io, const InputMessage& record) noexcept
 {
+    // shortcut: an ANSI game window delivers WM_CHAR as code-page bytes, which match UTF-16 only for ASCII; convert with the keyboard code page if a free-text field is added.
     if (record.wParam > 0 && record.wParam <= 0xFFFFU)
         io.AddInputCharacterUTF16(static_cast<ImWchar16>(record.wParam));
 }
@@ -351,13 +353,33 @@ void AddImGuiEvent(const InputMessage& record) noexcept
 }
 
 [[nodiscard]] LRESULT CALLBACK HdrSettingsWindowProcedure(
-    HWND window, UINT message, WPARAM wParam, LPARAM lParam,
-    UINT_PTR subclassId, DWORD_PTR referenceData) noexcept;
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam) noexcept;
+
+[[nodiscard]] LONG_PTR ReadWindowProcedure(HWND window) noexcept
+{
+    return g_unicodeWindow ? GetWindowLongPtrW(window, GWLP_WNDPROC) :
+        GetWindowLongPtrA(window, GWLP_WNDPROC);
+}
+
+[[nodiscard]] LONG_PTR ReplaceWindowProcedure(HWND window, LONG_PTR procedure) noexcept
+{
+    return g_unicodeWindow ? SetWindowLongPtrW(window, GWLP_WNDPROC, procedure) :
+        SetWindowLongPtrA(window, GWLP_WNDPROC, procedure);
+}
 
 [[nodiscard]] LRESULT ForwardInput(
     HWND window, const InputMessage& input)
 {
-    return DefSubclassProc(window, input.message, input.wParam, input.lParam);
+    // The predecessor may be a CallProc handle, which only CallWindowProc can invoke.
+    const auto forward = g_unicodeWindow ? &CallWindowProcW : &CallWindowProcA;
+    return forward(g_previousProcedure, window, input.message, input.wParam, input.lParam);
+}
+
+// A later subclasser still holding this procedure keeps forwarding through it.
+void RemoveInputSubclass(HWND window) noexcept
+{
+    if (ReadWindowProcedure(window) == reinterpret_cast<LONG_PTR>(&HdrSettingsWindowProcedure))
+        (void)ReplaceWindowProcedure(window, reinterpret_cast<LONG_PTR>(g_previousProcedure));
 }
 
 void CloseInteractionIfPending() noexcept
@@ -540,8 +562,7 @@ struct GestureConsumption
     HWND window, const InputMessage& input)
 {
     if (ConsumeInputMessage(input)) return 0;
-    if (input.message == WM_NCDESTROY)
-        (void)RemoveWindowSubclass(window, HdrSettingsWindowProcedure, kSettingsSubclassId);
+    if (input.message == WM_NCDESTROY) RemoveInputSubclass(window);
     const auto result = ForwardInput(window, input);
     if (input.message == WM_NCDESTROY) RetireDestroyedWindow(true);
     return result;
@@ -558,8 +579,7 @@ struct GestureConsumption
     if (input.message == WM_NCDESTROY) CloseInteractionIfPending();
     if (!g_active.load(std::memory_order_acquire))
     {
-        if (input.message == WM_NCDESTROY)
-            (void)RemoveWindowSubclass(window, HdrSettingsWindowProcedure, kSettingsSubclassId);
+        if (input.message == WM_NCDESTROY) RemoveInputSubclass(window);
         const auto result = ForwardInput(window, input);
         if (input.message == WM_NCDESTROY) RetireDestroyedWindow(false);
         return result;
@@ -568,8 +588,7 @@ struct GestureConsumption
 }
 
 [[nodiscard]] LRESULT CALLBACK HdrSettingsWindowProcedure(
-    HWND window, UINT message, WPARAM wParam, LPARAM lParam,
-    UINT_PTR, DWORD_PTR) noexcept
+    HWND window, UINT message, WPARAM wParam, LPARAM lParam) noexcept
 {
     const InputMessage input{message, wParam, lParam};
     try { return ProcessWindowMessage(window, input); }
@@ -597,23 +616,30 @@ void ResetQueue() noexcept
         process == GetCurrentProcessId();
 }
 
+// The procedure stays in the chain until WM_NCDESTROY, so the same HWND reactivates it.
 [[nodiscard]] bool ReactivateInput(HWND window) noexcept
 {
     if (g_window.load(std::memory_order_acquire) != window) return false;
-    DWORD_PTR referenceData{};
-    if (!GetWindowSubclass(window, HdrSettingsWindowProcedure,
-            kSettingsSubclassId, &referenceData)) return false;
     g_active.store(true, std::memory_order_release);
     return true;
 }
 
 [[nodiscard]] bool InstallInputSubclass(HWND window) noexcept
 {
-    if (!SetWindowSubclass(window, HdrSettingsWindowProcedure, kSettingsSubclassId, 0))
+    // Fallout 4's window is ANSI. A Unicode subclass converts it, and later ANSI
+    // subclassers then receive CallProc handles that crash when called directly.
+    g_unicodeWindow = IsWindowUnicode(window) != FALSE;
+    const auto procedure = reinterpret_cast<LONG_PTR>(&HdrSettingsWindowProcedure);
+    const auto current = ReadWindowProcedure(window);
+    const auto previous = current != 0 && current != procedure ?
+        ReplaceWindowProcedure(window, procedure) : 0;
+    if (previous == 0)
     {
         ClearWindowRecord();
         return false;
     }
+    // Replacing the procedure dispatches no message before its predecessor is recorded.
+    g_previousProcedure = reinterpret_cast<WNDPROC>(previous);
     return true;
 }
 
