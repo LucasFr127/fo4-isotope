@@ -59,7 +59,7 @@
       "type": "object",
       "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "call"],
       "properties": {
-        "status": { "const": "unvalidated" },
+        "status": { "enum": ["unvalidated", "runtime-validated"] },
         "scope": { "const": "deferred-scene-composite-pass" },
         "abi": { "const": "void(BSRenderPass*,uint32_t,bool)" },
         "authorityGap": { "type": "string", "minLength": 1 },

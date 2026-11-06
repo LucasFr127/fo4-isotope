@@ -286,7 +286,7 @@ foreach ($call in $screenUi.calls) {
 $screenUiLines += '}};'
 
 $composite = $manifest.sceneCompositeObserver
-if ($composite.status -ne 'unvalidated' -or
+if ($composite.status -notin @('unvalidated', 'runtime-validated') -or
     $composite.scope -ne 'deferred-scene-composite-pass' -or
     $composite.abi -ne 'void(BSRenderPass*,uint32_t,bool)' -or
     @($composite.call.expectedBytes).Count -ne 5 -or $composite.call.expectedBytes[0] -ne 232) {

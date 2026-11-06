@@ -24,7 +24,7 @@
         "extent": "presentation"
       },
       "role": "initialize-depth-tested-scene-target",
-      "evidenceQualification": "User-supplied AE gameplay capture SHA256 0e7ac0d4d5e81a350ac35ea88f22b19b5bdde8f9848a66653a22fcc3f31145b8: event 4948 is the first use of the single-mip, single-sample, full-resolution FP16 scene target. Solid full-screen indexed triangle, unpredicated, full RGB writes, no blending or alpha-to-coverage, GREATER depth test with no depth writes or stencil, and no scissor or depth bias. Pixel (1281,712) fails at depth 1 and retains RGB (16512,27648,50432) before bloom. Capture qualifies the shader and target-initialization seam; fixed-DLL gameplay and release validation remain pending."
+      "evidenceQualification": "User-supplied AE gameplay capture SHA256 0e7ac0d4d5e81a350ac35ea88f22b19b5bdde8f9848a66653a22fcc3f31145b8: event 4948 is the first use of the single-mip, single-sample, full-resolution FP16 scene target. Solid full-screen indexed triangle, unpredicated, full RGB writes, no blending or alpha-to-coverage, GREATER depth test with no depth writes or stencil, and no scissor or depth bias. Pixel (1281,712) fails at depth 1 and retains RGB (16512,27648,50432) before bloom. The capture qualifies the shader and target-initialization seam; since commit 07543ce the bright square has stayed gone in game on OG, NG and AE."
     },
     {
       "name": "late-game-ui-composite",
@@ -194,11 +194,11 @@
     ]
   },
   "sceneCompositeObserver": {
-    "status": "unvalidated",
+    "status": "runtime-validated",
     "scope": "deferred-scene-composite-pass",
     "abi": "void(BSRenderPass*,uint32_t,bool)",
     "authorityGap": "Pinned CommonLibF4 maps DrawWorld::DeferredComposite and BSBatchRenderer::RenderPassImmediately but has no call-site mapping or typed method for the composite pass submission.",
-    "evidenceQualification": "Static review of the exact on-disk Fallout4.exe 1.11.240.0 and its version-1-11-240-0 Address Library. DrawWorld::DeferredComposite (RVA0x021F82A0) makes three direct calls to BSBatchRenderer::RenderPassImmediately (RVA0x0221FB60), at +0x1F5, +0x915 and +0x9DE. Each passes a stack-local render pass in RCX, a 32-bit value in EDX and zero in R8D, and the caller ignores RAX; the callee prologue consumes RCX, EDX and R8B. Community Shaders 0.4.0 identifies +0x915 as the BSDFComposite pass. The live call is rechecked before mutation; native gameplay validation remains pending.",
+    "evidenceQualification": "Static review of the exact on-disk Fallout4.exe 1.11.240.0 and its version-1-11-240-0 Address Library. DrawWorld::DeferredComposite (RVA0x021F82A0) makes three direct calls to BSBatchRenderer::RenderPassImmediately (RVA0x0221FB60), at +0x1F5, +0x915 and +0x9DE. Each passes a stack-local render pass in RCX, a 32-bit value in EDX and zero in R8D, and the caller ignores RAX; the callee prologue consumes RCX, EDX and R8B. Community Shaders 0.4.0 identifies +0x915 as the BSDFComposite pass. The live call is rechecked before mutation; In game the boundary installed and, since commit 07543ce, the bright square has stayed gone on OG, NG and AE with and without F4R DLSS.",
     "lifetime": "The callee renders the caller's stack-local pass immediately and returns. The shim forwards all three arguments once and retains no engine pointer.",
     "thread": "Synchronous on the calling render thread inside DrawWorld::DeferredComposite. Graphics independently requires the active immediate context and the observed Present thread before initializing a scene target.",
     "call": {
