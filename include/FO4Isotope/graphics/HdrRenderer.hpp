@@ -143,6 +143,8 @@ struct GraphicsObservationSnapshot
     LinearColorDomain colorDomain{LinearColorDomain::unknown};
     std::uint32_t knownShaderMask{};
     std::uint32_t foreignShaderMask{};
+    std::uint32_t foreignScopeRejectMask{};
+    std::uint32_t foreignScopeRegisteredMask{};
     std::uint32_t lastKnownShaderCrc32{};
     std::int32_t lastDeviceResult{};
     std::int32_t lastPixelShaderResult{};

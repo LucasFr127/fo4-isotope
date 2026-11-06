@@ -10,8 +10,10 @@
 #include "RendererLifetime.hpp"
 #include "LiveSettings.hpp"
 #include <FO4Isotope/ui/HdrSettingsInput.hpp>
+#include <array>
 #include <format>
 #include <string>
+#include <string_view>
 
 namespace fo4hdr {
 AtomicEvidence g_evidence;
@@ -24,6 +26,13 @@ void RecordFailure(GraphicsObservationFailure value) noexcept
 void RecordForeignPass(RenoDxShaderPass pass) noexcept
 {
     g_evidence.foreignShaderMask.fetch_or(RenoDxShaderBit(pass), std::memory_order_relaxed);
+}
+
+void RecordForeignScopeRejection(NativeImageSpacePass scope, std::uint32_t registeredPasses) noexcept
+{
+    g_evidence.foreignScopeRegisteredMask.store(registeredPasses, std::memory_order_relaxed);
+    g_evidence.foreignScopeRejectMask.fetch_or(
+        std::uint32_t{1} << static_cast<std::uint8_t>(scope), std::memory_order_relaxed);
 }
 
 void RecordAbiException() noexcept
@@ -169,6 +178,8 @@ void ReadResourceStateSnapshot(GraphicsObservationSnapshot& snapshot) noexcept
     snapshot.colorDomain = static_cast<LinearColorDomain>( g_evidence.colorDomain.load());
     snapshot.knownShaderMask = g_evidence.knownShaderMask.load();
     snapshot.foreignShaderMask = g_evidence.foreignShaderMask.load();
+    snapshot.foreignScopeRejectMask = g_evidence.foreignScopeRejectMask.load();
+    snapshot.foreignScopeRegisteredMask = g_evidence.foreignScopeRegisteredMask.load();
     snapshot.lastKnownShaderCrc32 = g_evidence.lastKnownShaderCrc32.load();
     snapshot.lastDeviceResult = g_evidence.lastDeviceResult.load();
     snapshot.lastPixelShaderResult = g_evidence.lastPixelShaderResult.load();
@@ -669,6 +680,19 @@ void ReportNewShaders(const fo4hdr::GraphicsObservationSnapshot& graphics, Graph
     });
 }
 
+void ReportForeignScopeRejections(const fo4hdr::GraphicsObservationSnapshot& graphics, GraphicsDiagnosticSink sink)
+{
+    // Indexed by NativeImageSpacePass.
+    constexpr std::array<std::string_view, 4> scopes{"none", "tonemap-cinematic", "tonemap-cinematic-fade", "lut"};
+    static std::atomic<std::uint32_t> reportedScopes{};
+    const auto rejected = graphics.foreignScopeRejectMask;
+    const auto newlyRejected = rejected & ~reportedScopes.exchange(rejected, std::memory_order_acq_rel);
+    for (std::size_t scope = 1; scope < scopes.size(); ++scope)
+        if ((newlyRejected & (std::uint32_t{1} << scope)) != 0)
+            sink(std::format("foreign_pass_rejected scope={} registered_passes={:#x} "
+                "reason=incomplete-or-ambiguous-stock-set", scopes[scope], graphics.foreignScopeRegisteredMask));
+}
+
 } // namespace
 
 void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
@@ -682,6 +706,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
         ReportRendererStatus(graphics, sink);
         ReportSharedUi(sink);
         ReportNewShaders(graphics, sink);
+        ReportForeignScopeRejections(graphics, sink);
     }
     catch (...)
     {

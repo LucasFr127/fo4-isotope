@@ -33,7 +33,8 @@ constexpr std::size_t kRegistryAttempts = 64;
 struct ShaderRecord
 {
     std::atomic<ID3D11PixelShader*> shader{};
-    RenoDxShaderPass pass{};
+    // Reset rewrites it while readers may still hold the old shader.
+    std::atomic<RenoDxShaderPass> pass{};
 };
 std::array<ShaderRecord, kMaximumShaders> g_shaders{};
 std::array<std::atomic<ID3D11PixelShader*>, kMaximumObjects> g_lateGameUiShaders{};
@@ -46,7 +47,8 @@ std::uint32_t RegisteredShaderPassMask() noexcept
     std::uint32_t mask{};
     // A cleared slot keeps a stale pass, so only a live shader counts.
     for (const auto& entry : g_shaders)
-        if (entry.shader.load(std::memory_order_acquire) != nullptr) mask |= RenoDxShaderBit(entry.pass);
+        if (entry.shader.load(std::memory_order_acquire) != nullptr)
+            mask |= RenoDxShaderBit(entry.pass.load(std::memory_order_relaxed));
     return mask;
 }
 }  // namespace
@@ -74,7 +76,7 @@ void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept { g_imageS
     {
         if (entry.shader.load(std::memory_order_acquire) == shader)
         {
-            if (const auto* descriptor = FindShaderDescriptor(entry.pass))
+            if (const auto* descriptor = FindShaderDescriptor(entry.pass.load(std::memory_order_relaxed)))
                 return descriptor;
         }
     }
@@ -88,7 +90,9 @@ BoundShaderIdentity IdentifyBoundShader(ID3D11PixelShader* shader) noexcept
     const auto scope = std::exchange(g_imageSpacePass, NativeImageSpacePass::none);
     if (const auto* descriptor = FindShader(shader)) return {descriptor};
     if (scope == NativeImageSpacePass::none) return {};
-    const auto pass = ResolveNativeImageSpacePass(scope, RegisteredShaderPassMask());
+    const auto registered = RegisteredShaderPassMask();
+    const auto pass = ResolveNativeImageSpacePass(scope, registered);
+    if (!pass) RecordForeignScopeRejection(scope, registered);
     return {pass ? FindShaderDescriptor(*pass) : nullptr, pass.has_value()};
 }
 
@@ -166,7 +170,7 @@ void StoreRegisteredShader(ID3D11PixelShader* shader, RenoDxShaderPass pass) noe
     {
         if (entry.shader.load(std::memory_order_relaxed) == nullptr)
         {
-            entry.pass = pass;
+            entry.pass.store(pass, std::memory_order_relaxed);
             entry.shader.store(shader, std::memory_order_release);
             return;
         }
@@ -218,7 +222,7 @@ void ResetShaderRegistry() noexcept
     for (auto& entry : g_shaders)
     {
         entry.shader.store(nullptr, std::memory_order_release);
-        entry.pass = RenoDxShaderPass::toneMapA;
+        entry.pass.store(RenoDxShaderPass::toneMapA, std::memory_order_relaxed);
     }
     for (auto& entry : g_lateGameUiShaders)
         entry.store(nullptr, std::memory_order_release);

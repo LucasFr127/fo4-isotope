@@ -52,10 +52,10 @@ struct StockPassSet
     StockPassSet& operator=(const StockPassSet&) = delete;
 };
 
-void BindInScope(Device& device, Scope scope, ID3D11PixelShader* shader, ID3D11ClassInstance* instance = nullptr)
+void BindInScope(Device& device, Scope scope, ID3D11PixelShader* shader)
 {
     const auto previous = EnterNativeImageSpacePass(scope);
-    device.context->PSSetShader(shader, instance ? &instance : nullptr, instance ? 1 : 0);
+    device.context->PSSetShader(shader, nullptr, 0);
     ExitNativeImageSpacePass(previous);
 }
 
@@ -132,6 +132,15 @@ struct EnginePassScopeFixture : SharedPresentationContextFixture
         CheckHresult(deferred->FinishCommandList(FALSE, &commands), "Record pass scope replay");
         device.context->ExecuteCommandList(commands.Get(), FALSE);
         CheckUnknown();
+
+        // A stock bind closes its scope, so a later foreign bind there keeps stock identity only.
+        const auto stock = EnterNativeImageSpacePass(Scope::lut);
+        device.context->PSSetShader(set.stock.back().Get(), nullptr, 0);
+        FO4HDR_WARP_CHECK(record->currentPassKnown && !record->currentPassForeign);
+        FO4HDR_WARP_CHECK(record->currentPass == Pass::lut);
+        device.context->PSSetShader(foreign, nullptr, 0);
+        CheckUnknown();
+        ExitNativeImageSpacePass(stock);
     }
 
     void CheckVariants()
@@ -141,15 +150,21 @@ struct EnginePassScopeFixture : SharedPresentationContextFixture
             BindInScope(device, Scope::toneMapCinematicFade, original.foreign.Get());
             CheckForeign(Pass::toneMapB);
         }
-        // Cleared registry slots must not complete the original family.
+        // Cleared registry slots must not complete the original family; rejections are recorded.
         for (const auto passes : {std::initializer_list{Pass::toneMapB, Pass::lut},
                  std::initializer_list{Pass::toneMapNewA, Pass::lut},
                  std::initializer_list{Pass::toneMapA, Pass::toneMapB, Pass::toneMapNewA,
                      Pass::toneMapNewB, Pass::lut}})
         {
             const StockPassSet set(device, passes);
+            g_evidence.foreignScopeRejectMask = 0;
             BindInScope(device, Scope::toneMapCinematicFade, set.foreign.Get());
             CheckUnknown();
+            std::uint32_t registered{};
+            for (const auto pass : passes) registered |= RenoDxShaderBit(pass);
+            FO4HDR_WARP_CHECK(g_evidence.foreignScopeRejectMask.load() ==
+                std::uint32_t{1} << static_cast<std::uint8_t>(Scope::toneMapCinematicFade));
+            FO4HDR_WARP_CHECK(g_evidence.foreignScopeRegisteredMask.load() == registered);
         }
     }
 
@@ -165,8 +180,14 @@ struct EnginePassScopeFixture : SharedPresentationContextFixture
         CheckHresult(linkage->CreateClassInstance("ForeignPixelValue", 0, 0, 0, 0, &instance),
             "Create scoped shader class");
         const StockPassSet set(device, kUpdatedSet);
-        BindInScope(device, Scope::lut, linked.Get(), instance.Get());
+        // A class-instance bind stays untracked and leaves the scope to the next bind.
+        const auto previous = EnterNativeImageSpacePass(Scope::lut);
+        auto* value = instance.Get();
+        device.context->PSSetShader(linked.Get(), &value, 1);
         CheckUnknown();
+        device.context->PSSetShader(set.foreign.Get(), nullptr, 0);
+        CheckForeign(Pass::lut);
+        ExitNativeImageSpacePass(previous);
     }
 
     void CompleteOriginalLut()
