@@ -333,20 +333,16 @@ void TestSettingsPersistenceRewrite()
         original, {settings}, interfaceSettings) == original);
 }
 
-constexpr std::wstring_view kTestDisplayIdentity =
-        L"\\\\?\\DISPLAY#FO4Isotope_\x03A9#{A1B2C3D4}";
-
-SettingsPersistenceState WaitPositionSave()
+SettingsPersistenceSnapshot WaitPersistence(
+    SettingsPersistenceState SettingsPersistenceSnapshot::*state = &SettingsPersistenceSnapshot::state)
 {
-
     for (unsigned attempt = 0; attempt < 2000; ++attempt)
     {
         const auto result = ReadSettingsPersistenceSnapshot();
-        if (result.positionState != SettingsPersistenceState::saving)
-            return result.positionState;
+        if (result.*state != SettingsPersistenceState::saving) return result;
         Sleep(1);
     }
-    return SettingsPersistenceState::saving;
+    return ReadSettingsPersistenceSnapshot();
 }
 
 template <class Request>
@@ -359,31 +355,6 @@ std::uint64_t RetryPersistenceRequest(Request request)
         Sleep(1);
     }
     return 0;
-}
-
-std::uint64_t RequestProfileSave(const HdrSettings& settings)
-{
-    return RetryPersistenceRequest([&] { return RequestDisplayCalibrationSave(kTestDisplayIdentity, settings); });
-}
-
-std::uint64_t RequestProfileLoad(std::wstring_view identity)
-{
-    return RetryPersistenceRequest([&] { return RequestDisplayCalibrationLoad(identity); });
-}
-SettingsPersistenceSnapshot WaitProfile(std::uint64_t requested)
-{
-
-    SettingsPersistenceSnapshot result{};
-    for (unsigned attempt = 0; attempt < 2000; ++attempt)
-    {
-        result = ReadSettingsPersistenceSnapshot();
-        const auto busy = result.displayCalibrationState == SettingsPersistenceState::saving ||
-            result.displayCalibrationState == SettingsPersistenceState::loading;
-        if (result.displayCalibrationGeneration == requested && !busy)
-            return result;
-        Sleep(1);
-    }
-    return result;
 }
 
 struct PersistenceFixture
@@ -515,7 +486,8 @@ void TestPersistedWindowPosition(PersistenceFixture& fixture)
 {
     auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
     FO4HDR_CHECK(RequestHdrWindowPositionSave(90, 120));
-    FO4HDR_CHECK(WaitPositionSave() == SettingsPersistenceState::saved);
+    FO4HDR_CHECK(WaitPersistence(&SettingsPersistenceSnapshot::positionState).positionState ==
+        SettingsPersistenceState::saved);
     auto positionReload = LoadPluginConfiguration(path);
     FO4HDR_CHECK(positionReload.valid);
     FO4HDR_CHECK(positionReload.value.interfaceSettings.windowX == 90);
@@ -551,145 +523,6 @@ void TestPersistedWindowPosition(PersistenceFixture& fixture)
     FO4HDR_CHECK(positionReload.value.interfaceSettings.windowY == 230);
 }
 
-void TestDisplayProfileLoad()
-{
-    auto profileGeneration = RequestProfileLoad(kTestDisplayIdentity);
-    FO4HDR_CHECK(profileGeneration != 0);
-    auto profileSnapshot = WaitProfile(profileGeneration);
-    FO4HDR_CHECK(profileSnapshot.displayCalibrationState ==
-        SettingsPersistenceState::loaded);
-    FO4HDR_CHECK(std::wstring_view(
-        profileSnapshot.displayCalibration.monitorDevicePath.data()) ==
-        kTestDisplayIdentity);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.displayPeakNits == 430.0);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.uiPaperWhiteNits == 180.0);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.videoWhiteNits == 220.0);
-
-    constexpr std::wstring_view otherDisplayIdentity =
-        L"\\\\?\\DISPLAY#FO4Isotope_Other#{A1B2C3D4}";
-    profileGeneration = RequestProfileLoad(otherDisplayIdentity);
-    FO4HDR_CHECK(profileGeneration != 0);
-    profileSnapshot = WaitProfile(profileGeneration);
-    FO4HDR_CHECK(profileSnapshot.displayCalibrationState ==
-        SettingsPersistenceState::missing);
-    FO4HDR_CHECK(std::wstring_view(
-        profileSnapshot.displayCalibration.monitorDevicePath.data()) ==
-        otherDisplayIdentity);
-}
-
-void TestInvalidDisplayProfiles(const std::filesystem::path& path, const std::string& validProfileText)
-{
-    std::uint64_t profileGeneration{};
-    const auto profileSection = validProfileText.find("[DisplayProfile:");
-    FO4HDR_CHECK(profileSection != std::string::npos);
-    const auto writeProfileText = [&](std::string_view text) {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        output.write(text.data(), static_cast<std::streamsize>(text.size()));
-    };
-    writeProfileText(validProfileText + validProfileText.substr(profileSection));
-    profileGeneration = RequestProfileLoad(kTestDisplayIdentity);
-    FO4HDR_CHECK(profileGeneration != 0);
-    FO4HDR_CHECK(WaitProfile(profileGeneration).displayCalibrationState ==
-        SettingsPersistenceState::failed);
-
-    auto partialProfileText = validProfileText;
-    const auto partialStart = partialProfileText.find("VideoWhiteNits=220");
-    FO4HDR_CHECK(partialStart != std::string::npos);
-    partialProfileText.erase(partialStart,
-        partialProfileText.find('\n', partialStart) - partialStart + 1);
-    writeProfileText(partialProfileText);
-    profileGeneration = RequestProfileLoad(kTestDisplayIdentity);
-    FO4HDR_CHECK(profileGeneration != 0);
-    FO4HDR_CHECK(WaitProfile(profileGeneration).displayCalibrationState ==
-        SettingsPersistenceState::failed);
-
-    auto invalidProfileText = validProfileText;
-    const auto invalidStart = invalidProfileText.find(
-        "DisplayPeakNits=430", profileSection);
-    FO4HDR_CHECK(invalidStart != std::string::npos);
-    invalidProfileText.replace(invalidStart,
-        std::string_view("DisplayPeakNits=430").size(),
-        "DisplayPeakNits=399");
-    writeProfileText(invalidProfileText);
-    profileGeneration = RequestProfileLoad(kTestDisplayIdentity);
-    FO4HDR_CHECK(profileGeneration != 0);
-    FO4HDR_CHECK(WaitProfile(profileGeneration).displayCalibrationState ==
-        SettingsPersistenceState::failed);
-    writeProfileText(validProfileText);
-
-    FO4HDR_CHECK(RequestDisplayCalibrationLoad({}) == 0);
-    FO4HDR_CHECK(RequestDisplayCalibrationLoad(L"bad]\n[Output") == 0);
-    FO4HDR_CHECK(RequestDisplayCalibrationLoad(
-        std::wstring(kMaximumDisplayIdentityLength + 1, L'x')) == 0);
-}
-
-void TestPersistedDisplayProfiles(PersistenceFixture& fixture)
-{
-    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
-    {
-        std::ofstream append(path, std::ios::binary | std::ios::app);
-        append << "\n[UnrelatedProfileTest]\nKeep=1\n";
-    }
-    settings.displayPeakNits = 430.0;
-    settings.uiPaperWhiteNits = 180.0;
-    settings.videoWhiteNits = 220.0;
-
-    auto profileGeneration = RequestProfileSave(settings);
-    FO4HDR_CHECK(profileGeneration != 0);
-    auto profileSnapshot = WaitProfile(profileGeneration);
-    FO4HDR_CHECK(profileSnapshot.displayCalibrationState ==
-        SettingsPersistenceState::saved);
-    FO4HDR_CHECK(std::wstring_view(
-        profileSnapshot.displayCalibration.monitorDevicePath.data()) ==
-        kTestDisplayIdentity);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.displayPeakNits == 430.0);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.uiPaperWhiteNits == 180.0);
-    FO4HDR_CHECK(profileSnapshot.displayCalibration.videoWhiteNits == 220.0);
-    std::ifstream profileInput(path, std::ios::binary);
-    std::string validProfileText(
-        std::istreambuf_iterator<char>(profileInput), {});
-    profileInput.close();
-    FO4HDR_CHECK(validProfileText.find("[UnrelatedProfileTest]\nKeep=1\n") !=
-        std::string::npos);
-    const auto firstProfileSection = validProfileText.find("[DisplayProfile:");
-    FO4HDR_CHECK(firstProfileSection != std::string::npos);
-    const auto firstProfileText = validProfileText.substr(firstProfileSection);
-    FO4HDR_CHECK(firstProfileText.find("ExposureEV=") == std::string::npos);
-    FO4HDR_CHECK(firstProfileText.find("Algorithm=") == std::string::npos);
-    const auto firstProfileHeaderEnd =
-        validProfileText.find('\n', firstProfileSection);
-    FO4HDR_CHECK(firstProfileHeaderEnd != std::string::npos);
-    validProfileText.insert(firstProfileHeaderEnd + 1, "VendorKey=kept\n");
-    {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-        output << validProfileText;
-    }
-    profileGeneration = RequestProfileSave(settings);
-    FO4HDR_CHECK(profileGeneration != 0);
-    FO4HDR_CHECK(WaitProfile(profileGeneration).displayCalibrationState ==
-        SettingsPersistenceState::saved);
-    profileInput.open(path, std::ios::binary);
-    validProfileText.assign(std::istreambuf_iterator<char>(profileInput), {});
-    profileInput.close();
-    FO4HDR_CHECK(validProfileText.find("VendorKey=kept\n") !=
-        std::string::npos);
-
-    TestDisplayProfileLoad();
-
-    TestInvalidDisplayProfiles(path, validProfileText);
-}
-
-SettingsPersistenceSnapshot WaitSettingsAutosave()
-{
-    for (unsigned attempt = 0; attempt < 2000; ++attempt)
-    {
-        const auto result = ReadSettingsPersistenceSnapshot();
-        if (result.state != SettingsPersistenceState::saving) return result;
-        Sleep(1);
-    }
-    return ReadSettingsPersistenceSnapshot();
-}
-
 void TestSettingsAutosaveDebounce(PersistenceFixture& fixture)
 {
     SettingsAutosave autosave;
@@ -716,7 +549,7 @@ void TestSettingsAutosaveDebounce(PersistenceFixture& fixture)
     FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == generation);
     autosave.Update({settings}, interfaceSettings, {1101, true, false});
     FO4HDR_CHECK(!autosave.RequestFailed());
-    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    FO4HDR_CHECK(WaitPersistence().state == SettingsPersistenceState::saved);
     settings.exposureEv = 1.5;
     autosave.Update({settings}, interfaceSettings, {1102, false, false});
     FO4HDR_CHECK(autosave.Dirty({settings}, interfaceSettings));
@@ -725,7 +558,7 @@ void TestSettingsAutosaveDebounce(PersistenceFixture& fixture)
     FO4HDR_CHECK(reloaded.value.exposureEv == 1.25);
     FO4HDR_CHECK(reloaded.value.interfaceSettings.scale == 1.75);
     autosave.Update({settings}, interfaceSettings, {1103, true, false});
-    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    FO4HDR_CHECK(WaitPersistence().state == SettingsPersistenceState::saved);
     autosave.Update({settings}, interfaceSettings, {1104, true, false});
     FO4HDR_CHECK(!autosave.Dirty({settings}, interfaceSettings));
     FO4HDR_CHECK(LoadPluginConfiguration(fixture.path).value.exposureEv == 1.5);
@@ -745,14 +578,14 @@ void TestSettingsAutosaveRetry(PersistenceFixture& fixture)
     FO4HDR_CHECK(locked != INVALID_HANDLE_VALUE);
     if (locked == INVALID_HANDLE_VALUE) return;
     autosave.Update({fixture.settings}, fixture.interfaceSettings, {2000, true, false});
-    const auto failed = WaitSettingsAutosave();
+    const auto failed = WaitPersistence();
     CloseHandle(locked);
     FO4HDR_CHECK(failed.state == SettingsPersistenceState::failed);
     FO4HDR_CHECK(autosave.Dirty({fixture.settings}, fixture.interfaceSettings));
     autosave.Update({fixture.settings}, fixture.interfaceSettings, {3999, true, false});
     FO4HDR_CHECK(ReadSettingsPersistenceSnapshot().generation == failed.generation);
     autosave.Update({fixture.settings}, fixture.interfaceSettings, {4000, true, false});
-    FO4HDR_CHECK(WaitSettingsAutosave().state == SettingsPersistenceState::saved);
+    FO4HDR_CHECK(WaitPersistence().state == SettingsPersistenceState::saved);
     autosave.Update({fixture.settings}, fixture.interfaceSettings, {4001, true, false});
     FO4HDR_CHECK(!autosave.Dirty({fixture.settings}, fixture.interfaceSettings));
     FO4HDR_CHECK(LoadPluginConfiguration(fixture.path).value.exposureEv == fixture.settings.exposureEv);
@@ -765,7 +598,6 @@ void TestSettingsPersistenceSave()
     TestSettingsAutosaveDebounce(fixture);
     TestSettingsAutosaveRetry(fixture);
     TestPersistedWindowPosition(fixture);
-    TestPersistedDisplayProfiles(fixture);
     const auto& root = fixture.root;
     std::error_code error;
     FO4HDR_CHECK(std::filesystem::remove_all(root, error) != 0 && !error);

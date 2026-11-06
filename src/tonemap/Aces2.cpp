@@ -643,18 +643,6 @@ LinearRgb MapAdaptedAces2ToBt2020Nits(
     };
 }
 
-LinearRgb EvaluateAces2Ap0LutNits(
-    const Aces2Transform& transform,
-    LinearRgb sceneLinearAp0) noexcept
-{
-    Vec3 aces{
-        sceneLinearAp0.red, sceneLinearAp0.green, sceneLinearAp0.blue};
-    for (double& channel : aces)
-        if (!std::isfinite(channel)) channel = 0.0;
-    return EvaluateAces2GamutOutputNits(
-        transform, EvaluateAces2Ap0GamutInput(transform, aces));
-}
-
 LinearRgb MapAces2ToBt2020Nits(
     const Aces2Transform& transform,
     LinearRgb sceneLinearBt709) noexcept

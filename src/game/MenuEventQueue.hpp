@@ -177,11 +177,6 @@ public:
         return sequence;
     }
 
-    [[nodiscard]] std::uint64_t CurrentOpenMask() const noexcept
-    {
-        return Published().openMask;
-    }
-
     [[nodiscard]] std::uint64_t PublishedSequence() const noexcept
     {
         return Published().sequence;

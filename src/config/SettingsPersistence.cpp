@@ -10,7 +10,6 @@
 #include <array>
 #include <atomic>
 #include <charconv>
-#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
@@ -26,20 +25,6 @@ namespace fo4hdr {
 namespace {
 
 static_assert(sizeof(wchar_t) == 2);
-
-enum class DisplayCalibrationOperation : std::uint8_t
-{
-    none,
-    save,
-    load
-};
-
-enum class DisplayCalibrationReadResult : std::uint8_t
-{
-    loaded,
-    missing,
-    failed
-};
 
 struct PersistedKey
 {
@@ -186,20 +171,13 @@ HdrSettingsProfiles g_requestedSettings{};
 HdrInterfaceSettings g_requestedInterfaceSettings{};
 double g_requestedWindowX{-1.0};
 double g_requestedWindowY{-1.0};
-DisplayCalibrationProfile g_requestedDisplayCalibration{};
-DisplayCalibrationOperation g_requestedDisplayCalibrationOperation{};
 std::uint64_t g_requestedPositionGeneration{}; // under g_requestLock
 std::atomic<SettingsPersistenceState> g_positionState{
     SettingsPersistenceState::unavailable};
 std::atomic_flag g_requestLock = ATOMIC_FLAG_INIT;
 std::atomic<std::uint64_t> g_requestedGeneration{};
 std::atomic<std::uint64_t> g_completedGeneration{};
-std::atomic<std::uint64_t> g_requestedDisplayCalibrationGeneration{};
-DisplayCalibrationProfile g_completedDisplayCalibration{};
-std::uint64_t g_completedDisplayCalibrationGeneration{}; // under g_requestLock
 std::atomic<SettingsPersistenceState> g_state{
-    SettingsPersistenceState::unavailable};
-std::atomic<SettingsPersistenceState> g_displayCalibrationState{
     SettingsPersistenceState::unavailable};
 std::atomic<bool> g_started{};
 HANDLE g_saveEvent{};
@@ -347,219 +325,6 @@ constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
 {
     const auto& region = settings.selectiveColor.regions[key.region];
     return std::string(key.key) + "=" + FormatNumber(region.*key.number);
-}
-
-constexpr std::array<std::string_view, 3> kDisplayCalibrationKeys{
-    "DisplayPeakNits", "UiPaperWhiteNits", "VideoWhiteNits"};
-
-[[nodiscard]] bool ValidDisplayIdentity(
-    std::wstring_view monitorDevicePath) noexcept
-{
-    if (monitorDevicePath.empty() ||
-        monitorDevicePath.size() > kMaximumDisplayIdentityLength)
-        return false;
-    for (const auto character : monitorDevicePath)
-        if (character < L' ' || std::wstring_view{L"[]="}.find(character) != std::wstring_view::npos)
-            return false;
-    return true;
-}
-
-void CopyDisplayIdentity(
-    std::wstring_view source,
-    std::array<wchar_t, kMaximumDisplayIdentityLength + 1>& destination) noexcept
-{
-    destination.fill(L'\0');
-    std::copy(source.begin(), source.end(), destination.begin());
-}
-
-[[nodiscard]] bool ValidDisplayCalibration(
-    const DisplayCalibrationProfile& profile) noexcept
-{
-    HdrSettings settings{};
-    settings.displayPeakNits = profile.displayPeakNits;
-    settings.uiPaperWhiteNits = profile.uiPaperWhiteNits;
-    settings.videoWhiteNits = profile.videoWhiteNits;
-    return ValidateHdrSettings(settings) == HdrSettingsValidationError::none;
-}
-
-[[nodiscard]] double DisplayCalibrationValue(
-    const DisplayCalibrationProfile& profile, std::size_t index) noexcept
-{
-    if (index == 0) return profile.displayPeakNits;
-    if (index == 1) return profile.uiPaperWhiteNits;
-    return profile.videoWhiteNits;
-}
-
-void SetDisplayCalibrationValue(
-    DisplayCalibrationProfile& profile, std::size_t index, double value) noexcept
-{
-    if (index == 0) profile.displayPeakNits = value;
-    else if (index == 1) profile.uiPaperWhiteNits = value;
-    else profile.videoWhiteNits = value;
-}
-
-[[nodiscard]] std::optional<std::size_t> DisplayCalibrationKeyIndex(
-    std::string_view key) noexcept
-{
-    for (std::size_t index = 0; index < kDisplayCalibrationKeys.size(); ++index)
-        if (key == kDisplayCalibrationKeys[index]) return index;
-    return std::nullopt;
-}
-
-[[nodiscard]] std::string DisplayCalibrationSection(
-    const DisplayCalibrationProfile& profile)
-{
-    constexpr char digits[]{"0123456789ABCDEF"};
-    std::string section{"[DisplayProfile:"};
-    const std::wstring_view identity(profile.monitorDevicePath.data());
-    section.reserve(section.size() + identity.size() * 4 + 1);
-    for (const auto character : identity)
-    {
-        const auto code = static_cast<std::uint16_t>(character);
-        section.push_back(digits[(code >> 12) & 0xF]);
-        section.push_back(digits[(code >> 8) & 0xF]);
-        section.push_back(digits[(code >> 4) & 0xF]);
-        section.push_back(digits[code & 0xF]);
-    }
-    section.push_back(']');
-    return section;
-}
-
-[[nodiscard]] bool ParseCalibrationKey(const IniLine& line,
-    DisplayCalibrationProfile& loaded, std::array<bool, kDisplayCalibrationKeys.size()>& seen) noexcept
-{
-    const auto key = line.Key();
-    if (!key) return true;
-    const auto index = DisplayCalibrationKeyIndex(*key);
-    if (!index) return true;
-    if (seen[*index]) return false;
-    const auto value = Trim(line.trimmed.substr(line.trimmed.find('=') + 1));
-    double number{};
-    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
-    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size()) return false;
-    if (!std::isfinite(number)) return false;
-    SetDisplayCalibrationValue(loaded, *index, number);
-    seen[*index] = true;
-    return true;
-}
-
-[[nodiscard]] DisplayCalibrationReadResult CalibrationReadResult(
-    std::size_t sectionCount, const std::array<bool, kDisplayCalibrationKeys.size()>& seen,
-    const DisplayCalibrationProfile& loaded) noexcept
-{
-    if (sectionCount == 0) return DisplayCalibrationReadResult::missing;
-    if (sectionCount != 1) return DisplayCalibrationReadResult::failed;
-    if (std::ranges::find(seen, false) != seen.end()) return DisplayCalibrationReadResult::failed;
-    return ValidDisplayCalibration(loaded) ? DisplayCalibrationReadResult::loaded :
-        DisplayCalibrationReadResult::failed;
-}
-
-[[nodiscard]] DisplayCalibrationReadResult ParseDisplayCalibrationIni(
-    std::string_view original, const DisplayCalibrationProfile& requested,
-    DisplayCalibrationProfile& loaded) noexcept
-{
-    try
-    {
-        const auto targetSection = DisplayCalibrationSection(requested);
-        std::array<bool, kDisplayCalibrationKeys.size()> seen{};
-        std::size_t sectionCount{};
-        bool target{};
-        loaded = requested;
-        while (!original.empty())
-        {
-            const auto line = TakeIniLine(original);
-            if (line.IsSection())
-            {
-                target = line.trimmed == targetSection;
-                sectionCount += target;
-            }
-            else if (target && !ParseCalibrationKey(line, loaded, seen))
-                return DisplayCalibrationReadResult::failed;
-        }
-        return CalibrationReadResult(sectionCount, seen, loaded);
-    }
-    catch (...) { return DisplayCalibrationReadResult::failed; }
-}
-
-[[nodiscard]] std::size_t CountIniSection(std::string_view remaining, std::string_view target)
-{
-    std::size_t count{};
-    while (!remaining.empty()) count += TakeIniLine(remaining).trimmed == target;
-    return count;
-}
-
-class DisplayCalibrationIniWriter
-{
-public:
-    DisplayCalibrationIniWriter(const DisplayCalibrationProfile& profile, std::string_view original) :
-        profile_(profile), targetSection_(DisplayCalibrationSection(profile)), newline_(IniNewline(original))
-    {}
-
-    [[nodiscard]] std::optional<std::string> Rewrite(std::string_view original)
-    {
-        const auto count = CountIniSection(original, targetSection_);
-        if (count > 1) return std::nullopt;
-        result_.reserve(original.size() + targetSection_.size() + 96);
-        if (count == 0)
-        {
-            result_.assign(original);
-            FinishIniLine(result_, newline_);
-            result_.append(targetSection_).append(newline_);
-            AppendMissing();
-            return std::move(result_);
-        }
-        while (!original.empty()) AppendLine(TakeIniLine(original));
-        if (target_) AppendMissing();
-        return std::move(result_);
-    }
-
-private:
-    void AppendValue(std::size_t index)
-    {
-        result_.append(kDisplayCalibrationKeys[index]).append("=")
-            .append(FormatNumber(DisplayCalibrationValue(profile_, index))).append(newline_);
-    }
-
-    void AppendMissing()
-    {
-        for (std::size_t index = 0; index < seen_.size(); ++index)
-            if (!seen_[index]) AppendValue(index);
-    }
-
-    [[nodiscard]] bool ReplaceKey(const IniLine& line)
-    {
-        if (!target_) return false;
-        const auto key = line.Key();
-        if (!key) return false;
-        const auto index = DisplayCalibrationKeyIndex(*key);
-        if (!index) return false;
-        if (!seen_[*index]) AppendValue(*index);
-        seen_[*index] = true;
-        return true;
-    }
-
-    void AppendLine(const IniLine& line)
-    {
-        if (line.IsSection())
-        {
-            if (target_) AppendMissing();
-            target_ = line.trimmed == targetSection_;
-        }
-        if (!ReplaceKey(line)) result_.append(line.raw).append(newline_);
-    }
-
-    const DisplayCalibrationProfile& profile_;
-    std::string targetSection_;
-    std::string_view newline_;
-    std::string result_;
-    std::array<bool, kDisplayCalibrationKeys.size()> seen_{};
-    bool target_{};
-};
-
-[[nodiscard]] std::optional<std::string> RewriteDisplayCalibrationIni(
-    std::string_view original, const DisplayCalibrationProfile& profile)
-{
-    return DisplayCalibrationIniWriter(profile, original).Rewrite(original);
 }
 
 class SettingsIniWriter
@@ -869,37 +634,10 @@ private:
     }
 }
 
-[[nodiscard]] bool SaveDisplayCalibration(
-    const DisplayCalibrationProfile& profile) noexcept
-{
-    try
-    {
-        std::string original;
-        if (!ReadPersistenceFile(g_iniPath, original)) return false;
-        const auto updated = RewriteDisplayCalibrationIni(original, profile);
-        return updated && ReplacePersistenceFile(g_iniPath, *updated);
-    }
-    catch (...)
-    {
-        return false;
-    }
-}
-
-[[nodiscard]] DisplayCalibrationReadResult LoadDisplayCalibration(
-    const DisplayCalibrationProfile& requested,
-    DisplayCalibrationProfile& loaded) noexcept
-{
-    std::string original;
-    if (!ReadPersistenceFile(g_iniPath, original))
-        return DisplayCalibrationReadResult::failed;
-    return ParseDisplayCalibrationIni(original, requested, loaded);
-}
-
 struct PersistenceGenerations
 {
     std::uint64_t settings{};
     std::uint64_t position{};
-    std::uint64_t calibration{};
     bool operator==(const PersistenceGenerations&) const = default;
 };
 
@@ -907,8 +645,6 @@ struct PersistenceRequest
 {
     HdrSettingsProfiles settings;
     HdrInterfaceSettings interfaceSettings;
-    DisplayCalibrationProfile calibration;
-    DisplayCalibrationOperation calibrationOperation{};
     PersistenceGenerations generations;
 };
 
@@ -916,16 +652,7 @@ struct PendingPersistence
 {
     bool settings{};
     bool position{};
-    bool calibration{};
-    [[nodiscard]] bool Any() const noexcept { return settings || position || calibration; }
-};
-
-struct PersistenceCompletion
-{
-    bool saved{};
-    DisplayCalibrationProfile calibration;
-    DisplayCalibrationReadResult calibrationRead{DisplayCalibrationReadResult::failed};
-    bool calibrationSaved{};
+    [[nodiscard]] bool Any() const noexcept { return settings || position; }
 };
 
 [[nodiscard]] PersistenceRequest ReadPersistenceRequest() noexcept
@@ -936,9 +663,6 @@ struct PersistenceCompletion
     request.interfaceSettings = g_requestedInterfaceSettings;
     request.generations.settings = g_requestedGeneration.load(std::memory_order_relaxed);
     request.generations.position = g_requestedPositionGeneration;
-    request.calibration = g_requestedDisplayCalibration;
-    request.calibrationOperation = g_requestedDisplayCalibrationOperation;
-    request.generations.calibration = g_requestedDisplayCalibrationGeneration.load(std::memory_order_relaxed);
     if (request.generations.position != 0)
     {
         request.interfaceSettings.windowX = g_requestedWindowX;
@@ -946,34 +670,6 @@ struct PersistenceCompletion
     }
     g_requestLock.clear(std::memory_order_release);
     return request;
-}
-
-[[nodiscard]] PersistenceCompletion ExecutePersistenceRequest(
-    const PersistenceRequest& request, PendingPersistence pending) noexcept
-{
-    PersistenceCompletion completion;
-    completion.saved = (pending.settings || pending.position) &&
-        SaveSettings(request.settings, request.interfaceSettings, !pending.settings);
-    completion.calibration = request.calibration;
-    if (!pending.calibration) return completion;
-    if (request.calibrationOperation == DisplayCalibrationOperation::save)
-        completion.calibrationSaved = SaveDisplayCalibration(request.calibration);
-    else if (request.calibrationOperation == DisplayCalibrationOperation::load)
-        completion.calibrationRead = LoadDisplayCalibration(request.calibration, completion.calibration);
-    return completion;
-}
-
-[[nodiscard]] SettingsPersistenceState CalibrationCompletionState(
-    DisplayCalibrationOperation operation, const PersistenceCompletion& completion) noexcept
-{
-    if (operation == DisplayCalibrationOperation::save && completion.calibrationSaved)
-        return SettingsPersistenceState::saved;
-    if (operation != DisplayCalibrationOperation::load) return SettingsPersistenceState::failed;
-    if (completion.calibrationRead == DisplayCalibrationReadResult::loaded)
-        return SettingsPersistenceState::loaded;
-    if (completion.calibrationRead == DisplayCalibrationReadResult::missing)
-        return SettingsPersistenceState::missing;
-    return SettingsPersistenceState::failed;
 }
 
 [[nodiscard]] std::uint64_t PublishSettingsCompletion(
@@ -1000,31 +696,15 @@ struct PersistenceCompletion
     return latest;
 }
 
-[[nodiscard]] std::uint64_t PublishCalibrationCompletion(
-    const PersistenceRequest& request, bool pending, const PersistenceCompletion& completion) noexcept
-{
-    const auto latest = g_requestedDisplayCalibrationGeneration.load(std::memory_order_acquire);
-    if (pending && request.generations.calibration == latest)
-    {
-        g_completedDisplayCalibration = completion.calibration;
-        g_completedDisplayCalibrationGeneration = request.generations.calibration;
-        g_displayCalibrationState.store(CalibrationCompletionState(request.calibrationOperation, completion),
-            std::memory_order_release);
-    }
-    return latest;
-}
-
 [[nodiscard]] PersistenceGenerations PublishPersistenceCompletion(
-    const PersistenceRequest& request, PendingPersistence pending,
-    const PersistenceCompletion& completion) noexcept
+    const PersistenceRequest& request, PendingPersistence pending, bool saved) noexcept
 {
     // Publication shares the request lock so an old completion cannot replace
     // a newer request's in-flight state.
     LockPersistenceWorker();
     PersistenceGenerations latest;
-    latest.settings = PublishSettingsCompletion(request, pending.settings, completion.saved);
-    latest.position = PublishPositionCompletion(request, pending.position, completion.saved);
-    latest.calibration = PublishCalibrationCompletion(request, pending.calibration, completion);
+    latest.settings = PublishSettingsCompletion(request, pending.settings, saved);
+    latest.position = PublishPositionCompletion(request, pending.position, saved);
     g_requestLock.clear(std::memory_order_release);
     return latest;
 }
@@ -1038,12 +718,11 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
         const auto request = ReadPersistenceRequest();
         const PendingPersistence pending{
             request.generations.settings != processed.settings,
-            request.generations.position != processed.position,
-            request.generations.calibration != processed.calibration};
+            request.generations.position != processed.position};
         if (!pending.Any()) continue;
         processed = request.generations;
-        const auto completion = ExecutePersistenceRequest(request, pending);
-        const auto latest = PublishPersistenceCompletion(request, pending, completion);
+        const bool saved = SaveSettings(request.settings, request.interfaceSettings, !pending.settings);
+        const auto latest = PublishPersistenceCompletion(request, pending, saved);
         if (request.generations != latest) (void)SetEvent(g_saveEvent);
     }
 }
@@ -1069,13 +748,6 @@ DWORD WINAPI PersistenceWorker(void*) noexcept
         if (!locked) YieldProcessor();
     }
     return locked;
-}
-
-[[nodiscard]] bool IsCalibrationTerminal(SettingsPersistenceState state) noexcept
-{
-    constexpr std::array terminal{SettingsPersistenceState::saved, SettingsPersistenceState::loaded,
-        SettingsPersistenceState::missing, SettingsPersistenceState::failed};
-    return std::ranges::find(terminal, state) != terminal.end();
 }
 
 [[nodiscard]] bool ValidSettingsForPersistence(const HdrSettingsProfiles& settings,
@@ -1135,8 +807,6 @@ bool InitializeSettingsPersistence(
     CloseHandle(thread);
     g_state.store(SettingsPersistenceState::idle, std::memory_order_release);
     g_positionState.store(SettingsPersistenceState::idle, std::memory_order_release);
-    g_displayCalibrationState.store(
-        SettingsPersistenceState::idle, std::memory_order_release);
     g_started.store(true, std::memory_order_release);
     return true;
 }
@@ -1169,31 +839,11 @@ std::uint64_t RequestHdrSettingsSave(
 
 SettingsPersistenceSnapshot ReadSettingsPersistenceSnapshot() noexcept
 {
-    SettingsPersistenceSnapshot snapshot{
+    return {
         .state = g_state.load(std::memory_order_acquire),
         .generation =
             g_completedGeneration.load(std::memory_order_acquire),
-        .positionState = g_positionState.load(std::memory_order_acquire),
-        .displayCalibrationState =
-            g_displayCalibrationState.load(std::memory_order_acquire)
-    };
-    if (!IsCalibrationTerminal(snapshot.displayCalibrationState))
-        return snapshot;
-    if (g_requestLock.test_and_set(std::memory_order_acquire))
-    {
-        snapshot.displayCalibrationState = SettingsPersistenceState::loading;
-        return snapshot;
-    }
-    snapshot.displayCalibrationState =
-        g_displayCalibrationState.load(std::memory_order_acquire);
-    if (IsCalibrationTerminal(snapshot.displayCalibrationState))
-    {
-        snapshot.displayCalibrationGeneration =
-            g_completedDisplayCalibrationGeneration;
-        snapshot.displayCalibration = g_completedDisplayCalibration;
-    }
-    g_requestLock.clear(std::memory_order_release);
-    return snapshot;
+        .positionState = g_positionState.load(std::memory_order_acquire)};
 }
 
 bool RequestHdrWindowPositionSave(double x, double y) noexcept
@@ -1214,69 +864,6 @@ bool RequestHdrWindowPositionSave(double x, double y) noexcept
     if (SetEvent(g_saveEvent)) return true;
     g_positionState.store(SettingsPersistenceState::failed, std::memory_order_release);
     return false;
-}
-
-std::uint64_t RequestDisplayCalibrationSave(
-    std::wstring_view monitorDevicePath,
-    const HdrSettings& settings) noexcept
-{
-    DisplayCalibrationProfile profile{};
-    if (!ValidDisplayIdentity(monitorDevicePath)) return 0;
-    CopyDisplayIdentity(monitorDevicePath, profile.monitorDevicePath);
-    profile.displayPeakNits = settings.displayPeakNits;
-    profile.uiPaperWhiteNits = settings.uiPaperWhiteNits;
-    profile.videoWhiteNits = settings.videoWhiteNits;
-    if (!g_started.load(std::memory_order_acquire) ||
-        !ValidDisplayCalibration(profile)) return 0;
-    if (g_requestLock.test_and_set(std::memory_order_acquire)) return 0;
-    g_requestedDisplayCalibration = profile;
-    g_requestedDisplayCalibrationOperation = DisplayCalibrationOperation::save;
-    const auto generation =
-        g_requestedDisplayCalibrationGeneration.fetch_add(
-            1, std::memory_order_acq_rel) + 1;
-    g_displayCalibrationState.store(
-        SettingsPersistenceState::saving, std::memory_order_release);
-    g_requestLock.clear(std::memory_order_release);
-    if (SetEvent(g_saveEvent)) return generation;
-    if (!g_requestLock.test_and_set(std::memory_order_acquire))
-    {
-        if (g_requestedDisplayCalibrationGeneration.load(
-                std::memory_order_acquire) == generation)
-            g_displayCalibrationState.store(
-                SettingsPersistenceState::failed,
-                std::memory_order_release);
-        g_requestLock.clear(std::memory_order_release);
-    }
-    return 0;
-}
-
-std::uint64_t RequestDisplayCalibrationLoad(
-    std::wstring_view monitorDevicePath) noexcept
-{
-    DisplayCalibrationProfile profile{};
-    if (!g_started.load(std::memory_order_acquire) ||
-        !ValidDisplayIdentity(monitorDevicePath)) return 0;
-    if (g_requestLock.test_and_set(std::memory_order_acquire)) return 0;
-    CopyDisplayIdentity(monitorDevicePath, profile.monitorDevicePath);
-    g_requestedDisplayCalibration = profile;
-    g_requestedDisplayCalibrationOperation = DisplayCalibrationOperation::load;
-    const auto generation =
-        g_requestedDisplayCalibrationGeneration.fetch_add(
-            1, std::memory_order_acq_rel) + 1;
-    g_displayCalibrationState.store(
-        SettingsPersistenceState::loading, std::memory_order_release);
-    g_requestLock.clear(std::memory_order_release);
-    if (SetEvent(g_saveEvent)) return generation;
-    if (!g_requestLock.test_and_set(std::memory_order_acquire))
-    {
-        if (g_requestedDisplayCalibrationGeneration.load(
-                std::memory_order_acquire) == generation)
-            g_displayCalibrationState.store(
-                SettingsPersistenceState::failed,
-                std::memory_order_release);
-        g_requestLock.clear(std::memory_order_release);
-    }
-    return 0;
 }
 
 void SettingsAutosave::Initialize(const HdrSettingsProfiles& settings,

@@ -65,14 +65,6 @@ inline constexpr double kAces2SdrPeakNits{100.0};
     LinearRgb sceneLinearBt709,
     double lookStrength = 1.0) noexcept;
 
-// Direct AP0/D60 scene boundary for the pinned Contrast LMT.
-// This bypasses the BT.709 adapter, but retains the official AP1 formation
-// clamp. Finite signed AP0 is accepted; non-finite components become zero.
-// The LUT-only result retains finite display-gamut excursions.
-[[nodiscard]] LinearRgb EvaluateAces2Ap0LutNits(
-    const Aces2Transform& transform,
-    LinearRgb sceneLinearAp0) noexcept;
-
 // Diagnostic context-specific geometry, independent of LUT interpolation error.
 // The reference RemapM discontinuity is gamutMinusReach == 0 with positive
 // chromaMinusGamut. Production is continuous across this surface. Other
