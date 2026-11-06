@@ -18,6 +18,7 @@ DisplayCapabilities g_displayCapabilities;
 ComPtr<IDXGIFactory1> g_displayFactory;
 HMONITOR g_displayDiscoveryMonitor{};
 ULONGLONG g_displayRetryAfter{};
+const DisplayCapabilities* g_displayOverride{};
 
 [[nodiscard]] constexpr std::uint64_t DisplayIntersectionArea(
     RECT window, RECT display) noexcept
@@ -183,9 +184,7 @@ bool BeginDisplayDiscovery(HMONITOR monitor, bool factoryCurrent) noexcept
     return true;
 }
 
-}  // namespace
-
-[[nodiscard]] bool RefreshDisplayCapabilities(HWND window) noexcept
+[[nodiscard]] bool DiscoverDisplayCapabilities(HWND window) noexcept
 {
     const auto monitor = window ? MonitorFromWindow(window, MONITOR_DEFAULTTONULL) : nullptr;
     const bool factoryCurrent = g_displayFactory && g_displayFactory->IsCurrent();
@@ -196,19 +195,27 @@ bool BeginDisplayDiscovery(HMONITOR monitor, bool factoryCurrent) noexcept
     if (!search.ReadAdapters()) return false;
     return search.Publish();
 }
+
+}  // namespace
+
+[[nodiscard]] bool RefreshDisplayCapabilities(HWND window) noexcept
+{
+    return g_displayOverride != nullptr || DiscoverDisplayCapabilities(window);
+}
 [[nodiscard]] bool ReferenceDisplayStillEligible() noexcept
 {
     const auto observed = g_activeDisplayHdrState.load(
         std::memory_order_acquire);
     if (observed >= 0) return observed == 1;
-    return g_displayCapabilities.known &&
-        g_displayCapabilities.description.ColorSpace ==
+    const auto& capabilities = CurrentDisplayCapabilities();
+    return capabilities.known &&
+        capabilities.description.ColorSpace ==
             DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
 }
 
 const DisplayCapabilities& CurrentDisplayCapabilities() noexcept
 {
-    return g_displayCapabilities;
+    return g_displayOverride != nullptr ? *g_displayOverride : g_displayCapabilities;
 }
 
 void InvalidateDisplayCapabilities() noexcept
@@ -240,6 +247,12 @@ void PublishActiveDisplay(HMONITOR monitor, int hdrState) noexcept
 {
     g_activeMonitor = monitor;
     g_activeDisplayHdrState.store(hdrState, std::memory_order_release);
+}
+
+void OverrideDisplayCapabilities(const DisplayCapabilities* capabilities) noexcept
+{
+    // Kept apart from the discovery cache, so clearing it restores that cache untouched.
+    g_displayOverride = capabilities;
 }
 
 }  // namespace fo4hdr

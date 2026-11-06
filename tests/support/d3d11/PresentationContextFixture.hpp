@@ -48,6 +48,24 @@ struct ContextAtomicRestore
     }
 };
 
+// Reports an HDR10 monitor for the scope's lifetime, whatever the machine's
+// Windows HDR setting, so presentation tests do not depend on the desktop.
+struct SyntheticHdr10Display
+{
+    DisplayCapabilities capabilities{};
+
+    explicit SyntheticHdr10Display(HWND window) noexcept
+    {
+        capabilities.known = true;
+        capabilities.description.Monitor = MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
+        capabilities.description.ColorSpace = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+        OverrideDisplayCapabilities(&capabilities);
+    }
+    ~SyntheticHdr10Display() { OverrideDisplayCapabilities(nullptr); }
+    SyntheticHdr10Display(const SyntheticHdr10Display&) = delete;
+    SyntheticHdr10Display& operator=(const SyntheticHdr10Display&) = delete;
+};
+
 struct PresentationContextFixture
 {
     Device& device;
@@ -80,6 +98,7 @@ struct SharedPresentationContextFixture : PresentationContextFixture
     ReplacementShaderSet savedReplacements{g_replacements};
     HMONITOR savedMonitor{ActiveDisplayMonitor()};
     int savedHdrState{ActiveDisplayHdrState()};
+    SyntheticHdr10Display display{window.handle};
     std::uint64_t savedFrame{g_frame};
     bool savedCorrection{ArmorUiCorrectionEnabled()};
     bool savedPauseResources{SharedUiPauseResourcesReady()};

@@ -354,11 +354,31 @@ void CheckExclusions(Device& device)
     fixture.DrawKept();
 }
 
+// These cases need an HDR10 display, so the shared fixture reports one whatever
+// the desktop's Windows HDR setting.
+void CheckSyntheticHdr10Display(Device& device)
+{
+    const auto address = [](const DisplayCapabilities& value) {
+        return reinterpret_cast<std::uintptr_t>(&value);
+    };
+    std::uintptr_t synthetic{};
+    {
+        SharedPresentationContextFixture fixture(device);
+        synthetic = address(fixture.display.capabilities);
+        FO4HDR_WARP_CHECK(RefreshDisplayCapabilities(fixture.window.handle));
+        FO4HDR_WARP_CHECK(address(CurrentDisplayCapabilities()) == synthetic);
+        FO4HDR_WARP_CHECK(ReferenceDisplayStillEligible());
+    }
+    // The fixture's end hands display queries back to real discovery.
+    FO4HDR_WARP_CHECK(address(CurrentDisplayCapabilities()) != synthetic);
+}
+
 }  // namespace
 
 void VerifyUnpairedSceneFallback(Device& device)
 {
     auto native = CreateNativeContextDevice(device);
+    CheckSyntheticHdr10Display(native);
     CheckUnpairedProducers(native);
     CheckNativeChain(native);
     CheckDepthOfFieldKeepsDeclaration(native);

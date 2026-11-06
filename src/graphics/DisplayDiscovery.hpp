@@ -23,5 +23,8 @@ void ResetDisplayDiscovery() noexcept;
 [[nodiscard]] HMONITOR ActiveDisplayMonitor() noexcept;
 [[nodiscard]] int ActiveDisplayHdrState() noexcept;
 void PublishActiveDisplay(HMONITOR monitor, int hdrState) noexcept;
+// Test seam: a non-null profile replaces monitor discovery until cleared with nullptr.
+// The caller owns the profile; production never installs one.
+void OverrideDisplayCapabilities(const DisplayCapabilities* capabilities) noexcept;
 
 }  // namespace fo4hdr
