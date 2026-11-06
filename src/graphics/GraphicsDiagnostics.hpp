@@ -73,6 +73,7 @@ struct AtomicEvidence
     std::atomic<std::uint64_t> sdrFallbackFrameCount{};
     std::atomic<std::uint64_t> heartbeatReadyFrameCount{};
     std::atomic<std::uint64_t> heartbeatIncompleteFrameCount{};
+    std::atomic<std::uint64_t> unpairedSceneProducerCount{};
     std::atomic<std::uint64_t> heartbeatInvalidFrameCount{};
     std::atomic<std::uint64_t> qualifiedSceneFrameCount{};
     std::atomic<std::uint64_t> temporalAaDrawCount{};

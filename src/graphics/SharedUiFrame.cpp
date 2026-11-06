@@ -503,7 +503,11 @@ void PublishSharedUiScene(SharedUiWriteEvidence write) noexcept
     g_temporalIdentity.store(g_scene.temporalSceneReady ?
         CanonicalResourceIdentity(selected.Get()) : 0, std::memory_order_release);
     if (SameResourceIdentity(g_scene.currentScene.Get(), g_presentation.presentationProxySrv.Get()))
+    {
+        // A scene published onto the public image ends any gameplay SDR declaration.
+        g_startupSdrWhite.store(0.0F, std::memory_order_release);
         PublishSharedUiPublicImage({g_scene.currentSceneDomain, write.white, true}, write);
+    }
     PublishSharedUiPresentation();
 }
 
@@ -582,6 +586,19 @@ bool InitializeSharedUiSdr(ID3D11DeviceContext* context) noexcept
     return SharedUiStartupPaperWhite() > 0.0F;
 }
 
+bool DeclareSharedUiNativeSdr(bool assumed) noexcept
+{
+    const auto white = static_cast<float>(g_activeSettings.uiPaperWhiteNits);
+    if (!ProducerThread() || !ApplicationPresentationFacadeActive()) return false;
+    if (!std::isfinite(white) || white <= 0.0F) return false;
+    const auto cleared = InvalidateSharedUiPresentation();
+    PublishSharedUiPublicImage({LinearColorDomain::vanillaSdrCodes, white, true}, cleared);
+    StoreStartupDeclaration(white, cleared);
+    // A scope-identified foreign producer is not verified game output.
+    if (assumed) (void)AssumeSharedUiPresentation();
+    return true;
+}
+
 void ResetSharedUiResources(bool retainContentProvenance) noexcept
 {
     ResetSharedUiContent();
@@ -603,14 +620,14 @@ void SharedUiBoundary(const ArmorUiScopeToken& token, bool entering) noexcept
     }
 }
 
-namespace {
-
 bool ReplacementWritesPublic(const DrawObservation& observation) noexcept
 {
     return observation.currentReplacementActive &&
         (IsPresentationProxyTarget(observation.currentPrimaryRtv) ||
             IsPresentationProxyTarget(observation.currentSecondaryRtv));
 }
+
+namespace {
 
 void ObserveForeignMutation(ID3D11Resource* destination, bool publicDestination) noexcept
 {

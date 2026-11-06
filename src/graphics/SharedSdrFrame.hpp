@@ -18,6 +18,10 @@ void ResetSharedSdrFrame() noexcept;
 void ObserveSharedSdrDrawEntry(ID3D11DeviceContext* context) noexcept;
 void ObserveSharedSdrDraw(ID3D11DeviceContext* context,
     const DrawObservation& observation) noexcept;
+// A scene producer restored for lack of the frame's identified tone map declares the whole
+// public image it wrote as the game's SDR codes; a partial or foreign-thread write revokes.
+void ObserveRestoredSdrProducer(ID3D11DeviceContext* context,
+    const DrawObservation& observation) noexcept;
 void ObserveSharedSdrCopy(ID3D11Resource* destination) noexcept;
 void ObserveSharedSdrClear(ID3D11RenderTargetView* target) noexcept;
 bool SharedSdrFrameReady() noexcept;

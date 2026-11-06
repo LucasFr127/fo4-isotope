@@ -398,6 +398,32 @@ bool CapturedFrameReady(const SdrFrameContent& content) noexcept
     return content.identity.generation && content.identity.contextGeneration &&
         PositiveFinite(content.white) && PositiveFinite(content.videoWhite);
 }
+
+bool ViewportCoversPublic(ID3D11DeviceContext* context) noexcept
+{
+    UINT count = 1;
+    D3D11_VIEWPORT viewport{};
+    context->RSGetViewports(&count, &viewport);
+    const std::array covers{count >= 1, viewport.TopLeftX <= 0.0F, viewport.TopLeftY <= 0.0F,
+        viewport.Width >= static_cast<float>(g_presentation.width),
+        viewport.Height >= static_cast<float>(g_presentation.height)};
+    return std::ranges::all_of(covers, [](bool value) { return value; });
+}
+
+bool RestoredProducerWroteWholePublic(ID3D11DeviceContext* context, const DrawObservation& observation,
+    const DrawTargets& targets) noexcept
+{
+    ComPtr<ID3D11PixelShader> actual;
+    context->PSGetShader(&actual, nullptr, nullptr);
+    const bool temporal = observation.currentPass == RenoDxShaderPass::taa ||
+        observation.currentPass == RenoDxShaderPass::taa2;
+    const std::array ready{observation.immediate, observation.currentPassKnown,
+        !observation.currentReplacementActive, actual.Get() == observation.expectedBoundShader,
+        GetCurrentThreadId() == g_observedPresentThread.load(std::memory_order_acquire),
+        Unpredicated(context), temporal ? targets.TemporalPublic() : targets.SinglePublic(),
+        ViewportCoversPublic(context)};
+    return std::ranges::all_of(ready, [](bool value) { return value; });
+}
 } // namespace
 
 void ClearWholePublicBuffer(ID3D11DeviceContext* context) noexcept
@@ -486,6 +512,16 @@ void ObserveSharedSdrDraw(ID3D11DeviceContext* context, const DrawObservation& o
     else
         ObserveNativeUi(context, observation, targets);
     g_content.publicDrawn |= targets.WritesPublic();
+}
+
+void ObserveRestoredSdrProducer(ID3D11DeviceContext* context, const DrawObservation& observation) noexcept
+{
+    const DrawTargets targets(context);
+    if (!targets.WritesPublic()) return;
+    // Without a declaration, the native write still revokes the image's earlier interpretation.
+    if (!RestoredProducerWroteWholePublic(context, observation, targets) ||
+        !DeclareSharedUiNativeSdr(observation.currentPassForeign))
+        (void)InvalidateSharedUiPresentation();
 }
 
 void ObserveSharedSdrCopy(ID3D11Resource* destination) noexcept

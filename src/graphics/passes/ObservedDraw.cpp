@@ -788,10 +788,12 @@ void RecordProductionDraw(const ScopedProductionBindings& operatorBindings) noex
     }
 }
 
-void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservation& record,
+    bool restoredProducer = false) noexcept
 {
     ObservePipboyScreenDraw(context, record);
     ObserveSharedSdrDraw(context, record);
+    if (restoredProducer) ObserveRestoredSdrProducer(context, record);
 }
 
 // An SDR replacement reads only b13 and writes its original's domain,
@@ -826,6 +828,34 @@ void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservat
     return true;
 }
 
+[[nodiscard]] bool UnpairedSceneProducer(const DrawObservation& record) noexcept
+{
+    if (g_sdrModeActive.load(std::memory_order_acquire) || g_armor.armorEncodedActive) return false;
+    if (!ApplicationPresentationFacadeActive() || !record.currentReplacementActive) return false;
+    // The LUT stays native whatever it writes, so a later producer still reads game codes.
+    if (record.currentPass != RenoDxShaderPass::lut && !ReplacementWritesPublic(record)) return false;
+    const auto heartbeat = g_heartbeat.Evaluate(
+        g_evidence.resourceGeneration.load(std::memory_order_acquire), g_frame);
+    return !SceneReplacementAllowed(record.currentPass, heartbeat);
+}
+
+// A replacement written onto the public image revokes its readable SDR interpretation, so
+// until the frame identifies its tone map the scene chain draws its native shaders instead.
+[[nodiscard]] bool WithholdUnpairedReplacement(ID3D11DeviceContext* context, DrawObservation& record,
+    bool expectedShader) noexcept
+{
+    if (!expectedShader || !UnpairedSceneProducer(record)) return false;
+    const bool writesPublic = ReplacementWritesPublic(record);
+    if (RestoreNativePixelShader(context, record))
+    {
+        g_evidence.unpairedSceneProducerCount.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+    // A defeated restore leaves another shader writing what the replacement would have revoked.
+    if (writesPublic) (void)InvalidateSharedUiPresentation();
+    return false;
+}
+
 void ExecuteObservedDraw(
     DrawObservation& record,
     ID3D11DeviceContext* context,
@@ -837,6 +867,7 @@ void ExecuteObservedDraw(
         return;
     }
     const bool expectedShader = ValidateExpectedShaderBinding(context, record);
+    const bool unpaired = WithholdUnpairedReplacement(context, record, expectedShader);
     ObserveSharedSdrDrawEntry(context);
     const bool sharedUiRejected = ObserveSharedUiDraw(record);
     if (g_armor.armorEncodedActive)
@@ -866,7 +897,7 @@ void ExecuteObservedDraw(
                 operatorBindings.UsesProductionSettings());
             draw();
         }
-        ObserveCompletedNativeDraw(context, record);
+        ObserveCompletedNativeDraw(context, record, unpaired);
         RecordProductionDraw(operatorBindings);
         productionOperatorApplied = operatorBindings.UsesProductionOperator();
     }

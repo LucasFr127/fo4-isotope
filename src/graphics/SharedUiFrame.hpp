@@ -37,10 +37,14 @@ struct SharedUiOutput
 
 bool EnsureSharedUiResources(ID3D11Device* device) noexcept;
 bool InitializeSharedUiSdr(ID3D11DeviceContext* context) noexcept;
+// A native producer wrote the whole public image before the frame identified its tone map,
+// so the image holds the game's SDR codes at UI white; foreign output is only assumed.
+bool DeclareSharedUiNativeSdr(bool assumed) noexcept;
 void ResetSharedUiResources(bool retainContentProvenance = false) noexcept;
 void ResetSharedUiContent() noexcept;
 void SharedUiBoundary(const ArmorUiScopeToken& token, bool entering) noexcept;
 bool ObserveSharedUiDraw(const DrawObservation& observation) noexcept;
+bool ReplacementWritesPublic(const DrawObservation& observation) noexcept;
 SharedUiWriteEvidence CaptureSharedUiWrite(bool freshScene = false, float white = 0.0F) noexcept;
 void PublishSharedUiScene(SharedUiWriteEvidence write = CaptureSharedUiWrite()) noexcept;
 void PublishSharedUiPresentation() noexcept;

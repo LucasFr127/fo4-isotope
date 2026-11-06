@@ -304,6 +304,19 @@ private:
     return std::uint32_t{1} << static_cast<std::uint8_t>(pass);
 }
 
+// LUT, TAA and FXAA replacements wait for the frame's identified tone map, so a missed
+// tone map leaves the game's own SDR chain intact. Once a tone-map replacement has fed
+// the frame, that chain no longer holds the game's codes and the replacements stay.
+[[nodiscard]] constexpr bool SceneReplacementAllowed(
+    RenoDxShaderPass pass, const PipelineHeartbeatEvaluation& heartbeat) noexcept
+{
+    constexpr auto chain = RenoDxShaderBit(RenoDxShaderPass::lut) | RenoDxShaderBit(RenoDxShaderPass::taa) |
+        RenoDxShaderBit(RenoDxShaderPass::taa2) | RenoDxShaderBit(RenoDxShaderPass::fxaa);
+    if ((RenoDxShaderBit(pass) & chain) == 0) return true;
+    const bool current = heartbeat.currentGeneration && heartbeat.currentFrame;
+    return current && heartbeat.toneMapFamilyObserved;
+}
+
 // Engine image-space effect whose Render call scopes a pixel-shader bind,
 // identifying a recompiled shader that matches no RenoDX identity.
 enum class NativeImageSpacePass : std::uint8_t

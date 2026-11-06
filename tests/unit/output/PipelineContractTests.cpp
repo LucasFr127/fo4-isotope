@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <string_view>
 
 namespace fo4hdr::tests {
@@ -119,6 +120,31 @@ void TestHeartbeat()
     FO4HDR_CHECK(!heartbeat.Evaluate(8, 1).ready);
 }
 
+void TestSceneReplacementAllowed()
+{
+    using enum RenoDxShaderPass;
+    PipelineHeartbeat heartbeat;
+    heartbeat.Reset(3);
+    heartbeat.BeginFrame(3, 5);
+    const auto empty = heartbeat.Evaluate(3, 5);
+    heartbeat.Observe(lut);
+    const auto lutOnly = heartbeat.Evaluate(3, 5);
+    heartbeat.BeginFrame(3, 5);
+    heartbeat.Observe(toneMapA);
+    const auto toneMapped = heartbeat.Evaluate(3, 5);
+    for (const auto pass : {lut, taa, taa2, fxaa})
+    {
+        FO4HDR_CHECK(!SceneReplacementAllowed(pass, empty));
+        FO4HDR_CHECK(!SceneReplacementAllowed(pass, lutOnly));
+        // A replaced tone map keeps the chain replaced even when its LUT is missed.
+        FO4HDR_CHECK(SceneReplacementAllowed(pass, toneMapped));
+        FO4HDR_CHECK(!SceneReplacementAllowed(pass, heartbeat.Evaluate(3, 6)));
+        FO4HDR_CHECK(!SceneReplacementAllowed(pass, heartbeat.Evaluate(4, 5)));
+    }
+    for (const auto pass : {toneMapA, toneMapNewB, video, dofBlender, gameDof})
+        FO4HDR_CHECK(SceneReplacementAllowed(pass, empty));
+}
+
 void TestNativeImageSpacePassResolution()
 {
     constexpr auto bits = [](auto... passes) { return (RenoDxShaderBit(passes) | ...); };
@@ -213,6 +239,7 @@ void RunPipelineContractTests()
     TestTrustedCatalog();
     TestUnknownOutcomes();
     TestHeartbeat();
+    TestSceneReplacementAllowed();
     TestNativeImageSpacePassResolution();
     TestDeveloperConfiguration();
 }

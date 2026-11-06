@@ -142,6 +142,7 @@ void ReadPresentationCountersSnapshot(GraphicsObservationSnapshot& snapshot) noe
     snapshot.sdrFallbackFrameCount = g_evidence.sdrFallbackFrameCount.load();
     snapshot.heartbeatReadyFrameCount = g_evidence.heartbeatReadyFrameCount.load();
     snapshot.heartbeatIncompleteFrameCount = g_evidence.heartbeatIncompleteFrameCount.load();
+    snapshot.unpairedSceneProducerCount = g_evidence.unpairedSceneProducerCount.load();
     snapshot.heartbeatInvalidFrameCount = g_evidence.heartbeatInvalidFrameCount.load();
     snapshot.qualifiedSceneFrameCount = g_evidence.qualifiedSceneFrameCount.load();
 }
@@ -585,6 +586,7 @@ namespace {
         "backbuffer_redirects={} presents={} resizes={} hdr_frames={} sdr_frames={} generation={} "
         "color_domain_generation={} color_domain_mismatches={} color_domain={} game_reset_epoch={} "
         "heartbeat_ready_frames={} heartbeat_incomplete_frames={} heartbeat_invalid_frames={} "
+        "unpaired_scene_producers={} "
         "qualified_scene_frames={} taa_draws={} taa_unqualified_draws={} taa_proxy_draws={} "
         "taa_missing_proxy_draws={} taa_frames={} taa_bypass_frames={} taa_output_rejections={} "
         "reference_render_failures={} production_mode={}",
@@ -606,6 +608,7 @@ namespace {
         graphics.heartbeatReadyFrameCount,
         graphics.heartbeatIncompleteFrameCount,
         graphics.heartbeatInvalidFrameCount,
+        graphics.unpairedSceneProducerCount,
         graphics.qualifiedSceneFrameCount,
         graphics.temporalAaDrawCount,
         graphics.temporalUnqualifiedDrawCount,

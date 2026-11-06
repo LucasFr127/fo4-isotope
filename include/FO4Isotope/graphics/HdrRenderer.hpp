@@ -119,6 +119,7 @@ struct GraphicsObservationSnapshot
     std::uint64_t sdrFallbackFrameCount{};
     std::uint64_t heartbeatReadyFrameCount{};
     std::uint64_t heartbeatIncompleteFrameCount{};
+    std::uint64_t unpairedSceneProducerCount{};
     std::uint64_t heartbeatInvalidFrameCount{};
     std::uint64_t qualifiedSceneFrameCount{};
     std::uint64_t temporalAaDrawCount{};
