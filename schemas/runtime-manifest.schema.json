@@ -189,7 +189,7 @@
       "type": "object",
       "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "target", "fxaaTarget"],
       "properties": {
-        "status": { "const": "unvalidated" },
+        "status": { "enum": ["unvalidated", "runtime-validated"] },
         "scope": { "const": "synchronous-gamma-correct-lut-render" },
         "abi": { "const": "void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)" },
         "authorityGap": { "type": "string", "minLength": 1 },

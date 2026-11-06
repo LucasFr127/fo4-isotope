@@ -337,7 +337,7 @@ if ($null -ne $manifest.PSObject.Properties['nativeUiResources']) {
 }
 
 $lut = $manifest.nativeLutObserver
-if ($lut.status -ne 'unvalidated' -or
+if ($lut.status -notin @('unvalidated', 'runtime-validated') -or
     $lut.scope -ne 'synchronous-gamma-correct-lut-render' -or
     $lut.abi -ne 'void(ImageSpaceEffect*,BSTriShape*,ImageSpaceEffectParam*)' -or
     $lut.effectSubobjectOffset -le 0 -or
