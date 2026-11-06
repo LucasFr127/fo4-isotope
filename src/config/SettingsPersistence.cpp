@@ -24,8 +24,6 @@
 namespace fo4hdr {
 namespace {
 
-static_assert(sizeof(wchar_t) == 2);
-
 struct PersistedKey
 {
     std::string_view section;

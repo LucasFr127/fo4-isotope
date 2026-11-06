@@ -446,8 +446,6 @@ void TestResourcePromotionPredicate()
         FO4HDR_CHECK(
             ShouldPromoteSceneResourceToFp16(eligible, 1920, 1080));
     }
-    eligible.format = SceneResourceFormat::r16g16b16a16Float;
-    FO4HDR_CHECK(!ShouldPromoteSceneResourceToFp16(eligible, 1920, 1080));
     eligible.format = SceneResourceFormat::other;
     FO4HDR_CHECK(!ShouldPromoteSceneResourceToFp16(eligible, 1920, 1080));
     eligible.format = SceneResourceFormat::r11g11b10Float;

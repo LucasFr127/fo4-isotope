@@ -91,17 +91,12 @@ void RunSnapshotTests()
     fo4hdr::GameHdrSnapshot snapshot{};
     snapshot.uiContexts =
         fo4hdr::UiContextFlag::Gameplay |
-        fo4hdr::UiContextFlag::Hud |
-        fo4hdr::UiContextFlag::Subtitles;
+        fo4hdr::UiContextFlag::Hud;
 
     FO4HDR_CHECK(
         fo4hdr::HasUiContext(
             snapshot.uiContexts,
             fo4hdr::UiContextFlag::Hud));
-    FO4HDR_CHECK(
-        fo4hdr::HasUiContext(
-            snapshot.uiContexts,
-            fo4hdr::UiContextFlag::Subtitles));
     FO4HDR_CHECK(
         !fo4hdr::HasUiContext(
             snapshot.uiContexts,

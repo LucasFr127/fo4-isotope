@@ -15,7 +15,6 @@ enum class UiContextFlag : std::uint32_t
     None = 0,
     Gameplay = 1u << 0,
     Hud = 1u << 1,
-    Subtitles = 1u << 2,
     PipBoy = 1u << 3,
     PowerArmor = 1u << 4,
     Pause = 1u << 5,

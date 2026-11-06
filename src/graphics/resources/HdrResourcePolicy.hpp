@@ -17,8 +17,7 @@ namespace fo4hdr {
 enum class SceneResourceFormat : std::uint8_t
 {
     other,
-    r11g11b10Float,
-    r16g16b16a16Float
+    r11g11b10Float
 };
 
 struct SceneResourceDescription
