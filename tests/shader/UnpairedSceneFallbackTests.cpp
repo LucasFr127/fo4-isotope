@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -74,12 +75,18 @@ struct UnpairedSceneFixture : SharedPresentationContextFixture
         device.context->PSSetConstantBuffers(kProductionOperatorConstantSlot, 1, &constants);
     }
 
-    ID3D11PixelShader* BindReplacement(Pass pass, ID3D11RenderTargetView* output)
+    ID3D11PixelShader* BindStock(Pass pass, ID3D11RenderTargetView* output)
     {
         ResetShaderRegistry();
         auto* shader = CreateStock(pass);
         BindTargets(pass, output);
         device.context->PSSetShader(shader, nullptr, 0);
+        return shader;
+    }
+
+    ID3D11PixelShader* BindReplacement(Pass pass, ID3D11RenderTargetView* output)
+    {
+        auto* shader = BindStock(pass, output);
         FO4HDR_WARP_CHECK(record->currentReplacementActive && record->nativePixelShader.Get() == shader);
         return shader;
     }
@@ -153,6 +160,24 @@ void CheckNativeChain(Device& device)
     fixture.PresentReadable(std::pow(0.5, 2.2));
 }
 
+// When depth of field writes the final scene after a TAA that wrote an internal target,
+// nothing in the frame revokes the declaration an earlier unpaired frame made.
+void CheckDepthOfFieldKeepsDeclaration(Device& device)
+{
+    UnpairedSceneFixture fixture(device);
+    fixture.DrawDeclared(fixture.BindReplacement(Pass::taa2, fixture.proxy.rtv.Get()));
+    fixture.PresentReadable(std::pow(0.5, 2.2));
+    const auto internal = CreateTexture(*device.device.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT,
+        D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+    (void)fixture.BindReplacement(Pass::taa2, internal.rtv.Get());
+    fixture.DrawKept();
+    (void)fixture.BindStock(Pass::dofBlender, fixture.proxy.rtv.Get());
+    FO4HDR_WARP_CHECK(fixture.record->currentPassKnown && !fixture.record->currentReplacementActive);
+    device.context->Draw(3, 0);
+    FO4HDR_WARP_CHECK(SharedUiStartupPresentation().has_value());
+    fixture.PresentReadable(std::pow(0.5, 2.2));
+}
+
 // Once a tone-map replacement fed the frame, the chain keeps its replacements even with
 // the LUT missed, and their public write revokes a declaration. Video needs no tone map.
 void CheckKeptReplacements(Device& device)
@@ -218,18 +243,22 @@ void CheckQualifiedPublishRevokes(Device& device)
     FO4HDR_WARP_CHECK(!SharedUiStartupPresentation());
 }
 
-// A foreign LUT that took its pass through the engine scope is only assumed game output.
-void CheckForeignProducer(Device& device)
+// A foreign producer that took its pass through an engine scope is only assumed game output.
+void CheckForeignProducer(Device& device, NativeImageSpacePass scope, Pass pass,
+    std::initializer_list<Pass> stockSet)
 {
     UnpairedSceneFixture fixture(device);
     ResetShaderRegistry();
-    for (const auto pass : {Pass::toneMapNewA, Pass::toneMapNewB, Pass::lut}) (void)fixture.CreateStock(pass);
-    const auto foreign = CreatePixelShader(*device.device.Get(), generated::test::kSharedUiSyntheticPs);
-    fixture.BindTargets(Pass::lut, fixture.proxy.rtv.Get());
-    const auto previous = EnterNativeImageSpacePass(NativeImageSpacePass::lut);
+    for (const auto stock : stockSet) (void)fixture.CreateStock(stock);
+    const auto foreign = UnpairedSceneFixture::Temporal(pass) ?
+        CreatePixelShader(*device.device.Get(), generated::test::kSharedUiTemporalPs) :
+        CreatePixelShader(*device.device.Get(), generated::test::kSharedUiSyntheticPs);
+    fixture.BindTargets(pass, fixture.proxy.rtv.Get());
+    const auto previous = EnterNativeImageSpacePass(scope);
     device.context->PSSetShader(foreign.Get(), nullptr, 0);
     ExitNativeImageSpacePass(previous);
     FO4HDR_WARP_CHECK(fixture.record->currentPassForeign && fixture.record->currentReplacementActive);
+    FO4HDR_WARP_CHECK(fixture.record->currentPass == pass);
     fixture.DrawDeclared(foreign.Get(), true);
     FO4HDR_WARP_CHECK(SharedUiStartupAssumed());
     fixture.PresentReadable(std::pow(0.5, 2.2));
@@ -332,10 +361,13 @@ void VerifyUnpairedSceneFallback(Device& device)
     auto native = CreateNativeContextDevice(device);
     CheckUnpairedProducers(native);
     CheckNativeChain(native);
+    CheckDepthOfFieldKeepsDeclaration(native);
     CheckKeptReplacements(native);
     CheckQualifiedTransitions(native);
     CheckQualifiedPublishRevokes(native);
-    CheckForeignProducer(native);
+    CheckForeignProducer(native, NativeImageSpacePass::lut, Pass::lut,
+        {Pass::toneMapNewA, Pass::toneMapNewB, Pass::lut});
+    CheckForeignProducer(native, NativeImageSpacePass::temporalAa, Pass::taa2, {Pass::taa2});
     CheckUndeclaredWrites(native);
     CheckExclusions(native);
 }

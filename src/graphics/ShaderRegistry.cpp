@@ -88,7 +88,11 @@ BoundShaderIdentity IdentifyBoundShader(ID3D11PixelShader* shader) noexcept
     if (shader == nullptr) return {};
     // The engine binds a pass's shader once inside its Render; later binds stay stock-only.
     const auto scope = std::exchange(g_imageSpacePass, NativeImageSpacePass::none);
-    if (const auto* descriptor = FindShader(shader)) return {descriptor};
+    if (const auto* descriptor = FindShader(shader))
+    {
+        RecordScopeStockPass(scope, descriptor->pass);
+        return {descriptor};
+    }
     if (scope == NativeImageSpacePass::none) return {};
     const auto registered = RegisteredShaderPassMask();
     const auto pass = ResolveNativeImageSpacePass(scope, registered);

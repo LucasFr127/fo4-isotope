@@ -223,6 +223,19 @@ struct EnginePassScopeFixture : SharedPresentationContextFixture
         }
     }
 
+    // A stock bind inside a scope records that scope's pass, the evidence for its mapping;
+    // a foreign bind leaves the evidence alone.
+    void CheckScopeStockEvidence()
+    {
+        const StockPassSet set(device, {Pass::taa2, Pass::dofBlender});
+        BindInScope(device, Scope::temporalAaPipboy, set.stock[0].Get());
+        FO4HDR_WARP_CHECK(ScopeStockPass(Scope::temporalAaPipboy) == Pass::taa2);
+        BindInScope(device, Scope::bokehDofBlend, set.stock[1].Get());
+        FO4HDR_WARP_CHECK(ScopeStockPass(Scope::bokehDofBlend) == Pass::dofBlender);
+        BindInScope(device, Scope::temporalAaPipboy, set.foreign.Get());
+        FO4HDR_WARP_CHECK(ScopeStockPass(Scope::temporalAaPipboy) == Pass::taa2);
+    }
+
     // A scope-identified depth-of-field blend that consumes the selected scene advances it.
     void CheckEffectSceneAdvance()
     {
@@ -317,6 +330,7 @@ void VerifyEnginePassScopes(Device& device)
     {
         EnginePassScopeFixture fixture(native);
         fixture.CheckEffectScopes();
+        fixture.CheckScopeStockEvidence();
         fixture.CheckEffectSceneAdvance();
     }
     CheckSdrReplacement(native);

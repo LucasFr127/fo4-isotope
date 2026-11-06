@@ -17,6 +17,33 @@
 
 namespace fo4hdr {
 AtomicEvidence g_evidence;
+
+namespace {
+// Indexed by NativeImageSpacePass.
+constexpr std::array<std::string_view, 10> kScopeNames{"none", "tonemap-cinematic", "tonemap-cinematic-fade", "lut",
+    "temporal-aa", "temporal-aa-pipboy", "temporal-aa-power-armor-pipboy", "bokeh-dof-blend", "distant-blur", "fxaa"};
+static_assert(kScopeNames.size() == static_cast<std::size_t>(NativeImageSpacePass::fxaa) + 1);
+// The stock pass bound first inside each engine pass scope, as pass + 1, or 0 before any.
+std::array<std::atomic<std::uint8_t>, kScopeNames.size()> g_scopeStockPasses{};
+} // namespace
+
+void RecordScopeStockPass(NativeImageSpacePass scope, RenoDxShaderPass pass) noexcept
+{
+    const auto index = static_cast<std::size_t>(scope);
+    if (index == 0 || index >= g_scopeStockPasses.size()) return;
+    g_scopeStockPasses[index].store(static_cast<std::uint8_t>(static_cast<std::uint8_t>(pass) + 1),
+        std::memory_order_relaxed);
+}
+
+std::optional<RenoDxShaderPass> ScopeStockPass(NativeImageSpacePass scope) noexcept
+{
+    const auto index = static_cast<std::size_t>(scope);
+    const auto stored = index < g_scopeStockPasses.size() ?
+        g_scopeStockPasses[index].load(std::memory_order_relaxed) : std::uint8_t{};
+    if (stored == 0) return std::nullopt;
+    return static_cast<RenoDxShaderPass>(stored - 1);
+}
+
 void RecordFailure(GraphicsObservationFailure value) noexcept
 {
     g_evidence.failure.store(
@@ -685,20 +712,36 @@ void ReportNewShaders(const fo4hdr::GraphicsObservationSnapshot& graphics, Graph
 
 void ReportForeignScopeRejections(const fo4hdr::GraphicsObservationSnapshot& graphics, GraphicsDiagnosticSink sink)
 {
-    // Indexed by NativeImageSpacePass.
-    constexpr std::array<std::string_view, 10> scopes{"none", "tonemap-cinematic", "tonemap-cinematic-fade", "lut",
-        "temporal-aa", "temporal-aa-pipboy", "temporal-aa-power-armor-pipboy", "bokeh-dof-blend", "distant-blur",
-        "fxaa"};
-    static_assert(scopes.size() == static_cast<std::size_t>(NativeImageSpacePass::fxaa) + 1);
     constexpr auto firstEffectScope = static_cast<std::size_t>(NativeImageSpacePass::temporalAa);
     static std::atomic<std::uint32_t> reportedScopes{};
     const auto rejected = graphics.foreignScopeRejectMask;
     const auto newlyRejected = rejected & ~reportedScopes.exchange(rejected, std::memory_order_acq_rel);
-    for (std::size_t scope = 1; scope < scopes.size(); ++scope)
+    for (std::size_t scope = 1; scope < kScopeNames.size(); ++scope)
         if ((newlyRejected & (std::uint32_t{1} << scope)) != 0)
-            sink(std::format("foreign_pass_rejected scope={} registered_passes={:#x} reason={}", scopes[scope],
+            sink(std::format("foreign_pass_rejected scope={} registered_passes={:#x} reason={}", kScopeNames[scope],
                 graphics.foreignScopeRegisteredMask,
                 scope < firstEffectScope ? "incomplete-or-ambiguous-stock-set" : "stock-pass-not-registered"));
+}
+
+std::string_view PassName(std::optional<RenoDxShaderPass> pass) noexcept
+{
+    const auto* descriptor = pass ? FindShaderDescriptor(*pass) : nullptr;
+    return descriptor ? descriptor->name : std::string_view{"none"};
+}
+
+// A stock shader bound inside a scope confirms or contradicts the pass that scope gives a foreign one.
+void ReportScopeStockPasses(const fo4hdr::GraphicsObservationSnapshot& graphics, GraphicsDiagnosticSink sink)
+{
+    static std::array<std::atomic<bool>, kScopeNames.size()> reported{};
+    for (std::size_t index = 1; index < kScopeNames.size(); ++index)
+    {
+        const auto scope = static_cast<NativeImageSpacePass>(index);
+        const auto bound = ScopeStockPass(scope);
+        if (!bound || reported[index].exchange(true)) continue;
+        const auto expected = ResolveNativeImageSpacePass(scope, graphics.knownShaderMask);
+        sink(std::format("engine_pass_stock scope={} bound={} expected={} match={}", kScopeNames[index],
+            PassName(bound), PassName(expected), expected == bound));
+    }
 }
 
 } // namespace
@@ -715,6 +758,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
         ReportSharedUi(sink);
         ReportNewShaders(graphics, sink);
         ReportForeignScopeRejections(graphics, sink);
+        ReportScopeStockPasses(graphics, sink);
     }
     catch (...)
     {

@@ -112,6 +112,9 @@ void RecordFailure(GraphicsObservationFailure value) noexcept;
 void RecordForeignPass(RenoDxShaderPass pass) noexcept;
 // An unknown shader bound inside an engine pass scope found no whole stock set to join.
 void RecordForeignScopeRejection(NativeImageSpacePass scope, std::uint32_t registeredPasses) noexcept;
+// A stock shader bound inside an engine pass scope is evidence for the pass that scope maps to.
+void RecordScopeStockPass(NativeImageSpacePass scope, RenoDxShaderPass pass) noexcept;
+[[nodiscard]] std::optional<RenoDxShaderPass> ScopeStockPass(NativeImageSpacePass scope) noexcept;
 void RecordAbiException() noexcept;
 // The caller's descriptor fields let a skipped-candidate warning name its blocker.
 void RecordHdrCandidateDecision(HdrCandidateDecision decision,
