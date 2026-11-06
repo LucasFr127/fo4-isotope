@@ -74,6 +74,8 @@ inline constexpr std::uintptr_t kNativeLutRenderRva = 0x028C8B30;
 inline constexpr std::uint64_t kNativeLutRenderId = 1388477;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 280;
 inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ 72, 137, 92, 36, 16, 72, 137, 108, 36, 24, 86, 87, 65, 84, 65, 86, 65, 87, 72, 129, 236, 160, 0, 0, 0 }};
+inline constexpr std::uintptr_t kNativeFxaaRenderRva = 0x02804B10;
+inline constexpr std::uint64_t kNativeFxaaRenderId = 1231246;
 inline constexpr std::uintptr_t kImageSpaceWeatherRva = 0x00651D00;
 inline constexpr std::uint64_t kImageSpaceWeatherId = 684671;
 inline constexpr std::array<std::uint8_t, 12> kImageSpaceWeatherBytes{{ 64, 86, 72, 129, 236, 224, 0, 0, 0, 72, 139, 241 }};
@@ -129,7 +131,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_10_163.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "cd3a371db1542fe5d25ed1d6751f88396800110fd90669b4b2a5ca8fef45bcfd";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-10-163-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395";
-inline constexpr std::string_view kManifestSha256 = "91149831bce3d0c3479602fd39bf31e725fdbd0a488d7eac185b65ceb3ba74db";
+inline constexpr std::string_view kManifestSha256 = "cc7293bcad2c28c265b9c02805a7610cd4cd72b9b4313d5994d88574240e5616";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{

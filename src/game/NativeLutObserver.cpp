@@ -13,6 +13,8 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
+#include <span>
 #include "../../runtime/1.10.163/RuntimeIdentity.generated.hpp"
 #include "../../runtime/1.10.984/RuntimeIdentity.generated.hpp"
 #include "../../runtime/1.11.240/RuntimeIdentity.generated.hpp"
@@ -22,16 +24,39 @@ using Render = void (*)(RE::ImageSpaceEffect*, RE::BSTriShape*, RE::ImageSpaceEf
 using fo4hdr::NativeImageSpacePass;
 std::atomic<bool> g_attempted{};
 std::atomic<Render> g_next{};
-std::atomic<bool> g_passScopesReady{};
+// FXAA overrides the shared image-space Render with its own.
+std::atomic<Render> g_nextFxaa{};
+// One bit per NativeImageSpacePass whose scope may open.
+std::atomic<std::uint32_t> g_readyScopes{};
 RE::ImageSpaceManager** g_manager{};
 std::uintptr_t g_vtable{};
 
-// Opens the D3D-side pass scope only once the LUT and both tone-map slots are installed.
+constexpr std::uint32_t ScopeBit(NativeImageSpacePass pass) noexcept
+{
+    return std::uint32_t{1} << static_cast<std::uint8_t>(pass);
+}
+// A group's scopes open together: a lone tone map would feed a foreign LUT.
+constexpr auto kToneScopes = ScopeBit(NativeImageSpacePass::lut) |
+    ScopeBit(NativeImageSpacePass::toneMapCinematic) | ScopeBit(NativeImageSpacePass::toneMapCinematicFade);
+constexpr auto kTemporalScopes = ScopeBit(NativeImageSpacePass::temporalAa) |
+    ScopeBit(NativeImageSpacePass::temporalAaPipboy) | ScopeBit(NativeImageSpacePass::temporalAaPowerArmorPipboy);
+constexpr auto kDepthOfFieldScopes =
+    ScopeBit(NativeImageSpacePass::bokehDofBlend) | ScopeBit(NativeImageSpacePass::distantBlur);
+constexpr auto kFxaaScopes = ScopeBit(NativeImageSpacePass::fxaa);
+
+constexpr std::uint32_t ScopeGroup(NativeImageSpacePass pass) noexcept
+{
+    for (const auto group : {kToneScopes, kTemporalScopes, kDepthOfFieldScopes, kFxaaScopes})
+        if ((group & ScopeBit(pass)) != 0) return group;
+    return 0;
+}
+
+// Opens the D3D-side pass scope only while its group's slots are installed.
 class PassScope
 {
 public:
     explicit PassScope(NativeImageSpacePass pass) noexcept :
-        active_(g_passScopesReady.load(std::memory_order_acquire)),
+        active_((g_readyScopes.load(std::memory_order_acquire) & ScopeBit(pass)) != 0),
         previous_(active_ ? fo4hdr::EnterNativeImageSpacePass(pass) : NativeImageSpacePass::none) {}
     ~PassScope() { if (active_) fo4hdr::ExitNativeImageSpacePass(previous_); }
     PassScope(const PassScope&) = delete;
@@ -214,13 +239,14 @@ struct LutIdentity
 {
     std::uint64_t renderId{};
     std::size_t subobjectOffset{};
+    std::uint64_t fxaaRenderId{};
 };
 constexpr LutIdentity kOgLut{fo4hdr::generated::og::kNativeLutRenderId,
-    fo4hdr::generated::og::kNativeLutEffectSubobjectOffset};
+    fo4hdr::generated::og::kNativeLutEffectSubobjectOffset, fo4hdr::generated::og::kNativeFxaaRenderId};
 constexpr LutIdentity kAeLut{fo4hdr::generated::ae::kNativeLutRenderId,
-    fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset};
+    fo4hdr::generated::ae::kNativeLutEffectSubobjectOffset, fo4hdr::generated::ae::kNativeFxaaRenderId};
 constexpr LutIdentity kNgLut{fo4hdr::generated::ng::kNativeLutRenderId,
-    fo4hdr::generated::ng::kNativeLutEffectSubobjectOffset};
+    fo4hdr::generated::ng::kNativeLutEffectSubobjectOffset, fo4hdr::generated::ng::kNativeFxaaRenderId};
 
 const LutIdentity& RuntimeLutIdentity(const fo4hdr::RuntimeProfile& profile) noexcept
 {
@@ -292,43 +318,114 @@ bool InstallRenderSlot(void** slot, void* original)
 }
 
 template <NativeImageSpacePass Pass>
+std::atomic<Render>& PassTarget() noexcept
+{
+    if constexpr (Pass == NativeImageSpacePass::fxaa) return g_nextFxaa;
+    else return g_next;
+}
+
+template <NativeImageSpacePass Pass>
 void PassRenderHook(RE::ImageSpaceEffect* effect, RE::BSTriShape* geometry,
     RE::ImageSpaceEffectParam* parameters) noexcept
 {
-    const auto next = g_next.load(std::memory_order_acquire);
+    const auto next = PassTarget<Pass>().load(std::memory_order_acquire);
     if (!next || next == &PassRenderHook<Pass>) return;
     try {
         const PassScope scope(Pass);
         next(effect, geometry, parameters);
     } catch (...) {
-        g_passScopesReady.store(false, std::memory_order_release);
+        g_readyScopes.fetch_and(~ScopeGroup(Pass), std::memory_order_acq_rel);
     }
 }
 
-// Both tone-map classes inherit the LUT's image-space Render, so the
-// same target and sub-object offset qualify their slots, which swap as a pair.
-bool InstallPassSlots(const REX::FModule& module, const REL::Offset2ID& mappings,
-    std::uintptr_t target, const LutIdentity& identity)
+struct PassSlot
 {
-    struct PassSlot { std::uint64_t vtableId; void* hook; void** slot{}; };
-    std::array slots{
-        PassSlot{RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematic[2].id(),
-            reinterpret_cast<void*>(&PassRenderHook<NativeImageSpacePass::toneMapCinematic>)},
-        PassSlot{RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematicFade[2].id(),
-            reinterpret_cast<void*>(&PassRenderHook<NativeImageSpacePass::toneMapCinematicFade>)}};
-    auto* const expected = reinterpret_cast<void*>(target);
-    for (auto& entry : slots) {
-        const auto table = Resolve(mappings, module.GetBaseAddress(), entry.vtableId);
-        if (!InSection(module, ".rdata", table - sizeof(void*), 3 * sizeof(void*))) return false;
-        if (!ValidLocator(module, table, identity)) return false;
-        entry.slot = reinterpret_cast<void**>(table + sizeof(void*));
-        void* original{};
-        if (!ReadRenderSlot(entry.slot, original) || original != expected) return false;
+    std::uint64_t vtableId;
+    void* hook;
+    void** slot{};
+};
+
+template <NativeImageSpacePass Pass>
+PassSlot ScopeSlot(std::uint64_t vtableId) noexcept
+{
+    return {vtableId, reinterpret_cast<void*>(&PassRenderHook<Pass>)};
+}
+
+// The executable, its Address Library mappings and the runtime facts that qualify a slot.
+struct SlotContext
+{
+    const REX::FModule& module;
+    const REL::Offset2ID& mappings;
+    const LutIdentity& identity;
+};
+
+bool QualifyPassSlot(const SlotContext& context, PassSlot& entry, void* expected)
+{
+    const auto table = Resolve(context.mappings, context.module.GetBaseAddress(), entry.vtableId);
+    if (!InSection(context.module, ".rdata", table - sizeof(void*), 3 * sizeof(void*))) return false;
+    if (!ValidLocator(context.module, table, context.identity)) return false;
+    entry.slot = reinterpret_cast<void**>(table + sizeof(void*));
+    void* original{};
+    return ReadRenderSlot(entry.slot, original) && original == expected;
+}
+
+void RestorePassSlots(std::span<PassSlot> slots, void* expected)
+{
+    for (const auto& entry : slots) RestoreRenderSlot(entry.slot, expected, entry.hook, true);
+}
+
+bool SwapPassSlots(std::span<PassSlot> slots, void* expected)
+{
+    for (std::size_t index = 0; index < slots.size(); ++index) {
+        if (SwapRenderSlot(slots[index].slot, expected, slots[index].hook) == SlotSwap::installed) continue;
+        RestorePassSlots(slots.first(index), expected);
+        return false;
     }
-    if (SwapRenderSlot(slots[0].slot, expected, slots[0].hook) != SlotSwap::installed) return false;
-    if (SwapRenderSlot(slots[1].slot, expected, slots[1].hook) == SlotSwap::installed) return true;
-    RestoreRenderSlot(slots[0].slot, expected, slots[0].hook, true);
-    return false;
+    return true;
+}
+
+// Every slot of a group must hold the same target under the effect's sub-object
+// offset; the group swaps together or rolls back.
+bool InstallPassGroup(const SlotContext& context, std::span<PassSlot> slots, std::uintptr_t target)
+{
+    auto* const expected = reinterpret_cast<void*>(target);
+    for (auto& entry : slots)
+        if (!QualifyPassSlot(context, entry, expected)) return false;
+    return SwapPassSlots(slots, expected);
+}
+
+// FXAA's slot holds its own manifest-qualified Render instead of the shared one.
+bool InstallFxaaScope(const SlotContext& context, std::uintptr_t sharedTarget)
+{
+    const auto base = context.module.GetBaseAddress();
+    const auto rva = fo4hdr::game::direct_call_patch::ResolveMapping(
+        context.mappings, base, context.identity.fxaaRenderId);
+    const auto target = rva ? base + rva : 0;
+    if (target == sharedTarget || !ValidRenderTarget(context.module, target)) return false;
+    g_nextFxaa.store(reinterpret_cast<Render>(target), std::memory_order_release);
+    std::array slots{ScopeSlot<NativeImageSpacePass::fxaa>(RE::VTABLE::BSImagespaceShaderFXAA[2].id())};
+    return InstallPassGroup(context, slots, target);
+}
+
+// The tone-map, temporal and depth-of-field classes inherit the LUT's image-space
+// Render, so the same target and sub-object offset qualify their slots.
+std::uint32_t InstallPassScopes(const SlotContext& context, std::uintptr_t target)
+{
+    using enum NativeImageSpacePass;
+    std::array tone{ScopeSlot<toneMapCinematic>(RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematic[2].id()),
+        ScopeSlot<toneMapCinematicFade>(RE::VTABLE::BSImagespaceShaderHDRTonemapBlendCinematicFade[2].id())};
+    std::array temporal{ScopeSlot<temporalAa>(RE::VTABLE::BSImagespaceShaderTemporalAA[2].id()),
+        ScopeSlot<temporalAaPipboy>(RE::VTABLE::BSImagespaceShaderTemporalAAPipboy[2].id()),
+        ScopeSlot<temporalAaPowerArmorPipboy>(RE::VTABLE::BSImagespaceShaderTemporalAAPowerArmorPipboy[2].id())};
+    std::array depthOfField{
+        ScopeSlot<bokehDofBlend>(RE::VTABLE::BSImagespaceShaderBokehDepthOfFieldPass4[2].id()),
+        ScopeSlot<distantBlur>(RE::VTABLE::BSImagespaceShaderDistantBlur[2].id())};
+    std::uint32_t ready{};
+    if (InstallPassGroup(context, tone, target)) ready |= kToneScopes;
+    if (InstallPassGroup(context, temporal, target)) ready |= kTemporalScopes;
+    if (InstallPassGroup(context, depthOfField, target)) ready |= kDepthOfFieldScopes;
+    if (InstallFxaaScope(context, target)) ready |= kFxaaScopes;
+    return ready;
 }
 bool InstallQualifiedTarget(std::uintptr_t table, std::uintptr_t manager, std::uintptr_t target)
 {
@@ -363,16 +460,15 @@ bool ResolveAndInstall(const REX::FModule& module, const LutIdentity& identity)
     if (!ValidRenderTarget(module, target)) return false;
     if (!ValidLocator(module, table, identity)) return false;
     if (!InstallQualifiedTarget(table, manager, target)) return false;
-    // Foreign identity needs every scope: a lone tone map would feed a foreign LUT.
-    g_passScopesReady.store(InstallPassSlots(module, mappings, target, identity), std::memory_order_release);
+    g_readyScopes.store(InstallPassScopes({module, mappings, identity}, target), std::memory_order_release);
     return true;
 }
 }
 
 namespace fo4hdr::game {
-bool NativeImageSpacePassesInstalled() noexcept
+bool NativeImageSpacePassInstalled(NativeImageSpacePass pass) noexcept
 {
-    return g_passScopesReady.load(std::memory_order_acquire);
+    return (g_readyScopes.load(std::memory_order_acquire) & ScopeBit(pass)) != 0;
 }
 
 bool InitializeNativeLutObserver(bool requested) noexcept

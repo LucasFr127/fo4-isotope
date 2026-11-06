@@ -29,6 +29,18 @@ using Scope = NativeImageSpacePass;
 
 constexpr std::initializer_list<Pass> kUpdatedSet{Pass::toneMapNewA, Pass::toneMapNewB, Pass::lut};
 
+struct EffectScope
+{
+    Scope scope;
+    Pass pass;
+    bool replaced;
+};
+// Depth of field has no replacement; its identity only advances the scene.
+constexpr std::array<EffectScope, 6> kEffectScopes{{{Scope::temporalAa, Pass::taa2, true},
+    {Scope::temporalAaPipboy, Pass::taa2, true}, {Scope::temporalAaPowerArmorPipboy, Pass::taa, true},
+    {Scope::bokehDofBlend, Pass::dofBlender, false}, {Scope::distantBlur, Pass::gameDof, false},
+    {Scope::fxaa, Pass::fxaa, true}}};
+
 // Stand-ins for the stock shaders the engine creates; `foreign` stays unregistered.
 struct StockPassSet
 {
@@ -190,6 +202,47 @@ struct EnginePassScopeFixture : SharedPresentationContextFixture
         ExitNativeImageSpacePass(previous);
     }
 
+    // An effect scope takes its pass only while that stock shader is registered, and records
+    // the rejection otherwise.
+    void CheckEffectScopes()
+    {
+        for (const auto& effect : kEffectScopes)
+        {
+            {
+                const StockPassSet set(device, {effect.pass});
+                BindInScope(device, effect.scope, set.foreign.Get());
+                CheckForeign(effect.pass);
+                FO4HDR_WARP_CHECK(record->currentReplacementActive == effect.replaced);
+            }
+            const StockPassSet set(device, kUpdatedSet);
+            g_evidence.foreignScopeRejectMask = 0;
+            BindInScope(device, effect.scope, set.foreign.Get());
+            CheckUnknown();
+            FO4HDR_WARP_CHECK(g_evidence.foreignScopeRejectMask.load() ==
+                std::uint32_t{1} << static_cast<std::uint8_t>(effect.scope));
+        }
+    }
+
+    // A scope-identified depth-of-field blend that consumes the selected scene advances it.
+    void CheckEffectSceneAdvance()
+    {
+        const StockPassSet set(device, {Pass::dofBlender});
+        g_heartbeat.Observe(Pass::toneMapA);
+        g_heartbeat.Observe(Pass::lut);
+        g_scene.currentScene = lut.srv;
+        g_scene.currentSceneDomain = LinearColorDomain::linearBt2020UiRelative;
+        g_scene.productionOperatorApplied = true;
+        g_scene.temporalPassObserved = true;
+        g_scene.temporalSceneReady = true;
+        BindHud();
+        auto* input = lut.srv.Get();
+        device.context->PSSetShaderResources(0, 1, &input);
+        BindInScope(device, Scope::bokehDofBlend, set.foreign.Get());
+        CheckForeign(Pass::dofBlender);
+        device.context->Draw(3, 0);
+        FO4HDR_WARP_CHECK(g_scene.currentScene.Get() == proxy.srv.Get());
+    }
+
     void CompleteOriginalLut()
     {
         CreatedShaderIdentity identity{.descriptor = FindShaderDescriptor(Pass::taa)};
@@ -260,6 +313,11 @@ void VerifyEnginePassScopes(Device& device)
     {
         EnginePassScopeFixture fixture(native);
         fixture.CheckOriginalLutExclusion();
+    }
+    {
+        EnginePassScopeFixture fixture(native);
+        fixture.CheckEffectScopes();
+        fixture.CheckEffectSceneAdvance();
     }
     CheckSdrReplacement(native);
 }

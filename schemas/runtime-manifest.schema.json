@@ -187,7 +187,7 @@
     },
     "nativeLutObserver": {
       "type": "object",
-      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "target"],
+      "required": ["status", "scope", "abi", "authorityGap", "lifetime", "effectSubobjectOffset", "target", "fxaaTarget"],
       "properties": {
         "status": { "const": "unvalidated" },
         "scope": { "const": "synchronous-gamma-correct-lut-render" },
@@ -206,6 +206,15 @@
               "type": "array", "minItems": 25, "maxItems": 25,
               "items": { "type": "integer", "minimum": 0, "maximum": 255 }
             }
+          },
+          "additionalProperties": false
+        },
+        "fxaaTarget": {
+          "type": "object",
+          "required": ["addressLibraryId", "rva"],
+          "properties": {
+            "addressLibraryId": { "type": "integer", "minimum": 1 },
+            "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" }
           },
           "additionalProperties": false
         }

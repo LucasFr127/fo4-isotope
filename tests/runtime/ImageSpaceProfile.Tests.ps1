@@ -213,6 +213,9 @@ function Test-RuntimeIdentityGeneration {
     if ($generated -notmatch 'kHasNativeSceneComposite = true;') {
         throw "$runtime generated output omitted the qualified scene-clear identity."
     }
+    if ($generated -notmatch 'kNativeFxaaRenderId = [1-9][0-9]*;') {
+        throw "$runtime generated output omitted the FXAA Render identity."
+    }
     [IO.File]::AppendAllText(
         $second,
         "// stale`n",

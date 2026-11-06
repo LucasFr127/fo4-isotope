@@ -603,7 +603,13 @@ void InitializeObserverBoundaries(bool observerActive,
     const bool sharedUiRequested = ProductionRequested(diagnosticsConfiguration);
     const bool nativeLut = ReportBoundary("native LUT observation",
         fo4hdr::game::InitializeNativeLutObserver(LutObservationRequested(diagnosticsConfiguration)));
-    (void)ReportBoundary("native image-space pass", fo4hdr::game::NativeImageSpacePassesInstalled());
+    using fo4hdr::NativeImageSpacePass;
+    using fo4hdr::game::NativeImageSpacePassInstalled;
+    (void)ReportBoundary("native image-space pass", NativeImageSpacePassInstalled(NativeImageSpacePass::lut));
+    (void)ReportBoundary("native temporal pass", NativeImageSpacePassInstalled(NativeImageSpacePass::temporalAa));
+    (void)ReportBoundary("native depth-of-field pass",
+        NativeImageSpacePassInstalled(NativeImageSpacePass::distantBlur));
+    (void)ReportBoundary("native FXAA pass", NativeImageSpacePassInstalled(NativeImageSpacePass::fxaa));
     (void)ReportBoundary("ImageSpace provenance",
         fo4hdr::game::InitializeImageSpaceObserver(
             nativeLut, services.trampoline, services.pluginHandle));

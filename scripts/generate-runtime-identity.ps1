@@ -348,7 +348,9 @@ $lutLines = @(
     "inline constexpr std::uintptr_t kNativeLutRenderRva = $($lut.target.rva);",
     "inline constexpr std::uint64_t kNativeLutRenderId = $($lut.target.addressLibraryId);",
     "inline constexpr std::size_t kNativeLutEffectSubobjectOffset = $($lut.effectSubobjectOffset);",
-    "inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ $($lut.target.expectedBytes -join ', ') }};"
+    "inline constexpr std::array<std::uint8_t, 25> kNativeLutRenderBytes{{ $($lut.target.expectedBytes -join ', ') }};",
+    "inline constexpr std::uintptr_t kNativeFxaaRenderRva = $($lut.fxaaTarget.rva);",
+    "inline constexpr std::uint64_t kNativeFxaaRenderId = $($lut.fxaaTarget.addressLibraryId);"
 )
 
 $imageSpaceLines = @()

@@ -324,7 +324,13 @@ enum class NativeImageSpacePass : std::uint8_t
     none,
     toneMapCinematic,
     toneMapCinematicFade,
-    lut
+    lut,
+    temporalAa,
+    temporalAaPipboy,
+    temporalAaPowerArmorPipboy,
+    bokehDofBlend,
+    distantBlur,
+    fxaa
 };
 
 // A scoped foreign shader joins only a whole stock set registered by the
@@ -341,11 +347,24 @@ enum class NativeImageSpacePass : std::uint8_t
     return std::nullopt;
 }
 
+// A temporal, depth-of-field or FXAA scope takes its effect's one pass, but only while the
+// device registered that pass's stock shader, which fixes the replacement's register layout.
+[[nodiscard]] constexpr std::optional<RenoDxShaderPass> ResolveEffectStockPass(
+    NativeImageSpacePass pass, std::uint32_t registeredPasses) noexcept
+{
+    using enum RenoDxShaderPass;
+    constexpr std::array<RenoDxShaderPass, 6> passes{taa2, taa2, taa, dofBlender, gameDof, fxaa};
+    const auto index = static_cast<std::size_t>(pass) - static_cast<std::size_t>(NativeImageSpacePass::temporalAa);
+    if (index >= passes.size() || (registeredPasses & RenoDxShaderBit(passes[index])) == 0) return std::nullopt;
+    return passes[index];
+}
+
 [[nodiscard]] constexpr std::optional<RenoDxShaderPass> ResolveNativeImageSpacePass(
     NativeImageSpacePass pass, std::uint32_t registeredPasses) noexcept
 {
     using enum RenoDxShaderPass;
-    if (pass == NativeImageSpacePass::none || pass > NativeImageSpacePass::lut) return std::nullopt;
+    if (pass > NativeImageSpacePass::lut) return ResolveEffectStockPass(pass, registeredPasses);
+    if (pass == NativeImageSpacePass::none) return std::nullopt;
     const auto family = RegisteredStockFamily(registeredPasses);
     if (!family) return std::nullopt;
     constexpr std::array<RenoDxShaderPass, 6> passes{toneMapA, toneMapB, lut, toneMapNewA, toneMapNewB, lut};

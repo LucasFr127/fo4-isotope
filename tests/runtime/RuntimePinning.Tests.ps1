@@ -213,6 +213,16 @@ try {
         param($profile) $profile.call.expectedBytes[0] = 233
     }
 
+    Assert-ManifestProfileRejected $fixture 'nativeLutObserver' 'FXAA target missing' {
+        param($profile) $profile.PSObject.Properties.Remove('fxaaTarget')
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeLutObserver' 'FXAA target repeats the shared Render' {
+        param($profile) $profile.fxaaTarget.addressLibraryId = $profile.target.addressLibraryId
+    }
+    Assert-ManifestProfileRejected $fixture 'nativeLutObserver' 'FXAA target at the shared RVA' {
+        param($profile) $profile.fxaaTarget.rva = $profile.target.rva
+    }
+
     $fixtureLock = Join-Path $fixture "versions.lock.json"
     $invalidLock = Get-Content -LiteralPath $fixtureLock -Raw |
         ConvertFrom-Json

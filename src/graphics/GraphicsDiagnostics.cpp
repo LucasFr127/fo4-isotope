@@ -686,14 +686,19 @@ void ReportNewShaders(const fo4hdr::GraphicsObservationSnapshot& graphics, Graph
 void ReportForeignScopeRejections(const fo4hdr::GraphicsObservationSnapshot& graphics, GraphicsDiagnosticSink sink)
 {
     // Indexed by NativeImageSpacePass.
-    constexpr std::array<std::string_view, 4> scopes{"none", "tonemap-cinematic", "tonemap-cinematic-fade", "lut"};
+    constexpr std::array<std::string_view, 10> scopes{"none", "tonemap-cinematic", "tonemap-cinematic-fade", "lut",
+        "temporal-aa", "temporal-aa-pipboy", "temporal-aa-power-armor-pipboy", "bokeh-dof-blend", "distant-blur",
+        "fxaa"};
+    static_assert(scopes.size() == static_cast<std::size_t>(NativeImageSpacePass::fxaa) + 1);
+    constexpr auto firstEffectScope = static_cast<std::size_t>(NativeImageSpacePass::temporalAa);
     static std::atomic<std::uint32_t> reportedScopes{};
     const auto rejected = graphics.foreignScopeRejectMask;
     const auto newlyRejected = rejected & ~reportedScopes.exchange(rejected, std::memory_order_acq_rel);
     for (std::size_t scope = 1; scope < scopes.size(); ++scope)
         if ((newlyRejected & (std::uint32_t{1} << scope)) != 0)
-            sink(std::format("foreign_pass_rejected scope={} registered_passes={:#x} "
-                "reason=incomplete-or-ambiguous-stock-set", scopes[scope], graphics.foreignScopeRegisteredMask));
+            sink(std::format("foreign_pass_rejected scope={} registered_passes={:#x} reason={}", scopes[scope],
+                graphics.foreignScopeRegisteredMask,
+                scope < firstEffectScope ? "incomplete-or-ambiguous-stock-set" : "stock-pass-not-registered"));
 }
 
 } // namespace

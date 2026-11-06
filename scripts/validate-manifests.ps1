@@ -192,6 +192,16 @@ function Assert-SceneCompositeRuntime {
     }
 }
 
+function Assert-NativeLutRuntime {
+    param($Manifest)
+    # FXAA overrides the shared image-space Render, so its target is a different function.
+    $lut = $Manifest.nativeLutObserver
+    $sharedId = $lut.fxaaTarget.addressLibraryId -eq $lut.target.addressLibraryId
+    if ($sharedId -or $lut.fxaaTarget.rva -eq $lut.target.rva) {
+        throw 'The FXAA Render target repeats the shared image-space Render.'
+    }
+}
+
 function Assert-ArmorUiContract {
     param([string]$Runtime, $Armor)
     $validStatus = $armor.status -eq 'unvalidated' -and
@@ -279,5 +289,6 @@ foreach ($runtime in @(
     Assert-NativeUiResourcesRuntime $manifest
     Assert-ScreenUiRuntime $manifest
     Assert-SceneCompositeRuntime $manifest
+    Assert-NativeLutRuntime $manifest
     Assert-ArmorUiRuntime $runtime $manifest
 }

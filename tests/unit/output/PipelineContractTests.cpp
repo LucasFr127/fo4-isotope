@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <string_view>
+#include <utility>
 
 namespace fo4hdr::tests {
 namespace {
@@ -166,6 +167,20 @@ void TestNativeImageSpacePassResolution()
     FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, updated | original));
     FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, updated | bits(toneMapA)));
     FO4HDR_CHECK(!ResolveNativeImageSpacePass(Scope::lut, bits(lut, taa, fxaa)));
+
+    // An effect scope takes its one pass only while that stock pass is registered.
+    constexpr auto everyPass = bits(toneMapA, toneMapB, toneMapNewA, toneMapNewB, lut, taa, taa2, fxaa, video,
+        dofAuxiliary1, dofAuxiliary2, dofAuxiliary3, dofBlender, gameDof, vignette);
+    for (const auto& [scope, pass] : std::array{std::pair{Scope::temporalAa, taa2},
+             std::pair{Scope::temporalAaPipboy, taa2}, std::pair{Scope::temporalAaPowerArmorPipboy, taa},
+             std::pair{Scope::bokehDofBlend, dofBlender}, std::pair{Scope::distantBlur, gameDof},
+             std::pair{Scope::fxaa, fxaa}})
+    {
+        FO4HDR_CHECK(ResolveNativeImageSpacePass(scope, RenoDxShaderBit(pass)) == pass);
+        FO4HDR_CHECK(!ResolveNativeImageSpacePass(scope, everyPass & ~RenoDxShaderBit(pass)));
+    }
+    FO4HDR_CHECK(ResolveNativeImageSpacePass(Scope::lut, everyPass & ~bits(toneMapA, toneMapB)) == lut);
+    FO4HDR_CHECK(!ResolveNativeImageSpacePass(static_cast<Scope>(10), everyPass));
 }
 
 void TestDeveloperConfiguration()

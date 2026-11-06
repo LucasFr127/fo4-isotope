@@ -170,9 +170,9 @@ void DisableSharedUiPauseResources() noexcept;
 // shader, such as a Community Shaders replacement, under its other checks.
 void EnterNativeSceneCompositePass() noexcept;
 void ExitNativeSceneCompositePass() noexcept;
-// The game observer scopes the native tone-map and LUT effect Render calls on
-// their calling thread. The first pixel-shader bind inside one, if no stock
-// identity matches, takes that pass. Exit restores the previous pass.
+// The game observer scopes the native tone-map, LUT, TAA, depth-of-field and FXAA
+// effect Render calls on their calling thread. The first pixel-shader bind inside
+// one, if no stock identity matches, takes that pass. Exit restores the previous pass.
 [[nodiscard]] NativeImageSpacePass EnterNativeImageSpacePass(NativeImageSpacePass pass) noexcept;
 void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept;
 // Initial Win32 subclass installation must run on the exact HWND owner thread.
