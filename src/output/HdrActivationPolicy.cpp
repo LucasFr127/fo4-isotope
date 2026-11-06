@@ -125,11 +125,6 @@ SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept
     return inputs.hdrPathRequested ? HdrUnavailableReason(inputs) : SdrModeReason::hdrOff;
 }
 
-bool DecideSdrMode(const SdrModeInputs& inputs) noexcept
-{
-    return DecideSdrModeReason(inputs) != SdrModeReason::none;
-}
-
 const char* SdrModeReasonName(SdrModeReason reason) noexcept
 {
     const auto index = static_cast<std::size_t>(reason);

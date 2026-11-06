@@ -123,7 +123,6 @@ struct SdrModeInputs
 };
 
 [[nodiscard]] SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept;
-[[nodiscard]] bool DecideSdrMode(const SdrModeInputs& inputs) noexcept;
 [[nodiscard]] const char* SdrModeReasonName(SdrModeReason reason) noexcept;
 
 enum class HdrRendererState : std::uint8_t

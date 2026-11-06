@@ -30,7 +30,7 @@ extern std::atomic<bool> g_gameplayReadyApplied;
 extern std::atomic<bool> g_rendererCreationClaimed;
 // SDR color controls, latched per device generation on an owner chain without an HDR descriptor.
 extern std::atomic<bool> g_sdrModeActive;
-// Latches SDR mode when DecideSdrMode admits it and publishes the reason; a failed
+// Latches SDR mode when DecideSdrModeReason names a cause and publishes it; a failed
 // replacement build keeps the mode for the settings window with substitution disabled.
 bool PrepareSdrMode(const SdrModeInputs&, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 

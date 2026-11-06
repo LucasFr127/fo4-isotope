@@ -649,15 +649,15 @@ void TestSdrModeDecision()
 {
     const auto reason = [](SdrModeInputs inputs) { return DecideSdrModeReason(inputs); };
     // SDR mode follows its own request, including under ENB.
-    FO4HDR_CHECK(DecideSdrMode({.requested = true}));
     FO4HDR_CHECK(reason({.requested = true}) == SdrModeReason::hdrOff);
-    FO4HDR_CHECK(!DecideSdrMode({}));
-    FO4HDR_CHECK(!DecideSdrMode({.enbDetected = true}));
+    FO4HDR_CHECK(reason({}) == SdrModeReason::none);
+    FO4HDR_CHECK(reason({.enbDetected = true}) == SdrModeReason::none);
     FO4HDR_CHECK(reason({.requested = true, .enbDetected = true}) == SdrModeReason::enbDetected);
     // A created HDR chain never enters SDR mode.
-    FO4HDR_CHECK(!DecideSdrMode({.requested = true, .hdrPathRequested = true, .hdrChainCreated = true}));
-    FO4HDR_CHECK(!DecideSdrMode({.hdrPathRequested = true,
-        .hdrCandidate = HdrCandidateDecision::displayNotHdr10}));
+    FO4HDR_CHECK(reason({.requested = true, .hdrPathRequested = true, .hdrChainCreated = true}) ==
+        SdrModeReason::none);
+    FO4HDR_CHECK(reason({.hdrPathRequested = true,
+        .hdrCandidate = HdrCandidateDecision::displayNotHdr10}) == SdrModeReason::none);
     // Every HDR-requested owner chain without an HDR descriptor names its cause.
     const std::array<std::pair<HdrCandidateDecision, SdrModeReason>, 4> candidates{{
         {HdrCandidateDecision::displayNotHdr10, SdrModeReason::displayNotHdr10},
