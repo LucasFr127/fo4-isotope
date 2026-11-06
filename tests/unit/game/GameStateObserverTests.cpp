@@ -304,10 +304,10 @@ class SnapshotPublicationRace
 
     static bool Correlated(const fo4hdr::GameHdrSnapshot& value)
     {
-        return value.frameId == value.generation &&
+        return value.lifecycleGeneration == value.generation &&
             value.resourceGeneration == (value.generation ^ correlationMask) &&
-            value.renderWidth == static_cast<std::uint32_t>(value.generation) &&
-            value.renderHeight == ~static_cast<std::uint32_t>(value.generation) &&
+            value.rendererWindowCount == static_cast<std::uint32_t>(value.generation) &&
+            value.populatedRenderTargetCount == ~static_cast<std::uint32_t>(value.generation) &&
             value.activeImageSpace.eyeAdaptStrength == static_cast<float>(value.generation) &&
             fo4hdr::HasValidLutCount(value);
     }
@@ -366,10 +366,10 @@ class SnapshotPublicationRace
     void Publish(std::uint64_t generation)
     {
         fo4hdr::GameHdrSnapshot value{};
-        value.frameId = generation;
+        value.lifecycleGeneration = generation;
         value.resourceGeneration = generation ^ correlationMask;
-        value.renderWidth = static_cast<std::uint32_t>(generation);
-        value.renderHeight = ~static_cast<std::uint32_t>(generation);
+        value.rendererWindowCount = static_cast<std::uint32_t>(generation);
+        value.populatedRenderTargetCount = ~static_cast<std::uint32_t>(generation);
         value.activeImageSpace.eyeAdaptStrength = static_cast<float>(generation);
         value.activeLutCount = static_cast<std::uint32_t>(generation % 5);
         store.Update([&value](fo4hdr::GameHdrSnapshot& destination) noexcept { destination = value; });
@@ -399,7 +399,7 @@ class SnapshotPublicationRace
         FO4HDR_CHECK(totalReads.load() >= readers.size());
         FO4HDR_CHECK(readersObservedUpdate.load() == readers.size());
         FO4HDR_CHECK(final.generation == iterations);
-        FO4HDR_CHECK(final.frameId == iterations);
+        FO4HDR_CHECK(final.lifecycleGeneration == iterations);
         FO4HDR_CHECK(final.resourceGeneration == (iterations ^ correlationMask));
     }
 public:
@@ -442,7 +442,7 @@ void RunSnapshotConcurrentWritersTests()
             {
                 store.Update(
                     [](fo4hdr::GameHdrSnapshot& snapshot) noexcept {
-                        ++snapshot.frameId;
+                        ++snapshot.lifecycleGeneration;
                         ++snapshot.observationGeneration;
                     });
             }
@@ -469,7 +469,7 @@ void RunSnapshotConcurrentWritersTests()
     const auto snapshot = store.Read();
     constexpr auto expected = writerCount * updatesPerWriter;
     FO4HDR_CHECK(snapshot.generation == expected);
-    FO4HDR_CHECK(snapshot.frameId == expected);
+    FO4HDR_CHECK(snapshot.lifecycleGeneration == expected);
     FO4HDR_CHECK(snapshot.observationGeneration == expected);
 }
 

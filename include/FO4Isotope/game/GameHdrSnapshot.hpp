@@ -170,7 +170,6 @@ struct MenuTransitionPairSnapshot
 struct GameHdrSnapshot
 {
     std::uint64_t generation{};
-    std::uint64_t frameId{};
     std::uint64_t resourceGeneration{};
     std::uint64_t lifecycleGeneration{};
     std::uint64_t observationGeneration{};
@@ -182,12 +181,7 @@ struct GameHdrSnapshot
     UiContextFlag uiContexts{UiContextFlag::None};
 
     bool loading{};
-    bool interior{};
-    bool underwater{};
     bool imageSpaceOverride{};
-    bool holdExposure{};
-    bool taaEnabled{};
-    bool dynamicResolutionEnabled{};
     bool rendererInitialized{};
     bool rendererBorderless{};
     bool rendererVsync{};
@@ -198,11 +192,6 @@ struct GameHdrSnapshot
     bool menuTransitionWitnessValid{true};
 
     ImageSpaceActiveData activeImageSpace{};
-
-    float dynamicWidthRatio{1.0F};
-    float dynamicHeightRatio{1.0F};
-    std::uint32_t renderWidth{};
-    std::uint32_t renderHeight{};
 
     std::uint64_t rendererDeviceIdentity{};
     std::uint64_t rendererContextIdentity{};

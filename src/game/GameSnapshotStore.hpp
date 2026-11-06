@@ -60,15 +60,9 @@ constexpr void InvalidateWorldDependentGameSnapshot(
     snapshot.failedFeatures = static_cast<GameSnapshotFeature>(
         static_cast<std::uint32_t>(snapshot.failedFeatures) & ~dependent);
 
-    snapshot.frameId = 0;
     snapshot.uiContexts = UiContextFlag::None;
     snapshot.loading = loading;
-    snapshot.interior = false;
-    snapshot.underwater = false;
     snapshot.imageSpaceOverride = false;
-    snapshot.holdExposure = false;
-    snapshot.taaEnabled = false;
-    snapshot.dynamicResolutionEnabled = false;
     snapshot.rendererInitialized = false;
     snapshot.rendererBorderless = false;
     snapshot.rendererVsync = false;
@@ -78,10 +72,6 @@ constexpr void InvalidateWorldDependentGameSnapshot(
     snapshot.menuStateSynchronized = false;
     snapshot.menuTransitionWitnessValid = true;
     snapshot.activeImageSpace = {};
-    snapshot.dynamicWidthRatio = 1.0F;
-    snapshot.dynamicHeightRatio = 1.0F;
-    snapshot.renderWidth = 0;
-    snapshot.renderHeight = 0;
     snapshot.rendererDeviceIdentity = 0;
     snapshot.rendererContextIdentity = 0;
     snapshot.imageSpaceIdentity = 0;

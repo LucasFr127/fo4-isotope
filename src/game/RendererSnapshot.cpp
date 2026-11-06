@@ -112,12 +112,6 @@ void PublishRenderer(GameSnapshotStore& store, const GameHdrSnapshot& observed, 
                 observed.rendererContextIdentity;
             snapshot.rendererWindows = observed.rendererWindows;
             snapshot.rendererWindowCount = observed.rendererWindowCount;
-            snapshot.renderWidth = observed.renderWidth;
-            snapshot.renderHeight = observed.renderHeight;
-            snapshot.dynamicWidthRatio = observed.dynamicWidthRatio;
-            snapshot.dynamicHeightRatio = observed.dynamicHeightRatio;
-            snapshot.dynamicResolutionEnabled =
-                observed.dynamicResolutionEnabled;
             snapshot.populatedRenderTargetCount =
                 observed.populatedRenderTargetCount;
             snapshot.populatedDepthTargetCount =
