@@ -180,11 +180,15 @@ void DrawWeatherResponsePage(SettingsPage& page) noexcept
     const auto active = EffectiveWeatherGradeResponse(page.settings).enabled;
     DrawStatus(page, active);
     DrawSection(page, "weather-response", "Response", [&] {
+        // While the SDR operator holds the response on, the switch shows on and cannot change.
+        const auto forced = OperatorForcesWeatherResponse(page.settings);
+        const dmui::DisabledScope held{forced};
+        auto forcedOn = true;
         page.commitRequested |= DrawCheckboxField(page, {"weather-enabled", "Enabled",
             "Sets the grade's luminance and color response per weather ImageSpace. "
             "Other scenes use the Global Grade settings."},
-            {response.enabled, defaults.enabled, {dmui::FieldFeedbackSeverity::kInfo,
-                active && !response.enabled ?
+            {forced ? forcedOn : response.enabled, forced || defaults.enabled,
+                {dmui::FieldFeedbackSeverity::kInfo, forced ?
                     "On while Weather Response is on for the selected tone mapper." : nullptr}});
     });
     DrawSection(page, "luminance", "Luminance", [&] {

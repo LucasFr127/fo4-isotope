@@ -183,14 +183,20 @@ struct HdrSettings
     bool operator==(const HdrSettings&) const = default;
 };
 
+// The selected SDR operator turns the weather response on regardless of Enabled.
+[[nodiscard]] constexpr bool OperatorForcesWeatherResponse(const HdrSettings& settings) noexcept
+{
+    return settings.sdrOperatorWeatherResponse &&
+        settings.productionAlgorithm != ProductionToneMapperAlgorithm::native;
+}
+
 // The weather response the renderer applies. The operator switch leaves the saved
 // Enabled value alone, so Native keeps following it.
 [[nodiscard]] constexpr WeatherGradeResponseSettings EffectiveWeatherGradeResponse(
     const HdrSettings& settings) noexcept
 {
     auto response = settings.weatherGradeResponse;
-    response.enabled = response.enabled || (settings.sdrOperatorWeatherResponse &&
-        settings.productionAlgorithm != ProductionToneMapperAlgorithm::native);
+    response.enabled = response.enabled || OperatorForcesWeatherResponse(settings);
     return response;
 }
 
