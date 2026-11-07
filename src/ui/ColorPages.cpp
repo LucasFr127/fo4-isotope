@@ -1,11 +1,11 @@
-// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: GPL-3.0-only
+// Compiles the GPL-3.0-only DearModdingUI API headers; the CommonLib exceptions do not apply.
 #include "SettingsPages.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 #include <optional>
 
 namespace fo4hdr {
@@ -138,23 +138,21 @@ constexpr std::array kRegionControls{
 
 [[nodiscard]] bool SelectiveColorEnabled() noexcept { return Draft().selectiveColor.enabled; }
 
-// While the header's search or Modified only filter is in use, each color is a
-// standard group so the filter can find its rows; otherwise the table shows them.
-void AddRegion(SettingsPageBuilder& page, std::size_t region, const std::function<bool()>& filtering)
+// The table edits the colors; these hidden rows let the header's Reset all and
+// Revert cover them like every other setting.
+void AddRegionSettings(SettingsPageBuilder& page)
 {
-    page.Group(kRegionIds[region], kRegionNames[region], "drop");
-    for (std::size_t index = 0; index < kRegionControls.size(); ++index)
-    {
-        const auto& control = kRegionControls[index];
-        std::array<char, 32> id{};
-        std::snprintf(id.data(), id.size(), "%s-%s", kRegionIds[region], control.suffix);
-        auto& row = page.Number({id.data(), control.label, control.description}, control.range,
-            [region, value = control.value](HdrSettings& settings) -> double& {
-                return settings.selectiveColor.regions[region].*value;
-            });
-        row.isEnabled = SelectiveColorEnabled;
-        row.isVisible = filtering;
-    }
+    page.Group("color-settings", "Colors", "drop");
+    for (std::size_t region = 0; region < kSelectiveColorRegionCount; ++region)
+        for (const auto& control : kRegionControls)
+        {
+            std::array<char, 32> id{};
+            std::snprintf(id.data(), id.size(), "%s-%s", kRegionIds[region], control.suffix);
+            page.Number({id.data(), control.label, control.description}, control.range,
+                [region, value = control.value](HdrSettings& settings) -> double& {
+                    return settings.selectiveColor.regions[region].*value;
+                }).isVisible = [] { return false; };
+        }
 }
 
 bool g_colorsExpanded{true};
@@ -250,16 +248,14 @@ void BuildSelectiveColorPage(SettingsPageBuilder& page)
         {0.0, 100.0, "%.0f%%", 1.0, Publish::whileDragging},
         [](HdrSettings& settings) -> double& { return settings.selectiveColor.amountPercent; })
         .isEnabled = SelectiveColorEnabled;
-    const auto filtering = page.Filtering();
-    for (std::size_t region = 0; region < kSelectiveColorRegionCount; ++region)
-        AddRegion(page, region, filtering);
+    AddRegionSettings(page);
     // Rows disabled while Selective Color is off skip the host's Reset all, so reset them here.
     page.AlsoOnReset([defaults = page.Defaults().selectiveColor] {
         Draft().selectiveColor = defaults;
     });
     const auto glyph = CurrentSettingsFrame().client->ResolveIconGlyph("Colors", "drop").value_or(0);
-    page.DrawAfterRows([filtering, defaults = page.Defaults().selectiveColor, glyph] {
-        if (!filtering()) DrawRegionTable(defaults, glyph);
+    page.DrawAfterRows([defaults = page.Defaults().selectiveColor, glyph] {
+        DrawRegionTable(defaults, glyph);
     });
 }
 

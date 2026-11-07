@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: GPL-3.0-only
+// Compiles the GPL-3.0-only DearModdingUI API headers; the CommonLib exceptions do not apply.
 #pragma once
 
 #include "FO4Isotope/ui/SettingsMenu.hpp"
@@ -84,8 +85,8 @@ struct BuiltSettingsPage
     std::function<void()> drawAfter;
 };
 
-// Builds one profile's declarative page. The host then draws its search,
-// Modified only filter, Reset all and Revert, and each row's Reset.
+// Builds one profile's declarative page. The host then draws its Reset all and
+// Revert, and each row's Reset.
 class SettingsPageBuilder
 {
 public:
@@ -97,8 +98,6 @@ public:
     void WithoutPageActions() noexcept;
     // Reset all also runs this, after every row is back at its default.
     void AlsoOnReset(std::function<void()> reset);
-    // True while the header's search or Modified only filter is in use.
-    [[nodiscard]] std::function<bool()> Filtering() const;
     // Draws an editable view after the host's rows; the page decides when.
     void DrawAfterRows(std::function<void()> draw);
 

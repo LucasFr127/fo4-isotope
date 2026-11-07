@@ -485,6 +485,7 @@ $required = @(
     "LICENSES\BSD-3-Clause.txt",
     "LICENSES\MIT.txt",
     "COPYING.GPL-3.0-or-later",
+    "LICENSES\GPL-3.0-only.txt",
     "LICENSES\LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt",
     "COPYING.CommonLib-Exceptions",
     "REUSE.toml",
@@ -534,6 +535,10 @@ $localExceptions = Join-Path $auditRoot "COPYING.CommonLib-Exceptions"
 Assert-Fo4HdrLicenseTextHash $localGpl `
 ($expectedGplHash) `
 "Project GPL text differs from its canonical upstream identity."
+# The DearModdingUI client sources' GPL-3.0-only text is the same GPLv3 text.
+Assert-Fo4HdrLicenseTextHash (Join-Path $auditRoot "LICENSES\GPL-3.0-only.txt") `
+($expectedGplHash) `
+"Project GPL-3.0-only text differs from its canonical upstream identity."
 Assert-Fo4HdrLicenseTextHash $localApache `
 ($expectedApacheHash) `
 "Project Apache-2.0 text differs from its canonical upstream identity."

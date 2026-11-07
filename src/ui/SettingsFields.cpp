@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: GPL-3.0-only
+// Compiles the GPL-3.0-only DearModdingUI API headers; the CommonLib exceptions do not apply.
 #include "SettingsPages.hpp"
 
 #include <array>
@@ -80,6 +81,8 @@ SettingsPageBuilder::SettingsPageBuilder(BuiltSettingsPage& built,
     const HdrSettings& defaults, bool sdr) :
     built_(built), page_(built.page), reverts_(built.reverts), defaults_(defaults), sdr_(sdr)
 {
+    // The pages are short, so the header has no search or Modified only filter.
+    page_.filterOptions = {.showSearch = false, .showModifiedOnly = false};
     // Edits apply live and save automatically, so the header needs no Apply.
     page_.actions.showReset = true;
     page_.actions.revert = [&reverts = reverts_] {
@@ -103,11 +106,6 @@ void SettingsPageBuilder::AlsoOnReset(std::function<void()> reset)
         reset();
         RequestSettingsCommit();
     };
-}
-
-std::function<bool()> SettingsPageBuilder::Filtering() const
-{
-    return [&filter = page_.filter] { return !filter.search.empty() || filter.modifiedOnly; };
 }
 
 void SettingsPageBuilder::DrawAfterRows(std::function<void()> draw)

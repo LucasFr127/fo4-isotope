@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
+// SPDX-License-Identifier: GPL-3.0-only
+// Compiles the GPL-3.0-only DearModdingUI API headers; the CommonLib exceptions do not apply.
 #include "SettingsPages.hpp"
 
 #include "SettingsStatus.hpp"

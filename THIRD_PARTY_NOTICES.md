@@ -16,7 +16,9 @@ Source) Exceptions. See [GPL terms](COPYING.GPL-3.0-or-later) and
 ## DearModdingUI API
 
 GPL-3.0-only, without the CommonLib exceptions. The pinned API headers are
-compiled into the plugin. See [GPL terms](COPYING.GPL-3.0-or-later) and the
+compiled into the plugin, and the project files that compile them carry the
+same GPL-3.0-only license, without the CommonLib exceptions. See
+[GPL-3.0-only terms](LICENSES/GPL-3.0-only.txt) and the
 complete [API license](lib/commonlibf4/lib/dearmoddingui-api/LICENSE)
 retained with the dependency source.
 

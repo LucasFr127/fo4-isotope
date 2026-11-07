@@ -1,5 +1,11 @@
 # SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
+# Project files that compile the GPL-3.0-only DearModdingUI API headers, directly
+# or through the settings-page header, carry that license; the CommonLib
+# exceptions do not extend to them.
+$dmuiClientSpdxId = 'GPL-3.0-only'
+$dmuiClientInclude = '(?m)^\s*#\s*include\s*(?:<DearModdingUI/|"SettingsPages\.hpp")'
+
 function Test-Fo4HdrOfficialGt7Origin {
     param([string]$RelativePath, [string]$Text, [string]$LicenseExpression)
 
@@ -61,42 +67,59 @@ function Complete-Fo4HdrLicenseSnippet {
     ) $true
 }
 
+# A file that compiles the DearModdingUI API headers carries exactly their license.
+function Get-Fo4HdrOwnSourceLicense {
+    param([string]$RelativePath, [string]$Text, [Collections.Generic.List[string]]$Expressions)
+
+    if ($Text -notmatch $dmuiClientInclude) { return $projectSpdxId }
+    if ([string]::Join(' ', $Expressions) -cne $dmuiClientSpdxId) {
+        throw "DearModdingUI client source must be ${dmuiClientSpdxId} only: $RelativePath"
+    }
+    return $dmuiClientSpdxId
+}
+
+# REUSE-IgnoreStart
+$licenseLinePattern = '^\s*(?://|#|--|\*)?\s*SPDX-License-Identifier:\s*(?<expression>.*?)\s*(?:\*/)?\s*$'
+$snippetBeginPattern = '^\s*(?://|#|--|\*)?\s*SPDX-SnippetBegin\s*(?:\*/)?\s*$'
+$snippetEndPattern = '^\s*(?://|#|--|\*)?\s*SPDX-SnippetEnd\s*(?:\*/)?\s*$'
+# REUSE-IgnoreEnd
+
+# Routes one line to the open snippet, or records the file's own license expression.
+function Add-Fo4HdrLicenseLine {
+    param([string]$RelativePath, [string]$Line, [Collections.Generic.Stack[object]]$Snippets,
+        [Collections.Generic.List[string]]$Expressions)
+
+    if ($Line -match $snippetBeginPattern) {
+        $Snippets.Push([Collections.Generic.List[string]]::new())
+        return
+    }
+    if ($Line -match $snippetEndPattern) {
+        Complete-Fo4HdrLicenseSnippet $RelativePath $Snippets $licenseLinePattern
+        return
+    }
+    if ($Snippets.Count -gt 0) {
+        $Snippets.Peek().Add($Line)
+        return
+    }
+    $license = [regex]::Match($Line, $licenseLinePattern)
+    if ($license.Success) { $Expressions.Add($license.Groups['expression'].Value.Trim()) }
+}
+
 function Assert-Fo4HdrProductionSourceLicense {
     param(
         [Parameter(Mandatory = $true)][string]$RelativePath,
         [Parameter(Mandatory = $true)][string]$Text
     )
 
-    $lines = [regex]::Split($Text, '\r?\n')
     $snippets = [Collections.Generic.Stack[object]]::new()
     $fileExpressions = [Collections.Generic.List[string]]::new()
-    # REUSE-IgnoreStart
-    $licenseLine = '^\s*(?://|#|--|\*)?\s*SPDX-License-Identifier:\s*(?<expression>.*?)\s*(?:\*/)?\s*$'
-    $beginLine = '^\s*(?://|#|--|\*)?\s*SPDX-SnippetBegin\s*(?:\*/)?\s*$'
-    $endLine = '^\s*(?://|#|--|\*)?\s*SPDX-SnippetEnd\s*(?:\*/)?\s*$'
-    # REUSE-IgnoreEnd
-
-    foreach ($line in $lines) {
-        if ($line -match $beginLine) {
-            $snippets.Push([Collections.Generic.List[string]]::new())
-            continue
-        }
-        if ($line -match $endLine) {
-            Complete-Fo4HdrLicenseSnippet $RelativePath $snippets $licenseLine
-            continue
-        }
-        if ($snippets.Count -gt 0) {
-            $snippets.Peek().Add($line)
-            continue
-        }
-        $license = [regex]::Match($line, $licenseLine)
-        if ($license.Success) {
-            $fileExpressions.Add($license.Groups['expression'].Value.Trim())
-        }
+    foreach ($line in [regex]::Split($Text, '\r?\n')) {
+        Add-Fo4HdrLicenseLine $RelativePath $line $snippets $fileExpressions
     }
     if ($snippets.Count -gt 0) { throw "Unclosed SPDX snippet: $RelativePath" }
 
-    $importedExpressions = @($fileExpressions | Where-Object { $_ -cne $projectSpdxId })
+    $ownLicense = Get-Fo4HdrOwnSourceLicense $RelativePath $Text $fileExpressions
+    $importedExpressions = @($fileExpressions | Where-Object { $_ -cne $ownLicense })
     if ($importedExpressions.Count -gt 0) {
         Assert-Fo4HdrImportedSource $RelativePath $Text (
             [string]::Join(' ', $importedExpressions)
@@ -176,6 +199,26 @@ function Assert-Fo4HdrProductionSourceLicenseSelfTests {
             text = $nested.Replace("modified from org/repo@$commit/", 'modified from org/repo@main/') },
         @{ name = 'wrong GT7 hash'; path = 'shaders/tonemap/Gt7.hlsli';
             text = $gt7.Replace([string]$gt7Authority.expectedSha256, '0' * 64) }
+    )) {
+        Assert-Fo4HdrRejectedSourceLicense $case
+    }
+    Assert-Fo4HdrClientSourceLicenseSelfTests
+}
+
+function Assert-Fo4HdrClientSourceLicenseSelfTests {
+    $spdx = 'SPDX-'
+    $client = @(
+        "// ${spdx}License-Identifier: GPL-3.0-only",
+        '#include "SettingsPages.hpp"'
+    ) -join "`n"
+    Assert-Fo4HdrProductionSourceLicense 'src/ui/Client.cpp' $client
+    foreach ($case in @(
+        @{ name = 'DearModdingUI client under the project license'; path = 'src/ui/Client.cpp';
+            text = $client.Replace('GPL-3.0-only', $projectSpdxId) },
+        @{ name = 'DearModdingUI client with a second license'; path = 'src/ui/Client.cpp';
+            text = $client + "`n// ${spdx}License-Identifier: MIT" },
+        @{ name = 'GPL-3.0-only without the DearModdingUI API'; path = 'src/project.cpp';
+            text = $client.Replace('#include "SettingsPages.hpp"', '') }
     )) {
         Assert-Fo4HdrRejectedSourceLicense $case
     }
