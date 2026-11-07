@@ -30,7 +30,56 @@ constexpr std::array<const char*, 8> kSdrModeReasonTexts{
 static_assert(kSdrModeReasonTexts.size() ==
     static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
 
+// The host status line for each SdrModeReason; HDR simply off is the user's choice.
+constexpr std::array<const char*, 8> kSdrModeStatuses{
+    "SDR output.",
+    "SDR output: HDR is off.",
+    "SDR output: FO4Isotope.ini is invalid.",
+    "SDR output: ENB is installed.",
+    "SDR output: Windows HDR is off.",
+    "SDR output: the swap chain cannot carry HDR.",
+    "SDR output: the HDR swap chain was refused.",
+    "SDR output: HDR resources could not be created."};
+static_assert(kSdrModeStatuses.size() == kSdrModeReasonTexts.size());
+
+[[nodiscard]] SettingsMenuHealth DescribeSdrHealth(const SettingsMenuView& view) noexcept
+{
+    if (view.sdrControlsUnavailable)
+        return {HealthSeverity::error, "SDR color settings unavailable.",
+            "SDR color settings unavailable", "Their shaders could not be built. Restart the game "
+            "to retry."};
+    const auto index = static_cast<std::size_t>(view.sdrModeReason);
+    const auto* detail = SdrModeReasonText(view);
+    if (index >= kSdrModeStatuses.size() || detail == nullptr)
+        return {HealthSeverity::info, kSdrModeStatuses[1]};
+    return {HealthSeverity::warning, kSdrModeStatuses[index], "HDR unavailable", detail};
+}
+
 }  // namespace
+
+const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept
+{
+    return view.liveSettingsError ? "The last change could not be applied, so the previous "
+        "settings stay active. Change a setting to retry." : nullptr;
+}
+
+SettingsMenuHealth DescribeSettingsMenuHealth(
+    const SettingsMenuView& view, const char* saveProblem) noexcept
+{
+    if (!view.presenting)
+        return {HealthSeverity::error, "Renderer not running. See FO4Isotope.log.",
+            "Renderer not running", "FO4Isotope is not presenting this session, so its settings "
+            "cannot apply."};
+    if (saveProblem != nullptr)
+        return {HealthSeverity::error, "Settings are not being saved.", "Settings not saved",
+            saveProblem};
+    if (const auto* rejected = LiveSettingsErrorText(view))
+        return {HealthSeverity::warning, "The last change was not applied.", "Change not applied",
+            rejected};
+    if (view.sdrMode) return DescribeSdrHealth(view);
+    if (view.hdrActive) return {HealthSeverity::success, "HDR10 output active."};
+    return {HealthSeverity::info, "HDR10 output inactive."};
+}
 
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept
 {

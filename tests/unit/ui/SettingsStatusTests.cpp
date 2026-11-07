@@ -85,6 +85,38 @@ void TestWeatherResponseStatus()
     }
 }
 
+
+// The most severe condition names the host status; only problems carry a diagnostic.
+void TestSettingsMenuHealth()
+{
+    SettingsMenuView view{};
+    view.presenting = true;
+    view.hdrActive = true;
+    auto health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::success && health.summary == nullptr);
+    view.hdrActive = false;
+    view.sdrMode = true;
+    view.sdrModeReason = SdrModeReason::hdrOff;
+    health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::info && health.summary == nullptr);
+    view.sdrModeReason = SdrModeReason::displayNotHdr10;
+    health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::warning);
+    FO4HDR_CHECK(health.detail == SdrModeReasonText(view));
+    view.sdrControlsUnavailable = true;
+    FO4HDR_CHECK(DescribeSettingsMenuHealth(view, nullptr).severity == HealthSeverity::error);
+    view.liveSettingsError = true;
+    health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(std::string_view{health.summary} == "Change not applied");
+    constexpr auto saveProblem = "Saving failed.";
+    health = DescribeSettingsMenuHealth(view, saveProblem);
+    FO4HDR_CHECK(std::string_view{health.summary} == "Settings not saved" && health.detail == saveProblem);
+    view.presenting = false;
+    health = DescribeSettingsMenuHealth(view, saveProblem);
+    FO4HDR_CHECK(health.severity == HealthSeverity::error);
+    FO4HDR_CHECK(std::string_view{health.summary} == "Renderer not running");
+}
+
 }  // namespace
 
 void TestSettingsStatus()
@@ -92,6 +124,7 @@ void TestSettingsStatus()
     TestHdrRequestStatus();
     TestSdrModeReasonText();
     TestWeatherResponseStatus();
+    TestSettingsMenuHealth();
 }
 
 }  // namespace fo4hdr::tests

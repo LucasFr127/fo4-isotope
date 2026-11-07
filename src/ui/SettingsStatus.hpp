@@ -13,9 +13,35 @@ struct WeatherResponseState
     StatusMessage detail;
 };
 
+enum class HealthSeverity : std::uint8_t
+{
+    info,
+    success,
+    warning,
+    error
+};
+
+// What FO4Isotope reports to the host: one status line and, for a problem the
+// user can act on, a diagnostic summary with its detail.
+struct SettingsMenuHealth
+{
+    HealthSeverity severity{};
+    const char* status{};
+    const char* summary{};
+    const char* detail{};
+    bool operator==(const SettingsMenuHealth&) const = default;
+};
+
+// The most severe condition wins: renderer stopped, saving failed, a rejected
+// change, then the output mode.
+[[nodiscard]] SettingsMenuHealth DescribeSettingsMenuHealth(
+    const SettingsMenuView& view, const char* saveProblem) noexcept;
+
 [[nodiscard]] const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;
 // The note on the saved HDR request, or null when it needs none.
 [[nodiscard]] const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept;
+// The renderer rejected the last change, or null when it applied.
+[[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
 // Why this session runs SDR mode, or null when HDR was simply off.
 [[nodiscard]] const char* SdrModeReasonText(const SettingsMenuView& view) noexcept;
 // Whether the weather response reaches the current frame's LUT draw.

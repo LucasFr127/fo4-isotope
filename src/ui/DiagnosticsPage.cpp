@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdio>
+#include <optional>
 
 namespace fo4hdr {
 namespace {
@@ -15,6 +16,9 @@ namespace ui = dmui::ui;
 using Text = std::array<char, 160>;
 using Count = unsigned long long;
 
+[[nodiscard]] const SettingsMenuView& View() noexcept { return *CurrentSettingsFrame().view; }
+[[nodiscard]] const SettingsMenuRenderer& Renderer() noexcept { return *CurrentSettingsFrame().renderer; }
+
 [[nodiscard]] const char* PersistenceStateName(SettingsPersistenceState state) noexcept
 {
     constexpr std::array<const char*, 5> names{"unavailable", "idle", "saving", "saved", "failed"};
@@ -22,47 +26,96 @@ using Count = unsigned long long;
     return index < names.size() ? names[index] : "unknown";
 }
 
-void DrawStatusRows(SettingsPage& page) noexcept
+// A read-only row whose text the page formats each frame.
+template <class Format>
+void AddFormattedRow(SettingsPageBuilder& page, const FieldText& text, Format format)
 {
-    const auto& view = page.view;
-    Text text{};
-    DrawValueRow(page, {"output", "Output"},
-        view.sdrMode ? "SDR" : view.hdrActive ? "HDR10 active" : "HDR10 inactive");
-    std::snprintf(text.data(), text.size(), "%s at %.0f nits%s",
-        SettingsOperatorDisplayName(view.activeSettings.productionAlgorithm),
-        view.activeSettings.displayPeakNits, view.lutPending ? " (replacement pending)" : "");
-    DrawValueRow(page, {"tone-mapper", "Tone Mapper"}, text.data());
-    std::snprintf(text.data(), text.size(), "active %llu, desired %llu, request %llu",
-        Count{view.settingsGeneration}, Count{view.desiredSettingsGeneration},
-        Count{view.lutRequestGeneration});
-    DrawValueRow(page, {"settings-generation", "Settings"}, text.data());
-    std::snprintf(text.data(), text.size(), "generation %llu, frame %llu",
-        Count{view.resourceGeneration}, Count{view.frame});
-    DrawValueRow(page, {"resources", "Resources"}, text.data());
-    DrawValueRow(page, {"render-thread", "Render Thread"},
-        view.threadCompatible ? "Compatible" : "Disabled: draw and Present threads differ");
-    DrawValueRow(page, {"renderer-failure", "Renderer Failure"}, view.rendererFailure);
-    DrawValueRow(page, {"live-settings", "Live Settings Error"}, view.liveSettingsError ? "Yes" : "No");
-    DrawValueRow(page, {"saving", "Saving"}, PersistenceStateName(ReadSettingsPersistenceSnapshot().state));
-    DrawValueRow(page, {"armor-hud", "Armor HUD"}, view.armorEncodedStatus);
+    (void)page.Value(text, [format] {
+        Text value{};
+        format(value);
+        ui::TextUnformatted(value.data());
+    });
 }
 
-void DrawExposureLock(SettingsPage& page, const SettingsMenuRenderer& renderer) noexcept
+void AddTextRow(SettingsPageBuilder& page, const FieldText& text, const char* (*value)())
 {
-    const auto& view = page.view;
-    auto lock = view.exposureRequested;
-    const char* note = view.exposureFailed ?
-        "Unavailable: resources or vanilla source qualification failed." :
-        view.exposureRequested && !view.exposureActive ? "Waiting for a qualified scene capture." : nullptr;
-    if (DrawCheckboxField(page, {"exposure-lock", "Lock Vanilla Exposure",
-            "Holds the qualified GPU exposure so gameplay can be compared. Session only; "
-            "focus loss, loading or HDR retirement releases it."},
-            {lock, false, {dmui::FieldFeedbackSeverity::kWarning, note}}))
-        renderer.requestExposure(lock);
+    (void)page.Value(text, [value] { ui::TextUnformatted(value()); });
 }
 
-void CopyPipboyReport(const SettingsMenuView& view) noexcept
+void AddStatusRows(SettingsPageBuilder& page)
 {
+    page.Group("renderer-status", "Renderer", "cpu");
+    AddTextRow(page, {"output", "Output"}, [] {
+        const auto& view = View();
+        return view.sdrMode ? "SDR" : view.hdrActive ? "HDR10 active" : "HDR10 inactive";
+    });
+    AddFormattedRow(page, {"tone-mapper", "Tone Mapper"}, [](Text& text) {
+        const auto& view = View();
+        std::snprintf(text.data(), text.size(), "%s at %.0f nits%s",
+            SettingsOperatorDisplayName(view.activeSettings.productionAlgorithm),
+            view.activeSettings.displayPeakNits, view.lutPending ? " (replacement pending)" : "");
+    });
+    AddFormattedRow(page, {"settings-generation", "Settings"}, [](Text& text) {
+        const auto& view = View();
+        std::snprintf(text.data(), text.size(), "active %llu, desired %llu, request %llu",
+            Count{view.settingsGeneration}, Count{view.desiredSettingsGeneration},
+            Count{view.lutRequestGeneration});
+    });
+    AddFormattedRow(page, {"resources", "Resources"}, [](Text& text) {
+        std::snprintf(text.data(), text.size(), "generation %llu, frame %llu",
+            Count{View().resourceGeneration}, Count{View().frame});
+    });
+    AddTextRow(page, {"render-thread", "Render Thread"}, [] {
+        return View().threadCompatible ? "Compatible" : "Disabled: draw and Present threads differ";
+    });
+    AddTextRow(page, {"renderer-failure", "Renderer Failure"}, [] { return View().rendererFailure; });
+    AddTextRow(page, {"live-settings", "Live Settings Error"}, [] {
+        return View().liveSettingsError ? "Yes" : "No";
+    });
+    AddTextRow(page, {"saving", "Saving"}, [] {
+        return PersistenceStateName(ReadSettingsPersistenceSnapshot().state);
+    });
+    AddTextRow(page, {"armor-hud", "Armor HUD"}, [] { return View().armorEncodedStatus; });
+}
+
+// A session-only switch that asks the renderer instead of editing a setting.
+[[nodiscard]] dmui::SettingDescriptor SessionSwitch(const FieldText& text, bool (*get)(),
+    void (*set)(bool))
+{
+    dmui::SettingDescriptor setting{.id = text.id, .label = text.label,
+        .description = text.description, .control = dmui::CheckboxSettingControl{},
+        .defaultValue = false};
+    setting.binding = dmui::BindSetting(get, [set](bool value) {
+        set(value);
+        return value;
+    });
+    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
+    setting.showReset = false;
+    return setting;
+}
+
+void AddExposure(SettingsPageBuilder& page)
+{
+    page.Group("exposure", "Exposure", "aperture");
+    auto& lock = page.Custom(SessionSwitch({"exposure-lock", "Lock Vanilla Exposure",
+        "Holds the qualified GPU exposure so gameplay can be compared. Session only; "
+        "focus loss, loading or HDR retirement releases it."},
+        [] { return View().exposureRequested; },
+        [](bool requested) { Renderer().requestExposure(requested); }), {});
+    lock.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
+        const auto& view = View();
+        const char* note = view.exposureFailed ?
+            "Unavailable: resources or vanilla source qualification failed." :
+            view.exposureRequested && !view.exposureActive ?
+                "Waiting for a qualified scene capture." : nullptr;
+        if (note == nullptr) return std::nullopt;
+        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, note};
+    };
+}
+
+void CopyPipboyReport() noexcept
+{
+    const auto& view = View();
     const auto& pipboy = view.pipboy.state;
     const auto& rejections = view.pipboy.rejections;
     std::array<char, 4096> report{};
@@ -99,39 +152,40 @@ void CopyPipboyReport(const SettingsMenuView& view) noexcept
     ui::SetClipboardText(report.data());
 }
 
-void DrawPipboyObservation(SettingsPage& page, const SettingsMenuRenderer& renderer) noexcept
+void AddPipboy(SettingsPageBuilder& page)
 {
-    const auto& view = page.view;
-    const auto& pipboy = view.pipboy.state;
-    auto observe = pipboy.requested;
-    if (DrawCheckboxField(page, {"pipboy-observation", "Observe Pip-Boy Screen",
-            "Records Pip-Boy shader and resource lineage without changing color. Session only."},
-            {observe, false}))
-        renderer.requestPipboyObservation(observe);
-    DrawValueRow(page, {"pipboy-status", "Status"}, view.pipboy.status);
-    Text text{};
-    std::snprintf(text.data(), text.size(),
-        "producer %llu, consumer %llu, matched %llu, unmatched %llu, pending %llu, rejected %llu",
-        Count{pipboy.producerDraws}, Count{pipboy.consumerDraws}, Count{pipboy.matchedConsumers},
-        Count{pipboy.unmatchedConsumers}, Count{pipboy.pendingConsumers}, Count{pipboy.rejectedDraws});
-    DrawValueRow(page, {"pipboy-draws", "Draws"}, text.data());
-    std::snprintf(text.data(), text.size(), "producer %llu, consumer %llu, match %llu, age %llu",
-        Count{pipboy.lastProducerFrame}, Count{pipboy.lastConsumerFrame},
-        Count{pipboy.lastMatchedFrame}, Count{pipboy.lastProducerAge});
-    DrawValueRow(page, {"pipboy-frames", "Last Frames"}, text.data());
-    dmui::FieldScope field{page.client, "pipboy-report", "Report",
-        "Copies the current observation to the clipboard."};
-    if (field.Visible() && ui::Button("Copy")) CopyPipboyReport(view);
+    page.Group("pipboy", "Pip-Boy", "device-mobile");
+    (void)page.Custom(SessionSwitch({"pipboy-observation", "Observe Pip-Boy Screen",
+        "Records Pip-Boy shader and resource lineage without changing color. Session only."},
+        [] { return View().pipboy.state.requested; },
+        [](bool observe) { Renderer().requestPipboyObservation(observe); }), {});
+    AddTextRow(page, {"pipboy-status", "Status"}, [] { return View().pipboy.status; });
+    AddFormattedRow(page, {"pipboy-draws", "Draws"}, [](Text& text) {
+        const auto& pipboy = View().pipboy.state;
+        std::snprintf(text.data(), text.size(),
+            "producer %llu, consumer %llu, matched %llu, unmatched %llu, pending %llu, rejected %llu",
+            Count{pipboy.producerDraws}, Count{pipboy.consumerDraws}, Count{pipboy.matchedConsumers},
+            Count{pipboy.unmatchedConsumers}, Count{pipboy.pendingConsumers}, Count{pipboy.rejectedDraws});
+    });
+    AddFormattedRow(page, {"pipboy-frames", "Last Frames"}, [](Text& text) {
+        const auto& pipboy = View().pipboy.state;
+        std::snprintf(text.data(), text.size(), "producer %llu, consumer %llu, match %llu, age %llu",
+            Count{pipboy.lastProducerFrame}, Count{pipboy.lastConsumerFrame},
+            Count{pipboy.lastMatchedFrame}, Count{pipboy.lastProducerAge});
+    });
+    page.Action({"pipboy-report", "Report", "Copies the current observation to the clipboard."},
+        "Copy", CopyPipboyReport);
 }
 
 }  // namespace
 
-void DrawRendererPage(SettingsPage& page, const SettingsMenuRenderer& renderer) noexcept
+void BuildRendererPage(SettingsPageBuilder& page)
 {
-    DrawSection(page, "renderer-status", "Status", [&] { DrawStatusRows(page); });
-    if (!page.sdr)
-        DrawSection(page, "exposure", "Exposure", [&] { DrawExposureLock(page, renderer); });
-    DrawSection(page, "pipboy", "Pip-Boy", [&] { DrawPipboyObservation(page, renderer); });
+    page.WithoutPageActions();
+    page.Status();
+    AddStatusRows(page);
+    if (!page.Sdr()) AddExposure(page);
+    AddPipboy(page);
 }
 
 void DrawExposureOverlay(const SettingsMenuView& view) noexcept

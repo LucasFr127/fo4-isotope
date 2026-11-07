@@ -66,6 +66,7 @@ std::atomic<std::uint32_t> g_collectorThread{};
 std::atomic<bool> g_collectorFailed{};
 std::atomic<bool> g_uiCallbackFailed{};
 std::atomic<bool> g_settingsMenuRegistrationRequested{};
+std::atomic<bool> g_settingsMenuHostChecked{};
 std::atomic<fo4hdr::game::LifecycleDiagnosticsCallback>
     g_lifecycleDiagnostics{};
 std::atomic_flag g_collectionActive = ATOMIC_FLAG_INIT;
@@ -837,6 +838,17 @@ void RegisterSettingsMenuAt(fo4hdr::GameLifecycleEvent event)
     REX::WARN("settings_menu registration={}", name);
 }
 
+// The host starts at the first Present, so by the first load or new game it has
+// either started or given up; log once if it gave up after accepting us.
+void ReportSettingsMenuHostAt(fo4hdr::GameLifecycleEvent event)
+{
+    const auto gameStarted = event == fo4hdr::GameLifecycleEvent::PostLoadGame ||
+        event == fo4hdr::GameLifecycleEvent::NewGame;
+    if (!gameStarted || g_settingsMenuHostChecked.exchange(true, std::memory_order_acq_rel)) return;
+    if (const auto* reason = fo4hdr::SettingsMenuHostUnavailableReason())
+        REX::WARN("settings_menu host_unavailable reason={}", reason);
+}
+
 bool NeedsLifecycleCollection(fo4hdr::GameLifecycleEvent event, bool succeeded,
     bool shouldRegisterUi, bool hasPendingWork) noexcept
 {
@@ -918,6 +930,7 @@ void ObserveLifecycleImpl(F4SE::MessagingInterface::Message* message)
         REX::W32::GetCurrentThreadId());
 
     RegisterSettingsMenuAt(event);
+    ReportSettingsMenuHostAt(event);
     ScheduleLifecycleCollection(event, succeeded, ShouldRegisterUi(event, succeeded));
 }
 

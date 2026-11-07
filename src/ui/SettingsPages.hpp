@@ -5,28 +5,51 @@
 
 #include <DearModdingUI/Client.h>
 
+#include <algorithm>
 #include <array>
-#include <cstddef>
-#include <optional>
+#include <cstdint>
+#include <functional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace fo4hdr {
 
-// One page draw: the draft it edits and this frame's renderer view.
-struct SettingsPage
+// What the page bindings read and edit while the host draws a page.
+struct SettingsFrame
 {
-    dmui::Client& client;
-    HdrSettings& settings;
-    // The active profile's defaults: HDR, or vanilla-neutral SDR.
-    const HdrSettings& defaults;
+    dmui::Client* client{};
+    HdrSettings* draft{};
+    // The values when the menu opened; Revert restores them.
+    HdrSettings* session{};
     // [General] HdrEnabled saves like the other settings and applies at the next game start.
-    bool& hdrEnabled;
-    const SettingsMenuView& view;
-    bool sdr;
-    bool& commitRequested;
-    // Problems that affect every page; DrawPageMessages draws them.
+    bool* hdrEnabled{};
+    bool sessionHdrEnabled{};
+    const SettingsMenuView* view{};
+    const SettingsMenuRenderer* renderer{};
+    bool* commitRequested{};
+    // Problems that affect every page; each page's Status group shows them.
     std::array<StatusMessage, 2> problems{};
+};
+
+// Valid only while the menu draws one of its pages.
+[[nodiscard]] SettingsFrame& CurrentSettingsFrame() noexcept;
+// Requests a commit at the end of Present.
+void RequestSettingsCommit() noexcept;
+
+template <class Value>
+using SettingField = std::function<Value&(HdrSettings&)>;
+
+// Up to four page-specific messages; null entries draw nothing.
+using StatusList = std::array<StatusMessage, 4>;
+
+enum class Publish : std::uint8_t
+{
+    // LUT and peak edits wait for the slider's release.
+    onRelease,
+    // Constant-only edits publish while the slider moves.
+    whileDragging
 };
 
 struct FieldText
@@ -36,94 +59,139 @@ struct FieldText
     const char* description{};
 };
 
-struct FieldNote
-{
-    dmui::FieldFeedbackSeverity severity{dmui::FieldFeedbackSeverity::kInfo};
-    const char* text{};
-};
-
 struct SliderRange
 {
     double minimum, maximum;
     const char* format;
     double displayScale{1.0};
-    // Constant-only controls publish while dragging; LUT and peak edits wait for release.
-    bool publishWhileDragging{};
+    Publish publish{Publish::onRelease};
 };
-
-// A setting, the active profile's default for it, and optional row feedback.
-template <class Value>
-struct FieldValue
-{
-    Value& value;
-    Value defaultValue;
-    FieldNote note{};
-};
-
-// Field helpers draw one settings-table row with its Reset and return true when
-// the edit should publish.
-[[nodiscard]] bool DrawSliderField(SettingsPage& page, const FieldText& text,
-    const SliderRange& range, FieldValue<double> field) noexcept;
-[[nodiscard]] bool DrawCheckboxField(SettingsPage& page, const FieldText& text,
-    FieldValue<bool> field) noexcept;
-void DrawValueRow(SettingsPage& page, const FieldText& text, std::string_view value) noexcept;
-// Muted text for a page-wide note, or the error tone for a problem; null draws nothing.
-void DrawPageText(SettingsPage& page, const char* text,
-    dmui::TextTone tone = dmui::TextTone::kMuted) noexcept;
-// A page's own status messages and the problems shared by every page, as info
-// (muted), then warnings, then errors. Null or empty text draws nothing.
-void DrawPageMessages(SettingsPage& page, std::span<const StatusMessage> messages) noexcept;
-// The last row of every page; true when pressed.
-[[nodiscard]] bool DrawRestoreDefaultsRow(SettingsPage& page, bool modified) noexcept;
 
 template <class Value>
-[[nodiscard]] bool DrawChoiceField(SettingsPage& page, const FieldText& text,
-    FieldValue<Value> bound, std::span<const dmui::ChoiceOption<Value>> options) noexcept
+struct ChoiceEntry
 {
-    auto& [value, defaultValue, note] = bound;
-    dmui::FieldScope field{page.client, text.id, text.label, text.description};
-    if (!field.Visible()) return false;
-    const auto choice = dmui::DrawChoice<Value>(text.id, value, options);
-    if (choice.selected) value = *choice.selected;
-    if (note.text) (void)field.SetFeedback(note.severity, note.text);
-    const auto reset = field.End(true, value != defaultValue).value_or(false);
-    if (reset) value = defaultValue;
-    return choice.changed || reset;
-}
-
-// A titled settings table; the body draws its rows while it is visible.
-template <class Body>
-void DrawSection(SettingsPage& page, const char* id, const char* title, Body&& body) noexcept
-{
-    (void)page.client.DrawSectionHeader(title);
-    dmui::SettingsTableScope table{page.client, id};
-    if (table.Visible()) body();
-}
-
-struct CollapsibleSection
-{
-    const char* id;
-    const char* title;
-    bool& expanded;
-    std::size_t count;
+    Value value;
+    const char* key;
+    const char* label;
 };
 
-// A collapsed-by-default heading; the body draws its own tables.
-template <class Body>
-void DrawCollapsibleSection(SettingsPage& page, const CollapsibleSection& section, Body&& body) noexcept
+// One page as its builder made it: the part the host draws, how Revert restores
+// it, and an editable view the page draws itself after the host's rows.
+struct BuiltSettingsPage
 {
-    if (page.client.DrawCollapsingSectionHeader(
-            section.id, section.title, 0, section.expanded, section.count) && section.expanded)
-        body();
+    dmui::SettingsPage page;
+    std::vector<std::function<void()>> reverts;
+    std::function<void()> drawAfter;
+};
+
+// Builds one profile's declarative page. The host then draws its search,
+// Modified only filter, Reset all and Revert, and each row's Reset.
+class SettingsPageBuilder
+{
+public:
+    SettingsPageBuilder(BuiltSettingsPage& built, const HdrSettings& defaults, bool sdr);
+
+    [[nodiscard]] bool Sdr() const noexcept { return sdr_; }
+    [[nodiscard]] const HdrSettings& Defaults() const noexcept { return defaults_; }
+    // Diagnostics pages hold no settings to reset or revert.
+    void WithoutPageActions() noexcept;
+    // Reset all also runs this, after every row is back at its default.
+    void AlsoOnReset(std::function<void()> reset);
+    // True while the header's search or Modified only filter is in use.
+    [[nodiscard]] std::function<bool()> Filtering() const;
+    // Draws an editable view after the host's rows; the page decides when.
+    void DrawAfterRows(std::function<void()> draw);
+
+    // Starts a group; the rows added next belong to it.
+    void Group(const char* id, const char* label, const char* icon, bool expanded = true);
+    // A Status group with the page's messages and the shared problems.
+    void Status(std::function<StatusList()> messages = {});
+    // A returned row stays valid until the next row is added.
+    dmui::SettingDescriptor& Number(const FieldText& text, const SliderRange& range,
+        SettingField<double> field);
+    dmui::SettingDescriptor& Toggle(const FieldText& text, SettingField<bool> field);
+    template <class Option>
+    dmui::SettingDescriptor& Choice(const FieldText& text, SettingField<Option> field,
+        std::span<const ChoiceEntry<Option>> entries);
+    // A row the page binds itself, with how Revert restores it.
+    dmui::SettingDescriptor& Custom(dmui::SettingDescriptor setting, std::function<void()> revert);
+    dmui::SettingDescriptor& Value(const FieldText& text, std::function<void()> draw);
+    // Muted text across the row, for a short explanation inside a group.
+    void Note(const char* id, const char* text);
+    void Messages(std::function<StatusList()> messages);
+    void Action(const FieldText& text, const char* button, std::function<void()> activate,
+        std::function<bool()> visible = {});
+
+private:
+    dmui::SettingDescriptor& Add(dmui::SettingDescriptor setting);
+
+    BuiltSettingsPage& built_;
+    dmui::SettingsPage& page_;
+    std::vector<std::function<void()>>& reverts_;
+    HdrSettings defaults_;
+    bool sdr_;
+};
+
+// Commits once an edit completes, the slider's release or a click.
+void PublishOnRelease(const dmui::SettingEditEvent& edit);
+// Commits each change while a slider moves.
+void PublishWhileDragging(const dmui::SettingEditEvent& edit);
+
+template <class Option>
+[[nodiscard]] std::string ChoiceKey(std::span<const ChoiceEntry<Option>> entries, Option value)
+{
+    const auto found = std::ranges::find(entries, value, &ChoiceEntry<Option>::value);
+    return found == entries.end() ? std::string{} : std::string{found->key};
 }
 
-void DrawOutputPage(SettingsPage& page) noexcept;
-void DrawToneMappingPage(SettingsPage& page) noexcept;
-void DrawAdjustmentsPage(SettingsPage& page) noexcept;
-void DrawColorGradingPage(SettingsPage& page) noexcept;
-void DrawSelectiveColorPage(SettingsPage& page) noexcept;
-void DrawWeatherResponsePage(SettingsPage& page) noexcept;
-void DrawRendererPage(SettingsPage& page, const SettingsMenuRenderer& renderer) noexcept;
+template <class Option>
+void SelectChoice(std::span<const ChoiceEntry<Option>> entries, std::string_view key, Option& value)
+{
+    const auto found = std::ranges::find(entries, key,
+        [](const ChoiceEntry<Option>& entry) { return std::string_view{entry.key}; });
+    if (found != entries.end()) value = found->value;
+}
+
+template <class Option>
+dmui::SettingDescriptor& SettingsPageBuilder::Choice(const FieldText& text,
+    SettingField<Option> field, std::span<const ChoiceEntry<Option>> entries)
+{
+    dmui::ChoiceSettingControl control;
+    for (const auto& entry : entries) control.options.push_back({entry.key, entry.label});
+    const auto defaultValue = field(defaults_);
+    dmui::SettingDescriptor setting{.id = text.id, .label = text.label,
+        .description = text.description ? text.description : "",
+        .control = std::move(control), .defaultValue = ChoiceKey(entries, defaultValue)};
+    setting.binding = dmui::BindSetting(
+        [field, entries] { return ChoiceKey(entries, field(*CurrentSettingsFrame().draft)); },
+        [field, entries](std::string selected) {
+            auto& value = field(*CurrentSettingsFrame().draft);
+            SelectChoice(entries, selected, value);
+            return ChoiceKey(entries, value);
+        });
+    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
+    setting.isModified = [field, defaultValue] {
+        return field(*CurrentSettingsFrame().draft) != defaultValue;
+    };
+    setting.isDirty = [field] {
+        const auto& frame = CurrentSettingsFrame();
+        return field(*frame.draft) != field(*frame.session);
+    };
+    setting.onEdit = PublishOnRelease;
+    reverts_.push_back([field] {
+        const auto& frame = CurrentSettingsFrame();
+        field(*frame.draft) = field(*frame.session);
+    });
+    return Add(std::move(setting));
+}
+
+void BuildOutputPage(SettingsPageBuilder& page);
+void BuildToneMappingPage(SettingsPageBuilder& page);
+void BuildAdjustmentsPage(SettingsPageBuilder& page);
+void BuildColorGradingPage(SettingsPageBuilder& page);
+void BuildSelectiveColorPage(SettingsPageBuilder& page);
+void BuildWeatherResponsePage(SettingsPageBuilder& page);
+void BuildRendererPage(SettingsPageBuilder& page);
 void DrawExposureOverlay(const SettingsMenuView& view) noexcept;
 
 }  // namespace fo4hdr

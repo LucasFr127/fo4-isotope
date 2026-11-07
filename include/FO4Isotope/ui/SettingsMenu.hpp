@@ -137,6 +137,9 @@ void ConnectSettingsMenuRenderer(const SettingsMenuRenderer& renderer) noexcept;
 // Registers the DearModdingUI client on the F4SE main thread at kPostPostLoad.
 // Without the host the plugin runs headless from the INI.
 [[nodiscard]] SettingsMenuRegistration RegisterSettingsMenu() noexcept;
+// Why the host gave up after accepting the client, or null while it has not.
+// Safe from any thread.
+[[nodiscard]] const char* SettingsMenuHostUnavailableReason() noexcept;
 [[nodiscard]] const HdrSettings& ReadSettingsDraft() noexcept;
 [[nodiscard]] bool SettingsCommitRequested() noexcept;
 [[nodiscard]] bool ConsumeSettingsCommitRequest() noexcept;

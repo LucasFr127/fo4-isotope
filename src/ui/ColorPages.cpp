@@ -3,9 +3,15 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <functional>
+#include <optional>
 
 namespace fo4hdr {
 namespace {
+
+[[nodiscard]] HdrSettings& Draft() noexcept { return *CurrentSettingsFrame().draft; }
 
 struct ImageControl
 {
@@ -16,12 +22,14 @@ struct ImageControl
 
 // Image adjustments only change shader constants, so they publish while dragging.
 constexpr SliderRange kSignedAdjustment{
-    kMinimumImageAdjustment, kMaximumImageAdjustment, "%+.0f", 1.0, true};
+    kMinimumImageAdjustment, kMaximumImageAdjustment, "%+.0f", 1.0, Publish::whileDragging};
+constexpr SliderRange kSaturationRange{
+    kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%", 1.0, Publish::whileDragging};
 
 constexpr std::array kBrightnessControls{
     ImageControl{{"exposure", "Exposure", "Scene brightness before grading. +1 EV doubles it."},
         &HdrSettings::exposureEv,
-        {kMinimumSceneExposureEv, kMaximumSceneExposureEv, "%+.2f EV", 1.0, true}},
+        {kMinimumSceneExposureEv, kMaximumSceneExposureEv, "%+.2f EV", 1.0, Publish::whileDragging}},
     ImageControl{{"contrast", "Contrast", "Tonal separation around middle gray."},
         &HdrSettings::contrast, kSignedAdjustment},
     ImageControl{{"highlights", "Highlights", "Bright scene detail."},
@@ -33,26 +41,27 @@ constexpr std::array kBrightnessControls{
 
 constexpr std::array kColorControls{
     ImageControl{{"saturation", "Saturation", "Color intensity. Luminance stays the same."},
-        &HdrSettings::saturationPercent,
-        {kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%", 1.0, true}},
+        &HdrSettings::saturationPercent, kSaturationRange},
     ImageControl{{"highlight-saturation", "Highlight Saturation",
         "Color intensity of bright scene detail. Luminance stays the same."},
-        &HdrSettings::highlightSaturationPercent,
-        {kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%", 1.0, true}},
+        &HdrSettings::highlightSaturationPercent, kSaturationRange},
     ImageControl{{"temperature", "Temperature", "White balance from cool to warm."},
         &HdrSettings::temperature, kSignedAdjustment},
     ImageControl{{"tint", "Tint", "White balance from green to magenta."},
         &HdrSettings::tint, kSignedAdjustment}};
 
-constexpr ImageControl kBloomControl{{"bloom", "Bloom Strength",
-    "0% removes bloom; 100% keeps the game's bloom."}, &HdrSettings::bloomStrengthPercent,
-    {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent, "%.0f%%", 1.0, true}};
+constexpr std::array kBloomControls{
+    ImageControl{{"bloom", "Bloom Strength", "0% removes bloom; 100% keeps the game's bloom."},
+        &HdrSettings::bloomStrengthPercent,
+        {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent, "%.0f%%", 1.0,
+            Publish::whileDragging}}};
 
 constexpr std::array kGradingControls{
     ImageControl{{"grading-strength", "Grading Strength",
         "How much of the game's color grading applies. 0% removes it."},
         &HdrSettings::vanillaColorGradingStrengthPercent,
-        {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%", 1.0, true}},
+        {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%", 1.0,
+            Publish::whileDragging}},
     ImageControl{{"global-luminance", "Global Grade Luminance",
         "The grade's luminance response where Weather Response is off or does not apply."},
         &HdrSettings::vanillaGradeLuminancePercent,
@@ -62,76 +71,113 @@ constexpr std::array kGradingControls{
         &HdrSettings::vanillaGradeColorPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"}}};
 
-void DrawImageControl(SettingsPage& page, const ImageControl& control) noexcept
-{
-    page.commitRequested |= DrawSliderField(page, control.text, control.range,
-        {page.settings.*control.value, page.defaults.*control.value});
-}
-
 template <std::size_t Count>
-[[nodiscard]] bool Modified(const SettingsPage& page, const std::array<ImageControl, Count>& controls) noexcept
+void AddImageControls(SettingsPageBuilder& page, const std::array<ImageControl, Count>& controls)
 {
     for (const auto& control : controls)
-        if (page.settings.*control.value != page.defaults.*control.value) return true;
-    return false;
+        (void)page.Number(control.text, control.range,
+            [value = control.value](HdrSettings& settings) -> double& { return settings.*value; });
 }
 
-template <std::size_t Count>
-void Restore(SettingsPage& page, const std::array<ImageControl, Count>& controls) noexcept
+constexpr std::array<ChoiceEntry<ColorGradingMethod>, 2> kGradingMethods{{
+    {ColorGradingMethod::rgbRatio, "rgb-ratio", "RGB Ratio"},
+    {ColorGradingMethod::affine, "affine", "Affine"}}};
+constexpr std::array<ChoiceEntry<ColorGradingCurve>, 2> kGradingCurves{{
+    {ColorGradingCurve::gamma22, "gamma22", "Gamma 2.2"},
+    {ColorGradingCurve::srgb, "srgb", "sRGB"}}};
+
+[[nodiscard]] std::optional<dmui::FieldFeedback> AffineStatusFeedback()
 {
-    for (const auto& control : controls)
-        page.settings.*control.value = page.defaults.*control.value;
+    const auto& view = *CurrentSettingsFrame().view;
+    if (view.activeSettings.colorGradingMethod != ColorGradingMethod::affine ||
+        view.affineStatus == nullptr)
+        return std::nullopt;
+    return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kInfo, view.affineStatus};
 }
 
 // Both lift the game's SDR LUTs into HDR, so SDR has neither.
-void DrawHdrConversion(SettingsPage& page) noexcept
+void AddHdrConversion(SettingsPageBuilder& page)
 {
-    using MethodChoice = dmui::ChoiceOption<ColorGradingMethod>;
-    using CurveChoice = dmui::ChoiceOption<ColorGradingCurve>;
-    static const std::array<MethodChoice, 2> methods{{
-        {ColorGradingMethod::rgbRatio, "RGB Ratio"}, {ColorGradingMethod::affine, "Affine"}}};
-    static const std::array<CurveChoice, 2> curves{{
-        {ColorGradingCurve::gamma22, "Gamma 2.2"}, {ColorGradingCurve::srgb, "sRGB"}}};
-    auto& settings = page.settings;
-    const auto& view = page.view;
-    const auto* affineStatus =
-        view.activeSettings.colorGradingMethod == ColorGradingMethod::affine ? view.affineStatus : nullptr;
-    DrawSection(page, "hdr-conversion", "HDR Conversion", [&] {
-        page.commitRequested |= DrawChoiceField(page, {"grading-method", "Grading Method",
-            "RGB Ratio keeps each color's channel ratios. Affine keeps lifted blacks constant."},
-            {settings.colorGradingMethod, page.defaults.colorGradingMethod,
-                {dmui::FieldFeedbackSeverity::kInfo, affineStatus}},
-            std::span<const MethodChoice>{methods});
-        page.commitRequested |= DrawChoiceField(page, {"grading-curve", "Grading Curve",
-            "How the game's LUT colors are read. Gamma 2.2 keeps deeper shadows; sRGB lifts them."},
-            {settings.colorGradingCurve, page.defaults.colorGradingCurve},
-            std::span<const CurveChoice>{curves});
-    });
+    page.Group("hdr-conversion", "HDR Conversion", "arrows-out");
+    page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
+        "RGB Ratio keeps each color's channel ratios. Affine keeps lifted blacks constant."},
+        [](HdrSettings& settings) -> ColorGradingMethod& { return settings.colorGradingMethod; },
+        std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods})
+        .resolveFeedback = AffineStatusFeedback;
+    (void)page.Choice<ColorGradingCurve>({"grading-curve", "Grading Curve",
+        "How the game's LUT colors are read. Gamma 2.2 keeps deeper shadows; sRGB lifts them."},
+        [](HdrSettings& settings) -> ColorGradingCurve& { return settings.colorGradingCurve; },
+        std::span<const ChoiceEntry<ColorGradingCurve>>{kGradingCurves});
 }
 
 constexpr std::array<const char*, kSelectiveColorRegionCount> kRegionNames{
     "Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Magenta"};
+constexpr std::array<const char*, kSelectiveColorRegionCount> kRegionIds{
+    "red", "orange", "yellow", "green", "cyan", "blue", "magenta"};
 
-// One color's three adjustments and its Reset share a table row.
-[[nodiscard]] bool DrawSelectiveRegion(std::size_t index, SelectiveColorRegionSettings& region,
+struct RegionControl
+{
+    const char* suffix;
+    const char* label;
+    const char* description;
+    double SelectiveColorRegionSettings::* value;
+    SliderRange range;
+};
+
+constexpr std::array kRegionControls{
+    RegionControl{"hue", "Hue", "Shifts this color's hue in degrees. 0 leaves it unchanged.",
+        &SelectiveColorRegionSettings::hueDegrees,
+        {-10.0, 10.0, "%+.2f deg", 1.0, Publish::whileDragging}},
+    RegionControl{"saturation", "Saturation", "This color's saturation. 100% leaves it unchanged.",
+        &SelectiveColorRegionSettings::saturationPercent,
+        {50.0, 150.0, "%.0f%%", 1.0, Publish::whileDragging}},
+    RegionControl{"brightness", "Brightness",
+        "This color's brightness, by up to one stop. Gray stays unchanged.",
+        &SelectiveColorRegionSettings::brightness,
+        {-100.0, 100.0, "%+.0f", 1.0, Publish::whileDragging}}};
+
+[[nodiscard]] bool SelectiveColorEnabled() noexcept { return Draft().selectiveColor.enabled; }
+
+// While the header's search or Modified only filter is in use, each color is a
+// standard group so the filter can find its rows; otherwise the table shows them.
+void AddRegion(SettingsPageBuilder& page, std::size_t region, const std::function<bool()>& filtering)
+{
+    page.Group(kRegionIds[region], kRegionNames[region], "drop");
+    for (std::size_t index = 0; index < kRegionControls.size(); ++index)
+    {
+        const auto& control = kRegionControls[index];
+        std::array<char, 32> id{};
+        std::snprintf(id.data(), id.size(), "%s-%s", kRegionIds[region], control.suffix);
+        auto& row = page.Number({id.data(), control.label, control.description}, control.range,
+            [region, value = control.value](HdrSettings& settings) -> double& {
+                return settings.selectiveColor.regions[region].*value;
+            });
+        row.isEnabled = SelectiveColorEnabled;
+        row.isVisible = filtering;
+    }
+}
+
+bool g_colorsExpanded{true};
+
+[[nodiscard]] bool DrawRegionRow(std::size_t index, SelectiveColorRegionSettings& region,
     const SelectiveColorRegionSettings& defaults) noexcept
 {
     namespace ui = dmui::ui;
     bool changed{};
-    const auto edit = [&changed](const char* id, double& value, double minimum, double maximum,
-                          const char* format) {
-        (void)ui::TableNextColumn();
-        ui::SetNextItemWidth(-1.0F);
-        changed |= ui::DragScalar(id, &value, 0.1F, &minimum, &maximum, format,
-            ui::SliderFlags::kAlwaysClamp);
-    };
     ui::PushID(static_cast<std::int32_t>(index));
     ui::TableNextRow();
     (void)ui::TableNextColumn();
     ui::TextUnformatted(kRegionNames[index]);
-    edit("##hue", region.hueDegrees, -10.0, 10.0, "%+.2f deg");
-    edit("##saturation", region.saturationPercent, 50.0, 150.0, "%.0f%%");
-    edit("##brightness", region.brightness, -100.0, 100.0, "%+.0f");
+    for (const auto& control : kRegionControls)
+    {
+        (void)ui::TableNextColumn();
+        ui::SetNextItemWidth(-1.0F);
+        const auto& range = control.range;
+        ui::PushID(control.suffix);
+        changed |= ui::DragScalar("##value", &(region.*control.value), 0.1F, &range.minimum,
+            &range.maximum, range.format, ui::SliderFlags::kAlwaysClamp);
+        ui::PopID();
+    }
     (void)ui::TableNextColumn();
     {
         const dmui::DisabledScope unchanged{region == defaults};
@@ -145,87 +191,76 @@ constexpr std::array<const char*, kSelectiveColorRegionCount> kRegionNames{
     return changed;
 }
 
-[[nodiscard]] bool DrawSelectiveRegions(SelectiveColorSettings& selective,
-    const SelectiveColorSettings& defaults) noexcept
+// The seven colors in one table, so their adjustments compare at a glance.
+void DrawRegionTable(const SelectiveColorSettings& defaults, char32_t glyph) noexcept
 {
     namespace ui = dmui::ui;
     using ui::TableColumnFlags;
+    auto& client = *CurrentSettingsFrame().client;
+    auto& selective = Draft().selectiveColor;
+    if (!client.DrawCollapsingSectionHeader("colors", "Colors", glyph, g_colorsExpanded,
+            kSelectiveColorRegionCount) || !g_colorsExpanded)
+        return;
+    (void)dmui::DrawStyledText(client, "Hue shifts by degrees. Saturation 100% and Brightness 0 "
+        "leave a color unchanged.", {.tone = dmui::TextTone::kMuted, .wrapped = true});
+    const dmui::DisabledScope off{!selective.enabled};
     constexpr auto flags = ui::TableFlags::kRowBg | ui::TableFlags::kBordersInnerH |
         ui::TableFlags::kSizingStretchProp;
-    if (!ui::BeginTable("selective-regions", 5, flags)) return false;
+    if (!ui::BeginTable("selective-regions", 5, flags)) return;
     ui::TableSetupColumn("Color", TableColumnFlags::kWidthFixed, ui::GetFontSize() * 5.0F);
-    ui::TableSetupColumn("Hue", TableColumnFlags::kWidthStretch, 1.0F);
-    ui::TableSetupColumn("Saturation", TableColumnFlags::kWidthStretch, 1.0F);
-    ui::TableSetupColumn("Brightness", TableColumnFlags::kWidthStretch, 1.0F);
+    for (const auto& control : kRegionControls)
+        ui::TableSetupColumn(control.label, TableColumnFlags::kWidthStretch, 1.0F);
     ui::TableSetupColumn("##reset", TableColumnFlags::kWidthFixed, ui::GetFontSize() * 4.0F);
     ui::TableHeadersRow();
     bool changed{};
     for (std::size_t index = 0; index < selective.regions.size(); ++index)
-        changed |= DrawSelectiveRegion(index, selective.regions[index], defaults.regions[index]);
+        changed |= DrawRegionRow(index, selective.regions[index], defaults.regions[index]);
     ui::EndTable();
-    return changed;
+    if (changed) RequestSettingsCommit();
 }
 
 }  // namespace
 
-void DrawAdjustmentsPage(SettingsPage& page) noexcept
+void BuildAdjustmentsPage(SettingsPageBuilder& page)
 {
-    DrawSection(page, "brightness-detail", "Brightness & Detail", [&] {
-        for (const auto& control : kBrightnessControls) DrawImageControl(page, control);
-    });
-    DrawSection(page, "color", "Color", [&] {
-        for (const auto& control : kColorControls) DrawImageControl(page, control);
-    });
-    DrawSection(page, "bloom", "Bloom", [&] { DrawImageControl(page, kBloomControl); });
-    const std::array bloom{kBloomControl};
-    const auto modified = Modified(page, kBrightnessControls) ||
-        Modified(page, kColorControls) || Modified(page, bloom);
-    if (!DrawRestoreDefaultsRow(page, modified)) return;
-    Restore(page, kBrightnessControls);
-    Restore(page, kColorControls);
-    Restore(page, bloom);
-    page.commitRequested = true;
+    page.Status();
+    page.Group("brightness-detail", "Brightness & Detail", "sun");
+    AddImageControls(page, kBrightnessControls);
+    page.Group("color", "Color", "palette");
+    AddImageControls(page, kColorControls);
+    page.Group("bloom", "Bloom", "sparkle");
+    AddImageControls(page, kBloomControls);
 }
 
-void DrawColorGradingPage(SettingsPage& page) noexcept
+void BuildColorGradingPage(SettingsPageBuilder& page)
 {
-    DrawSection(page, "grading-strength", "Strength", [&] {
-        for (const auto& control : kGradingControls) DrawImageControl(page, control);
-    });
-    if (!page.sdr) DrawHdrConversion(page);
-    auto& settings = page.settings;
-    const auto& defaults = page.defaults;
-    const auto modified = Modified(page, kGradingControls) ||
-        settings.colorGradingMethod != defaults.colorGradingMethod ||
-        settings.colorGradingCurve != defaults.colorGradingCurve;
-    if (!DrawRestoreDefaultsRow(page, modified)) return;
-    Restore(page, kGradingControls);
-    settings.colorGradingMethod = defaults.colorGradingMethod;
-    settings.colorGradingCurve = defaults.colorGradingCurve;
-    page.commitRequested = true;
+    page.Status();
+    page.Group("grading-strength", "Strength", "gauge");
+    AddImageControls(page, kGradingControls);
+    if (!page.Sdr()) AddHdrConversion(page);
 }
 
-void DrawSelectiveColorPage(SettingsPage& page) noexcept
+void BuildSelectiveColorPage(SettingsPageBuilder& page)
 {
-    auto& selective = page.settings.selectiveColor;
-    const auto& defaults = page.defaults.selectiveColor;
-    DrawSection(page, "selective-color", "Selective Color", [&] {
-        page.commitRequested |= DrawCheckboxField(page, {"selective-enabled", "Enabled",
-            "Applies the per-color adjustments below."}, {selective.enabled, defaults.enabled});
-        const dmui::DisabledScope off{!selective.enabled};
-        page.commitRequested |= DrawSliderField(page, {"selective-amount", "Amount",
-            "Blends all color adjustments. 0% removes them."},
-            {0.0, 100.0, "%.0f%%", 1.0, true}, {selective.amountPercent, defaults.amountPercent});
+    page.Status();
+    page.Group("selective-color", "Selective Color", "swatches");
+    (void)page.Toggle({"selective-enabled", "Enabled", "Applies the per-color adjustments below."},
+        [](HdrSettings& settings) -> bool& { return settings.selectiveColor.enabled; });
+    page.Number({"selective-amount", "Amount", "Blends all color adjustments. 0% removes them."},
+        {0.0, 100.0, "%.0f%%", 1.0, Publish::whileDragging},
+        [](HdrSettings& settings) -> double& { return settings.selectiveColor.amountPercent; })
+        .isEnabled = SelectiveColorEnabled;
+    const auto filtering = page.Filtering();
+    for (std::size_t region = 0; region < kSelectiveColorRegionCount; ++region)
+        AddRegion(page, region, filtering);
+    // Rows disabled while Selective Color is off skip the host's Reset all, so reset them here.
+    page.AlsoOnReset([defaults = page.Defaults().selectiveColor] {
+        Draft().selectiveColor = defaults;
     });
-    (void)page.client.DrawSectionHeader("Colors");
-    DrawPageText(page, "Hue shifts by degrees. Saturation 100% and Brightness 0 leave a color unchanged.");
-    {
-        const dmui::DisabledScope off{!selective.enabled};
-        page.commitRequested |= DrawSelectiveRegions(selective, defaults);
-    }
-    if (!DrawRestoreDefaultsRow(page, selective != defaults)) return;
-    selective = defaults;
-    page.commitRequested = true;
+    const auto glyph = CurrentSettingsFrame().client->ResolveIconGlyph("Colors", "drop").value_or(0);
+    page.DrawAfterRows([filtering, defaults = page.Defaults().selectiveColor, glyph] {
+        if (!filtering()) DrawRegionTable(defaults, glyph);
+    });
 }
 
 }  // namespace fo4hdr

@@ -2,13 +2,16 @@
 #include "FO4Isotope/ui/SettingsMenu.hpp"
 
 #include "SettingsPages.hpp"
+#include "SettingsStatus.hpp"
 #include "FO4Isotope/config/SettingsPersistence.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <functional>
 #include <optional>
-#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace fo4hdr {
 namespace {
@@ -22,15 +25,16 @@ struct SettingsMenuState
     HdrSettings inactiveSettings{DefaultSdrSettings()};
     bool sdrProfile{};
     HdrInterfaceSettings interfaceDraft{};
-    // Undo Changes restores the values from when the menu opened.
+    // Each page's Revert restores the values from when the menu opened.
     HdrSettings sessionSettings{};
     HdrInterfaceSettings sessionInterfaceSettings{};
     bool commitRequested{};
     bool developerMode{};
-    // FO4Isotope's pages are shown, and the last one drew where edits can commit.
+    // FO4Isotope's pages are shown.
     bool menuActive{};
-    bool editable{};
     bool overlayDemanded{};
+    // What the host's status line and Health page last received.
+    SettingsMenuHealth health{};
     SettingsAutosave autosave;
 };
 
@@ -61,13 +65,11 @@ dmui::Client& Client() noexcept
     return nullptr;
 }
 
-// Problems that affect every page, drawn after the page's own info and warnings.
+// Problems that affect every page, after each page's own info and warnings.
 [[nodiscard]] std::array<StatusMessage, 2> PageProblems(const SettingsMenuView& view) noexcept
 {
     constexpr auto error = StatusSeverity::error;
-    return {StatusMessage{view.liveSettingsError ? "The last change could not be applied, so the "
-                "previous settings stay active. Change a setting to retry." : nullptr, error},
-        StatusMessage{SaveProblemText(), error}};
+    return {StatusMessage{LiveSettingsErrorText(view), error}, StatusMessage{SaveProblemText(), error}};
 }
 
 // Pages edit only when this callback runs on the thread FO4Isotope presents on.
@@ -81,29 +83,43 @@ dmui::Client& Client() noexcept
     return nullptr;
 }
 
-// OwnMessages pages call DrawPageMessages themselves, so the shared problems
-// follow their own info and warnings.
-template <auto Draw, bool OwnMessages = false>
-void DrawSettingsPage() noexcept
+// A page is built for the profile the renderer draws and rebuilt when that changes.
+struct ProfilePage
 {
+    BuiltSettingsPage built;
+    std::optional<bool> sdr;
+};
+
+template <void (*Build)(SettingsPageBuilder&)>
+void DrawPage()
+{
+    static ProfilePage profilePage;
+    auto& built = profilePage.built;
     auto& client = Client();
     SettingsMenuView view;
     if (g_renderer.refreshView != nullptr) g_renderer.refreshView(view);
-    g_state.editable = UnavailableText(view) == nullptr;
-    if (!g_state.editable)
+    if (const auto* unavailable = UnavailableText(view))
     {
-        (void)dmui::DrawStyledText(client, UnavailableText(view),
-            {.tone = dmui::TextTone::kError, .wrapped = true});
+        std::array<char, 256> text{};
+        std::snprintf(text.data(), text.size(), "Error: %s", unavailable);
+        (void)dmui::DrawStyledText(client, text.data(), {.tone = dmui::TextTone::kError, .wrapped = true});
         return;
     }
-    const auto defaults = g_state.sdrProfile ? DefaultSdrSettings() : HdrSettings{};
-    SettingsPage page{client, g_state.draft, defaults, g_state.interfaceDraft.hdrEnabled,
-        view, g_state.sdrProfile, g_state.commitRequested, PageProblems(view)};
-    if constexpr (!OwnMessages) DrawPageMessages(page, {});
-    if constexpr (std::is_invocable_v<decltype(Draw), SettingsPage&, const SettingsMenuRenderer&>)
-        Draw(page, g_renderer);
-    else
-        Draw(page);
+    auto& frame = CurrentSettingsFrame();
+    frame = {&client, &g_state.draft, &g_state.sessionSettings, &g_state.interfaceDraft.hdrEnabled,
+        g_state.sessionInterfaceSettings.hdrEnabled, &view, &g_renderer, &g_state.commitRequested,
+        PageProblems(view)};
+    if (profilePage.sdr != g_state.sdrProfile)
+    {
+        built = {};
+        const auto defaults = g_state.sdrProfile ? DefaultSdrSettings() : HdrSettings{};
+        SettingsPageBuilder builder{built, defaults, g_state.sdrProfile};
+        Build(builder);
+        profilePage.sdr = g_state.sdrProfile;
+    }
+    built.page.Draw(client);
+    if (built.drawAfter) built.drawAfter();
+    frame.view = nullptr;
 }
 
 void ObservePageActivity(const dmui::PageActivity& activity) noexcept
@@ -117,21 +133,10 @@ void ObservePageActivity(const dmui::PageActivity& activity) noexcept
     g_state.menuActive = activity.kind != dmui::PageActivityKind::kDeactivated;
 }
 
-// The command palette can run this from any page, so it acts only while ours are shown.
-void UndoChanges() noexcept
-{
-    if (!g_state.menuActive || !g_state.editable) return;
-    g_state.draft = g_state.sessionSettings;
-    g_state.interfaceDraft = g_state.sessionInterfaceSettings;
-    g_state.commitRequested = true;
-}
-
 // Keeps the developer overlay on screen only while the exposure lock is held.
-void UpdateExposureOverlay() noexcept
+void UpdateExposureOverlay(const SettingsMenuView& view) noexcept
 {
-    if (!g_exposureOverlay || g_renderer.refreshView == nullptr) return;
-    SettingsMenuView view;
-    g_renderer.refreshView(view);
+    if (!g_exposureOverlay) return;
     const auto wanted = view.exposureRequested || view.exposureActive;
     if (wanted == g_state.overlayDemanded) return;
     auto& client = Client();
@@ -139,20 +144,43 @@ void UpdateExposureOverlay() noexcept
         g_state.overlayDemanded = wanted;
 }
 
+[[nodiscard]] DMUI_StatusSeverity HostSeverity(HealthSeverity severity) noexcept
+{
+    constexpr std::array<DMUI_StatusSeverity, 4> severities{DMUI_STATUS_SEVERITY_INFO,
+        DMUI_STATUS_SEVERITY_SUCCESS, DMUI_STATUS_SEVERITY_WARNING, DMUI_STATUS_SEVERITY_ERROR};
+    return severities[std::min<std::size_t>(static_cast<std::size_t>(severity), 3U)];
+}
+
+// The host's status line and Health page hear about each change once.
+void UpdateHostStatus(const SettingsMenuView& view) noexcept
+{
+    const auto health = DescribeSettingsMenuHealth(view, SaveProblemText());
+    if (health == g_state.health) return;
+    auto& client = Client();
+    const auto severity = HostSeverity(health.severity);
+    (void)client.SetStatus(severity, health.status);
+    if (health.summary != nullptr)
+        (void)client.ReportDiagnostic({severity, nullptr, health.summary, health.detail});
+    g_state.health = health;
+}
+
 // Runs after every Present: saves once the renderer applied the draft, at once
 // after the menu closes and 500 ms after the last edit while it is open.
 void ObserveFrame() noexcept
 {
+    SettingsMenuView view;
+    if (g_renderer.refreshView != nullptr) g_renderer.refreshView(view);
     const auto applied = g_renderer.draftApplied == nullptr || g_renderer.draftApplied(g_state.draft);
     g_state.autosave.Update(PersistedProfiles(), g_state.interfaceDraft,
         {GetTickCount64(), applied, g_state.menuActive});
-    if (g_state.developerMode) UpdateExposureOverlay();
+    UpdateHostStatus(view);
+    if (g_state.developerMode) UpdateExposureOverlay(view);
 }
 
 struct PageEntry
 {
     dmui::PageDescriptor descriptor;
-    void (*draw)() noexcept;
+    void (*draw)();
 };
 
 // Two sidebar categories; within each, pages sort by key.
@@ -162,26 +190,26 @@ const std::array kCategories{
 const std::array kPages{
     PageEntry{{.id = "output", .displayName = "Output", .categoryId = "display",
                   .summary = "HDR output and display brightness.", .sortKey = 0, .iconName = "sun"},
-        &DrawSettingsPage<DrawOutputPage, true>},
+        &DrawPage<BuildOutputPage>},
     PageEntry{{.id = "tone-mapping", .displayName = "Tone Mapping", .categoryId = "display",
                   .summary = "Tone mapper and its look.", .sortKey = 100, .iconName = "chart-line"},
-        &DrawSettingsPage<DrawToneMappingPage>},
+        &DrawPage<BuildToneMappingPage>},
     PageEntry{{.id = "adjustments", .displayName = "Adjustments", .categoryId = "color",
                   .summary = "Exposure, contrast, white balance and bloom.", .sortKey = 0,
                   .iconName = "sliders"},
-        &DrawSettingsPage<DrawAdjustmentsPage>},
+        &DrawPage<BuildAdjustmentsPage>},
     PageEntry{{.id = "color-grading", .displayName = "Color Grading", .categoryId = "color",
                   .summary = "How the game's color grading applies.", .sortKey = 100,
                   .iconName = "palette"},
-        &DrawSettingsPage<DrawColorGradingPage>},
+        &DrawPage<BuildColorGradingPage>},
     PageEntry{{.id = "selective-color", .displayName = "Selective Color", .categoryId = "color",
                   .summary = "Hue, saturation and brightness per color.", .sortKey = 200,
                   .iconName = "swatches"},
-        &DrawSettingsPage<DrawSelectiveColorPage>},
+        &DrawPage<BuildSelectiveColorPage>},
     PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "color",
                   .summary = "Color grading response per weather.", .sortKey = 300,
                   .iconName = "cloud-sun"},
-        &DrawSettingsPage<DrawWeatherResponsePage, true>}};
+        &DrawPage<BuildWeatherResponsePage>}};
 
 [[nodiscard]] bool RegisterPages() noexcept
 {
@@ -192,10 +220,7 @@ const std::array kPages{
     const auto addPage = [&client](const PageEntry& page) {
         return client.AddPage(page.descriptor, page.draw).has_value();
     };
-    if (!std::ranges::all_of(kCategories, addCategory)) return false;
-    if (!std::ranges::all_of(kPages, addPage)) return false;
-    return client.AddAction("undo-changes", "Undo Changes", "arrow-counter-clockwise",
-        "Restore the settings from when the menu opened.", &UndoChanges);
+    return std::ranges::all_of(kCategories, addCategory) && std::ranges::all_of(kPages, addPage);
 }
 
 // Developer pages: renderer status, temporary diagnostics and the exposure overlay.
@@ -205,7 +230,7 @@ const std::array kPages{
     if (!client.AddCategory({"diagnostics", "Diagnostics", 900, "pulse"})) return false;
     if (!client.AddPage({"renderer", "Renderer", "diagnostics",
             "Renderer state and temporary developer tools.", 0, DMUI_PAGE_KIND_SETTINGS, "cpu"},
-            &DrawSettingsPage<DrawRendererPage>)) return false;
+            &DrawPage<BuildRendererPage>)) return false;
     g_exposureOverlay = client.AddPage({"exposure-overlay", "Exposure Lock", nullptr, nullptr, 0,
         DMUI_PAGE_KIND_OVERLAY, "lock"}, [] {
             SettingsMenuView view;
@@ -269,6 +294,16 @@ SettingsMenuRegistration RegisterSettingsMenu() noexcept
     if (!client.AddPageActivityObserver(&ObservePageActivity)) return failed;
     if (!client.AddFrameObserver(&ObserveFrame)) return failed;
     return SettingsMenuRegistration::registered;
+}
+
+const char* SettingsMenuHostUnavailableReason() noexcept
+{
+    switch (Client().UnavailableReason())
+    {
+    case DMUI_UNAVAILABLE_HOST_DISABLED: return "host-disabled";
+    case DMUI_UNAVAILABLE_BACKEND_FAILED: return "backend-failed";
+    default: return nullptr;
+    }
 }
 
 const HdrSettings& ReadSettingsDraft() noexcept { return g_state.draft; }
