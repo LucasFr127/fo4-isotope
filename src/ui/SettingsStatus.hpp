@@ -42,6 +42,9 @@ struct SettingsMenuHealth
 [[nodiscard]] const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept;
 // The renderer rejected the last change, or null when it applied.
 [[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
+// Reports SDR mode as HDR off once the saved request turns HDR off, so the reason's
+// advice goes away without a restart.
+void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept;
 // Why this session runs SDR mode, or null when HDR was simply off.
 [[nodiscard]] const char* SdrModeReasonText(const SettingsMenuView& view) noexcept;
 // Whether the weather response reaches the current frame's LUT draw.

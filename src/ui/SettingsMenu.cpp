@@ -99,6 +99,7 @@ void DrawPage()
     auto& client = Client();
     SettingsMenuView view;
     if (g_renderer.refreshView != nullptr) g_renderer.refreshView(view);
+    ApplyHdrRequest(view, g_state.interfaceDraft.hdrEnabled);
     if (const auto* unavailable = UnavailableText(view))
     {
         std::array<char, 256> text{};
@@ -171,6 +172,7 @@ void ObserveFrame() noexcept
 {
     SettingsMenuView view;
     if (g_renderer.refreshView != nullptr) g_renderer.refreshView(view);
+    ApplyHdrRequest(view, g_state.interfaceDraft.hdrEnabled);
     const auto applied = g_renderer.draftApplied == nullptr || g_renderer.draftApplied(g_state.draft);
     g_state.autosave.Update(PersistedProfiles(), g_state.interfaceDraft,
         {GetTickCount64(), applied, g_state.menuActive});

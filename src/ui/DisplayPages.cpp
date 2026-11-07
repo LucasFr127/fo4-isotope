@@ -43,7 +43,10 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     const auto& view = View();
     StatusList messages{};
     if (!view.sdrMode) return messages;
-    messages[0] = {SdrModeReasonText(view), StatusSeverity::warning};
+    // An SDR display is a normal setup; its note only points at the HDR switch.
+    messages[0] = {SdrModeReasonText(view),
+        view.sdrModeReason == SdrModeReason::displayNotHdr10 ? StatusSeverity::info :
+            StatusSeverity::warning};
     messages[1] = view.enbDetected ? StatusMessage{"ENB is installed, so the color settings have no "
             "effect and ENB's own effects stay intact.", StatusSeverity::warning} :
         view.sdrControlsUnavailable ? StatusMessage{"The SDR color settings are unavailable this "

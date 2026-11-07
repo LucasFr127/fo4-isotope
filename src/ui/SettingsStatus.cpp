@@ -19,7 +19,8 @@ constexpr std::array<const char*, 8> kSdrModeReasonTexts{
         "one from the download, then restart the game.",
     "SDR is shown because ENB is installed. Remove ENB to use HDR.",
     "SDR is shown because Windows HDR was off or no HDR display was found when the game "
-        "started. Turn on Use HDR in Windows display settings, then restart the game.",
+        "started. On an SDR display, turn off Enable HDR. On an HDR display, turn on Use HDR "
+        "in Windows display settings, then restart the game.",
     "SDR is shown because the game's swap chain cannot carry HDR, for example in exclusive "
         "fullscreen or with High FPS Physics Fix's sequential swap effect. Use borderless or "
         "windowed mode with a flip or discard swap effect, then restart the game.",
@@ -30,17 +31,19 @@ constexpr std::array<const char*, 8> kSdrModeReasonTexts{
 static_assert(kSdrModeReasonTexts.size() ==
     static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
 
-// The host status line for each SdrModeReason; HDR simply off is the user's choice.
-constexpr std::array<const char*, 8> kSdrModeStatuses{
-    "SDR output.",
-    "SDR output: HDR is off.",
-    "SDR output: FO4Isotope.ini is invalid.",
-    "SDR output: ENB is installed.",
-    "SDR output: Windows HDR is off.",
-    "SDR output: the swap chain cannot carry HDR.",
-    "SDR output: the HDR swap chain was refused.",
-    "SDR output: HDR resources could not be created."};
-static_assert(kSdrModeStatuses.size() == kSdrModeReasonTexts.size());
+// The host status for each SdrModeReason. HDR off and an SDR display are normal setups,
+// so they carry no diagnostic: the host keeps diagnostics after the cause is gone.
+constexpr std::array<SettingsMenuHealth, 8> kSdrModeHealth{{
+    {HealthSeverity::info, "SDR output."},
+    {HealthSeverity::info, "SDR output: HDR is off."},
+    {HealthSeverity::warning, "SDR output: FO4Isotope.ini is invalid.", "HDR unavailable"},
+    {HealthSeverity::warning, "SDR output: ENB is installed.", "HDR unavailable"},
+    {HealthSeverity::info, "SDR output: no HDR display. On an SDR display, turn off Enable HDR."},
+    {HealthSeverity::warning, "SDR output: the swap chain cannot carry HDR.", "HDR unavailable"},
+    {HealthSeverity::warning, "SDR output: the HDR swap chain was refused.", "HDR unavailable"},
+    {HealthSeverity::warning, "SDR output: HDR resources could not be created.",
+        "HDR unavailable"}}};
+static_assert(kSdrModeHealth.size() == kSdrModeReasonTexts.size());
 
 [[nodiscard]] SettingsMenuHealth DescribeSdrHealth(const SettingsMenuView& view) noexcept
 {
@@ -50,9 +53,10 @@ static_assert(kSdrModeStatuses.size() == kSdrModeReasonTexts.size());
             "to retry."};
     const auto index = static_cast<std::size_t>(view.sdrModeReason);
     const auto* detail = SdrModeReasonText(view);
-    if (index >= kSdrModeStatuses.size() || detail == nullptr)
-        return {HealthSeverity::info, kSdrModeStatuses[1]};
-    return {HealthSeverity::warning, kSdrModeStatuses[index], "HDR unavailable", detail};
+    if (index >= kSdrModeHealth.size() || detail == nullptr) return kSdrModeHealth[1];
+    auto health = kSdrModeHealth[index];
+    health.detail = detail;
+    return health;
 }
 
 }  // namespace
@@ -95,6 +99,13 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
     // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
     if (!hdrEnabled && !view.sdrMode) return "Restart the game to turn HDR off.";
     return nullptr;
+}
+
+void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept
+{
+    // Once HDR is turned off, SDR is the user's choice; only an unusable INI still needs a fix.
+    if (!hdrEnabled && view.sdrModeReason != SdrModeReason::configurationDefaults)
+        view.sdrModeReason = SdrModeReason::hdrOff;
 }
 
 const char* SdrModeReasonText(const SettingsMenuView& view) noexcept

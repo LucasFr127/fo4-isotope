@@ -36,22 +36,29 @@ void TestHdrRequestStatus()
     FO4HDR_CHECK(HdrRequestStatus(true, fallback) == nullptr);
 }
 
-// Every handled cause of SDR mode names itself; HDR simply off needs no note.
+// Every handled cause of SDR mode names itself; HDR off, at start or since, needs no note
+// unless the INI cannot save the request.
 void TestSdrModeReasonText()
 {
-    const auto text = [](SdrModeReason reason) {
+    const auto text = [](SdrModeReason reason, bool hdrEnabled = true) {
         SettingsMenuView view{};
         view.sdrMode = true;
         view.sdrModeReason = reason;
+        ApplyHdrRequest(view, hdrEnabled);
         const auto* message = SdrModeReasonText(view);
         return std::string_view{message != nullptr ? message : ""};
     };
     FO4HDR_CHECK(text(SdrModeReason::none).empty() && text(SdrModeReason::hdrOff).empty());
     FO4HDR_CHECK(text(SdrModeReason::enbDetected).contains("ENB"));
     FO4HDR_CHECK(text(SdrModeReason::configurationDefaults).contains("FO4Isotope.ini"));
+    FO4HDR_CHECK(text(SdrModeReason::displayNotHdr10).contains("turn off Enable HDR"));
     for (const auto reason : {SdrModeReason::displayNotHdr10, SdrModeReason::descriptorUnsupported,
              SdrModeReason::hdrCandidateRejected, SdrModeReason::hdrInstallFailed})
+    {
         FO4HDR_CHECK(text(reason).starts_with("SDR is shown because"));
+        FO4HDR_CHECK(text(reason, false).empty());
+    }
+    FO4HDR_CHECK(text(SdrModeReason::configurationDefaults, false).contains("FO4Isotope.ini"));
 }
 
 
@@ -97,9 +104,17 @@ void TestSettingsMenuHealth()
     view.hdrActive = false;
     view.sdrMode = true;
     view.sdrModeReason = SdrModeReason::hdrOff;
+    const auto hdrOff = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(hdrOff.severity == HealthSeverity::info && hdrOff.summary == nullptr);
+    // An SDR display is informational and points at the HDR switch; turning it off settles it.
+    view.sdrModeReason = SdrModeReason::displayNotHdr10;
     health = DescribeSettingsMenuHealth(view, nullptr);
     FO4HDR_CHECK(health.severity == HealthSeverity::info && health.summary == nullptr);
-    view.sdrModeReason = SdrModeReason::displayNotHdr10;
+    FO4HDR_CHECK(std::string_view{health.status}.contains("turn off Enable HDR"));
+    auto settled = view;
+    ApplyHdrRequest(settled, false);
+    FO4HDR_CHECK(DescribeSettingsMenuHealth(settled, nullptr) == hdrOff);
+    view.sdrModeReason = SdrModeReason::hdrCandidateRejected;
     health = DescribeSettingsMenuHealth(view, nullptr);
     FO4HDR_CHECK(health.severity == HealthSeverity::warning);
     FO4HDR_CHECK(health.detail == SdrModeReasonText(view));
