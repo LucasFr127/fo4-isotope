@@ -119,6 +119,7 @@ void TestSdrProfileDefaults()
              Edit{[](HdrSettings& s) { s.highlights = 1.0; }},
              Edit{[](HdrSettings& s) { s.shadows = 1.0; }},
              Edit{[](HdrSettings& s) { s.saturationPercent = 101.0; }},
+             Edit{[](HdrSettings& s) { s.highlightSaturationPercent = 99.0; }},
              Edit{[](HdrSettings& s) { s.temperature = 1.0; }},
              Edit{[](HdrSettings& s) { s.tint = -1.0; }},
              Edit{[](HdrSettings& s) {
@@ -271,6 +272,7 @@ void TestDefaultSettingsMath()
     FO4HDR_CHECK(derived.highlightsEv == 0.0);
     FO4HDR_CHECK(derived.shadowsEv == 0.0);
     FO4HDR_CHECK(derived.saturationScale == 1.0);
+    FO4HDR_CHECK(derived.highlightSaturationScale == 1.0);
     FO4HDR_CHECK(derived.vanillaColorGradingBlend == 1.0);
     FO4HDR_CHECK(test::Approx(derived.vanillaGradeLuminanceRemoval, 0.33, 1.0e-15));
     FO4HDR_CHECK(test::Approx(derived.vanillaGradeColorRemoval, 0.33, 1.0e-15));
@@ -291,6 +293,7 @@ void TestAdjustedSettingsMath()
     adjusted.highlights = 50.0;
     adjusted.shadows = -50.0;
     adjusted.saturationPercent = 0.0;
+    adjusted.highlightSaturationPercent = 150.0;
     adjusted.vanillaColorGradingStrengthPercent = 25.0;
     adjusted.vanillaGradeLuminancePercent = 25.0;
     adjusted.vanillaGradeColorPercent = 75.0;
@@ -302,6 +305,7 @@ void TestAdjustedSettingsMath()
     FO4HDR_CHECK(adjustedMath.highlightsEv == 1.0);
     FO4HDR_CHECK(adjustedMath.shadowsEv == -1.0);
     FO4HDR_CHECK(adjustedMath.saturationScale == 0.0);
+    FO4HDR_CHECK(adjustedMath.highlightSaturationScale == 1.5);
     FO4HDR_CHECK(adjustedMath.vanillaColorGradingBlend == 0.25);
     FO4HDR_CHECK(adjustedMath.vanillaGradeLuminanceRemoval == 0.75);
     FO4HDR_CHECK(adjustedMath.vanillaGradeColorRemoval == 0.25);
@@ -504,6 +508,10 @@ void TestSettingsValidation()
         HdrSettingsValidationError::shadowsOutOfRange);
     check(&HdrSettings::saturationPercent, 200.01,
         HdrSettingsValidationError::saturationOutOfRange);
+    check(&HdrSettings::highlightSaturationPercent, -0.01,
+        HdrSettingsValidationError::highlightSaturationOutOfRange);
+    check(&HdrSettings::highlightSaturationPercent, nan,
+        HdrSettingsValidationError::highlightSaturationOutOfRange);
     check(&HdrSettings::temperature, -100.01,
         HdrSettingsValidationError::temperatureOutOfRange);
     check(&HdrSettings::tint, 100.01,

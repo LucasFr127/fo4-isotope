@@ -266,6 +266,8 @@ HdrSettingsValidationError ValidateHdrImage(const HdrSettings& settings) noexcep
             HdrSettingsValidationError::shadowsOutOfRange},
         {&HdrSettings::saturationPercent, kMinimumSaturationPercent, kMaximumSaturationPercent,
             HdrSettingsValidationError::saturationOutOfRange},
+        {&HdrSettings::highlightSaturationPercent, kMinimumSaturationPercent,
+            kMaximumSaturationPercent, HdrSettingsValidationError::highlightSaturationOutOfRange},
         {&HdrSettings::temperature, kMinimumImageAdjustment, kMaximumImageAdjustment,
             HdrSettingsValidationError::temperatureOutOfRange},
         {&HdrSettings::tint, kMinimumImageAdjustment, kMaximumImageAdjustment,
@@ -336,6 +338,7 @@ HdrSettingsMath DeriveHdrSettingsMath(
     result.shadowsEv =
         settings.shadows / 100.0 * kMaximumSelectiveExposureEv;
     result.saturationScale = settings.saturationPercent / 100.0;
+    result.highlightSaturationScale = settings.highlightSaturationPercent / 100.0;
     result.vanillaColorGradingBlend =
         settings.vanillaColorGradingStrengthPercent / 100.0;
     result.vanillaGradeLuminanceRemoval =
@@ -369,7 +372,7 @@ bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept
         settings.bloomStrengthPercent == 100.0, settings.contrast == 0.0,
         settings.blacks == 0.0, settings.highlights == 0.0,
         settings.shadows == 0.0, settings.saturationPercent == 100.0,
-        settings.temperature == 0.0, settings.tint == 0.0,
+        settings.highlightSaturationPercent == 100.0, settings.temperature == 0.0, settings.tint == 0.0,
         !IsSelectiveColorEffective(settings.selectiveColor)};
     return std::ranges::find(neutral, false) == neutral.end();
 }

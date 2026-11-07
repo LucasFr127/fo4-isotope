@@ -202,6 +202,7 @@ void CheckSdrProfileRewrite()
     auto sdr = DefaultSdrSettings();
     sdr.exposureEv = -0.5;
     sdr.contrast = 15.0;
+    sdr.highlightSaturationPercent = 70.0;
     sdr.bloomStrengthPercent = 60.0;
     sdr.selectiveColor.enabled = true;
     sdr.selectiveColor.regions[3].saturationPercent = 80.0;
@@ -228,6 +229,7 @@ void CheckSdrProfileRewrite()
     // The SDR shoulder minimum survives the saved 0.001 precision.
     FO4HDR_CHECK(section("[SdrGT7]").find("ShoulderStart=0.216\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrImage]\nExposureEV=-0.5\nContrast=15\n") != std::string::npos);
+    FO4HDR_CHECK(section("[SdrImage]").find("HighlightSaturation=70\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrEffects]\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("BloomStrength=60\n") != std::string::npos);
     FO4HDR_CHECK(saved.find("[SdrSelectiveColor]\nEnabled=1\n") != std::string::npos);

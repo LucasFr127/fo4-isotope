@@ -44,7 +44,7 @@ struct PersistedKey
     std::string_view formerKey{};
 };
 
-constexpr std::array<PersistedKey, 47> kPersistedKeys{{
+constexpr std::array<PersistedKey, 48> kPersistedKeys{{
     {.section = "General", .key = "HdrEnabled", .interfaceFlag = &HdrInterfaceSettings::hdrEnabled},
     {"WeatherLutResponse", "Enabled", nullptr, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, false, false, nullptr,
@@ -110,6 +110,7 @@ constexpr std::array<PersistedKey, 47> kPersistedKeys{{
     {"Image", "Highlights", &HdrSettings::highlights},
     {"Image", "Shadows", &HdrSettings::shadows},
     {"Image", "Saturation", &HdrSettings::saturationPercent},
+    {"Image", "HighlightSaturation", &HdrSettings::highlightSaturationPercent},
     {"Image", "Temperature", &HdrSettings::temperature},
     {"Image", "Tint", &HdrSettings::tint},
     {"Image", "ColorGradingMethod", nullptr, false, true},

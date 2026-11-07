@@ -48,7 +48,8 @@ struct alignas(16) OperatorConstants
     std::array<float, 4> lutProfileLuminanceRemoval{};
     std::array<float, 4> lutProfileColorRemoval{};
     std::uint32_t lutProfilesActive{};
-    std::array<std::uint32_t, 3> lutProfilePadding{};
+    float highlightSaturationScale{1.0F};
+    std::array<std::uint32_t, 2> lutProfilePadding{};
 };
 static_assert(sizeof(OperatorConstants) == 320);
 static_assert(offsetof(OperatorConstants, bloomStrength) == 32);
@@ -70,6 +71,7 @@ static_assert(offsetof(OperatorConstants, selectiveColorPlaneB) +
 static_assert(offsetof(OperatorConstants, lutProfileLuminanceRemoval) == 272);
 static_assert(offsetof(OperatorConstants, lutProfileColorRemoval) == 288);
 static_assert(offsetof(OperatorConstants, lutProfilesActive) == 304);
+static_assert(offsetof(OperatorConstants, highlightSaturationScale) == 308);
 // b13 publishes ColorGradingCurve directly; GradeTransfer.hlsli uses these values.
 static_assert(static_cast<std::uint32_t>(ColorGradingCurve::gamma22) == 0U);
 static_assert(static_cast<std::uint32_t>(ColorGradingCurve::srgb) == 1U);

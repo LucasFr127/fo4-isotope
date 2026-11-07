@@ -65,9 +65,9 @@ cbuffer Fo4HdrToneMapConstants : register(b13)
     float4 Fo4HdrLutProfileLuminanceRemoval;
     float4 Fo4HdrLutProfileColorRemoval;
 
-    // c19: profile activity and explicit ABI padding.
+    // c19: profile activity, highlight saturation and explicit ABI padding.
     uint Fo4HdrLutProfilesActive;
-    uint Fo4HdrLutProfilesReserved0;
+    float Fo4HdrHighlightSaturation;
     uint Fo4HdrLutProfilesReserved1;
     uint Fo4HdrLutProfilesReserved2;
 }

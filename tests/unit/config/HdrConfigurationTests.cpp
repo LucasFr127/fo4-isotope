@@ -37,6 +37,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.highlights == 0.0);
     FO4HDR_CHECK(shipped.value.shadows == 0.0);
     FO4HDR_CHECK(shipped.value.saturationPercent == 100.0);
+    FO4HDR_CHECK(shipped.value.highlightSaturationPercent == 100.0);
     FO4HDR_CHECK(shipped.value.temperature == 0.0);
     FO4HDR_CHECK(shipped.value.tint == 0.0);
     FO4HDR_CHECK(!shipped.value.selectiveColor.enabled);
@@ -92,7 +93,7 @@ void TestSdrProfileConfiguration()
 
     const auto parsed = ParsePluginConfiguration(MinimalProductionConfiguration() +
         "[General]\nSdrEnabled=0\n"
-        "[SdrImage]\nExposureEV=0.5\nSaturation=120\nColorGradingMethod=Unknown\n"
+        "[SdrImage]\nExposureEV=0.5\nSaturation=120\nHighlightSaturation=60\nColorGradingMethod=Unknown\n"
         "[SdrEffects]\nBloomStrength=40\nVanillaGradeColorStrength=20\n"
         "[SdrSelectiveColor]\nEnabled=1\nRedHue=5\n"
         "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n"
@@ -105,6 +106,7 @@ void TestSdrProfileConfiguration()
     expected.toneMapperParameters.agxContrast = 2.5;
     expected.exposureEv = 0.5;
     expected.saturationPercent = 120.0;
+    expected.highlightSaturationPercent = 60.0;
     expected.bloomStrengthPercent = 40.0;
     expected.vanillaGradeColorPercent = 20.0;
     expected.selectiveColor.enabled = true;
@@ -253,6 +255,7 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.highlights == 0.0);
     FO4HDR_CHECK(parsed.value.shadows == 0.0);
     FO4HDR_CHECK(parsed.value.saturationPercent == 100.0);
+    FO4HDR_CHECK(parsed.value.highlightSaturationPercent == 100.0);
     FO4HDR_CHECK(parsed.value.temperature == 0.0);
     FO4HDR_CHECK(parsed.value.tint == 0.0);
     FO4HDR_CHECK(
@@ -316,6 +319,17 @@ void TestConfigurationEndpoints()
         FO4HDR_CHECK(endpoint.valid);
         FO4HDR_CHECK(endpoint.value.blacks == blacks);
     }
+    for (const auto percent : {"0", "200"})
+    {
+        const auto endpoint = ParsePluginConfiguration(MinimalProductionConfiguration() +
+            "\n[Image]\nHighlightSaturation=" + percent + "\n");
+        FO4HDR_CHECK(endpoint.valid);
+        FO4HDR_CHECK(endpoint.value.highlightSaturationPercent == std::stod(percent));
+    }
+    const auto oversaturated = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "\n[Image]\nHighlightSaturation=200.01\n");
+    FO4HDR_CHECK(!oversaturated.valid &&
+        oversaturated.error == PluginConfigurationError::valueOutOfRange);
     for (const auto key : {"VanillaGradeLuminanceStrength", "VanillaGradeColorStrength"})
         for (const auto endpointValue : {0.0, 100.0})
         {
@@ -367,6 +381,7 @@ void TestExtendedConfiguration()
     FO4HDR_CHECK(parsed.value.highlights == 50.0);
     FO4HDR_CHECK(parsed.value.shadows == -75.0);
     FO4HDR_CHECK(parsed.value.saturationPercent == 125.0);
+    FO4HDR_CHECK(parsed.value.highlightSaturationPercent == 40.0);
     FO4HDR_CHECK(parsed.value.temperature == 20.0);
     FO4HDR_CHECK(parsed.value.tint == -30.0);
     FO4HDR_CHECK(

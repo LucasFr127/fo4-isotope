@@ -165,6 +165,8 @@ struct HdrSettings
     double highlights{};
     double shadows{};
     double saturationPercent{100.0};
+    // Saturation of bright highlights; it shares Saturation's range.
+    double highlightSaturationPercent{100.0};
     double temperature{};
     double tint{};
     SelectiveColorSettings selectiveColor{};
@@ -216,6 +218,7 @@ enum class HdrSettingsValidationError : std::uint8_t
     highlightsOutOfRange,
     shadowsOutOfRange,
     saturationOutOfRange,
+    highlightSaturationOutOfRange,
     temperatureOutOfRange,
     tintOutOfRange,
     toneMapperParametersOutOfRange,
@@ -233,6 +236,7 @@ struct HdrSettingsMath
     double highlightsEv{};
     double shadowsEv{};
     double saturationScale{1.0};
+    double highlightSaturationScale{1.0};
     double vanillaColorGradingBlend{1.0};
     double vanillaGradeLuminanceRemoval{};
     double vanillaGradeColorRemoval{};

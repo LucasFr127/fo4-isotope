@@ -389,7 +389,8 @@ namespace {
         .selectiveColorPlaneA = OperatorColorVector(
             selective.planeA[0], selective.planeA[1], selective.planeA[2]),
         .selectiveColorPlaneB = OperatorColorVector(
-            selective.planeB[0], selective.planeB[1], selective.planeB[2])
+            selective.planeB[0], selective.planeB[1], selective.planeB[2]),
+        .highlightSaturationScale = static_cast<float>(math.highlightSaturationScale)
     };
     for (std::size_t index = 0; index < kSelectiveColorRegionCount; ++index)
         settings.selectiveColorRegions[index] = OperatorColorVector(

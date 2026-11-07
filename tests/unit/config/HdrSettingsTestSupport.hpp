@@ -35,6 +35,7 @@ Blacks=-40
 Highlights=50
 Shadows=-75
 Saturation=125
+HighlightSaturation=40
 Temperature=20
 Tint=-30
 ColorGradingMethod=Affine

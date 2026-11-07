@@ -250,6 +250,7 @@ void PublishReplacementConfiguration(
     bypass.highlightsEv = 0.0F;
     bypass.shadowsEv = 0.0F;
     bypass.saturationScale = 1.0F;
+    bypass.highlightSaturationScale = 1.0F;
     bypass.liveSettingsReserved = 0U;
     bypass.blacksStrength = 0.0F;
     bypass.colorGradingCurve = 0U;

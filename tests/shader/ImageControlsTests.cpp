@@ -208,6 +208,42 @@ struct ImageControlDirectCase
     Texture &directOperatorOutput;
 };
 
+// The Saturation step's chroma scale with only Highlight Saturation set.
+[[nodiscard]] double HighlightSaturationScale(const NativeGradeRgb &source, double highlightSaturation)
+{
+    const double y = ImageControlLuminance(source);
+    const double t = std::clamp((y - 1.0) / 3.0, 0.0, 1.0);
+    double scale = 1.0 + (highlightSaturation - 1.0) * t * t * (3.0 - 2.0 * t);
+    for (const double channel : source)
+        if (scale > 1.0 && channel < y)
+            scale = std::min(scale, y / (y - channel));
+    return scale;
+}
+
+[[nodiscard]] NativeGradeRgb HighlightSaturationOracle(const NativeGradeRgb &source, double highlightSaturation)
+{
+    const double y = ImageControlLuminance(source);
+    const double scale = HighlightSaturationScale(source, highlightSaturation);
+    NativeGradeRgb result{};
+    for (std::size_t c = 0; c < 3; ++c)
+        result[c] = y + (source[c] - y) * scale;
+    return result;
+}
+
+void CheckHighlightSaturationPixel(const NativeGradeRgb &source, const NativeGradeRgb &actual,
+                                   float highlightSaturation)
+{
+    const auto expected = HighlightSaturationOracle(source, highlightSaturation);
+    const double tolerance = 2.0e-6 + 1.0e-5 * std::max({source[0], source[1], source[2]});
+    FO4HDR_WARP_CHECK(std::abs(ImageControlLuminance(actual) - ImageControlLuminance(source)) <= tolerance);
+    for (std::size_t c = 0; c < 3; ++c) {
+        FO4HDR_WARP_CHECK(std::isfinite(actual[c]) && actual[c] >= 0);
+        FO4HDR_WARP_CHECK(std::abs(actual[c] - expected[c]) <= tolerance);
+    }
+    if (highlightSaturation == 1)
+        FO4HDR_WARP_CHECK(actual == source);
+}
+
 ToneMapConstants ImageControlProductionSettings(TestedToneMapper mapper, float blacks, float gradeStrength)
 {
     const auto algorithm = ProductionAlgorithm(mapper);
@@ -383,6 +419,38 @@ struct ImageControlFixture
         }
     }
 
+    void CheckHighlightSaturation() const
+    {
+        // Below, inside and above the band, a neutral, gamut-bound primaries and black.
+        constexpr std::array<Float4, kWidth> corpus{{{0.5F, 0.25F, 0.125F, 1},
+                                                     {4, 2, 1, 1},
+                                                     {8, 4, 2, 1},
+                                                     {16, 4, 1, 1},
+                                                     {6, 6, 6, 1},
+                                                     {0, 6, 0, 1},
+                                                     {20, 0, 0, 1},
+                                                     {0, 0, 0, 1}}};
+        D3D11_SUBRESOURCE_DATA data{corpus.data(), sizeof(corpus), 0};
+        auto input =
+            CreateTexture(*device.device.Get(), DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_SHADER_RESOURCE, &data);
+        std::array<ID3D11ShaderResourceView *, 8> resources{
+            input.srv.Get(),    nullptr, nullptr, identity.srv.Get(), identity.srv.Get(), identity.srv.Get(),
+            identity.srv.Get(), nullptr};
+        for (const float highlightSaturation : {0.0F, 0.5F, 1.0F, 2.0F}) {
+            ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
+            settings.vanillaGradeStrength = 0;
+            settings.highlightSaturation = highlightSaturation;
+            const auto constants = CreateConstantBuffer(*device.device.Get(), settings);
+            auto *target = controlsOutput.rtv.Get();
+            DrawFullscreen(*device.context.Get(), {vertexShader, shader.Get(), lutConstants.Get(), constants.Get(),
+                                                   resources.data(), 8, samplers.data(), 8, &target, 1});
+            const auto actual = ReadControls();
+            for (std::size_t i = 0; i < kWidth; ++i)
+                CheckHighlightSaturationPixel({corpus[i].red, corpus[i].green, corpus[i].blue}, actual[i],
+                                              highlightSaturation);
+        }
+    }
+
     void CheckDirectOperator(const ImageControlDirectCase &test) const
     {
         const auto &[mapper, lut, directCorpus, directOperatorShader, directOperatorOutput] = test;
@@ -500,10 +568,11 @@ void VerifyImageControls(Device &device, ID3D11VertexShader *vertexShader, ID3D1
     const auto maxArithmeticError = fixture.CheckArithmetic();
     fixture.CheckExtremes();
     fixture.CheckAdaptation();
+    fixture.CheckHighlightSaturation();
     fixture.CheckProduction();
     std::cout << "HDR grading Blacks: independent controls max_abs=" << maxArithmeticError
-              << "; default bypass, neutral ramps, mixed-color ratios, knee, Shadows/Contrast and three-operator PQ "
-                 "checked\n";
+              << "; default bypass, neutral ramps, mixed-color ratios, knee, Shadows/Contrast, Highlight Saturation "
+                 "and three-operator PQ checked\n";
 }
 
 struct RgbRatioRemovalPixel

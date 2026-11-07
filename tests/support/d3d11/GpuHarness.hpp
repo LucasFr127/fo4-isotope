@@ -222,7 +222,8 @@ struct ToneMapConstants
     Float4 lutProfileLuminanceRemoval{};
     Float4 lutProfileColorRemoval{};
     std::uint32_t lutProfilesActive{};
-    std::array<std::uint32_t, 3> lutProfilesReserved{};
+    float highlightSaturation{1.0F};
+    std::array<std::uint32_t, 2> lutProfilesReserved{};
 };
 static_assert(sizeof(ToneMapConstants) == 320);
 static_assert(offsetof(ToneMapConstants, blacksStrength) == 60);
@@ -236,6 +237,7 @@ static_assert(offsetof(ToneMapConstants, selectiveColorPlaneB) +
 static_assert(offsetof(ToneMapConstants, lutProfileLuminanceRemoval) == 272);
 static_assert(offsetof(ToneMapConstants, lutProfileColorRemoval) == 288);
 static_assert(offsetof(ToneMapConstants, lutProfilesActive) == 304);
+static_assert(offsetof(ToneMapConstants, highlightSaturation) == 308);
 
 [[nodiscard]] ComPtr<ID3D11Buffer> CreateConstantBuffer(
     ID3D11Device& device, ToneMapConstants constants);

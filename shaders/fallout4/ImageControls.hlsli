@@ -75,6 +75,7 @@ bool Fo4HdrOtherImageControlsAreNeutral()
         Fo4HdrHighlightsEv == 0.0f &&
         Fo4HdrContrastSlope == 1.0f &&
         Fo4HdrSaturation == 1.0f &&
+        Fo4HdrHighlightSaturation == 1.0f &&
         all(Fo4HdrColorAdaptationRow0 == float4(1.0f, 0.0f, 0.0f, 0.0f)) &&
         all(Fo4HdrColorAdaptationRow1 == float4(0.0f, 1.0f, 0.0f, 0.0f)) &&
         all(Fo4HdrColorAdaptationRow2 == float4(0.0f, 0.0f, 1.0f, 0.0f));
@@ -114,7 +115,9 @@ float3 Fo4HdrApplyImageControls(float3 color)
         color = Fo4HdrApplyBlacks(color);
         luminance = dot(color, kBt709Luma);
         const float3 chroma = color - luminance.xxx;
-        float boundedSaturation = Fo4HdrSaturation;
+        // Highlight Saturation fades in over the Highlights band.
+        float boundedSaturation = Fo4HdrSaturation * lerp(1.0f,
+            Fo4HdrHighlightSaturation, smoothstep(1.0f, 4.0f, luminance));
         if (boundedSaturation > 1.0f)
         {
             // Preserve luminance while preventing an oversaturation request from
