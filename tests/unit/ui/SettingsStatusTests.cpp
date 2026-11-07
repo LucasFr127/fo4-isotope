@@ -55,24 +55,34 @@ void TestSdrModeReasonText()
 }
 
 
-// The status names the first reason the response cannot reach the current draw.
-void TestWeatherResponseStatusText()
+// The status names the first reason the response cannot reach the current draw;
+// only a bypass is a warning, and an active response needs no feedback.
+void TestWeatherResponseStatus()
 {
-    const auto text = [](const WeatherLutResponseView& view, bool active) {
-        return std::string_view{WeatherResponseStatusText(view, active)};
+    const auto value = [](const WeatherLutResponseView& view, bool active) {
+        return std::string_view{WeatherResponseStatus(view, active).value};
+    };
+    const auto info = [](const WeatherLutResponseView& view, bool active) {
+        const auto detail = WeatherResponseStatus(view, active).detail;
+        return detail.text != nullptr && detail.severity == StatusSeverity::info;
     };
     WeatherLutResponseView view{};
-    FO4HDR_CHECK(text(view, false).starts_with("Off"));
-    FO4HDR_CHECK(text(view, true).starts_with("Waiting"));
+    FO4HDR_CHECK(value(view, false) == "Off" && info(view, false));
+    FO4HDR_CHECK(value(view, true) == "Waiting" && info(view, true));
     view.validatedSlots = 0b11U;
-    FO4HDR_CHECK(text(view, true).starts_with("No weather response"));
+    FO4HDR_CHECK(value(view, true) == "Not recognized" && info(view, true));
     view.automaticSlots = 0b01U;
-    FO4HDR_CHECK(text(view, true).starts_with("Partly active"));
+    FO4HDR_CHECK(value(view, true) == "Partly active" && info(view, true));
     view.automaticSlots = 0b11U;
-    FO4HDR_CHECK(text(view, true).starts_with("Active"));
+    FO4HDR_CHECK(value(view, true) == "Active");
+    FO4HDR_CHECK(WeatherResponseStatus(view, true).detail.text == nullptr);
     view.gradingBypassed = true;
-    FO4HDR_CHECK(text(view, true).starts_with("Grading replacement bypassed"));
-    FO4HDR_CHECK(text(view, false).starts_with("Grading replacement bypassed"));
+    for (const auto active : {true, false})
+    {
+        const auto state = WeatherResponseStatus(view, active);
+        FO4HDR_CHECK(std::string_view{state.value} == "Bypassed");
+        FO4HDR_CHECK(state.detail.severity == StatusSeverity::warning);
+    }
 }
 
 }  // namespace
@@ -81,7 +91,7 @@ void TestSettingsStatus()
 {
     TestHdrRequestStatus();
     TestSdrModeReasonText();
-    TestWeatherResponseStatusText();
+    TestWeatherResponseStatus();
 }
 
 }  // namespace fo4hdr::tests

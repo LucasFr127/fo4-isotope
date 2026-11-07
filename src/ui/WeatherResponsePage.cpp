@@ -160,12 +160,20 @@ void DrawContributors(const WeatherLutResponseView& view) noexcept
     ui::EndTable();
 }
 
+// Like other DMUI status pages: a tinted value, then its messages by severity.
 void DrawStatus(SettingsPage& page, bool active) noexcept
 {
     const auto& view = page.view.weatherLutResponse;
-    DrawPageText(page, WeatherResponseStatusText(view, active));
-    for (const auto* detail : {view.status, view.imageSpaceStatus})
-        if (detail != nullptr && detail[0] != '\0') DrawPageText(page, detail);
+    const auto scene = WeatherResponseStatus(view, active);
+    const auto tone = scene.detail.severity != StatusSeverity::info ? dmui::TextTone::kWarning :
+        scene.detail.text == nullptr ? dmui::TextTone::kSuccess : dmui::TextTone::kInherit;
+    DrawSection(page, "status", "Status", [&] {
+        dmui::FieldScope field{page.client, "current-scene", "Current Scene",
+            "Whether the weather response reaches the current scene's color grading."};
+        if (field.Visible()) (void)dmui::DrawStyledText(page.client, scene.value, {.tone = tone});
+    });
+    const std::array messages{scene.detail, view.status, view.imageSpaceStatus};
+    DrawPageMessages(page, messages);
 }
 
 bool g_advancedExpanded{};

@@ -15,14 +15,28 @@
 
 namespace fo4hdr {
 
+enum class StatusSeverity : std::uint8_t
+{
+    info,
+    warning,
+    error
+};
+
+// A renderer status line; the menu shows it as Info, Warning or Error feedback.
+struct StatusMessage
+{
+    const char* text{};
+    StatusSeverity severity{};
+};
+
 struct WeatherLutResponseView
 {
     std::array<LutSnapshot, 4> currentLuts{};
     std::uint32_t validatedSlots{};
-    const char* status{};
+    StatusMessage status{};
     std::array<ImageSpaceIdentity, 4> currentImageSpaces{};
     std::uint32_t imageSpaceValidSlots{};
-    const char* imageSpaceStatus{};
+    StatusMessage imageSpaceStatus{};
     std::array<std::uint32_t, 4> referencingContexts{};
     std::array<ResolvedLutGrade, 4> resolved{};
     std::uint32_t automaticSlots{};

@@ -18,6 +18,7 @@ using Text = std::array<char, 256>;
 
 constexpr double kMinimumPeakNits{400.0}, kMaximumPeakNits{2000.0};
 constexpr double kMinimumWhiteNits{100.0}, kMaximumWhiteNits{300.0};
+constexpr auto kDisplayDescription = "The display the game runs on, as Windows reports it.";
 
 [[nodiscard]] bool Reported(float nits) noexcept
 {
@@ -31,19 +32,22 @@ constexpr double kMinimumWhiteNits{100.0}, kMaximumWhiteNits{300.0};
     return text;
 }
 
-// The SDR menu shows why HDR is off, then which color controls still act.
-void DrawSdrOutputNotes(SettingsPage& page) noexcept
+// The SDR menu shows why HDR is off and whether the color controls act; HDR has no notes.
+void DrawOutputNotes(SettingsPage& page) noexcept
 {
     const auto& view = page.view;
-    DrawPageText(page, SdrModeReasonText(view), dmui::TextTone::kWarning);
-    if (view.enbDetected)
-        DrawPageText(page, "ENB is installed, so the color settings have no effect and "
-            "ENB's own effects stay intact.", dmui::TextTone::kWarning);
-    else if (view.sdrControlsUnavailable)
-        DrawPageText(page, "The SDR color settings are unavailable this session because "
-            "their shaders could not be built. Restart the game to retry.", dmui::TextTone::kError);
-    else
-        DrawPageText(page, "SDR output is active. The color settings apply to the game's SDR image.");
+    std::array<StatusMessage, 2> notes{};
+    if (page.sdr)
+    {
+        notes[0] = {SdrModeReasonText(view), StatusSeverity::warning};
+        notes[1] = view.enbDetected ? StatusMessage{"ENB is installed, so the color settings have no "
+                "effect and ENB's own effects stay intact.", StatusSeverity::warning} :
+            view.sdrControlsUnavailable ? StatusMessage{"The SDR color settings are unavailable this "
+                "session because their shaders could not be built. Restart the game to retry.",
+                StatusSeverity::error} :
+            StatusMessage{"SDR output is active. The color settings apply to the game's SDR image."};
+    }
+    DrawPageMessages(page, notes);
 }
 
 void DrawHdrRequest(SettingsPage& page) noexcept
@@ -98,7 +102,8 @@ void DrawDisplayRows(SettingsPage& page) noexcept
         display.friendlyName.data() : display.deviceName.data();
     (void)WideCharToMultiByte(CP_UTF8, 0, wide, -1, name.data(),
         static_cast<int>(name.size()), nullptr, nullptr);
-    DrawValueRow(page, {"display-name", "Display"}, name[0] != '\0' ? name.data() : "Unknown");
+    DrawValueRow(page, {"display-name", "Display", kDisplayDescription},
+        name[0] != '\0' ? name.data() : "Unknown");
     if (DrawReportedValue(page, {"reported-peak", "Reported Peak",
             "Use copies it to Peak Brightness, within the supported range."}, display.peakNits))
     {
@@ -106,7 +111,8 @@ void DrawDisplayRows(SettingsPage& page) noexcept
             std::round(static_cast<double>(display.peakNits)), kMinimumPeakNits, kMaximumPeakNits);
         page.commitRequested = true;
     }
-    DrawValueRow(page, {"reported-full-frame", "Reported Full Frame"},
+    DrawValueRow(page, {"reported-full-frame", "Reported Full Frame",
+        "The brightness the display reports for a fully bright screen. For reference only."},
         Nits(display.fullFrameNits).data());
     if (DrawReportedValue(page, {"windows-sdr-white", "Windows SDR White",
             "Use copies it to Menu & HUD White, within the supported range."}, display.sdrWhiteNits))
@@ -123,7 +129,8 @@ void DrawDisplay(SettingsPage& page) noexcept
         if (page.view.display.known)
             DrawDisplayRows(page);
         else
-            DrawValueRow(page, {"display-name", "Display"}, "Not reported. Set brightness manually.");
+            DrawValueRow(page, {"display-name", "Display", kDisplayDescription},
+                "Not reported. Set brightness manually.");
     });
 }
 
@@ -294,7 +301,7 @@ void DrawToneMapper(SettingsPage& page) noexcept
 
 void DrawOutputPage(SettingsPage& page) noexcept
 {
-    if (page.sdr) DrawSdrOutputNotes(page);
+    DrawOutputNotes(page);
     DrawHdrRequest(page);
     if (!page.sdr)
     {

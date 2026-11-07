@@ -61,13 +61,13 @@ dmui::Client& Client() noexcept
     return nullptr;
 }
 
-// Problems that affect every page come first, in the error tone.
-void DrawPageProblems(SettingsPage& page) noexcept
+// Problems that affect every page, drawn after the page's own info and warnings.
+[[nodiscard]] std::array<StatusMessage, 2> PageProblems(const SettingsMenuView& view) noexcept
 {
-    if (page.view.liveSettingsError)
-        DrawPageText(page, "The last change could not be applied, so the previous settings stay "
-            "active. Change a setting to retry.", dmui::TextTone::kError);
-    DrawPageText(page, SaveProblemText(), dmui::TextTone::kError);
+    constexpr auto error = StatusSeverity::error;
+    return {StatusMessage{view.liveSettingsError ? "The last change could not be applied, so the "
+                "previous settings stay active. Change a setting to retry." : nullptr, error},
+        StatusMessage{SaveProblemText(), error}};
 }
 
 // Pages edit only when this callback runs on the thread FO4Isotope presents on.
@@ -81,7 +81,9 @@ void DrawPageProblems(SettingsPage& page) noexcept
     return nullptr;
 }
 
-template <auto Draw>
+// OwnMessages pages call DrawPageMessages themselves, so the shared problems
+// follow their own info and warnings.
+template <auto Draw, bool OwnMessages = false>
 void DrawSettingsPage() noexcept
 {
     auto& client = Client();
@@ -96,8 +98,8 @@ void DrawSettingsPage() noexcept
     }
     const auto defaults = g_state.sdrProfile ? DefaultSdrSettings() : HdrSettings{};
     SettingsPage page{client, g_state.draft, defaults, g_state.interfaceDraft.hdrEnabled,
-        view, g_state.sdrProfile, g_state.commitRequested};
-    DrawPageProblems(page);
+        view, g_state.sdrProfile, g_state.commitRequested, PageProblems(view)};
+    if constexpr (!OwnMessages) DrawPageMessages(page, {});
     if constexpr (std::is_invocable_v<decltype(Draw), SettingsPage&, const SettingsMenuRenderer&>)
         Draw(page, g_renderer);
     else
@@ -160,7 +162,7 @@ const std::array kCategories{
 const std::array kPages{
     PageEntry{{.id = "output", .displayName = "Output", .categoryId = "display",
                   .summary = "HDR output and display brightness.", .sortKey = 0, .iconName = "sun"},
-        &DrawSettingsPage<DrawOutputPage>},
+        &DrawSettingsPage<DrawOutputPage, true>},
     PageEntry{{.id = "tone-mapping", .displayName = "Tone Mapping", .categoryId = "display",
                   .summary = "Tone mapper and its look.", .sortKey = 100, .iconName = "chart-line"},
         &DrawSettingsPage<DrawToneMappingPage>},
@@ -179,7 +181,7 @@ const std::array kPages{
     PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "color",
                   .summary = "Color grading response per weather.", .sortKey = 300,
                   .iconName = "cloud-sun"},
-        &DrawSettingsPage<DrawWeatherResponsePage>}};
+        &DrawSettingsPage<DrawWeatherResponsePage, true>}};
 
 [[nodiscard]] bool RegisterPages() noexcept
 {

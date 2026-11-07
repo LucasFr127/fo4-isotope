@@ -5,6 +5,7 @@
 
 #include <DearModdingUI/Client.h>
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <span>
@@ -24,6 +25,8 @@ struct SettingsPage
     const SettingsMenuView& view;
     bool sdr;
     bool& commitRequested;
+    // Problems that affect every page; DrawPageMessages draws them.
+    std::array<StatusMessage, 2> problems{};
 };
 
 struct FieldText
@@ -67,6 +70,9 @@ void DrawValueRow(SettingsPage& page, const FieldText& text, std::string_view va
 // Muted text for a page-wide note, or the error tone for a problem; null draws nothing.
 void DrawPageText(SettingsPage& page, const char* text,
     dmui::TextTone tone = dmui::TextTone::kMuted) noexcept;
+// A page's own status messages and the problems shared by every page, as info
+// (muted), then warnings, then errors. Null or empty text draws nothing.
+void DrawPageMessages(SettingsPage& page, std::span<const StatusMessage> messages) noexcept;
 // The last row of every page; true when pressed.
 [[nodiscard]] bool DrawRestoreDefaultsRow(SettingsPage& page, bool modified) noexcept;
 

@@ -111,7 +111,7 @@ WeatherLutResponseView UiWeatherLutResponseSnapshot() noexcept
             g_lutInspectorGradingBypassed};
     WeatherLutResponseView view;
     view.status = NativeLutObserverMessage();
-    view.imageSpaceStatus = "Waiting for a recognized ImageSpace blend.";
+    view.imageSpaceStatus = kImageSpaceWaitingStatus;
     return view;
 }
 

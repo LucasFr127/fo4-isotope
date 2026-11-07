@@ -54,6 +54,28 @@ void DrawPageText(SettingsPage& page, const char* text, dmui::TextTone tone) noe
         (void)dmui::DrawStyledText(page.client, text, {.tone = tone, .wrapped = true});
 }
 
+[[nodiscard]] static bool HasText(const StatusMessage& message) noexcept
+{
+    return message.text != nullptr && message.text[0] != '\0';
+}
+
+void DrawPageMessages(SettingsPage& page, std::span<const StatusMessage> messages) noexcept
+{
+    constexpr std::array tones{dmui::TextTone::kMuted, dmui::TextTone::kWarning, dmui::TextTone::kError};
+    const auto draw = [&page, &tones](std::span<const StatusMessage> list, std::size_t severity) {
+        for (const auto& message : list)
+        {
+            if (static_cast<std::size_t>(message.severity) != severity) continue;
+            if (HasText(message)) DrawPageText(page, message.text, tones[severity]);
+        }
+    };
+    for (std::size_t severity = 0; severity < tones.size(); ++severity)
+    {
+        draw(messages, severity);
+        draw(page.problems, severity);
+    }
+}
+
 bool DrawRestoreDefaultsRow(SettingsPage& page, bool modified) noexcept
 {
     (void)page.client.DrawSectionHeader("Defaults");

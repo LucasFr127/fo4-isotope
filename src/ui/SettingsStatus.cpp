@@ -54,17 +54,20 @@ const char* SdrModeReasonText(const SettingsMenuView& view) noexcept
     return index < kSdrModeReasonTexts.size() ? kSdrModeReasonTexts[index] : nullptr;
 }
 
-const char* WeatherResponseStatusText(const WeatherLutResponseView& view, bool active) noexcept
+WeatherResponseState WeatherResponseStatus(const WeatherLutResponseView& view, bool active) noexcept
 {
-    if (view.gradingBypassed) return "Grading replacement bypassed: the response is not applied.";
-    if (!active) return "Off. The Global Grade settings apply.";
+    if (view.gradingBypassed)
+        return {"Bypassed", {"Grading replacement bypassed: the response is not applied.",
+            StatusSeverity::warning}};
+    if (!active) return {"Off", {"The Global Grade settings apply."}};
     if (view.validatedSlots == 0)
-        return "Waiting for a recognized vanilla LUT draw. The Global Grade settings apply.";
+        return {"Waiting", {"Waiting for a recognized vanilla LUT draw. The Global Grade settings apply."}};
     if (view.automaticSlots == 0)
-        return "No weather response is recognized for this scene. The Global Grade settings apply.";
+        return {"Not recognized",
+            {"No weather response is recognized for this scene. The Global Grade settings apply."}};
     if ((view.automaticSlots & view.validatedSlots) != view.validatedSlots)
-        return "Partly active: some contributors use the Global Grade settings.";
-    return "Active for the current scene.";
+        return {"Partly active", {"Some contributors use the Global Grade settings."}};
+    return {"Active", {}};
 }
 
 }  // namespace fo4hdr
