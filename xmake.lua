@@ -213,7 +213,7 @@ target_end()
 target("FO4Isotope")
     add_rules("fo4hdr.plugin", {
         name = "FO4Isotope",
-        author = "FO4Isotope contributors",
+        author = "Lucas Farias",
         description =
             "CommonLibF4 HDR output plugin for Fallout 4"
     })

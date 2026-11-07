@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Thatcher Freeman
-// Copyright FO4Isotope contributors
+// Copyright Lucas Farias
 // Upstream: thatcherfreeman/utility-dctls@a495531de3e4704a0a6e0113daa69be303172ed0/Effects/Smooth Tetra Skin.dctl
 // Adapted for FO4Isotope: linear input only, fixed bounded hue centers,
 // shared stabilized weights, CPU-prepared neutral planes, and HDR-domain

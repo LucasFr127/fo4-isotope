@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2023 Thatcher Freeman
-// Copyright FO4Isotope contributors
+// Copyright Lucas Farias
 // Upstream: thatcherfreeman/utility-dctls@a495531de3e4704a0a6e0113daa69be303172ed0/Effects/Smooth Tetra Skin.dctl
 // Linear-only bounded adaptation for FO4Isotope. The cylindrical conversion
 // is attributed by the upstream source to Juan Pablo Zambrano.
