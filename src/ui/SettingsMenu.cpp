@@ -172,14 +172,14 @@ const std::array kPages{
                   .summary = "How the game's color grading applies.", .sortKey = 100,
                   .iconName = "palette"},
         &DrawSettingsPage<DrawColorGradingPage>},
-    PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "color",
-                  .summary = "Color grading response per weather.", .sortKey = 200,
-                  .iconName = "cloud-sun"},
-        &DrawSettingsPage<DrawWeatherResponsePage>},
     PageEntry{{.id = "selective-color", .displayName = "Selective Color", .categoryId = "color",
-                  .summary = "Hue, saturation and brightness per color.", .sortKey = 300,
+                  .summary = "Hue, saturation and brightness per color.", .sortKey = 200,
                   .iconName = "swatches"},
-        &DrawSettingsPage<DrawSelectiveColorPage>}};
+        &DrawSettingsPage<DrawSelectiveColorPage>},
+    PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "color",
+                  .summary = "Color grading response per weather.", .sortKey = 300,
+                  .iconName = "cloud-sun"},
+        &DrawSettingsPage<DrawWeatherResponsePage>}};
 
 [[nodiscard]] bool RegisterPages() noexcept
 {
