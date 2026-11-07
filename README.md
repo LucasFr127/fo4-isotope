@@ -8,7 +8,7 @@ modern tone mapping (GT7, AgX, ACES 2) and color grading to Fallout 4, in HDR
 or SDR. On an HDR display, it also adds fast, native HDR10 output. On an SDR
 display, you get the same tone mappers and color tools, with the defaults
 matching the vanilla image until you change them. Adjust everything in the
-in-game menu (default hotkey: F8).
+in-game DearModdingUI menu.
 
 Download: [Nexus Mods](https://www.nexusmods.com/fallout4/mods/109207)
 
@@ -42,12 +42,14 @@ HDR and SDR keep separate settings, so switching modes never mixes them up.
   [Address Library for F4SE Plugins](https://www.nexusmods.com/fallout4/mods/47327)
 - For HDR, enable HDR in Windows. Isotope uses HDR whenever Windows HDR is on
   (not Auto HDR) and SDR otherwise
+- DearModdingUI, for the in-game settings menu. Without it, Isotope runs from
+  the settings in `FO4Isotope.ini`
 
 ## Usage
 
-Press **F8** to open the settings panel. HDR can be turned on or off there and
-applies at the next game start. The shortcut and default settings can be
-changed in `FO4Isotope.ini`.
+Open Isotope's pages in the DearModdingUI menu. HDR can be turned on or off
+there and applies at the next game start. The default settings can be changed
+in `FO4Isotope.ini`.
 
 ## Building from source
 
@@ -86,6 +88,8 @@ After the Debug build, run the full suite, then build and test ReleaseDbg:
 Licensed under **GPL-3.0-or-later with the CommonLibF4
 exceptions**. See the
 [combined license](LICENSES/LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions.txt).
-License texts are collected in `LICENSES/`. Third-party files retain their own
+The files that compile the DearModdingUI API headers are GPL-3.0-only, without
+the CommonLib exceptions. License texts are collected in `LICENSES/`.
+Third-party files retain their own
 notices and licenses; attributions are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
