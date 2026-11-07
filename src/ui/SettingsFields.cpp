@@ -51,6 +51,7 @@ void ForEachMessage(const StatusList& messages, Visit&& visit)
 
 [[nodiscard]] dmui::SettingDescriptor Describe(const FieldText& text)
 {
+    // applyTiming keeps its default: kImmediate only appends "Applies now.", which live edits don't need.
     dmui::SettingDescriptor setting;
     setting.id = text.id;
     setting.label = text.label;
@@ -154,7 +155,6 @@ dmui::SettingDescriptor& SettingsPageBuilder::Number(const FieldText& text,
             value = shown == defaultValue * scale ? defaultValue : shown / scale;
             return value * scale;
         });
-    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
     setting.isModified = [field, defaultValue] { return field(*g_frame.draft) != defaultValue; };
     setting.isDirty = [field] { return field(*g_frame.draft) != field(*g_frame.session); };
     setting.onEdit = range.publish == Publish::whileDragging ? PublishWhileDragging : PublishOnRelease;
@@ -171,7 +171,6 @@ dmui::SettingDescriptor& SettingsPageBuilder::Toggle(const FieldText& text, Sett
     setting.binding = dmui::BindSetting(
         [field] { return field(*g_frame.draft); },
         [field](bool value) { return field(*g_frame.draft) = value; });
-    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
     setting.isModified = [field, defaultValue] { return field(*g_frame.draft) != defaultValue; };
     setting.isDirty = [field] { return field(*g_frame.draft) != field(*g_frame.session); };
     setting.onEdit = PublishOnRelease;

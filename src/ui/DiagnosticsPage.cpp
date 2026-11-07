@@ -90,7 +90,6 @@ void AddStatusRows(SettingsPageBuilder& page)
         set(value);
         return value;
     });
-    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
     setting.showReset = false;
     return setting;
 }

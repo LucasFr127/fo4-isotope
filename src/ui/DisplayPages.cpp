@@ -273,7 +273,7 @@ void AddToneMapper(SettingsPageBuilder& page)
         }, sdr ? entries : entries.subspan(1)).resolveFeedback = PendingOperatorFeedback;
     if (!sdr) return;
     // Vanilla follows the Weather Response page instead.
-    page.Toggle({"sdr-weather-response", "Weather Response",
+    page.Toggle({"sdr-weather-response", "Weather Response (Recommended)",
         "Turns on Weather Response while this tone mapper replaces the game's curve."},
         [](HdrSettings& settings) -> bool& { return settings.sdrOperatorWeatherResponse; })
         .isVisible = [] { return Draft().productionAlgorithm != native; };

@@ -168,7 +168,6 @@ dmui::SettingDescriptor& SettingsPageBuilder::Choice(const FieldText& text,
             SelectChoice(entries, selected, value);
             return ChoiceKey(entries, value);
         });
-    setting.applyTiming = dmui::SettingApplyTiming::kImmediate;
     setting.isModified = [field, defaultValue] {
         return field(*CurrentSettingsFrame().draft) != defaultValue;
     };
