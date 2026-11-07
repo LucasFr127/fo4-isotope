@@ -2,11 +2,14 @@
 
 #include "../UnitTestSuite.hpp"
 
+#include "d3d11/ConstantBufferRanges.hpp"
 #include "d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 #include "TestHarness.hpp"
 
 #include <d3d11_1.h>
 #include <wrl/client.h>
+#include <cstddef>
+#include <cstring>
 
 namespace fo4hdr::tests {
 namespace {
@@ -127,6 +130,61 @@ void VerifyOrdinaryFallbackAndRecapture(WarpContext& warp)
     FO4HDR_CHECK(ReferenceCount(second.Get()) == secondBoundReferenceCount);
 }
 
+// High FPS Physics Fix's draw-call counter swaps the context's vtable for a copy of
+// its 115 D3D11.0 slots. This copy ends at a no-access page, so a D3D11.1 call
+// through the object's current table faults instead of reading past it.
+void VerifyTaggedTableUnderForeignD3D11_0Copy(WarpContext& warp)
+{
+    auto original = CreateConstants(warp.device.Get());
+    auto replacement = CreateConstants(warp.device.Get());
+    FO4HDR_CHECK(original && replacement);
+    if (!original || !replacement) return;
+
+    constexpr UINT slot = 3;
+    constexpr UINT originalFirst = 16;
+    constexpr UINT originalCount = 16;
+    ID3D11Buffer* originalRaw = original.Get();
+    warp.context1->CSSetConstantBuffers1(slot, 1, &originalRaw, &originalFirst,
+        &originalCount);
+
+    SYSTEM_INFO system{};
+    GetSystemInfo(&system);
+    auto* pages = static_cast<std::byte*>(VirtualAlloc(nullptr, 2 * system.dwPageSize,
+        MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    DWORD protection{};
+    auto** object = reinterpret_cast<void***>(warp.context.Get());
+    void** const table = *object;
+    const bool tagged = pages &&
+        VirtualProtect(pages + system.dwPageSize, system.dwPageSize, PAGE_NOACCESS, &protection) &&
+        SUCCEEDED(warp.context->SetPrivateData(kOriginalContextTable, sizeof(table), &table));
+    FO4HDR_CHECK(tagged);
+    if (tagged)
+    {
+        constexpr std::size_t kContextBaseSlots = 115;
+        auto** copy = reinterpret_cast<void**>(pages + system.dwPageSize) - kContextBaseSlots;
+        std::memcpy(copy, table, kContextBaseSlots * sizeof(void*));
+        *object = copy;
+        {
+            ScopedD3D11ComputeConstantBuffer saved;
+            saved.Capture(warp.context.Get(), warp.context1.Get(), slot);
+            ID3D11Buffer* replacementRaw = replacement.Get();
+            warp.context->CSSetConstantBuffers(slot, 1, &replacementRaw);
+        }
+        *object = table;
+    }
+    (void)warp.context->SetPrivateData(kOriginalContextTable, 0, nullptr);
+    if (pages) VirtualFree(pages, 0, MEM_RELEASE);
+
+    ComPtr<ID3D11Buffer> restored;
+    UINT restoredFirst{};
+    UINT restoredCount{};
+    warp.context1->CSGetConstantBuffers1(slot, 1, &restored, &restoredFirst,
+        &restoredCount);
+    FO4HDR_CHECK(restored.Get() == original.Get());
+    FO4HDR_CHECK(restoredFirst == originalFirst);
+    FO4HDR_CHECK(restoredCount == originalCount);
+}
+
 } // namespace
 
 void RunScopedD3D11ComputeConstantBufferTests()
@@ -138,6 +196,8 @@ void RunScopedD3D11ComputeConstantBufferTests()
     VerifyRangedContext1Restoration(warp);
     warp.context->ClearState();
     VerifyOrdinaryFallbackAndRecapture(warp);
+    warp.context->ClearState();
+    VerifyTaggedTableUnderForeignD3D11_0Copy(warp);
     warp.context->ClearState();
 }
 

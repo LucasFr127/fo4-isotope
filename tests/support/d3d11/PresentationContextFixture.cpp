@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "PresentationContextFixture.hpp"
+#include "d3d11/ConstantBufferRanges.hpp"
 #include "reference/ShaderReference.hpp"
 #include "FrameTrace.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
@@ -103,6 +104,8 @@ void PresentationContextFixture::InstallHooks()
     if (!record) throw std::runtime_error("Context hook test did not publish a record");
     FO4HDR_WARP_CHECK(*reinterpret_cast<void***>(device.context.Get()) == record->shadow.data());
     FO4HDR_WARP_CHECK(record->shadow.header == header);
+    FO4HDR_WARP_CHECK(OriginalContextTable(g_rendererDevice.activeContext1.Get()) ==
+        record->originalVtable);
     if (!g_configuration.productionRequested)
     {
         for (const auto slot : {kContextDispatch, kContextDispatchIndirect,

@@ -27,6 +27,7 @@
 #include "../ShaderRegistry.hpp"
 #include "../resources/ScenePromotionPolicy.hpp"
 #include "../resources/PresentationResources.hpp"
+#include "../d3d11/ConstantBufferRanges.hpp"
 #include "../d3d11/PresentationSwapChain.hpp"
 
 #include <wrl/client.h>
@@ -503,7 +504,10 @@ template <std::size_t Count>
     const auto slots = DiscoverVtableSlots(current, kContextBaseSlots);
     if (slots == 0) return false;
     if (!PrepareContextRecord(record, current, slots)) return false;
-    return PublishObjectShadow(context, *record, current);
+    if (!PublishObjectShadow(context, *record, current)) return false;
+    // Untagged, D3D11.1 range calls fall back to the object's current table.
+    (void)context->SetPrivateData(kOriginalContextTable, sizeof(current), &current);
+    return true;
 }
 
 [[nodiscard]] bool PrepareSwapChainRecord(SwapChainRecord* record,

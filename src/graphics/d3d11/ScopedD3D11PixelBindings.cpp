@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ScopedD3D11PixelBindings.hpp"
+#include "ConstantBufferRanges.hpp"
 
 namespace fo4hdr {
 
@@ -39,9 +40,8 @@ void ScopedD3D11PixelBindings::Reset() noexcept
     }
     auto* constantBuffer = previousConstantBuffer_.Get();
     if (context1_)
-        context1_->PSSetConstantBuffers1(constantBufferSlot_, 1,
-            &constantBuffer, &previousFirstConstant_,
-            &previousNumConstants_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::pixel, constantBufferSlot_)
+            .Set(&constantBuffer, &previousFirstConstant_, &previousNumConstants_);
     else
         context_->PSSetConstantBuffers(
             constantBufferSlot_, 1, &constantBuffer);
@@ -104,9 +104,9 @@ void ScopedD3D11PixelBindings::PrepareContext(ID3D11DeviceContext* context, ID3D
 void ScopedD3D11PixelBindings::ApplyBindings(const PixelBindingRequest& request) noexcept
 {
     if (context1_)
-        context1_->PSGetConstantBuffers1(constantBufferSlot_, 1,
-            previousConstantBuffer_.GetAddressOf(),
-            &previousFirstConstant_, &previousNumConstants_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::pixel, constantBufferSlot_)
+            .Get(previousConstantBuffer_.GetAddressOf(), &previousFirstConstant_,
+                &previousNumConstants_);
     else
         context_->PSGetConstantBuffers(
             constantBufferSlot_, 1, previousConstantBuffer_.GetAddressOf());

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "ScopedD3D11ComputeConstantBuffer.hpp"
+#include "ConstantBufferRanges.hpp"
 
 namespace fo4hdr {
 
@@ -17,8 +18,8 @@ void ScopedD3D11ComputeConstantBuffer::Capture(ID3D11DeviceContext* context, ID3
     context1_ = cachedContext1;
     slot_ = slot;
     if (context1_)
-        context1_->CSGetConstantBuffers1(slot_, 1, &buffer_, &firstConstant_,
-            &constantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::compute, slot_)
+            .Get(&buffer_, &firstConstant_, &constantCount_);
     else
         context_->CSGetConstantBuffers(slot_, 1, &buffer_);
 }
@@ -28,8 +29,8 @@ void ScopedD3D11ComputeConstantBuffer::Restore() noexcept
     if (!context_) return;
 
     if (context1_)
-        context1_->CSSetConstantBuffers1(slot_, 1, &buffer_, &firstConstant_,
-            &constantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::compute, slot_)
+            .Set(&buffer_, &firstConstant_, &constantCount_);
     else
         context_->CSSetConstantBuffers(slot_, 1, &buffer_);
 

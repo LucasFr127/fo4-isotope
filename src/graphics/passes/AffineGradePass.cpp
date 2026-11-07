@@ -2,6 +2,7 @@
 
 #include "AffineGradePass.hpp"
 
+#include "../d3d11/ConstantBufferRanges.hpp"
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 
 #include <algorithm>
@@ -30,8 +31,8 @@ using Microsoft::WRL::ComPtr;
     AffineInputs& inputs) noexcept
 {
     ID3D11Buffer* constants{};
-    context1->PSGetConstantBuffers1(2, 1, &constants,
-        &inputs.firstConstant, &inputs.constantCount);
+    ConstantBufferRangeSlot(context1, ConstantBufferStage::pixel, 2)
+        .Get(&constants, &inputs.firstConstant, &inputs.constantCount);
     inputs.constants.Attach(constants);
     if (!inputs.constants || inputs.constantCount < 2) return false;
     D3D11_BUFFER_DESC description{};
@@ -139,8 +140,8 @@ void DispatchAffinePrepare(ID3D11DeviceContext* context,
     for (std::size_t i = 0; i < resources.size(); ++i) resources[i] = inputs.looks[i].Get();
     context->CSSetShaderResources(0, static_cast<UINT>(resources.size()), resources.data());
     auto* constants = inputs.constants.Get();
-    context1->CSSetConstantBuffers1(2, 1, &constants,
-        &inputs.firstConstant, &inputs.constantCount);
+    ConstantBufferRangeSlot(context1, ConstantBufferStage::compute, 2)
+        .Set(&constants, &inputs.firstConstant, &inputs.constantCount);
     auto* output = state.preblendUav.Get();
     context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
     context->CSSetShader(state.preblendShader.Get(), nullptr, 0);

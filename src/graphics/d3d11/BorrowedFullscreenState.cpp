@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "BorrowedFullscreenState.hpp"
+#include "ConstantBufferRanges.hpp"
 
 namespace fo4hdr {
 
@@ -38,9 +39,10 @@ void BorrowedFullscreenState::CaptureGraphics() noexcept
     context_->PSGetShaderResources(0, static_cast<UINT>(resources_.size()), resources_.data());
     if (context1_)
     {
-        context1_->PSGetConstantBuffers1(0, 1, &constants_, &firstConstant_, &constantCount_);
-        context1_->VSGetConstantBuffers1(0, 1, &vertexConstants_,
-            &firstVertexConstant_, &vertexConstantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::pixel, 0)
+            .Get(&constants_, &firstConstant_, &constantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::vertex, 0)
+            .Get(&vertexConstants_, &firstVertexConstant_, &vertexConstantCount_);
     }
     else
     {
@@ -57,10 +59,11 @@ void BorrowedFullscreenState::RestoreGraphics() noexcept
     if (context1_)
     {
         auto* buffer = constants_.Get();
-        context1_->PSSetConstantBuffers1(0, 1, &buffer, &firstConstant_, &constantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::pixel, 0)
+            .Set(&buffer, &firstConstant_, &constantCount_);
         auto* vertexBuffer = vertexConstants_.Get();
-        context1_->VSSetConstantBuffers1(0, 1, &vertexBuffer,
-            &firstVertexConstant_, &vertexConstantCount_);
+        ConstantBufferRangeSlot(context1_, ConstantBufferStage::vertex, 0)
+            .Set(&vertexBuffer, &firstVertexConstant_, &vertexConstantCount_);
     }
     else
     {

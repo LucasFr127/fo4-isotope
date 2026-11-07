@@ -27,6 +27,7 @@
 #include "../ShaderRegistry.hpp"
 #include "../LutProfileBindings.hpp"
 #include "../hooks/ContextHooks.hpp"
+#include "../d3d11/ConstantBufferRanges.hpp"
 #include "../d3d11/ScopedD3D11PixelBindings.hpp"
 #include "../d3d11/ScopedD3D11ComputeConstantBuffer.hpp"
 #include <FO4Isotope/hooks/HookOwnership.hpp>
@@ -425,7 +426,8 @@ struct NativeExposureBinding
     auto* context1 = g_developerExposure.context1.Get();
     UINT first{}, count{};
     context->PSGetShaderResources(2, 1, &binding.exposure);
-    if (context1) context1->PSGetConstantBuffers1(2, 1, &binding.constants, &first, &count);
+    if (context1) ConstantBufferRangeSlot(context1, ConstantBufferStage::pixel, 2)
+        .Get(&binding.constants, &first, &count);
     else context->PSGetConstantBuffers(2, 1, &binding.constants);
     if (!binding.exposure || !binding.constants) return false;
     D3D11_SHADER_RESOURCE_VIEW_DESC view{};
@@ -463,7 +465,8 @@ struct NativeExposureBinding
     auto* source = binding.exposure.Get();
     auto* bufferPointer = binding.constants.Get();
     context->CSSetShaderResources(0, 1, &source);
-    if (context1) context1->CSSetConstantBuffers1(2, 1, &bufferPointer, &binding.first, &binding.count);
+    if (context1) ConstantBufferRangeSlot(context1, ConstantBufferStage::compute, 2)
+        .Set(&bufferPointer, &binding.first, &binding.count);
     else context->CSSetConstantBuffers(2, 1, &bufferPointer);
     context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
     context->CSSetShader(shader, nullptr, 0);
