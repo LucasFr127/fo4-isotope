@@ -36,7 +36,7 @@ constexpr std::array kColorControls{
         &HdrSettings::saturationPercent,
         {kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%", 1.0, true}},
     ImageControl{{"highlight-saturation", "Highlight Saturation",
-        "Color intensity of bright highlights. Lower values fade them toward white sooner."},
+        "Color intensity of bright scene detail. Luminance stays the same."},
         &HdrSettings::highlightSaturationPercent,
         {kMinimumSaturationPercent, kMaximumSaturationPercent, "%.0f%%", 1.0, true}},
     ImageControl{{"temperature", "Temperature", "White balance from cool to warm."},
