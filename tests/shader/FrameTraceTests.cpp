@@ -18,7 +18,7 @@
 #include "resources/DeveloperExposureResources.hpp"
 #include "resources/PresentationResources.hpp"
 #include "resources/SceneResources.hpp"
-#include "FO4Isotope/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/output/NativeMenuState.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 
 #include <algorithm>
@@ -394,8 +394,8 @@ void CheckSharedUiTraceReport(const FrameTraceSharedUiSnapshot& snapshot,
         FO4HDR_WARP_CHECK(TraceField(line, 7) == std::to_string(snapshot.contextGeneration));
     }
     const auto white = std::bit_cast<std::uint32_t>(snapshot.frozenWhite);
-    const auto menuGeneration = HdrSettingsNativeMenuGeneration();
-    const auto menu = static_cast<std::uint32_t>(ReadHdrSettingsNativeMenuState());
+    const auto menuGeneration = NativeMenuGeneration();
+    const auto menu = static_cast<std::uint32_t>(ReadNativeMenuState());
     FO4HDR_WARP_CHECK(TraceContains(std::format("args=0/0/23/{}/2/1/4/3/8/7/{}/{}",
         white, menuGeneration, menu)));
     FO4HDR_WARP_CHECK(TraceContains(std::format("args=1/0/48/{}/2/1/4/3/8/7", white)));
@@ -1050,7 +1050,6 @@ struct TraceOwnedPresentScope
     PipelineHeartbeat heartbeat{g_heartbeat};
     PresentationResources presentation{g_presentation};
     SceneResources scene{g_scene};
-    UiTransportResources ui{g_uiTransport};
     ArmorCompositionResources armor{g_armor};
     DeveloperExposureResources exposure{g_developerExposure};
     HMONITOR monitor{ActiveDisplayMonitor()};
@@ -1083,7 +1082,6 @@ struct TraceOwnedPresentScope
         g_gameplayReadyApplied = game.gameplayReady && !game.presentationBlocked;
         g_presentation = {};
         g_scene = {};
-        g_uiTransport = {};
         g_armor = {};
         g_developerExposure = {};
         PublishActiveDisplay(nullptr, -1);
@@ -1097,7 +1095,6 @@ struct TraceOwnedPresentScope
         g_heartbeat = heartbeat;
         g_presentation = presentation;
         g_scene = scene;
-        g_uiTransport = ui;
         g_armor = armor;
         g_developerExposure = exposure;
         g_frame = frame;

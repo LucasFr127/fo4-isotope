@@ -16,16 +16,12 @@ void RunHdrSettingsTests()
 {
     TestPipboyScreenObservation();
     TestDeveloperExposureLockFramePolicy();
-    TestHdrShortcutInput();
-    TestHdrShortcutWindowProcedure();
-    TestHdrSubclassKeepsAnsiWindow();
-    TestHotkeyFormatting();
     TestSettingsDefaultsAndMath();
     TestSettingsValidation();
     TestWeatherGradeConfiguration();
     TestWeatherGradeResponse();
-    TestToneMapperPanelSmoke();
-    TestVanillaGradePanelSmoke();
+    TestToneMapperRecommendations();
+    TestSettingsStatus();
     TestOptionalConfigurationValues();
     TestOptionalConfigurationFailures();
     TestSettingsPersistenceRewrite();
@@ -62,8 +58,8 @@ constexpr Section kSections[]{
     {"gt7", fo4hdr::tests::RunGt7Tests},
     {"performance", fo4hdr::tests::RunPerformanceTests},
     {"hdr-settings", fo4hdr::tests::RunHdrSettingsTests},
-    {"lut-profiles-panel", fo4hdr::tests::RunLutProfilesPanelTests},
     {"native-lut-observation", fo4hdr::tests::RunNativeLutObservationTests},
+    {"native-menu-state", fo4hdr::tests::RunNativeMenuStateTests},
     {"image-space-provenance", fo4hdr::tests::RunImageSpaceProvenanceTests},
     {"scoped-d3d11-compute-constant-buffer",
         fo4hdr::tests::RunScopedD3D11ComputeConstantBufferTests},

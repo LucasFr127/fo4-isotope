@@ -12,7 +12,6 @@
 #endif
 
 Texture2D<float4> FrameSource : register(t0);
-Texture2D<float4> SettingsSurface : register(t3);
 
 cbuffer FrameMapping : register(b0)
 {
@@ -23,27 +22,11 @@ cbuffer FrameMapping : register(b0)
     float PeakWhite;
     uint Reserved0;
     uint Reserved1;
-    uint HasSettings;
+    uint Reserved2;
     uint SharedUiEncoded;
     uint AssumedContent;
     float ArmorPeakUiRelative;
 };
-
-// IEC sRGB inverse transfer. The armor interval has a separate signed gamma contract.
-float3 DecodeAuthoredCodes(float3 code)
-{
-    return code <= 0.04045f ? code / 12.92f :
-        pow(max((code + 0.055f) / 1.055f, 0.0f), 2.4f);
-}
-
-float3 BlendAuthoredLayer(float3 behind, float4 layer, float white)
-{
-    const float coverage = saturate(layer.a);
-    float3 contribution = 0.0f;
-    if (coverage > 1.0e-6f)
-        contribution = DecodeAuthoredCodes(max(layer.rgb, 0.0f) / coverage) * coverage;
-    return Fo4HdrExpandPrimaries(contribution * white) + behind * (1.0f - coverage);
-}
 
 float3 EvaluateFrameLayers(uint2 pixel)
 {
@@ -66,8 +49,6 @@ float3 EvaluateFrameLayers(uint2 pixel)
             light *= ArmorPeakUiRelative / max(ArmorPeakUiRelative, maximum);
         }
     }
-    const bool absolute = (FrameMode >= 3u && FrameMode <= 5u) || FrameMode == 7u ||
-        (FrameMode >= 10u && FrameMode <= 14u);
 
     switch (FrameMode)
     {
@@ -127,21 +108,6 @@ float3 EvaluateFrameLayers(uint2 pixel)
         break;
     default:
         break;
-    }
-
-    if (FrameMode == 0u)
-    {
-        [branch] if (HasSettings != 0u)
-        {
-            const float4 layer = SettingsSurface.Load(int3(pixel, 0));
-            light = layer.rgb + light * (1.0f - saturate(layer.a));
-        }
-    }
-    else
-    {
-        const float white = absolute ? MenuWhite : 1.0f;
-        [branch] if (HasSettings != 0u)
-            light = BlendAuthoredLayer(light, SettingsSurface.Load(int3(pixel, 0)), white);
     }
     // A shared exit avoids FXC's uninitialized-result warning when this is inlined.
     return light;

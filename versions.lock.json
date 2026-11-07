@@ -60,7 +60,7 @@
     "dearModdingUiApiLicenseSha256": "605e9047a563c5c8396ffb18232aa4304ec56586aee537c45064c6fb425e44ad"
   },
   "xmake": {
-    "requiresLockSha256": "38f74adb952a5bb0bcc2f694999fc33185fe6f41b270dfd5808b74cc4d9a83d5",
+    "requiresLockSha256": "2d6005652d5ae03772f0f0d0508de3297d013d94a4e16a34669890b32a3c4a52",
     "packages": {
       "spdlog": {
         "version": "v1.16.0",
@@ -69,16 +69,6 @@
         "recipeTreeSha1": "f5d1a017ba91f3c730f0e787cc6e954fc87b4b01",
         "recipeSha256": "59353fc2684f2907cba4c5a3ef2134029581d82062a92cd81746813829c1b900",
         "licenseSha256": "4ccecab18d1ff0b61174fe3d6c430541625d3ddb865b0d5887db296f883c76e7"
-      },
-      "imgui": {
-        "version": "v1.92.6-docking",
-        "tagObject": "7a6efe395d18d9cb37cea397f63ce0d39824dc72",
-        "commit": "2a1b69f05748ad909f03acf4533447cac1331611",
-        "sourceSha256": "5e84cdaa6a6041586a0d11a3071b749734a0439d66fdbdad37ae5b27e37d396c",
-        "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
-        "recipeTreeSha1": "7d5c8c9a8ea338975afb8a7ca203a788a6f79e5f",
-        "recipeSha256": "7b54981beca4ce0f56d105e2e14044cdf302753b0778576462849b8def4d1d4b",
-        "licenseSha256": "173506a2d6f7fb67990d257fb2507f188690eca39060c39469ae7bef43aae2a3"
       }
     }
   },

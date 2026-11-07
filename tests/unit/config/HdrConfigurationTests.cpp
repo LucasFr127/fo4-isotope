@@ -47,13 +47,6 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.vanillaGradeLuminancePercent == 67.0);
     FO4HDR_CHECK(shipped.value.vanillaGradeColorPercent == 67.0);
     FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 50.0);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.toggleKey ==
-        HdrSettingsHotkey{});
-    FO4HDR_CHECK(shipped.value.interfaceSettings.scale == 1.25);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.windowWidth == 700.0);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.windowHeight == 680.0);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.windowX == -1.0);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.windowY == -1.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.hdrEnabled);
     FO4HDR_CHECK(!shipped.value.developerMode);
     FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
@@ -69,6 +62,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(text.find("Radial") == std::string::npos);
     FO4HDR_CHECK(text.find("NativeReference") == std::string::npos);
     FO4HDR_CHECK(text.find("HdrColorResponse") == std::string::npos);
+    FO4HDR_CHECK(text.find("[Interface]") == std::string::npos);
 }
 
 [[nodiscard]] PluginConfigurationError SdrConfigurationError(std::string_view extra)
@@ -266,13 +260,6 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 67.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 67.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 50.0);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey ==
-        kDefaultSettingsToggleVirtualKey);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers ==
-        0U);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.25);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.windowWidth == 700.0);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 680.0);
 }
 
 // DeveloperMode and the Debug keys default to off when omitted.
@@ -387,11 +374,6 @@ void TestExtendedConfiguration()
     FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 75.0);
     FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 40.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 75.0);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.virtualKey == 0x7BU);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.toggleKey.modifiers == 0U);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.scale == 1.5);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.windowWidth == 900.0);
-    FO4HDR_CHECK(parsed.value.interfaceSettings.windowHeight == 760.0);
 }
 
 void TestOptionalConfigurationValues()
@@ -517,10 +499,7 @@ void TestConfigurationRangeErrors()
              "VanillaGradeLuminanceStrength=-1",
              "VanillaGradeColorStrength=nan",
              "BloomStrength=-1",
-             "BloomStrength=100.01",
-             "Scale=1.1",
-             "WindowWidth=519",
-             "WindowHeight=1001"})
+             "BloomStrength=100.01"})
     {
         auto text = ExtendedProductionConfiguration();
         const std::string_view replacement{keyValue};
@@ -555,46 +534,27 @@ void TestConfigurationDuplicateEffects()
     FO4HDR_CHECK(parsed.error == PluginConfigurationError::duplicateKey);
 }
 
-void TestConfigurationToggleKeys()
+// The released settings-window keys still load, valid or not, and are ignored.
+void TestRetiredInterfaceKeys()
 {
-    std::string text;
-    PluginConfigurationResult parsed;
-    for (const auto toggle : {"F1", "F10", "F24", "Alt+H", "Space",
-             "Ctrl+Shift+H", "Ctrl+Alt+Shift+Numpad0"})
-    {
-        text = MinimalProductionConfiguration() +
-            "\n[Interface]\nToggleKey=" + toggle + "\n";
-        FO4HDR_CHECK(ParsePluginConfiguration(text).valid);
-    }
-    for (const auto toggle : {"F0", "F25", "f10", "F10junk", "Alt",
-             "Alt+", "Ctrl+Ctrl+H", "Win+H", "Alt+F4", "Alt+Tab",
-             "Ctrl+Alt+Delete", "Escape", "Ctrl+Escape", "Alt+Enter"})
-    {
-        text = MinimalProductionConfiguration() +
-            "\n[Interface]\nToggleKey=" + toggle + "\n";
-        parsed = ParsePluginConfiguration(text);
-        FO4HDR_CHECK(!parsed.valid);
-        FO4HDR_CHECK(parsed.error ==
-            PluginConfigurationError::unsupportedToggleKey);
-    }
+    const auto parsed = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "\n[Interface]\nToggleKey=Win+H\nScale=1.1\nWindowWidth=519\n"
+        "WindowHeight=1001\nWindowX=-2\nWindowY=nan\n");
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(parsed.value.interfaceSettings == HdrInterfaceSettings{});
 }
 
-// An unusable INI starts neutral SDR only and keeps a shortcut that parsed first.
+// An unusable INI starts neutral SDR only.
 void TestFallbackConfiguration()
 {
     // HdrEnabled is the one required key.
-    auto parsed = ParsePluginConfiguration(
-        "[Interface]\nToggleKey=Alt+H\n[General]\nDeveloperMode=1\n");
+    const auto parsed = ParsePluginConfiguration("[General]\nDeveloperMode=1\n");
     FO4HDR_CHECK(!parsed.valid && parsed.error == PluginConfigurationError::missingKey);
-    const auto fallback = FallbackPluginConfiguration(parsed.value);
+    const auto fallback = FallbackPluginConfiguration();
     FO4HDR_CHECK(fallback.sdrEnabled && fallback.configurationDefaults);
     FO4HDR_CHECK(!fallback.enabled && !fallback.productionRequested && !fallback.developerMode);
     FO4HDR_CHECK(!fallback.interfaceSettings.hdrEnabled);
-    FO4HDR_CHECK(FormatHdrSettingsHotkey(fallback.interfaceSettings.toggleKey).data() ==
-        std::string_view{"Alt+H"});
     FO4HDR_CHECK(fallback.sdrSettings == DefaultSdrSettings());
-    FO4HDR_CHECK(FallbackPluginConfiguration(PluginConfiguration{}).interfaceSettings.toggleKey ==
-        HdrInterfaceSettings{}.toggleKey);
 }
 
 void TestOptionalConfigurationFailures()
@@ -605,7 +565,7 @@ void TestOptionalConfigurationFailures()
     TestConfigurationOperatorErrors();
     TestConfigurationRangeErrors();
     TestConfigurationDuplicateEffects();
-    TestConfigurationToggleKeys();
+    TestRetiredInterfaceKeys();
 }
 
 }  // namespace fo4hdr::tests

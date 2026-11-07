@@ -27,12 +27,10 @@
 #include "../resources/DeveloperExposureResources.hpp"
 #include "../resources/ReplacementShaders.hpp"
 #include <FO4Isotope/output/ArmorUiComposition.hpp>
-#include <backends/imgui_impl_dx11.h>
-#include <imgui.h>
 #include "../d3d11/BorrowedComputeState.hpp"
 #include "../d3d11/BorrowedFullscreenState.hpp"
 #include "../hooks/ContextHooks.hpp"
-#include "FO4Isotope/ui/SettingsWindow.hpp"
+#include "FO4Isotope/ui/SettingsMenu.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -65,13 +63,6 @@ void BeginPipboyObservation() noexcept
     else g_pipboyScreen.status = "Unavailable: requires healthy gameplay HDR";
 }
 
-
-void SettingsFocusLost() noexcept
-{
-    StopPipboyScreenObservation("Stopped: focus loss");
-    ResetArmorUiScope();
-    g_developerExposure.state.Request(false);
-}
 void RequestExposure(bool requested) noexcept
 {
     g_developerExposure.state.Request(requested);
@@ -82,24 +73,6 @@ void RequestPipboyObservation(bool requested) noexcept
     StopPipboyScreenObservation("Off");
     if (requested) BeginPipboyObservation();
 }
-
-[[nodiscard]] bool RenderDeveloperUiDrawData(ID3D11DeviceContext* context) noexcept
-{
-    const auto* drawData = ImGui::GetDrawData();
-    if (drawData == nullptr || drawData->TotalVtxCount == 0) return false;
-    const float clear[4]{};
-    context->ClearRenderTargetView(g_uiTransport.uiRtv.Get(), clear);
-    ComPtr<ID3D11RenderTargetView> previousRtv;
-    ComPtr<ID3D11DepthStencilView> previousDsv;
-    context->OMGetRenderTargets(1, &previousRtv, &previousDsv);
-    ID3D11RenderTargetView* uiRtv = g_uiTransport.uiRtv.Get();
-    context->OMSetRenderTargets(1, &uiRtv, nullptr);
-    ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-    ID3D11RenderTargetView* restore = previousRtv.Get();
-    context->OMSetRenderTargets(1, &restore, previousDsv.Get());
-    return true;
-}
-
 
 SettingsPipboyViewObservation UiPipboyView(const PipboyScreenViewObservation& value) noexcept
 {
@@ -142,13 +115,18 @@ WeatherLutResponseView UiWeatherLutResponseSnapshot() noexcept
     return view;
 }
 
-SettingsWindowView UiSettingsSnapshot() noexcept
+SettingsMenuView UiSettingsSnapshot() noexcept
 {
-    SettingsWindowView result;
+    SettingsMenuView result;
+    const auto presentThread = g_observedPresentThread.load(std::memory_order_acquire);
+    result.presenting = presentThread != 0;
+    result.drawOnPresentThread = GetCurrentThreadId() == presentThread;
+    result.developerMode = g_configuration.developerMode;
+    // Present-thread state is read only from that thread.
+    if (!result.drawOnPresentThread) return result;
     result.activeSettings = g_activeSettings;
     result.lutPending = g_lutPending;
     result.liveSettingsError = g_liveSettingsError;
-    result.developerMode = g_configuration.developerMode;
     result.hdrActive = g_evidence.hdrColorSpaceActive.load();
     result.sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
     result.hdrEnabledAtStart = g_configuration.enabled;
@@ -169,29 +147,37 @@ SettingsWindowView UiSettingsSnapshot() noexcept
     result.settingsGeneration = g_settingsGeneration;
     result.desiredSettingsGeneration = g_desiredSettingsGeneration;
     result.lutRequestGeneration = g_lutRequestGeneration;
-    result.targetWidth = g_presentation.width;
-    result.targetHeight = g_presentation.height;
     result.display = UiDisplaySnapshot();
     result.weatherLutResponse = UiWeatherLutResponseSnapshot();
     result.pipboy = UiPipboySnapshot();
     return result;
 }
 
-void RefreshSettingsView(SettingsWindowView& view) noexcept
+void RefreshSettingsView(SettingsMenuView& view) noexcept
 {
     view = UiSettingsSnapshot();
 }
 
-bool DrawDeveloperUi(ID3D11DeviceContext* context) noexcept
+bool SettingsDraftApplied(const HdrSettings& draft) noexcept
 {
-    if (!DeveloperUiResourcesReady() || !SettingsWindowBackendReady()) return false;
-    auto view = UiSettingsSnapshot();
-    const SettingsWindowActions actions{
-        SettingsFocusLost, RequestExposure, RequestPipboyObservation, RefreshSettingsView};
-    return DrawSettingsWindow(view, actions) && RenderDeveloperUiDrawData(context);
+    if (!g_configuration.productionRequested && !g_sdrModeActive.load(std::memory_order_acquire))
+        return true;
+    return !g_lutPending && g_activeSettings == draft;
 }
 
 } // namespace
+
+SettingsMenuRenderer PresentationSettingsMenuRenderer() noexcept
+{
+    return {RefreshSettingsView, SettingsDraftApplied, RequestExposure, RequestPipboyObservation};
+}
+
+void PresentationFocusLost() noexcept
+{
+    StopPipboyScreenObservation("Stopped: focus loss");
+    ResetArmorUiScope();
+    g_developerExposure.state.Request(false);
+}
 
 PresentationResult PresentationMapFailure(HRESULT status) noexcept
 {
@@ -218,8 +204,7 @@ PresentationResult PresentationMapFailure(HRESULT status) noexcept
     const bool hdr = compositionConstants.mode != 0U &&
         compositionConstants.mode != 4U && compositionConstants.mode != 5U;
     if (!SetColorSpace(hdr)) return PresentationResult::failed;
-    ID3D11ShaderResourceView* inputs[]{
-        scene, nullptr, nullptr, g_uiTransport.uiSrv.Get()};
+    ID3D11ShaderResourceView* inputs[]{scene, nullptr, nullptr, nullptr};
     ID3D11RenderTargetView* output = g_presentation.presentationBackBufferRtv.Get();
     ID3D11Buffer* constants = g_presentation.constants.Get();
     context->PSSetShaderResources(0, 4, inputs);
@@ -261,8 +246,7 @@ ID3D11ShaderResourceView* ReferenceSource(LinearColorDomain domain) noexcept
         g_presentation.presentationProxySrv.Get() : g_scene.currentScene.Get();
 }
 
-CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
-    bool settingsOverlayPresent) noexcept
+CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain) noexcept
 {
     const auto vanillaSdr = requiredDomain == LinearColorDomain::vanillaSdrCodes;
     const auto encoding = SourceEncoding(requiredDomain);
@@ -278,7 +262,6 @@ CompositionConstants ReferenceComposition(LinearColorDomain requiredDomain,
             static_cast<float>(kSceneReferenceWhiteNits),
         .displayPeakNits =
             static_cast<float>(g_activeSettings.displayPeakNits),
-        .settingsOverlayPresent = static_cast<std::uint32_t>(settingsOverlayPresent),
         .sharedUiEncoded = encoding,
     };
     if (encoding != 0U)
@@ -338,8 +321,7 @@ ID3D11DeviceContext* PrepareGpuPerformanceSample(IDXGISwapChain* swapChain,
         g_presentation.presentationBackBuffer.Get());
     if (!priorState.Ready()) return PresentationResult::blocked;
     ScopedGpuPerformanceSample gpuSample(measurementContext);
-    const auto settingsOverlayPresent = DrawDeveloperUi(context);
-    const auto compositionConstants = ReferenceComposition(requiredDomain, settingsOverlayPresent);
+    const auto compositionConstants = ReferenceComposition(requiredDomain);
     return DrawPresentation(context, ReferenceSource(requiredDomain), compositionConstants);
 }
 
@@ -383,7 +365,7 @@ PresentationResult RenderPublicSharedUiOutput(IDXGISwapChain* swapChain, ID3D11D
     BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
     if (!priorState.Ready()) return PresentationResult::blocked;
-    auto constants = ReferenceComposition(presentation.domain, DrawDeveloperUi(context));
+    auto constants = ReferenceComposition(presentation.domain);
     if (output.sdr) constants.mode = presentation.domain == LinearColorDomain::linearBt709Relative ? 5U : 4U;
     constants.uiPaperWhiteNits = presentation.white;
     constants.sceneReferenceWhiteNits = presentation.white;
@@ -441,9 +423,8 @@ bool StartupPresentationAvailable(const SharedUiPresentation* presentation) noex
     BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
         g_presentation.presentationBackBuffer.Get());
     if (!priorState.Ready()) return PresentationResult::blocked;
-    auto constants = SdrComposition(presentation);
-    constants.settingsOverlayPresent = static_cast<std::uint32_t>(DrawDeveloperUi(context));
-    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(), constants);
+    return DrawPresentation(context, g_presentation.presentationProxySrv.Get(),
+        SdrComposition(presentation));
 }
 
 bool PresentationContextAvailable(IDXGISwapChain* swapChain, ID3D11Device* device,
@@ -451,42 +432,6 @@ bool PresentationContextAvailable(IDXGISwapChain* swapChain, ID3D11Device* devic
 {
     const std::array<const void*, 3> required{swapChain, device, context};
     return std::ranges::find(required, nullptr) == required.end();
-}
-
-[[nodiscard]] bool SdrOverlayReady(IDXGISwapChain* swapChain, ID3D11Device* device,
-    ID3D11DeviceContext* context) noexcept
-{
-    return PresentationContextAvailable(swapChain, device, context) &&
-        PresentationContextValid(context) && SettingsWindowBackendReady() &&
-        EnsureSdrBackBufferTarget(swapChain, device);
-}
-
-// The window runs every Present, open or closed, so it can consume toggles.
-[[nodiscard]] ImDrawData* DrawSdrSettingsFrame() noexcept
-{
-    auto view = UiSettingsSnapshot();
-    const SettingsWindowActions actions{
-        SettingsFocusLost, RequestExposure, RequestPipboyObservation, RefreshSettingsView};
-    if (!DrawSettingsWindow(view, actions)) return nullptr;
-    auto* drawData = ImGui::GetDrawData();
-    return drawData != nullptr && drawData->TotalVtxCount > 0 ? drawData : nullptr;
-}
-
-void DrawSdrSettingsOverlay(IDXGISwapChain* swapChain, ID3D11Device* device,
-    ID3D11DeviceContext* context) noexcept
-{
-    if (!SdrOverlayReady(swapChain, device, context)) return;
-    ScopedPresentationContext ownedContext(context, PresentationScope::finalOutput);
-    if (!ownedContext.Ready()) return;
-    auto* drawData = DrawSdrSettingsFrame();
-    if (drawData == nullptr) return;
-    BorrowedFullscreenState priorState(context, g_rendererDevice.activeContext1.Get(),
-        g_presentation.sdrBackBuffer.Get());
-    if (!priorState.Ready()) return;
-    // The SDR backbuffer holds display codes, so sRGB-authored ImGui draws directly.
-    ID3D11RenderTargetView* target = g_presentation.sdrBackBufferRtv.Get();
-    context->OMSetRenderTargets(1, &target, nullptr);
-    ImGui_ImplDX11_RenderDrawData(drawData);
 }
 
 [[nodiscard]] bool RenderBlackPresentationFrame(

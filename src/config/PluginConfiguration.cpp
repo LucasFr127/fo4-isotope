@@ -186,12 +186,6 @@ enum class RequiredKey : std::size_t
     colorGradingMethod,
     colorGradingCurve,
     bloomStrength,
-    toggleKey,
-    interfaceScale,
-    settingsWindowWidth,
-    settingsWindowHeight,
-    settingsWindowX,
-    settingsWindowY,
     weatherEnabled,
     weatherLuminanceBase,
     weatherLuminanceGain,
@@ -297,12 +291,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Effects", "VanillaGradeLuminanceStrength", RequiredKey::vanillaGradeLuminance},
     {"Effects", "VanillaGradeColorStrength", RequiredKey::vanillaGradeColor},
     {"Effects", "BloomStrength", RequiredKey::bloomStrength},
-    {"Interface", "ToggleKey", RequiredKey::toggleKey},
-    {"Interface", "Scale", RequiredKey::interfaceScale},
-    {"Interface", "WindowWidth", RequiredKey::settingsWindowWidth},
-    {"Interface", "WindowHeight", RequiredKey::settingsWindowHeight},
-    {"Interface", "WindowX", RequiredKey::settingsWindowX},
-    {"Interface", "WindowY", RequiredKey::settingsWindowY},
     {"Image", "ExposureEV", RequiredKey::exposureEv},
     {"SelectiveColor", "RedHue", RequiredKey::selectiveRedHue},
     {"SelectiveColor", "RedSaturation", RequiredKey::selectiveRedSaturation},
@@ -428,11 +416,6 @@ constexpr ConfigurationKey kConfigurationKeys[]{
         {RequiredKey::displayPeakNits, &configuration.displayPeakNits},
         {RequiredKey::uiPaperWhiteNits, &configuration.uiPaperWhiteNits},
         {RequiredKey::videoWhiteNits, &configuration.videoWhiteNits},
-        {RequiredKey::interfaceScale, &configuration.interfaceSettings.scale},
-        {RequiredKey::settingsWindowWidth, &configuration.interfaceSettings.windowWidth},
-        {RequiredKey::settingsWindowHeight, &configuration.interfaceSettings.windowHeight},
-        {RequiredKey::settingsWindowX, &configuration.interfaceSettings.windowX},
-        {RequiredKey::settingsWindowY, &configuration.interfaceSettings.windowY},
     };
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? nullptr : found->value;
@@ -497,11 +480,6 @@ constexpr ConfigurationRange kConfigurationRanges[]{
     {RequiredKey::vanillaGradeLuminance, {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent}},
     {RequiredKey::vanillaGradeColor, {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent}},
     {RequiredKey::bloomStrength, {kMinimumBloomStrengthPercent, kMaximumBloomStrengthPercent}},
-    {RequiredKey::interfaceScale, {kMinimumInterfaceScale, kMaximumInterfaceScale}},
-    {RequiredKey::settingsWindowWidth, {kMinimumSettingsWindowWidth, kMaximumSettingsWindowWidth}},
-    {RequiredKey::settingsWindowHeight, {kMinimumSettingsWindowHeight, kMaximumSettingsWindowHeight}},
-    {RequiredKey::settingsWindowX, {-1.0, 65535.0}},
-    {RequiredKey::settingsWindowY, {-1.0, 65535.0}},
 };
 
 [[nodiscard]] constexpr std::array<double, 2> NumericRange(RequiredKey key) noexcept
@@ -616,9 +594,6 @@ PluginConfigurationError ParseNamedSetting(PluginConfiguration& parsed,
     if (key == RequiredKey::algorithm) return ParseAlgorithm(value, parsed.productionAlgorithm);
     if (key == RequiredKey::colorGradingMethod) return ParseGradingMethod(value, parsed.colorGradingMethod);
     if (key == RequiredKey::colorGradingCurve) return ParseGradingCurve(value, parsed.colorGradingCurve);
-    if (key == RequiredKey::toggleKey)
-        return ParseHdrSettingsHotkey(value, parsed.interfaceSettings.toggleKey) ?
-            PluginConfigurationError::none : PluginConfigurationError::unsupportedToggleKey;
     return ParseBoolean(value, BooleanTarget(parsed, key)) ?
         PluginConfigurationError::none : PluginConfigurationError::invalidBoolean;
 }
@@ -659,8 +634,6 @@ PluginConfigurationError ValidateConfiguration(const PluginConfiguration& parsed
 {
     const auto error = ValidateDiagnosticConfiguration(parsed);
     if (error != PluginConfigurationError::none) return error;
-    if (ValidateHdrInterfaceSettings(parsed.interfaceSettings) != HdrInterfaceSettingsValidationError::none)
-        return PluginConfigurationError::valueOutOfRange;
     if (ValidateHdrSettings(parsed) != HdrSettingsValidationError::none ||
         ValidateProfileSettings(parsed.sdrSettings, true) != HdrSettingsValidationError::none)
         return PluginConfigurationError::valueOutOfRange;
@@ -792,14 +765,12 @@ private:
 
 }  // namespace
 
-PluginConfiguration FallbackPluginConfiguration(const PluginConfiguration& parsed) noexcept
+PluginConfiguration FallbackPluginConfiguration() noexcept
 {
     PluginConfiguration fallback{};
     fallback.sdrEnabled = true;
     fallback.configurationDefaults = true;
     fallback.interfaceSettings.hdrEnabled = false;
-    if (IsSupportedHdrSettingsHotkey(parsed.interfaceSettings.toggleKey))
-        fallback.interfaceSettings.toggleKey = parsed.interfaceSettings.toggleKey;
     return fallback;
 }
 
@@ -875,7 +846,6 @@ std::string_view ToString(PluginConfigurationError error) noexcept
         {PluginConfigurationError::unsupportedAlgorithm, "unsupported-algorithm"},
         {PluginConfigurationError::unsupportedColorGradingMethod, "unsupported-color-grading-method"},
         {PluginConfigurationError::unsupportedColorGradingCurve, "unsupported-color-grading-curve"},
-        {PluginConfigurationError::unsupportedToggleKey, "unsupported-toggle-key"},
         {PluginConfigurationError::invalidCombination, "invalid-combination"},
     };
     const auto found = std::ranges::find(names, error, &ErrorName::error);

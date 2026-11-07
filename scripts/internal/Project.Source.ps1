@@ -200,10 +200,9 @@ function Test-Fo4HdrDependencySources {
     }
 
     $packages = @($manifest.packages)
-    if ($packages.Count -ne 2 -or
-        (Compare-Object @($packages.name | Sort-Object) @("imgui", "spdlog"))) {
+    if ($packages.Count -ne 1 -or $packages[0].name -ne "spdlog") {
         throw (
-            "The linked XMake source manifest must contain exactly ImGui and spdlog; " +
+            "The linked XMake source manifest must contain exactly spdlog; " +
             "CMake and Ninja in the XMake lock are build tools, not linked " +
             "libraries."
         )
@@ -211,10 +210,8 @@ function Test-Fo4HdrDependencySources {
 
     Assert-Fo4HdrSpdlogSources $packages $versions $dependencyLock.Spdlog $ArtifactRoot
 
-    Assert-Fo4HdrImguiSources $packages $versions $ArtifactRoot
-
     Assert-Fo4HdrDependencyNotices $RepoRoot
-    Write-Host "Validated locked ImGui and spdlog source, recipe, license, and notice identities."
+    Write-Host "Validated locked spdlog source, recipe, license, and notice identities."
 }
 
 function Get-Fo4HdrSourceInventoryEntries {
@@ -335,21 +332,6 @@ function Assert-Fo4HdrSpdlogSources {
 
 }
 
-function Assert-Fo4HdrImguiSources {
-    param([object[]]$Packages, [psobject]$Versions, [string]$ArtifactRoot)
-    $imgui = @($packages | Where-Object name -eq "imgui")[0]
-    Assert-Fo4HdrImguiSourceIdentity $imgui $versions.xmake.packages.imgui
-    $artifacts = Get-Fo4HdrPackageSourceArtifacts $imgui $ArtifactRoot
-    $imguiSourcePath = $artifacts.Source
-    $imguiRecipePath = $artifacts.Recipe
-    if ((Get-Sha256 $imguiSourcePath) -ne $imgui.sourceSha256 -or
-        (Get-Sha256 $imguiRecipePath) -ne $imgui.recipeSha256) {
-        throw "The cached ImGui source or recipe hash differs from its manifest."
-    }
-    Assert-Fo4HdrImguiArchiveContents $imgui $imguiSourcePath $imguiRecipePath
-
-}
-
 function Assert-Fo4HdrDependencyNotices {
     param([string]$RepoRoot)
     $notices = Get-Content `
@@ -358,8 +340,6 @@ function Assert-Fo4HdrDependencyNotices {
     foreach ($noticeIdentity in @(
         "spdlog",
         "Copyright (c) 2016 Gabi Melman",
-        "Dear ImGui",
-        "Copyright (c) 2014-2026 Omar Cornut",
         "MIT"
     )) {
         if ($notices -notlike "*$noticeIdentity*") {
@@ -546,21 +526,6 @@ function Assert-Fo4HdrSpdlogSourceIdentity {
 
 }
 
-function Assert-Fo4HdrImguiSourceIdentity {
-    param([psobject]$Imgui, [psobject]$ImguiLock)
-    foreach ($field in @("version", "sourceSha256", "recipeCommit", "recipeTreeSha1", "recipeSha256", "licenseSha256")) {
-        if ([string]$imgui.$field -ne [string]$imguiLock.$field) {
-            throw "The ImGui $field differs across source authorities."
-        }
-    }
-    $invalidIdentity = $imgui.repository -ne "https://github.com/ocornut/imgui.git" -or
-        $imgui.sourceRevision -ne $imguiLock.commit -or
-        $imgui.sourceArchiveFormat -ne "tar.gz"
-    if ($invalidIdentity) {
-        throw "The ImGui source identity or archive format is not canonical."
-    }
-}
-
 function Assert-Fo4HdrSpdlogArchiveContents {
     param([psobject]$Package, [string]$SourcePath, [string]$RecipePath)
     foreach ($licenseFile in @($package.licenseFiles)) {
@@ -573,18 +538,6 @@ function Assert-Fo4HdrSpdlogArchiveContents {
     }
 
     Assert-Fo4HdrSpdlogRecipeContents $package $recipePath
-
-}
-
-function Assert-Fo4HdrImguiArchiveContents {
-    param([psobject]$Imgui, [string]$ImguiSourcePath, [string]$ImguiRecipePath)
-    foreach ($licenseFile in @($imgui.licenseFiles)) {
-        if ((Get-Fo4HdrSourceArchiveEntrySha256 $imguiSourcePath "tar.gz" $licenseFile) -ne
-            $imgui.licenseSha256) {
-            throw "The ImGui MIT license hash differs from its manifest."
-        }
-    }
-    Assert-Fo4HdrImguiRecipeContents $imgui $imguiRecipePath
 
 }
 
@@ -609,19 +562,6 @@ function Assert-Fo4HdrSpdlogRecipeContents {
     finally {
         $recipeArchive.Dispose()
     }
-
-}
-
-function Assert-Fo4HdrImguiRecipeContents {
-    param([psobject]$Imgui, [string]$ImguiRecipePath)
-    $imguiRecipe = Open-Fo4HdrValidatedZipArchive $imguiRecipePath
-    try {
-        $imguiRecipeText = Read-Fo4HdrZipEntryUtf8Text $imguiRecipe "xmake-repo/packages/i/imgui/xmake.lua"
-        foreach ($required in @('set_license("MIT")', $imgui.version, $imgui.sourceSha256)) {
-            if ($imguiRecipeText -notlike "*$required*") { throw "The archived ImGui recipe is missing: $required" }
-        }
-    }
-    finally { $imguiRecipe.Dispose() }
 
 }
 
@@ -680,12 +620,6 @@ function Assert-Fo4HdrLockedPackageSet {
         "ninja#f56260b5",
         "spdlog v1.16.0#09c8c173"
     )
-    $expectedLockKeyPrefixes = @("imgui v1.92.6-docking#")
-    foreach ($prefix in $expectedLockKeyPrefixes) {
-        $match = @($lockedPackageKeys | Where-Object { $_.StartsWith($prefix) })
-        if ($match.Count -ne 1) { throw "xmake-requires.lock does not contain exactly one $prefix entry." }
-        $expectedLockKeys += $match[0]
-    }
     if ($lockedPackageKeys.Count -ne $expectedLockKeys.Count -or
         (Compare-Object $lockedPackageKeys $expectedLockKeys)) {
         throw (

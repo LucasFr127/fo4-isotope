@@ -462,13 +462,10 @@ struct SharedUiFallbackFixture : SharedPresentationContextFixture
         ResetSharedUiResources();
         g_scene = {};
         FO4HDR_WARP_CHECK(!SharedUiPresentationForOutput() && !SharedUiStartupAssumed());
-        const auto ui = g_uiTransport;
-        g_uiTransport = {};
         g_presentation.presentationProxyRtv.Reset();
         g_presentation.presentationBackBufferRtv.Reset();
         PresentReadable(0.25);
         g_presentation.presentationProxyRtv = proxy.rtv;
-        g_uiTransport = ui;
         FO4HDR_WARP_CHECK(EnsureSharedUiResources(device.device.Get()));
         CheckFrozenWhitePresentation();
 

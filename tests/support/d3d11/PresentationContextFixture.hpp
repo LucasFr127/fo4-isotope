@@ -71,7 +71,6 @@ struct PresentationContextFixture
     Device& device;
     RendererDevice savedDevice{g_rendererDevice};
     PresentationResources savedPresentation{g_presentation};
-    UiTransportResources savedUi{g_uiTransport};
     SceneResources savedScene{g_scene};
     ArmorCompositionResources savedArmor{g_armor};
     PipelineHeartbeat savedHeartbeat{g_heartbeat};

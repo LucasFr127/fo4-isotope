@@ -167,13 +167,6 @@ void CheckGt7ReferencePixel(const std::array<std::uint16_t, 4>& values,
 void VerifyGt7OfficialReference(Device& device)
 {
     const auto corpora = BuildGt7ReferenceCorpora();
-    std::array<Float4, kWidth> transparent{};
-    const auto uiPixels = MakeFp16Pixels(transparent);
-    D3D11_SUBRESOURCE_DATA uiData{
-        uiPixels.data(), static_cast<UINT>(sizeof(uiPixels)), 0};
-    auto ui = CreateTexture(*device.device.Get(),
-        DXGI_FORMAT_R16G16B16A16_FLOAT,
-        D3D11_BIND_SHADER_RESOURCE, &uiData);
     auto composition = CreateTexture(*device.device.Get(),
         DXGI_FORMAT_R16G16B16A16_FLOAT,
         D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS);
@@ -197,8 +190,7 @@ void VerifyGt7OfficialReference(Device& device)
             const auto constants = CreateConstantBuffer(
                 *device.device.Get(), CompositionConstants{
                     kWidth, kHeight, 8U, 203.0F, 203.0F, peak, 0U, 0U});
-            std::array<ID3D11ShaderResourceView*, 4> inputs{
-                scene.srv.Get(), nullptr, nullptr, ui.srv.Get()};
+            std::array<ID3D11ShaderResourceView*, 1> inputs{scene.srv.Get()};
             Dispatch(*device.context.Get(), { shader.Get(), constants.Get(),
                 inputs.data(), static_cast<UINT>(inputs.size()),
                 composition.uav.Get()});

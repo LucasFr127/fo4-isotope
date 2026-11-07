@@ -67,10 +67,10 @@ struct Gt7OperatorUi
         {NAN, -INFINITY, INFINITY, 1.0F}
     }};
     ComPtr<ID3D11ComputeShader> composeShader, outputShader;
-    Texture ui, composition, output;
+    Texture composition, output;
     std::array<float, 3> peakHighlight{};
     std::size_t peakIndex{};
-    Texture opaqueUi, uiScene;
+    Texture uiScene;
     explicit Gt7OperatorUi(Device& source) : device(source) {}
     bool PairwiseCase(const Float4& firstPixel, float peak, std::size_t index) const
     {
@@ -82,13 +82,6 @@ struct Gt7OperatorUi
             *device.device.Get(), fo4hdr::generated::test::kLayerEvaluationCs);
         outputShader = CreateShader(
             *device.device.Get(), fo4hdr::generated::test::kTransferEvaluationCs);
-        std::array<Float4, kWidth> transparent{};
-        const auto uiPixels = MakeFp16Pixels(transparent);
-        D3D11_SUBRESOURCE_DATA uiData{
-            uiPixels.data(), static_cast<UINT>(sizeof(uiPixels)), 0};
-        ui = CreateTexture(*device.device.Get(),
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            D3D11_BIND_SHADER_RESOURCE, &uiData);
         composition = CreateTexture(*device.device.Get(),
             DXGI_FORMAT_R16G16B16A16_FLOAT,
             D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS);
@@ -210,8 +203,7 @@ struct Gt7OperatorUi
             *device.device.Get(), CompositionConstants{
                 kWidth, kHeight, compositionMode,
                 203.0F, 203.0F, peak, 0U, 0U});
-        std::array<ID3D11ShaderResourceView*, 4> inputs{
-            scene.srv.Get(), nullptr, nullptr, ui.srv.Get()};
+        std::array<ID3D11ShaderResourceView*, 1> inputs{scene.srv.Get()};
         Dispatch(*device.context.Get(), { composeShader.Get(),
             constants.Get(), inputs.data(),
             static_cast<UINT>(inputs.size()), composition.uav.Get()});
@@ -249,48 +241,12 @@ struct Gt7OperatorUi
     }
     void InitializeUi()
     {
-        std::array<Float4, kWidth> whiteOverlay{};
-        whiteOverlay.fill({1.0F, 1.0F, 1.0F, 1.0F});
-        const auto opaquePixels = MakeFp16Pixels(whiteOverlay);
-        D3D11_SUBRESOURCE_DATA opaqueData{
-            opaquePixels.data(), static_cast<UINT>(sizeof(opaquePixels)), 0};
-        opaqueUi = CreateTexture(*device.device.Get(),
-            DXGI_FORMAT_R16G16B16A16_FLOAT,
-            D3D11_BIND_SHADER_RESOURCE, &opaqueData);
         const auto neutralPixels = MakeFp16Pixels(neutral);
         D3D11_SUBRESOURCE_DATA neutralData{
             neutralPixels.data(), static_cast<UINT>(sizeof(neutralPixels)), 0};
         uiScene = CreateTexture(*device.device.Get(),
             DXGI_FORMAT_R16G16B16A16_FLOAT,
             D3D11_BIND_SHADER_RESOURCE, &neutralData);
-    }
-    void CheckUiWhite()
-    {
-        for (const auto peak : {400.0F, 1000.0F, 2000.0F}) {
-            for (const auto white : {100.0F, 203.0F, 300.0F}) {
-                const auto constants = CreateConstantBuffer(
-                    *device.device.Get(), CompositionConstants{
-                        kWidth, kHeight, compositionMode,
-                        white, 203.0F, peak, 0U, 0U});
-                std::array<ID3D11ShaderResourceView*, 4> inputs{
-                    uiScene.srv.Get(), nullptr, nullptr, opaqueUi.srv.Get()};
-                Dispatch(*device.context.Get(), { composeShader.Get(),
-                    constants.Get(), inputs.data(),
-                    static_cast<UINT>(inputs.size()), composition.uav.Get()});
-                device.context->CopyResource(
-                    composition.staging.Get(), composition.texture.Get());
-                D3D11_MAPPED_SUBRESOURCE mapped{};
-                CheckHresult(device.context->Map(composition.staging.Get(), 0,
-                    D3D11_MAP_READ, 0, &mapped),
-                    "Map independent production UI paper white");
-                const auto* values = static_cast<const std::uint16_t*>(mapped.pData);
-                for (std::size_t channel = 0; channel < 3; ++channel)
-                    FO4HDR_WARP_CHECK(std::abs(
-                        Binary16ToFloat(values[channel]) - white) <= 2.0F);
-                device.context->Unmap(composition.staging.Get(), 0);
-            }
-        }
-
     }
     void CheckUiBaseline(const std::array<std::uint16_t, 4>* values,
         std::array<std::array<std::uint16_t, 3>, kWidth>& baseline, bool capturedBaseline)
@@ -317,8 +273,7 @@ struct Gt7OperatorUi
                         *device.device.Get(), CompositionConstants{
                             kWidth, kHeight, compositionMode,
                             white, 203.0F, peak, 0U, 0U});
-                    std::array<ID3D11ShaderResourceView*, 4> inputs{
-                        uiScene.srv.Get(), nullptr, nullptr, ui.srv.Get()};
+                    std::array<ID3D11ShaderResourceView*, 1> inputs{uiScene.srv.Get()};
                     Dispatch(*device.context.Get(), { composeShader.Get(),
                         constants.Get(), inputs.data(),
                         static_cast<UINT>(inputs.size()), composition.uav.Get()});
@@ -350,7 +305,6 @@ struct Gt7OperatorUi
         FO4HDR_WARP_CHECK(peakHighlight[1] < peakHighlight[2]);
         for (const auto distinct : gt7PairwiseDifferences) FO4HDR_WARP_CHECK(distinct);
         InitializeUi();
-        CheckUiWhite();
         CheckUiIndependence();
     }
 };

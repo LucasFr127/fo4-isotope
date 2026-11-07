@@ -17,7 +17,8 @@
 #include "LiveSettings.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include "passes/ArmorCompositionPass.hpp"
-#include "FO4Isotope/ui/SettingsWindow.hpp"
+#include "passes/PresentationPass.hpp"
+#include "FO4Isotope/ui/SettingsMenu.hpp"
 #include <FO4Isotope/output/ArmorUiComposition.hpp>
 #include <new>
 #include <algorithm>
@@ -73,7 +74,6 @@ std::atomic<bool> g_sdrModeActive{};
         .replacementShaderSet = ReplacementProgramsReady(),
         .presentationProxySet = PresentationProxyReady(),
         .compositionSet = PresentationCompositionReady(),
-        .uiSet = DeveloperUiResourcesReady(),
         .outputSet = PresentationOutputReady()
     };
 }
@@ -131,9 +131,8 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
     ResetDeveloperExposureResources();
     g_presentation.presentationRedirectedThisFrame = false;
     ResetArmorCompositionResources();
-    // Retire the real output view before the transport images and proxy.
+    // Retire the real output view before the proxy.
     if (!retainPresentationBuffer) RetirePresentationOutput();
-    ResetUiTransportResources();
     ResetPresentationResources(retainColorControl, retainPresentationBuffer);
 }
 
@@ -150,10 +149,6 @@ void ResetResources(bool retainColorControl, bool retainPresentationBuffer) noex
         ResetResources(false, ApplicationPresentationFacadeActive());
     if (creation != PresentationResourceCreation::ready) return false;
     EnsureArmorEncodedResources(device, context);
-    const auto settingsRequested = g_configuration.productionRequested || g_configuration.developerHdr10Reference;
-    EnsureSettingsWindowBackend(settingsRequested, g_outputWindow, device, context);
-    g_evidence.settingsBackendFailed.store(settingsRequested && !SettingsWindowBackendReady(),
-        std::memory_order_release);
     if (CurrentWideGamutReadiness().Complete()) {
         g_presentation.colorDomainGeneration =
             g_evidence.resourceGeneration.load(std::memory_order_acquire);
@@ -268,7 +263,6 @@ struct DisplayGenerationObservation
 }
 void RetireLostDeviceGeneration() noexcept
 {
-    ShutdownSettingsWindowBackend();
     if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
     g_presentation.applicationFacadeChain = nullptr;
     g_sdrModeActive.store(false, std::memory_order_release);
@@ -474,8 +468,9 @@ void InitializeLiveSettings(const PluginConfiguration& configuration) noexcept
 {
     g_activeSettings = static_cast<const HdrSettings&>(configuration);
     g_sdrProfileSelected = false;
-    InitializeSettingsWindow({g_activeSettings, configuration.sdrSettings},
-        configuration.interfaceSettings);
+    ConnectSettingsMenuRenderer(PresentationSettingsMenuRenderer());
+    InitializeSettingsMenu({g_activeSettings, configuration.sdrSettings},
+        configuration.interfaceSettings, configuration.developerMode);
     g_settingsGeneration = 1;
     g_desiredSettingsGeneration = 1;
     // Request generations never restart: the process-lifetime worker skips one it already built.
@@ -727,7 +722,7 @@ void SetSdrModeActive(bool active) noexcept
         // A pending table belongs to the profile being left.
         RetirePendingOperatorLutBuild();
         g_liveSettingsError = false;
-        SelectSettingsWindowProfile(active);
+        SelectSettingsMenuProfile(active);
         g_activeSettings = ReadSettingsDraft();
         g_sdrProfileSelected = active;
     }
@@ -765,8 +760,7 @@ void DeferUnpreparedSdrOperator() noexcept
 
 }  // namespace
 
-bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
-    ID3D11DeviceContext* context) noexcept
+bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device) noexcept
 {
     // The latch precedes the build so its constants omit the HDR operator mode.
     const auto reason = DecideSdrModeReason(inputs);
@@ -776,14 +770,12 @@ bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device,
     SetSdrModeActive(admitted);
     if (!admitted) return false;
     DeferUnpreparedSdrOperator();
-    // A failed build keeps the mode for the settings window; nothing substitutes.
+    // A failed build keeps the mode for the settings menu; nothing substitutes.
     if (!BuildSdrReplacementsOrDeferOperator(device))
     {
         DisableSdrSubstitution();
         RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
     }
-    EnsureSettingsWindowBackend(true, g_outputWindow, device, context);
-    g_evidence.settingsBackendFailed.store(!SettingsWindowBackendReady(), std::memory_order_release);
     return true;
 }
 
@@ -918,12 +910,6 @@ bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noe
     g_evidence.initialized.store(true, std::memory_order_release);
     g_initialization.Complete(true);
     return true;
-}
-
-GraphicsSettingsInputActivation TryActivateGraphicsSettingsInputOnCurrentThread() noexcept
-{
-    const auto input = TryActivateSettingsWindowInput();
-    return {input.ready, input.active, input.currentThreadId, input.windowThreadId};
 }
 
 } // namespace fo4hdr

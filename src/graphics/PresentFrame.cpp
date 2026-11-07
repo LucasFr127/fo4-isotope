@@ -16,9 +16,7 @@
 #include "resources/DeveloperExposureResources.hpp"
 #include "resources/ArmorCompositionResources.hpp"
 #include "resources/HdrResourcePolicy.hpp"
-#include "FO4Isotope/ui/SettingsWindow.hpp"
 #include <FO4Isotope/output/HdrActivationPolicy.hpp>
-#include <FO4Isotope/ui/HdrSettingsInput.hpp>
 #include "FO4Isotope/output/PerformanceStatistics.hpp"
 #include <wrl/client.h>
 #include <algorithm>
@@ -56,6 +54,17 @@ struct OutputRecovery
     bool used{}, pending{};
 };
 OutputRecovery g_outputRecovery;
+// Present-thread only; a null window counts as focused.
+bool g_outputWindowFocused{true};
+
+// True on the one Present that first sees the game window lose foreground focus.
+[[nodiscard]] bool ObserveOutputWindowFocusLoss() noexcept
+{
+    const bool focused = g_outputWindow == nullptr || GetForegroundWindow() == g_outputWindow;
+    const bool lost = g_outputWindowFocused && !focused;
+    g_outputWindowFocused = focused;
+    return lost;
+}
 
 bool ApplyGraphicsLifecycle(const GraphicsLifecyclePublication& publication) noexcept
 {
@@ -405,8 +414,7 @@ struct PresentFrame
 
     bool PipboyObservationRetired()
     {
-        return HdrSettingsFocusLossPending() ||
-            g_pipboyRetiredContext.load(std::memory_order_acquire) ==
+        return g_pipboyRetiredContext.load(std::memory_order_acquire) ==
                 g_pipboyScreen.state.contextGeneration ||
             g_evidence.resourceGeneration.load(std::memory_order_acquire) !=
                 g_pipboyScreen.state.generation;
@@ -620,8 +628,9 @@ struct PresentFrame
         }
         const auto thread = GetCurrentThreadId();
         g_observedPresentThread.store(thread, std::memory_order_release);
+        if (ObserveOutputWindowFocusLoss()) PresentationFocusLost();
         if (g_pipboyScreen.state.requested && PipboyObservationRetired())
-            StopPipboyScreenObservation("Stopped: focus loss or context/resource retirement");
+            StopPipboyScreenObservation("Stopped: context/resource retirement");
         const auto drawThread =
             g_currentFrameQualifiedDrawThread.exchange(
                 0, std::memory_order_acq_rel);
@@ -1039,9 +1048,6 @@ struct PresentFrame
         ValidateActivation();
         RenderHdrFallback();
         RenderSdrHandoff();
-        if (g_sdrModeActive.load(std::memory_order_acquire))
-            DrawSdrSettingsOverlay(swapChain, g_rendererDevice.activeDevice,
-                g_rendererDevice.activeContext);
         PublishResult();
         if (rendered) PublishSharedUiPresentation();
         TraceSharedUiOutput({rendered, rendered || hdrFallbackRendered || sdrHandoffRendered,

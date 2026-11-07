@@ -4,7 +4,6 @@
 
 #include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "TestHarness.hpp"
-#include <Windows.h>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -181,10 +180,7 @@ void TestSettingsEquality()
     const HdrInterfaceSettings interfaceDefaults{};
     auto interfaceCopy = interfaceDefaults;
     FO4HDR_CHECK(interfaceCopy == interfaceDefaults);
-    interfaceCopy.windowX = 100.0;
-    FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
-    interfaceCopy = interfaceDefaults;
-    interfaceCopy.toggleKey = HdrSettingsHotkey{VK_F10, 0U};
+    interfaceCopy.hdrEnabled = false;
     FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
     interfaceCopy = interfaceDefaults;
     FO4HDR_CHECK(interfaceCopy == interfaceDefaults);
@@ -196,7 +192,7 @@ void TestSettingsEquality()
     FO4HDR_CHECK(configurationCopy != configurationDefaults);
     configurationCopy = configurationDefaults;
     FO4HDR_CHECK(configurationCopy == configurationDefaults);
-    configurationCopy.interfaceSettings.windowY = 100.0;
+    configurationCopy.interfaceSettings.hdrEnabled = false;
     FO4HDR_CHECK(configurationCopy != configurationDefaults);
     configurationCopy = configurationDefaults;
     configurationCopy.developerMode = true;

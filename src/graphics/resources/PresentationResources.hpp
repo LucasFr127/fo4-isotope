@@ -27,10 +27,6 @@ struct PresentationResources
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> presentDepth;
     Microsoft::WRL::ComPtr<ID3D11BlendState> presentBlend;
     Microsoft::WRL::ComPtr<ID3D11Buffer> constants;
-    // SDR-mode settings window target on the game's own backbuffer.
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> sdrBackBuffer;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> sdrBackBufferRtv;
-    bool sdrBackBufferUnsupported{};
     LinearColorDomain presentationProxyDomain{LinearColorDomain::unknown};
     std::uint64_t colorDomainGeneration{};
     bool presentationRedirectedThisFrame{};
@@ -56,7 +52,6 @@ bool RecreatePresentationConstants(ID3D11Device*) noexcept;
 bool EnsurePresentationOutputResources(IDXGISwapChain*, ID3D11Device*,
     ID3D11DeviceContext*, bool hdr) noexcept;
 bool ApplicationPresentationFacadeActive() noexcept;
-bool EnsureSdrBackBufferTarget(IDXGISwapChain*, ID3D11Device*) noexcept;
 HRESULT AcquireApplicationPresentationBuffer(IDXGISwapChain*, ID3D11Texture2D**) noexcept;
 enum class PresentationResourceCreation
 {
@@ -68,17 +63,5 @@ PresentationResourceCreation CreatePresentationResources(
     IDXGISwapChain*, ID3D11Device*, ID3D11DeviceContext*) noexcept;
 void ResetPresentationResources(bool retainColorControl, bool retainPresentationBuffer = false) noexcept;
 void RetirePresentationOutput() noexcept;
-
-struct UiTransportResources
-{
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> ui;
-    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> uiSrv;
-    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> uiRtv;
-};
-extern UiTransportResources g_uiTransport;
-
-bool DeveloperUiResourcesReady() noexcept;
-bool CreateTextureViews(ID3D11Device*, std::uint32_t width, std::uint32_t height) noexcept;
-void ResetUiTransportResources() noexcept;
 
 } // namespace fo4hdr

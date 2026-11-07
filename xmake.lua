@@ -29,16 +29,6 @@ end
 -- own PluginVersion.cpp.
 includes("lib/commonlibf4")
 
-add_requires("imgui v1.92.6-docking", {
-    configs = {
-        shared = false,
-        dx11 = true,
-        win32 = true,
-        no_demo_windows = true,
-        no_debug_tools = true
-    }
-})
-
 set_project("FO4Isotope")
 set_version("0.0.0")
 set_license("LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions")
@@ -193,6 +183,7 @@ target("fo4hdr-core")
         "src/output/RenderPipelineContract.cpp",
         "src/output/NativeLutObservation.cpp",
         "src/output/WeatherGradeResponse.cpp",
+        "src/output/NativeMenuState.cpp",
         "src/output/ArmorUiComposition.cpp")
     add_files(
         "src/output/Hdr10Color.cpp",
@@ -206,13 +197,12 @@ target_end()
 target("fo4hdr-renderer")
     set_kind("static")
     set_default(true)
-    add_deps("fo4hdr-core", "fo4hdr-shaders")
+    add_deps("fo4hdr-core", "fo4hdr-shaders", "dearmoddingui-api")
     add_files("src/graphics/**.cpp")
     add_files("src/ui/**.cpp")
     add_headerfiles("include/FO4Isotope/**.hpp")
     add_includedirs("include", { public = true })
     add_includedirs(path.join(os.projectdir(), "build", "generated"))
-    add_packages("imgui")
     if not has_config("fo4hdr_frame_trace") then
         add_defines("FO4HDR_DISABLE_FRAME_TRACE=1", { public = true })
     end
@@ -251,10 +241,7 @@ if has_config("fo4hdr_build_tests") then
         add_files("tests/shader/ShaderTestOptions.cpp")
         add_files("src/game/ImageSpaceState.cpp")
         add_syslinks("bcrypt", "d3d11", "user32")
-        add_packages("imgui")
-        add_files("src/ui/HdrSettingsInput.cpp")
-        add_files("src/ui/ToneMapperPanel.cpp", "src/ui/ToneMapperRecommendations.cpp",
-            "src/ui/LutProfilesPanel.cpp")
+        add_files("src/ui/SettingsStatus.cpp", "src/ui/ToneMapperRecommendations.cpp")
         add_files("src/graphics/OperatorLutWorker.cpp")
         add_files("src/graphics/d3d11/ContextQuerySafety.cpp",
             "src/graphics/d3d11/ScopedD3D11ComputeConstantBuffer.cpp")
@@ -289,7 +276,6 @@ if has_config("fo4hdr_build_tests") then
         set_kind("static")
         set_default(true)
         add_deps("fo4hdr-core", "fo4hdr-shaders", "commonlibf4")
-        add_packages("imgui")
         add_includedirs("include", ".", "src/config", "src/game", "src/graphics", "src/ui",
             "src/runtime", "tests/support",
             path.join(os.projectdir(), "build", "generated"))

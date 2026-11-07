@@ -49,9 +49,7 @@ function Assert-LayoutCoreDependency {
     param([string]$File, [string]$Resolved)
     $core = $File -match '^(src|include/FO4Isotope)/(config|tonemap|output|runtime|hooks)/'
     $renderer = $Resolved -match '^(src|include/FO4Isotope)/(graphics|ui)/'
-    $inputContract = $Resolved -ceq 'include/FO4Isotope/ui/HdrSettingsInput.hpp'
-    if (!$core -or !$renderer) { return }
-    if (!$inputContract) {
+    if ($core -and $renderer) {
         throw "Core component depends on renderer/UI in ${File}: $Resolved"
     }
 }
@@ -160,8 +158,8 @@ function Assert-LayoutRejects {
 function Test-LayoutDependencies {
     $paths = @{}
     foreach ($path in @('include/FO4Isotope/graphics/HdrRenderer.hpp',
-        'include/FO4Isotope/ui/SettingsWindow.hpp', 'include/FO4Isotope/ui/HdrSettingsInput.hpp',
-        'src/graphics/PresentFrame.hpp', 'src/ui/LutProfilesPanel.hpp',
+        'include/FO4Isotope/ui/SettingsMenu.hpp',
+        'src/graphics/PresentFrame.hpp', 'src/ui/SettingsPages.hpp',
         'src/game/GameStateObserver.hpp', 'src/runtime/RuntimeIdentityFiles.hpp',
         'src/config/SettingsPersistence.hpp')) {
         Add-LayoutPath $paths $path
@@ -170,23 +168,23 @@ function Test-LayoutDependencies {
         foreach ($root in @('src', 'include/FO4Isotope')) {
             $file = "$root/$subsystem/Component.hpp"
             foreach ($dependency in @('FO4Isotope/graphics/HdrRenderer.hpp',
-                'FO4Isotope/ui/SettingsWindow.hpp', 'graphics/PresentFrame.hpp', 'ui/LutProfilesPanel.hpp')) {
+                'FO4Isotope/ui/SettingsMenu.hpp', 'graphics/PresentFrame.hpp', 'ui/SettingsPages.hpp')) {
                 Assert-LayoutRejects { Assert-LayoutInclude $file $dependency $paths }
             }
         }
     }
-    Assert-LayoutInclude 'src/config/Settings.cpp' 'FO4Isotope/ui/HdrSettingsInput.hpp' $paths
-    Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' 'FO4Isotope/ui/SettingsWindow.hpp' $paths
+    Assert-LayoutRejects { Assert-LayoutInclude 'src/config/Settings.cpp' 'FO4Isotope/ui/SettingsMenu.hpp' $paths }
+    Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' 'FO4Isotope/ui/SettingsMenu.hpp' $paths
     Assert-LayoutInclude 'src/plugin/PluginMain.cpp' '../game/GameStateObserver.hpp' $paths
     Assert-LayoutInclude 'src/plugin/PluginMain.cpp' '../runtime/RuntimeIdentityFiles.hpp' $paths
     Assert-LayoutInclude 'src/game/GameStateObserver.cpp' 'FO4Isotope/graphics/HdrRenderer.hpp' $paths
     Assert-LayoutInclude 'tests/unit/runtime/RuntimeIdentityFilesTests.cpp' 'RuntimeIdentityFiles.hpp' $paths
-    Assert-LayoutInclude 'tests/unit/config/SettingsTests.cpp' 'LutProfilesPanel.hpp' $paths
+    Assert-LayoutInclude 'tests/unit/config/SettingsTests.cpp' 'SettingsPages.hpp' $paths
     Assert-LayoutInclude 'tests/unit/config/SettingsTests.cpp' 'SettingsPersistence.hpp' $paths
     Assert-LayoutRejects { Assert-LayoutInclude 'include/FO4Isotope/config/Settings.hpp' 'SettingsPersistence.hpp' $paths }
     Assert-LayoutInclude 'tests/shader/PresentationTests.cpp' 'PresentFrame.hpp' $paths
-    Assert-LayoutRejects { Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' '../ui/LutProfilesPanel.hpp' $paths }
-    Assert-LayoutRejects { Assert-LayoutInclude 'src/ui/SettingsWindow.cpp' '../graphics/PresentFrame.hpp' $paths }
+    Assert-LayoutRejects { Assert-LayoutInclude 'src/graphics/PresentFrame.cpp' '../ui/SettingsPages.hpp' $paths }
+    Assert-LayoutRejects { Assert-LayoutInclude 'src/ui/SettingsMenu.cpp' '../graphics/PresentFrame.hpp' $paths }
     Assert-LayoutRejects { Assert-LayoutInclude 'tests/unit/runtime/RuntimeIdentityFilesTests.cpp' 'runtimeIdentityFiles.hpp' $paths }
 }
 

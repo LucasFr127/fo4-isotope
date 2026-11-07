@@ -19,7 +19,6 @@ namespace fo4hdr::tests::gpu {
 struct PublicPresentationInputs
 {
     Texture& scene;
-    Texture& layer;
     Texture& output;
     const PresentationShaders* shader;
 };
@@ -67,14 +66,6 @@ fo4hdr::LinearRgb ExpectedPublicPresentationPixel(const Float4& pixel,
     const CompositionConstants& constants)
 {
     auto light = ExpectedPublicPresentationSource(pixel, constants);
-    if (constants.settingsOverlayPresent != 0) {
-        const auto layer = fo4hdr::ConvertBt709ToBt2020({
-            DecodePublicPresentationChannel(0.8, 1) * 0.25,
-            DecodePublicPresentationChannel(0.4, 1) * 0.25,
-            DecodePublicPresentationChannel(0.2, 1) * 0.25});
-        light = {light.red * 0.75 + layer.red, light.green * 0.75 + layer.green,
-            light.blue * 0.75 + layer.blue};
-    }
     if (constants.mode == 4 || constants.mode == 5) {
         light = fo4hdr::ConvertBt2020ToBt709(light);
         return {std::pow(std::clamp(light.red, 0.0, 1.0), 1.0 / 2.2),
@@ -123,15 +114,13 @@ void VerifyPublicPresentationMapping(Device& device, const PublicPresentationInp
 {
     constexpr UINT width = 37, height = 19;
     for (const float white : {120.0F, 280.0F}) {
-        for (const UINT hasSettings : {0U, 1U}) {
-            const CompositionConstants mapping{width, height, source.mode, white, white, 1000,
-                0, 0, hasSettings, source.encoding, 0, source.encoding == 2 ? 2.5F : 0.0F};
-            const auto constants = CreateConstantBuffer(*device.device.Get(), mapping);
-            DrawPresentation(device, {test.shader, constants.Get(),
-                {test.scene.srv.Get(), nullptr, nullptr, test.layer.srv.Get()},
-                test.output.rtv.Get(), width, height});
-            CheckPublicPresentationPixels(device, {test.output, pixels, mapping});
-        }
+        const CompositionConstants mapping{width, height, source.mode, white, white, 1000,
+            0, 0, 0, source.encoding, 0, source.encoding == 2 ? 2.5F : 0.0F};
+        const auto constants = CreateConstantBuffer(*device.device.Get(), mapping);
+        DrawPresentation(device, {test.shader, constants.Get(),
+            {test.scene.srv.Get(), nullptr, nullptr, nullptr},
+            test.output.rtv.Get(), width, height});
+        CheckPublicPresentationPixels(device, {test.output, pixels, mapping});
     }
 }
 
@@ -146,9 +135,6 @@ void VerifyPublicPresentationPixels(Device& device, const PublicPresentationInpu
     for (std::size_t index = 0; index < pixels.size(); ++index)
         pixels[index] = samples[index % samples.size()];
     device.context->UpdateSubresource(test.scene.texture.Get(), 0, nullptr, pixels.data(), width * sizeof(Float4), 0);
-    std::array<Float4, width * height> overlay{};
-    overlay.fill({0.2F, 0.1F, 0.05F, 0.25F});
-    device.context->UpdateSubresource(test.layer.texture.Get(), 0, nullptr, overlay.data(), width * sizeof(Float4), 0);
     constexpr std::array mappings{PublicSourceMapping{1, 0}, PublicSourceMapping{3, 0},
         PublicSourceMapping{3, 1}, PublicSourceMapping{3, 2}, PublicSourceMapping{4, 0},
         PublicSourceMapping{4, 1}, PublicSourceMapping{4, 2}, PublicSourceMapping{5, 0}};
@@ -187,10 +173,8 @@ void VerifyPublicPresentationOutput(Device& device)
     auto output = GetPresentationBuffer(device, *chain.Get());
     auto scene = CreateSizedTexture(*device.device.Get(), {width, height,
         DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_SHADER_RESOURCE});
-    auto layer = CreateSizedTexture(*device.device.Get(), {width, height,
-        DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_SHADER_RESOURCE});
     const auto shader = CreatePresentationShaders(*device.device.Get());
-    const PublicPresentationInputs inputs{scene, layer, output, &shader};
+    const PublicPresentationInputs inputs{scene, output, &shader};
     VerifyPublicPresentationPixels(device, inputs);
     VerifyPublicSdrContainment(device, inputs);
 }

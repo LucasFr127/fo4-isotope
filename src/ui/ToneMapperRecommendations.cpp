@@ -79,4 +79,20 @@ ToneMapperRecommendedRange GetToneMapperRecommendedRange(
     return {true, minimum, control->maximum, reference->nits};
 }
 
+const char* ToneMapperRecommendationStatus(
+    double value, const ToneMapperRecommendedRange& range) noexcept
+{
+    // A control without a measured range shows no recommendation.
+    if (!range.available) return nullptr;
+    if (!std::isfinite(value)) return "Control value is invalid.";
+    // Edits may round through float; include only that endpoint representation.
+    const auto minimum = std::min(range.minimum,
+        static_cast<double>(static_cast<float>(range.minimum)));
+    const auto maximum = std::max(range.maximum,
+        static_cast<double>(static_cast<float>(range.maximum)));
+    if (value < minimum || value > maximum)
+        return "Outside the recommended range: may show banding or color steps.";
+    return nullptr;
+}
+
 } // namespace fo4hdr

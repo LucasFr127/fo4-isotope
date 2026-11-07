@@ -22,54 +22,6 @@
 namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
 
-UiTransportResources g_uiTransport;
-
-struct RenderTextureDestination
-{
-    ComPtr<ID3D11Texture2D>& texture;
-    ComPtr<ID3D11ShaderResourceView>& srv;
-    ComPtr<ID3D11RenderTargetView>& rtv;
-};
-
-[[nodiscard]] bool CreateRenderTextureViews(
-    ID3D11Device* device, const D3D11_TEXTURE2D_DESC& description,
-    const RenderTextureDestination& output) noexcept
-{
-    return SUCCEEDED(device->CreateTexture2D(&description, nullptr, &output.texture)) &&
-        SUCCEEDED(device->CreateShaderResourceView(output.texture.Get(), nullptr, &output.srv)) &&
-        SUCCEEDED(device->CreateRenderTargetView(output.texture.Get(), nullptr, &output.rtv));
-}
-
-[[nodiscard]] bool CreateTextureViews(
-    ID3D11Device* device, std::uint32_t width, std::uint32_t height) noexcept
-{
-    D3D11_TEXTURE2D_DESC fp16{};
-    fp16.Width = width;
-    fp16.Height = height;
-    fp16.MipLevels = 1;
-    fp16.ArraySize = 1;
-    fp16.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    fp16.SampleDesc.Count = 1;
-    fp16.Usage = D3D11_USAGE_DEFAULT;
-    fp16.BindFlags = D3D11_BIND_SHADER_RESOURCE |
-                     D3D11_BIND_RENDER_TARGET;
-    return CreateRenderTextureViews(device, fp16,
-        {g_uiTransport.ui, g_uiTransport.uiSrv, g_uiTransport.uiRtv});
-}
-
-
-[[nodiscard]] bool DeveloperUiResourcesReady() noexcept
-{
-    return g_uiTransport.ui && g_uiTransport.uiSrv && g_uiTransport.uiRtv;
-}
-
-void ResetUiTransportResources() noexcept
-{
-    g_uiTransport.uiRtv.Reset();
-    g_uiTransport.uiSrv.Reset();
-    g_uiTransport.ui.Reset();
-}
-
 PresentationResources g_presentation;
 
 [[nodiscard]] bool ApplicationPresentationFacadeActive() noexcept
@@ -207,12 +159,7 @@ bool EnsurePresentationTarget(IDXGISwapChain* swapChain, ID3D11Device* device) n
 }
 [[nodiscard]] bool PresentationResourcesReady() noexcept
 {
-    const std::array required{
-        PresentationOutputReady(),
-        DeveloperUiResourcesReady(),
-        PresentationCompositionReady()
-    };
-    return std::ranges::all_of(required, [](bool ready) { return ready; });
+    return PresentationOutputReady() && PresentationCompositionReady();
 }
 
 [[nodiscard]] bool HdrFlipDescriptorSupported(const DXGI_SWAP_CHAIN_DESC& description) noexcept
@@ -369,11 +316,7 @@ bool PreparePresentationOutputColor(IDXGISwapChain* swapChain,
     if (!PresentationColorSupported(hdr) &&
         !PreparePresentationOutputColor(swapChain, device, context, hdr)) return false;
     if (!CreatePresentationProxy(swapChain, device)) return false;
-    if (!PresentationCompositionReady() && !CreatePresentationComposition(device)) return false;
-    // A reset also retires the optional settings layer; output stays usable without it.
-    if (!DeveloperUiResourcesReady())
-        (void)CreateTextureViews(device, g_presentation.width, g_presentation.height);
-    return true;
+    return PresentationCompositionReady() || CreatePresentationComposition(device);
 }
 
 [[nodiscard]] PresentationResourceCreation CreatePresentationResources(
@@ -393,8 +336,6 @@ bool PreparePresentationOutputColor(IDXGISwapChain* swapChain,
         RecordFailure(GraphicsObservationFailure::resourceCreationFailed);
         return PresentationResourceCreation::compositionFailed;
     }
-    // Flattened public output remains usable when optional layer capture fails.
-    (void)CreateTextureViews(device, g_presentation.width, g_presentation.height);
     return PresentationResourceCreation::ready;
 }
 
@@ -424,72 +365,6 @@ void RetirePresentationOutput() noexcept
     // Armor closes before this phase; its borrowed proxy UAV retires before output.
     g_presentation.presentationProxyUav.Reset();
     g_presentation.presentationBackBufferRtv.Reset();
-    g_presentation.sdrBackBufferRtv.Reset();
-    g_presentation.sdrBackBuffer.Reset();
-    g_presentation.sdrBackBufferUnsupported = false;
-}
-
-namespace {
-
-// ImGui writes display codes, so the view must not apply an sRGB encode. A
-// lower layer's sRGB or FP16 chain keeps its own view format: the window's
-// colors shift there, but a visible window beats a hidden modal one.
-[[nodiscard]] DXGI_FORMAT SdrBackBufferViewFormat(DXGI_FORMAT format) noexcept
-{
-    struct ViewFormat { DXGI_FORMAT texture; DXGI_FORMAT view; };
-    constexpr ViewFormat formats[]{
-        {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM},
-        {DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM},
-        {DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM},
-        {DXGI_FORMAT_B8G8R8A8_TYPELESS, DXGI_FORMAT_B8G8R8A8_UNORM},
-        {DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM},
-        {DXGI_FORMAT_R10G10B10A2_TYPELESS, DXGI_FORMAT_R10G10B10A2_UNORM},
-        {DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB},
-        {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB},
-        {DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT}};
-    const auto found = std::ranges::find(formats, format, &ViewFormat::texture);
-    return found == std::end(formats) ? DXGI_FORMAT_UNKNOWN : found->view;
-}
-
-// ImGui's rasterizer needs a single-sample render target.
-[[nodiscard]] bool SdrBackBufferDrawable(const D3D11_TEXTURE2D_DESC& description) noexcept
-{
-    return SdrBackBufferViewFormat(description.Format) != DXGI_FORMAT_UNKNOWN &&
-        description.SampleDesc.Count == 1 &&
-        (description.BindFlags & D3D11_BIND_RENDER_TARGET) != 0;
-}
-
-}  // namespace
-
-bool EnsureSdrBackBufferTarget(IDXGISwapChain* swapChain, ID3D11Device* device) noexcept
-{
-    if (g_presentation.sdrBackBufferRtv) return true;
-    if (g_presentation.sdrBackBufferUnsupported) return false;
-    if (swapChain == nullptr || device == nullptr) return false;
-    // Retry only after this swap-chain generation retires.
-    g_presentation.sdrBackBufferUnsupported = true;
-    ComPtr<ID3D11Texture2D> backBuffer;
-    if (FAILED(swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer)))) return false;
-    D3D11_TEXTURE2D_DESC description{};
-    backBuffer->GetDesc(&description);
-    if (!SdrBackBufferDrawable(description))
-    {
-        // Named once by the lifecycle report; this runs once per generation.
-        g_evidence.sdrTargetSamples.store(description.SampleDesc.Count, std::memory_order_relaxed);
-        g_evidence.sdrTargetFormat.store(description.Format, std::memory_order_release);
-        return false;
-    }
-    D3D11_RENDER_TARGET_VIEW_DESC view{};
-    view.Format = SdrBackBufferViewFormat(description.Format);
-    view.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
-    if (FAILED(device->CreateRenderTargetView(backBuffer.Get(), &view,
-            &g_presentation.sdrBackBufferRtv)))
-        return false;
-    g_presentation.sdrBackBufferUnsupported = false;
-    g_presentation.sdrBackBuffer = std::move(backBuffer);
-    g_presentation.width = description.Width;
-    g_presentation.height = description.Height;
-    return true;
 }
 
 void ResetPresentationResources(bool retainColorControl, bool retainPresentationBuffer) noexcept

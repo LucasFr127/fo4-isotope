@@ -450,7 +450,7 @@ struct SharedUiFixture
         const CompositionConstants constants{
             .width = kCompositionWidth, .height = kCompositionHeight, .mode = 3,
             .uiPaperWhiteNits = content.white, .sceneReferenceWhiteNits = 203,
-            .displayPeakNits = 1000, .settingsOverlayPresent = 0, .sharedUiEncoded = encoding};
+            .displayPeakNits = 1000, .sharedUiEncoded = encoding};
         const auto buffer = CreateConstantBuffer(*device.device.Get(), constants);
         DrawPresentation(device, {&finalShader, buffer.Get(),
             {composition.srv.Get(), nullptr, nullptr, nullptr}, output.rtv.Get(),

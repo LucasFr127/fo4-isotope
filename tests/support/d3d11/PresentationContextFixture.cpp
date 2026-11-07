@@ -16,7 +16,6 @@ PresentationContextFixture::PresentationContextFixture(Device& value) : device(v
 {
     RetireSharedUiPublicImage();
     g_presentation = {};
-    g_uiTransport = {};
     g_scene = {};
     g_armor = {};
     g_armor.armorEncodedAttempted = true;
@@ -48,7 +47,6 @@ PresentationContextFixture::~PresentationContextFixture()
     RetireSharedUiPublicImage();
     g_rendererDevice = savedDevice;
     g_presentation = savedPresentation;
-    g_uiTransport = savedUi;
     g_scene = savedScene;
     g_armor = savedArmor;
     g_heartbeat = savedHeartbeat;
@@ -84,7 +82,6 @@ void PresentationContextFixture::PrepareResources()
     g_presentation.presentRasterizer = shaders.rasterizer;
     g_presentation.presentDepth = shaders.depth;
     g_presentation.presentBlend = shaders.blend;
-    FO4HDR_WARP_CHECK(CreateTextureViews(device.device.Get(), kWidth, kHeight));
     FO4HDR_WARP_CHECK(RecreatePresentationConstants(device.device.Get()));
     g_scene.currentScene = proxy.srv;
     g_scene.currentSceneDomain = LinearColorDomain::linearBt2020UiRelative;

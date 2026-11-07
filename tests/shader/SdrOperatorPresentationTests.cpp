@@ -4,7 +4,7 @@
 #include "d3d11/PresentationContextFixture.hpp"
 #include "d3d11/BorrowedFullscreenState.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
-#include "FO4Isotope/ui/SettingsWindow.hpp"
+#include "FO4Isotope/ui/SettingsMenu.hpp"
 
 #include <algorithm>
 #include <array>
@@ -54,7 +54,7 @@ HRESULT STDMETHODCALLTYPE FailPixelShader(ID3D11Device*, const void*, SIZE_T,
 }
 
 // SDR mode with an operator selected in the SDR profile. The renderer does not
-// gate selectability; the settings layer does.
+// gate selectability; the settings menu does.
 struct SdrOperatorFixture : SharedPresentationContextFixture
 {
     std::unique_ptr<OperatorLutBuildResult> savedHdrLut{std::move(RetainedCpuLut(OperatorLutTarget::hdr10))};
@@ -100,8 +100,8 @@ struct SdrOperatorFixture : SharedPresentationContextFixture
     // Commits an SDR draft through the path end Present takes on a commit request.
     void CommitSdrDraft(const HdrSettings& draft)
     {
-        InitializeSettingsWindow({HdrSettings{}, draft}, {});
-        SelectSettingsWindowProfile(true);
+        InitializeSettingsMenu({HdrSettings{}, draft}, {}, false);
+        SelectSettingsMenuProfile(true);
         CommitUiDraft(device.device.Get(), device.context.Get());
     }
 };
@@ -157,7 +157,7 @@ void CheckDeferredOperator(Device& device)
     auto* hdrMarker = new OperatorLutBuildResult{};
     RetainedCpuLut(OperatorLutTarget::hdr10).reset(hdrMarker);
     const SdrModeInputs inputs{.requested = true};
-    FO4HDR_WARP_CHECK(PrepareSdrMode(inputs, device.device.Get(), device.context.Get()));
+    FO4HDR_WARP_CHECK(PrepareSdrMode(inputs, device.device.Get()));
     // Without a retained table the native curve draws until the build publishes.
     FO4HDR_WARP_CHECK(g_activeSettings.productionAlgorithm == ProductionToneMapperAlgorithm::native);
     FO4HDR_WARP_CHECK(g_replacements.configurationKey.mode == 0U && g_replacements.operatorLutSampler);
@@ -177,7 +177,7 @@ void CheckProfileSwitchRetiresPendingTable(Device& device)
 {
     SdrOperatorFixture fixture(device, ProductionToneMapperAlgorithm::aces2);
     FO4HDR_WARP_CHECK(InitializeOperatorLutWorker());
-    FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true}, device.device.Get(), device.context.Get()));
+    FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true}, device.device.Get()));
     FO4HDR_WARP_CHECK(g_lutPending);
     // The pending SDR table belongs to the profile being left.
     SetSdrModeActive(false);
@@ -213,8 +213,7 @@ void CheckFailedTableUpload(Device& device)
     {
         const FailingDeviceCreation failure(device.device.Get(), kDeviceCreateTexture3D,
             reinterpret_cast<void*>(&FailTexture3D));
-        FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true},
-            device.device.Get(), device.context.Get()));
+        FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true}, device.device.Get()));
     }
     FO4HDR_WARP_CHECK(g_sdrModeActive.load() && g_replacements.configurationKey.mode == 0U);
     FO4HDR_WARP_CHECK(g_activeSettings.productionAlgorithm == ProductionToneMapperAlgorithm::native);
@@ -225,7 +224,7 @@ void CheckFailedTableUpload(Device& device)
     FO4HDR_WARP_CHECK(g_replacements.configurationKey.mode == 2U && ReplacementSetMatchesConfiguration());
 }
 
-// Failed SDR replacements keep the mode for the settings window, without
+// Failed SDR replacements keep the mode for the settings menu, without
 // substitution. The redirect after a rejected HDR attempt shares this path.
 void CheckFailedSdrShaderBuild(Device& device)
 {
@@ -234,7 +233,7 @@ void CheckFailedSdrShaderBuild(Device& device)
         const FailingDeviceCreation failure(device.device.Get(), kDeviceCreatePixelShader,
             reinterpret_cast<void*>(&FailPixelShader));
         FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true, .hdrPathRequested = true},
-            device.device.Get(), device.context.Get()));
+            device.device.Get()));
     }
     FO4HDR_WARP_CHECK(g_sdrModeActive.load() && g_replacements.sdrSubstitutionDisabled);
     FO4HDR_WARP_CHECK(g_evidence.sdrModeReason.load() ==
@@ -252,7 +251,7 @@ void CheckEnbKeepsGameShaders(Device& device)
     for (const bool enb : {true, false})
     {
         FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true, .enbDetected = enb},
-            device.device.Get(), device.context.Get()));
+            device.device.Get()));
         auto* game = fixture.hudShader.Get();
         FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) ==
             (enb ? game : g_replacements.toneMapASdr.Get()));
@@ -352,8 +351,8 @@ private:
     std::array<void*, kShadowHeaderSlots + kContextBaseSlots> table_{};
 };
 
-// ENB keeps SDR mode, and the settings overlay borrows state through its
-// context; borrowed state must release only the class instances returned.
+// ENB keeps SDR mode, and borrowed context state must release only the class
+// instances returned.
 void CheckClassInstanceOverrun(Device& device)
 {
     auto destination = CreateTexture(*device.device.Get(), DXGI_FORMAT_R8G8B8A8_UNORM,

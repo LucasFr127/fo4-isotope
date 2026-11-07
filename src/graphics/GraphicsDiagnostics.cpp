@@ -9,7 +9,6 @@
 #include <utility>
 #include "RendererLifetime.hpp"
 #include "LiveSettings.hpp"
-#include <FO4Isotope/ui/HdrSettingsInput.hpp>
 #include <array>
 #include <format>
 #include <string>
@@ -129,10 +128,6 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
     snapshot.candidateCreatedFormat = g_evidence.candidateCreatedFormat.load();
     snapshot.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load());
     snapshot.rendererInstalled = g_evidence.rendererInstalled.load();
-    snapshot.settingsWindowReady = g_evidence.settingsWindowReady.load();
-    snapshot.settingsBackendFailed = g_evidence.settingsBackendFailed.load();
-    snapshot.sdrTargetFormat = g_evidence.sdrTargetFormat.load();
-    snapshot.sdrTargetSamples = g_evidence.sdrTargetSamples.load();
     snapshot.presentHookConflict = g_evidence.presentHookConflict.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();
     snapshot.qualifiedDrawThreadId = g_observedQualifiedDrawThread.load();
@@ -472,11 +467,6 @@ bool ValidatePipboySession(ID3D11DeviceContext* context, const DrawObservation& 
 {
     auto& p = g_pipboyScreen;
     if (!p.state.requested) return false;
-    if (HdrSettingsFocusLossPending())
-    {
-        StopPipboyScreenObservation("Stopped: focus loss");
-        return false;
-    }
     if (context != g_rendererDevice.activeContext || !record.immediate) return false;
     if (PipboySessionRetired(record, p))
     {

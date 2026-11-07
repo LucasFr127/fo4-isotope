@@ -83,13 +83,9 @@ struct GraphicsObservationSnapshot
     HdrCandidateRejection hdrCandidateRejection{HdrCandidateRejection::none};
     std::int32_t candidateCreateResult{};
     std::uint32_t candidateCreatedFormat{};
-    // Why SDR mode runs, and what keeps the settings window off the screen.
+    // Why SDR mode runs, and whether the renderer installed.
     SdrModeReason sdrModeReason{SdrModeReason::none};
     bool rendererInstalled{};
-    bool settingsWindowReady{};
-    bool settingsBackendFailed{};
-    std::uint32_t sdrTargetFormat{};
-    std::uint32_t sdrTargetSamples{};
     // A foreign Present hook runs before final HDR composition overwrites it.
     bool presentHookConflict{};
     bool liveSettingsThreadCompatible{};
@@ -151,14 +147,6 @@ struct GraphicsObservationSnapshot
     std::int32_t lastPixelShaderResult{};
 };
 
-struct GraphicsSettingsInputActivation
-{
-    bool ready{};
-    bool active{};
-    std::uint32_t currentThreadId{};
-    std::uint32_t windowThreadId{};
-};
-
 // Production output may be enabled without DeveloperMode; tracing and
 // reference diagnostics still require it.
 [[nodiscard]] bool InitializeGraphicsObservation(
@@ -175,14 +163,6 @@ void ExitNativeSceneCompositePass() noexcept;
 // one, if no stock identity matches, takes that pass. Exit restores the previous pass.
 [[nodiscard]] NativeImageSpacePass EnterNativeImageSpacePass(NativeImageSpacePass pass) noexcept;
 void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept;
-// Initial Win32 subclass installation must run on the exact HWND owner thread.
-// F4SE lifecycle callbacks provide bounded, D3D-free retry opportunities after
-// the render thread has published the initialized ImGui window. The input
-// boundary still verifies the exact HWND owner before an initial install. A
-// retained project-owned subclass may also be reactivated safely after a
-// device generation changes.
-[[nodiscard]] GraphicsSettingsInputActivation
-TryActivateGraphicsSettingsInputOnCurrentThread() noexcept;
 [[nodiscard]] GraphicsObservationSnapshot ReadGraphicsObservation() noexcept;
 using GraphicsDiagnosticSink = void (*)(std::string_view message);
 // Called from the existing lifecycle callback, never the presenting hot path.

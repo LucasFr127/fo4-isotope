@@ -21,7 +21,6 @@ struct SettingsPersistenceSnapshot
 {
     SettingsPersistenceState state{SettingsPersistenceState::unavailable};
     std::uint64_t generation{};
-    SettingsPersistenceState positionState{SettingsPersistenceState::unavailable};
 };
 
 struct SettingsAutosaveFrame
@@ -58,7 +57,5 @@ private:
     const HdrInterfaceSettings& interfaceSettings) noexcept;
 [[nodiscard]] SettingsPersistenceSnapshot
 ReadSettingsPersistenceSnapshot() noexcept;
-// Position-only autosave never persists unsaved image/interface controls.
-[[nodiscard]] bool RequestHdrWindowPositionSave(double x, double y) noexcept;
 
 }  // namespace fo4hdr

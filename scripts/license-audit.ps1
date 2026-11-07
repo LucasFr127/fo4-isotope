@@ -347,7 +347,6 @@ function Get-Fo4HdrForbiddenArtifactReason {
 function Assert-Fo4HdrSafeArtifactRules {
     foreach ($relative in @(
             "third_party/xmake-package-sources/spdlog-v1.16.0.zip",
-            "third_party/xmake-package-sources/imgui-v1.92.6-docking.tar.gz",
             "src/plugin/PluginMain.cpp"
     )) {
         if (Get-Fo4HdrForbiddenArtifactReason $relative) {
@@ -569,6 +568,8 @@ Assert-Fo4HdrTextContainsAll `
 -Required @(
     "CommonLibF4",
     "commonlib-shared",
+    "DearModdingUI API",
+    "GPL-3.0-only",
     "GPL-3.0-or-later",
     "Exceptions"
 ) `

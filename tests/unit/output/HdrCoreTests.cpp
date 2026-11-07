@@ -341,16 +341,14 @@ void TestWideGamutReadinessAndSdrHandoff()
         .replacementShaderSet = true,
         .presentationProxySet = true,
         .compositionSet = true,
-        .uiSet = true,
         .outputSet = true
     };
     FO4HDR_CHECK(readiness.Complete());
     constexpr std::array partialSets{
-        WideGamutResourceReadiness{false, true, true, true, true},
-        WideGamutResourceReadiness{true, false, true, true, true},
-        WideGamutResourceReadiness{true, true, false, true, true},
-        WideGamutResourceReadiness{true, true, true, false, true},
-        WideGamutResourceReadiness{true, true, true, true, false}
+        WideGamutResourceReadiness{false, true, true, true},
+        WideGamutResourceReadiness{true, false, true, true},
+        WideGamutResourceReadiness{true, true, false, true},
+        WideGamutResourceReadiness{true, true, true, false}
     };
     for (const auto partial : partialSets)
         FO4HDR_CHECK(!partial.Complete());

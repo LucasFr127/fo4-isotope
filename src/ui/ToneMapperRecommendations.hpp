@@ -15,4 +15,8 @@ struct ToneMapperRecommendedRange
     ProductionToneMapperAlgorithm algorithm, double requestedPeakNits,
     double ToneMapperParameters::* parameter) noexcept;
 
+// A warning for a value outside the range, or null when none is needed.
+[[nodiscard]] const char* ToneMapperRecommendationStatus(
+    double value, const ToneMapperRecommendedRange& range) noexcept;
+
 } // namespace fo4hdr

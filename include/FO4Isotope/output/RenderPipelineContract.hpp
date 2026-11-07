@@ -68,13 +68,12 @@ struct WideGamutResourceReadiness
     bool replacementShaderSet{};
     bool presentationProxySet{};
     bool compositionSet{};
-    bool uiSet{};
     bool outputSet{};
 
     [[nodiscard]] constexpr bool Complete() const noexcept
     {
         return replacementShaderSet && presentationProxySet &&
-            compositionSet && uiSet && outputSet;
+            compositionSet && outputSet;
     }
 };
 

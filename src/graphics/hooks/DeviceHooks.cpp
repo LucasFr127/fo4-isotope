@@ -19,7 +19,6 @@
 #include "SwapChainHooks.hpp"
 #include "../DisplayDiscovery.hpp"
 #include "../resources/ReplacementShaders.hpp"
-#include "FO4Isotope/ui/SettingsWindow.hpp"
 #include "FO4Isotope/hooks/PeIat.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "../GraphicsDiagnostics.hpp"
@@ -886,7 +885,6 @@ private:
     {
         if (g_rendererDevice.activeDevice == nullptr || !HasCreatedObject(request_.device)) return;
         if (g_rendererDevice.activeDevice == *request_.device) return;
-        ShutdownSettingsWindowBackend();
         if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
         g_presentation.applicationFacadeChain = nullptr;
         ResetResources();
@@ -939,14 +937,13 @@ private:
 
     void PublishInstallation()
     {
-        // SDR mode is ready before publication activates settings input below.
+        // SDR mode is ready before the renderer publishes.
         (void)PrepareSdrMode({.requested = g_configuration.sdrEnabled,
             .hdrPathRequested = HdrPathRequested(), .hdrCandidate = candidateDecision_,
             .enbDetected = LoadedModuleExports("ENBGetSDKVersion"),
             .hdrChainCreated = hdrDescriptor_, .hdrInstallFailed = hdrInstallFailed_,
             .configurationDefaults = g_configuration.configurationDefaults},
-            *request_.device, *request_.context);
-        g_evidence.settingsWindowReady.store(SettingsWindowBackendReady(), std::memory_order_release);
+            *request_.device);
         g_evidence.rendererInstalled.store(true, std::memory_order_release);
         g_rendererDevice.activeDevice = *request_.device;
         g_rendererDevice.activeContext = *request_.context;
@@ -955,7 +952,6 @@ private:
         ++g_deviceGeneration;
         g_scenePromotion = {HdrPathRequested() && hdrDescriptor_ && g_referenceHealthy && g_productionHealthy,
             MainImage()};
-        if (SettingsWindowBackendReady()) (void)TryActivateGraphicsSettingsInputOnCurrentThread();
         if (facade_)
         {
             auto* nativeChain = *request_.swapChain;
@@ -986,7 +982,6 @@ private:
         if (installed.chain) RollBackShadow(*request_.swapChain, FindSwapChain(*request_.swapChain));
         if (installed.context) RollBackShadow(*request_.context, FindContext(*request_.context));
         if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
-        ShutdownSettingsWindowBackend();
         SetSdrModeActive(false);
         g_evidence.rendererInstalled.store(false, std::memory_order_release);
         ResetResources();

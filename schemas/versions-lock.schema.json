@@ -334,8 +334,7 @@
         "packages": {
           "type": "object",
           "required": [
-            "spdlog",
-            "imgui"
+            "spdlog"
           ],
           "properties": {
             "spdlog": {
@@ -372,30 +371,6 @@
                   "type": "string",
                   "pattern": "^[0-9a-fA-F]{64}$"
                 }
-              },
-              "additionalProperties": false
-            },
-            "imgui": {
-              "type": "object",
-              "required": [
-                "version",
-                "tagObject",
-                "commit",
-                "sourceSha256",
-                "recipeCommit",
-                "recipeTreeSha1",
-                "recipeSha256",
-                "licenseSha256"
-              ],
-              "properties": {
-                "version": { "const": "v1.92.6-docking" },
-                "tagObject": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-                "commit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-                "sourceSha256": { "$ref": "#/definitions/sha256OrPlaceholder" },
-                "recipeCommit": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-                "recipeTreeSha1": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
-                "recipeSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
-                "licenseSha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" }
               },
               "additionalProperties": false
             }

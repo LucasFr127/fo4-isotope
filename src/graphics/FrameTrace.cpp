@@ -9,7 +9,7 @@
 #include "LiveSettings.hpp"
 #include "ShaderRegistry.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
-#include "FO4Isotope/ui/HdrSettingsInput.hpp"
+#include "FO4Isotope/output/NativeMenuState.hpp"
 
 #include <wrl/client.h>
 #include <atomic>
@@ -278,11 +278,11 @@ void DescribeBackbuffer(IDXGISwapChain* chain, TraceResource& result) noexcept
 
 std::array<std::uint32_t, 2> ReadTraceNativeMenu() noexcept
 {
-    const auto generation = HdrSettingsNativeMenuGeneration();
-    const auto state = ReadHdrSettingsNativeMenuState();
-    const auto currentGeneration = HdrSettingsNativeMenuGeneration();
+    const auto generation = NativeMenuGeneration();
+    const auto state = ReadNativeMenuState();
+    const auto currentGeneration = NativeMenuGeneration();
     const auto coherentState = generation == currentGeneration ?
-        state : HdrSettingsNativeMenuState::unknown;
+        state : NativeMenuState::unknown;
     return {currentGeneration, static_cast<std::uint32_t>(coherentState)};
 }
 
