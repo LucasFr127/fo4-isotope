@@ -100,7 +100,7 @@ void AddHdrConversion(SettingsPageBuilder& page)
 {
     page.Group("hdr-conversion", "HDR Conversion", "arrows-out");
     page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
-        "RGB Ratio keeps each color's channel ratios. Affine keeps lifted blacks constant."},
+        "RGB Ratio keeps each color's channel ratios. Affine closely matches the game's tints."},
         [](HdrSettings& settings) -> ColorGradingMethod& { return settings.colorGradingMethod; },
         std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods})
         .resolveFeedback = AffineStatusFeedback;
