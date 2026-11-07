@@ -43,6 +43,9 @@
 
 namespace {
 
+// Keep equal to runtime/PluginVersion.cpp, xmake.lua and the DMUI client version.
+constexpr REL::Version kPluginVersion{1, 3, 0};
+
 enum class PluginLoadState : std::uint8_t
 {
     notStarted,
@@ -154,7 +157,8 @@ void InitializeProjectLogging() noexcept
         logger->flush_on(level);
         spdlog::set_default_logger(std::move(logger));
         spdlog::set_pattern("[%T.%e] [%=5t] [%L] %v");
-        REX::INFO("FO4Isotope v0");
+        REX::INFO("FO4Isotope v{}.{}.{}", kPluginVersion.major(), kPluginVersion.minor(),
+            kPluginVersion.patch());
         if (!fileError.empty())
         {
             REX::WARN("log file unavailable detail={}", fileError);
@@ -374,7 +378,7 @@ F4SE_EXPORT bool F4SEPlugin_Query(
 
         a_info->infoVersion = F4SE::PluginInfo::kVersion;
         a_info->name = "FO4Isotope";
-        a_info->version = 0;
+        a_info->version = kPluginVersion.pack();
         // Load owns the runtime decision so that every rejection is logged.
         return a_f4se != nullptr && !a_f4se->IsEditor();
     }
