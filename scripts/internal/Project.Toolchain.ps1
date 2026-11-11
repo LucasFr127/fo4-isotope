@@ -19,7 +19,7 @@ function Assert-Fo4HdrToolchainValue {
         throw "$Key is not pinned. Run scripts/pin-toolchain.ps1."
     }
     # PowerShell and Git run the scripts but shape no build output, so every
-    # policy accepts their servicing updates.
+    # policy accepts the updates the lock allows for them.
     $compatible = $policy -eq "hosted-ci" -or $Key -in @("powerShell", "git")
     $family = $null
     if ($compatible) {

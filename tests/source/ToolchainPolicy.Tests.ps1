@@ -56,8 +56,9 @@ try {
             Assert-ToolchainResult $case.Key $case.Expected '0.0.0' $false
             Assert-ToolchainResult $case.Key $case.Expected ($newer + '-preview') $false
         }
-        Assert-ToolchainResult 'powerShell' $pinned.powerShell '7.60.0' $false
-        Assert-ToolchainResult 'powerShell' $pinned.powerShell '7.7.0' $false
+        Assert-ToolchainResult 'powerShell' $pinned.powerShell '7.7.0' $true
+        Assert-ToolchainResult 'powerShell' $pinned.powerShell '8.0.0' $false
+        Assert-ToolchainResult 'powerShell' $pinned.powerShell '70.0.0' $false
         Assert-ToolchainResult 'msvcCompiler' $pinned.msvc.compilerVersion '19.52.0' $false
         Assert-ToolchainResult 'msvcTools' $pinned.msvc.toolsVersion '14.52.0' $false
         Assert-ToolchainResult 'git' $pinned.git '2.55.0.windows.99' $true
@@ -102,4 +103,4 @@ finally {
     $env:FO4HDR_TOOLCHAIN_POLICY = $savedPolicy
     $env:VCToolsVersion = $savedToolset
 }
-Write-Host 'Pinned and hosted-CI toolchain acceptance, script-tool servicing, family rejection, and x64 checks passed.'
+Write-Host 'Pinned and hosted-CI toolchain acceptance, script-tool updates, family rejection, and x64 checks passed.'

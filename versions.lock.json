@@ -39,7 +39,7 @@
         "visualStudioInstallation": "18",
         "msvcCompiler": "19.51",
         "msvcTools": "14.51",
-        "powerShell": "7.6"
+        "powerShell": "7"
       },
       "git": "available",
       "xmakeArchiveSha256": "0f2c57a29f358e4f9f059cd823f40c3213750dcb13d5b6e9f6e5b29910992d65"

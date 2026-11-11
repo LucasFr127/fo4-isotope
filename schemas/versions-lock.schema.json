@@ -163,7 +163,7 @@
                 "visualStudioInstallation": { "type": "string", "pattern": "^[0-9]+$" },
                 "msvcCompiler": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
                 "msvcTools": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
-                "powerShell": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" }
+                "powerShell": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
               },
               "additionalProperties": false
             },
