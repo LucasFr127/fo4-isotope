@@ -3,6 +3,7 @@
 #pragma once
 
 #include "DrawObservation.hpp"
+#include <FO4Isotope/graphics/HdrRenderer.hpp>
 #include <FO4Isotope/output/NativeLutObservation.hpp>
 #include <FO4Isotope/output/WeatherGradeResponse.hpp>
 #include <FO4Isotope/ui/SettingsMenu.hpp>
@@ -27,6 +28,8 @@ extern bool g_lutInspectorGradingBypassed;
 ID3D11Buffer* PrepareLutProfileDraw(ID3D11DeviceContext*, const DrawObservation&, ID3D11Buffer*) noexcept;
 void MarkWeatherResponseBypassed() noexcept;
 void RefreshWeatherGradeResponses() noexcept;
+// DeveloperMode only: why and how often the automatic response stopped applying.
+void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink);
 StatusMessage NativeLutObserverMessage() noexcept;
 // The status before any ImageSpace blend is recognized.
 inline constexpr StatusMessage kImageSpaceWaitingStatus{"Waiting for a recognized ImageSpace blend."};

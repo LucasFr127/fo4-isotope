@@ -6,21 +6,31 @@
 #include "RendererLifetime.hpp"
 #include "LiveSettings.hpp"
 #include "PresentFrame.hpp"
+#include "WeatherResponseDrops.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <format>
 
 namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
 
 namespace {
 WeatherGradeResponseCache g_weatherGradeResponses;
+WeatherGradeResponseHold g_weatherResponseHold;
+WeatherResponseDrops g_weatherResponseDrops;
+// Color grading draws that arrived off the Present thread and so kept the Fallback Grade.
+std::atomic<std::uint32_t> g_foreignThreadLutDraws{};
+std::atomic<std::uint32_t> g_heldLutDraws{};
 }
 
 void RefreshWeatherGradeResponses() noexcept
 {
-    (void)g_weatherGradeResponses.Refresh(ReadWeatherGradeCatalog(),
-        EffectiveWeatherGradeResponse(g_activeSettings));
+    // A held response was resolved under the previous settings.
+    if (g_weatherGradeResponses.Refresh(ReadWeatherGradeCatalog(),
+            EffectiveWeatherGradeResponse(g_activeSettings)))
+        g_weatherResponseHold.Reset();
 }
 
 std::array<LutSnapshot, 4> g_lutInspectorLuts{};
@@ -132,23 +142,30 @@ ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::
     return fallbackGrade;
 }
 
-bool ResolveLutProfileConstants(const NativeLutObservation& native, OperatorConstants& constants) noexcept
+// Writes the per-slot removal amounts; false when every slot equals the Fallback Grade's.
+bool ApplyLutProfileGrades(const WeatherGradeResponseHold::Grades& grades,
+    OperatorConstants& constants) noexcept
 {
-    g_lutInspectorAutomaticSlots = EligibleWeatherGradeSlots(native, g_lutInspectorValidatedSlots);
     bool customized{};
-    for (std::size_t i = 0; i < native.luts.size(); ++i)
+    for (std::size_t i = 0; i < grades.size(); ++i)
     {
-        const auto resolved = ResolveLutProfileSlot(native, i);
-        g_lutInspectorResolved[i] = resolved;
         constants.lutProfileLuminanceRemoval[i] =
-            static_cast<float>(1.0 - resolved.luminancePercent / 100.0);
+            static_cast<float>(1.0 - grades[i].luminancePercent / 100.0);
         constants.lutProfileColorRemoval[i] =
-            static_cast<float>(1.0 - resolved.colorPercent / 100.0);
+            static_cast<float>(1.0 - grades[i].colorPercent / 100.0);
         customized = customized ||
             constants.lutProfileLuminanceRemoval[i] != constants.selectiveColorPlaneA[3] ||
             constants.lutProfileColorRemoval[i] != constants.selectiveColorPlaneB[3];
     }
     return customized;
+}
+
+bool ResolveLutProfileConstants(const NativeLutObservation& native, OperatorConstants& constants) noexcept
+{
+    g_lutInspectorAutomaticSlots = EligibleWeatherGradeSlots(native, g_lutInspectorValidatedSlots);
+    for (std::size_t i = 0; i < native.luts.size(); ++i)
+        g_lutInspectorResolved[i] = ResolveLutProfileSlot(native, i);
+    return ApplyLutProfileGrades(g_lutInspectorResolved, constants);
 }
 
 void UseFallbackGrade(const char* reason) noexcept
@@ -288,15 +305,66 @@ bool IsWeatherResponseDrawCurrent(ID3D11DeviceContext* context,
         g_lutInspectorAutomaticSlots == EligibleWeatherGradeSlots(native, g_lutInspectorValidatedSlots);
 }
 
-ID3D11Buffer* PrepareLutProfileDraw(
-    ID3D11DeviceContext* context, const DrawObservation& record,
-    ID3D11Buffer* fallback) noexcept
+const char* UnverifiedLutReason(const NativeLutObservation& native) noexcept
 {
-    if (GetCurrentThreadId() != g_observedPresentThread.load(std::memory_order_acquire) ||
-        !g_liveSettingsThreadCompatible.load(std::memory_order_acquire))
-        return fallback;
-    ResetLutProfileInspector();
-    const auto& native = CurrentNativeLutObservation();
+    if (native.serial == 0) return "No vanilla LUT observation for this draw";
+    return g_lutInspectorValidatedSlots == 0 ? g_lutInspectorStatus.text :
+        "A weighted LUT slot has no verified texture";
+}
+
+const char* SlotDropReason(const NativeLutObservation& native, std::size_t i) noexcept
+{
+    const auto slot = 1U << i;
+    if ((g_lutInspectorValidatedSlots & slot) == 0) return UnverifiedLutReason(native);
+    if ((g_lutInspectorImageSpaceSlots & slot) == 0) return g_lutInspectorImageSpaceStatus.text;
+    return g_lutInspectorFallbackReasons[i];
+}
+
+// Names why a weighted slot of this draw does not use the response; null when all do.
+const char* WeatherResponseDropReason(const NativeLutObservation& native) noexcept
+{
+    bool weighted{};
+    for (std::size_t i = 0; i < native.luts.size(); ++i)
+    {
+        // A slot this faint cannot show a swap to the Fallback Grade.
+        if (!(native.luts[i].weight > 0.05F)) continue;
+        weighted = true;
+        if ((g_lutInspectorAutomaticSlots & (1U << i)) == 0) return SlotDropReason(native, i);
+    }
+    return weighted ? nullptr : UnverifiedLutReason(native);
+}
+
+void ObserveWeatherResponseDrop(bool enabled, const char* reason) noexcept
+{
+    if (!g_configuration.developerMode) return;
+    if (enabled)
+        g_weatherResponseDrops.Observe(g_frame, reason);
+    else
+        g_weatherResponseDrops.Forget();
+}
+
+// The game can set its LUTs on another thread while this pass draws, which fails
+// a frame's checks without changing the scene. Such a draw keeps the response of
+// the last draw that passed, for the few frames the hold allows.
+ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* fallback) noexcept
+{
+    WeatherGradeResponseHold::Grades held{};
+    if (!g_weatherResponseHold.TryHold(g_frame, held)) return fallback;
+    auto constants = g_replacements.configurationKey;
+    if (!ApplyLutProfileGrades(held, constants)) return fallback;
+    auto* prepared = UploadLutProfileConstants(context, constants, fallback);
+    if (prepared == fallback) return fallback;
+    g_lutInspectorResolved = held;
+    g_lutInspectorStatus = {
+        "Weather response held from a recent frame; this draw's sources are unverified."};
+    g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
+    return prepared;
+}
+
+ID3D11Buffer* ResolveLutProfileDraw(
+    ID3D11DeviceContext* context, const DrawObservation& record,
+    const NativeLutObservation& native, ID3D11Buffer* fallback) noexcept
+{
     if (!PrepareLutProfileInspector(context, record, native)) return fallback;
 
     auto constants = g_replacements.configurationKey;
@@ -312,6 +380,44 @@ ID3D11Buffer* PrepareLutProfileDraw(
     }
     return prepared;
 
+}
+
+ID3D11Buffer* PrepareLutProfileDraw(
+    ID3D11DeviceContext* context, const DrawObservation& record,
+    ID3D11Buffer* fallback) noexcept
+{
+    if (GetCurrentThreadId() != g_observedPresentThread.load(std::memory_order_acquire) ||
+        !g_liveSettingsThreadCompatible.load(std::memory_order_acquire))
+    {
+        // The inspector and drop record belong to the Present thread.
+        g_foreignThreadLutDraws.fetch_add(1, std::memory_order_relaxed);
+        return fallback;
+    }
+    ResetLutProfileInspector();
+    const auto& native = CurrentNativeLutObservation();
+    auto* prepared = ResolveLutProfileDraw(context, record, native, fallback);
+    const bool enabled = EffectiveWeatherGradeResponse(g_activeSettings).enabled;
+    const auto* dropped = WeatherResponseDropReason(native);
+    ObserveWeatherResponseDrop(enabled, dropped);
+    if (!enabled) return prepared;
+    if (dropped != nullptr) return HoldWeatherResponse(context, fallback);
+    g_weatherResponseHold.Store(g_frame, g_lutInspectorResolved);
+    return prepared;
+}
+
+void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink)
+{
+    if (!g_configuration.developerMode || !sink) return;
+    sink(std::format(
+        "weather_response foreign_thread_draws={} held_draws={} unlisted_drops={} brief_frames={}",
+        g_foreignThreadLutDraws.load(std::memory_order_relaxed),
+        g_heldLutDraws.load(std::memory_order_relaxed), g_weatherResponseDrops.Unlisted(),
+        WeatherResponseDrops::kBriefFrames));
+    g_weatherResponseDrops.ForEach([sink](const WeatherResponseDrops::Entry& entry) {
+        sink(std::format(
+            "weather_response_drop drops={} brief={} longest_brief_frames={} reason=\"{}\"",
+            entry.drops, entry.brief, entry.longestBriefFrames, entry.reason));
+    });
 }
 
 }  // namespace fo4hdr

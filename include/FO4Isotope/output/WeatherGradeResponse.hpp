@@ -102,4 +102,25 @@ private:
     bool ready_{};
 };
 
+// Keeps the last applied per-slot response for a few frames, so a draw that
+// cannot verify its sources for a moment does not swap to the Fallback Grade.
+// Single-thread owner.
+class WeatherGradeResponseHold final
+{
+public:
+    using Frame = std::uint64_t;
+    using Grades = std::array<ResolvedLutGrade, 4>;
+    // Held draws do not renew the hold, so it ends this many frames after the last applied draw.
+    static constexpr Frame kFrames = 3;
+
+    void Store(Frame frame, const Grades& grades) noexcept;
+    void Reset() noexcept;
+    [[nodiscard]] bool TryHold(Frame frame, Grades& grades) const noexcept;
+
+private:
+    Grades grades_{};
+    Frame frame_{};
+    bool stored_{};
+};
+
 }  // namespace fo4hdr

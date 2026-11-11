@@ -16,6 +16,7 @@ void RunHdrSettingsTests()
 {
     TestPipboyScreenObservation();
     TestDeveloperExposureLockFramePolicy();
+    TestWeatherResponseDrops();
     TestSettingsDefaultsAndMath();
     TestSettingsValidation();
     TestWeatherGradeConfiguration();

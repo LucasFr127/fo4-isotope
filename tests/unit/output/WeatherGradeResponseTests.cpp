@@ -120,6 +120,31 @@ void TestWeatherCachePublication()
     FO4HDR_CHECK(ReadWeatherGradeCatalog().data() == published.data());
 }
 
+void TestWeatherResponseHold()
+{
+    constexpr WeatherGradeResponseHold::Grades applied{{{40.0, 50.0}, {60.0, 70.0}, {}, {}}};
+    constexpr auto last = WeatherGradeResponseHold::kFrames;
+    WeatherGradeResponseHold hold;
+    WeatherGradeResponseHold::Grades held{};
+    FO4HDR_CHECK(!hold.TryHold(1, held));
+
+    hold.Store(10, applied);
+    FO4HDR_CHECK(hold.TryHold(10, held));
+    FO4HDR_CHECK(held == applied);
+    // Holding does not renew: the limit counts from the last applied draw.
+    held = {};
+    FO4HDR_CHECK(hold.TryHold(10 + last, held));
+    FO4HDR_CHECK(held == applied);
+    held = {};
+    FO4HDR_CHECK(!hold.TryHold(11 + last, held));
+    FO4HDR_CHECK(held == WeatherGradeResponseHold::Grades{});
+    FO4HDR_CHECK(!hold.TryHold(9, held));
+
+    hold.Store(20, applied);
+    hold.Reset();
+    FO4HDR_CHECK(!hold.TryHold(20, held));
+}
+
 }  // namespace
 
 void TestWeatherGradeResponse()
@@ -162,6 +187,7 @@ void TestWeatherGradeResponse()
     TestWeatherCacheInvalidation();
     TestWeatherCacheCapacity();
     TestWeatherCachePublication();
+    TestWeatherResponseHold();
 }
 
 }  // namespace fo4hdr::tests

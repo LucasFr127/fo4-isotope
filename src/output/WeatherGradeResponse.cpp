@@ -147,4 +147,24 @@ bool WeatherGradeResponseCache::TryResolve(const WeatherGradeAggregate& aggregat
     return true;
 }
 
+void WeatherGradeResponseHold::Store(Frame frame, const Grades& grades) noexcept
+{
+    grades_ = grades;
+    frame_ = frame;
+    stored_ = true;
+}
+
+void WeatherGradeResponseHold::Reset() noexcept
+{
+    stored_ = false;
+}
+
+bool WeatherGradeResponseHold::TryHold(Frame frame, Grades& grades) const noexcept
+{
+    // An earlier frame wraps to a large distance and is refused.
+    if (!stored_ || frame - frame_ > kFrames) return false;
+    grades = grades_;
+    return true;
+}
+
 }  // namespace fo4hdr
