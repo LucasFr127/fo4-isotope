@@ -52,6 +52,7 @@ void TestSelectiveColorMathAndPersistence();
 void TestToneMapperRecommendations();
 void TestSettingsStatus();
 void TestDeveloperExposureLockFramePolicy();
+void TestWeatherResponseDrops();
 void TestPipboyScreenObservation();
 
 }  // namespace fo4hdr::tests

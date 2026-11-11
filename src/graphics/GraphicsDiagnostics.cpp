@@ -2,6 +2,7 @@
 
 #include "GraphicsDiagnostics.hpp"
 #include "FrameTrace.hpp"
+#include "LutProfileBindings.hpp"
 #include "SharedUiFrame.hpp"
 #include "ShaderRegistry.hpp"
 #include "hooks/DeviceHooks.hpp"
@@ -746,6 +747,7 @@ void ReportGraphicsLifecycle(GraphicsDiagnosticSink sink) noexcept
         if (!ShouldReportLifecycle(graphics)) return;
         ReportRendererStatus(graphics, sink);
         ReportSharedUi(sink);
+        ReportWeatherResponseDrops(sink);
         ReportNewShaders(graphics, sink);
         ReportForeignScopeRejections(graphics, sink);
         ReportScopeStockPasses(graphics, sink);
