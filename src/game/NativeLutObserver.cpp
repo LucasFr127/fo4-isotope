@@ -99,7 +99,7 @@ bool Read(const void* source, void* destination, std::size_t size) noexcept
 }
 
 // The draw owns the texture lifetime. Copy strings immediately and require both
-// native representations to agree; a pending asset replacement remains global.
+// native representations to agree; a pending asset replacement uses the Fallback Grade.
 bool CopyPath(const char* source, std::array<char, 260>& result,
     std::uint16_t& length) noexcept
 {

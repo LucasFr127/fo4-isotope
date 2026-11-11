@@ -45,8 +45,8 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(!IsSelectiveColorEffective(shipped.value.selectiveColor));
     FO4HDR_CHECK(
         shipped.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.vanillaGradeLuminancePercent == 67.0);
-    FO4HDR_CHECK(shipped.value.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(shipped.value.fallbackGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(shipped.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.hdrEnabled);
     FO4HDR_CHECK(!shipped.value.developerMode);
@@ -63,6 +63,8 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(text.find("Radial") == std::string::npos);
     FO4HDR_CHECK(text.find("NativeReference") == std::string::npos);
     FO4HDR_CHECK(text.find("HdrColorResponse") == std::string::npos);
+    FO4HDR_CHECK(text.find("VanillaGradeLuminanceStrength") == std::string::npos);
+    FO4HDR_CHECK(text.find("VanillaGradeColorStrength") == std::string::npos);
     FO4HDR_CHECK(text.find("[Interface]") == std::string::npos);
 }
 
@@ -94,7 +96,7 @@ void TestSdrProfileConfiguration()
     const auto parsed = ParsePluginConfiguration(MinimalProductionConfiguration() +
         "[General]\nSdrEnabled=0\n"
         "[SdrImage]\nExposureEV=0.5\nSaturation=120\nHighlightSaturation=60\nColorGradingMethod=Unknown\n"
-        "[SdrEffects]\nBloomStrength=40\nVanillaGradeColorStrength=20\n"
+        "[SdrEffects]\nBloomStrength=40\nFallbackGradeColor=20\n"
         "[SdrSelectiveColor]\nEnabled=1\nRedHue=5\n"
         "[SdrWeatherLutResponse]\nEnabled=1\nColorGain=0.5\n"
         "[SdrToneMapper]\nAlgorithm=Vanilla\n"
@@ -108,7 +110,7 @@ void TestSdrProfileConfiguration()
     expected.saturationPercent = 120.0;
     expected.highlightSaturationPercent = 60.0;
     expected.bloomStrengthPercent = 40.0;
-    expected.vanillaGradeColorPercent = 20.0;
+    expected.fallbackGradeColorPercent = 20.0;
     expected.selectiveColor.enabled = true;
     expected.selectiveColor.regions[0].hueDegrees = 5.0;
     expected.weatherGradeResponse.enabled = true;
@@ -260,8 +262,8 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.tint == 0.0);
     FO4HDR_CHECK(
         parsed.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 67.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(parsed.value.fallbackGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(parsed.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 50.0);
 }
 
@@ -289,6 +291,27 @@ void TestFormerAgxColorResponseName()
     const auto both = ParsePluginConfiguration(MinimalProductionConfiguration() +
         "[AgX]\nColorResponse=0.4\nHdrColorResponse=0.4\n");
     FO4HDR_CHECK(!both.valid && both.error == PluginConfigurationError::duplicateKey);
+}
+
+// The former Fallback Grade names still load in both profiles; a file with both
+// names is a duplicate.
+void TestFormerFallbackGradeNames()
+{
+    const auto former = ParsePluginConfiguration(MinimalProductionConfiguration() +
+        "[Effects]\nVanillaGradeLuminanceStrength=40\nVanillaGradeColorStrength=30\n"
+        "[SdrEffects]\nVanillaGradeLuminanceStrength=20\nVanillaGradeColorStrength=10\n");
+    FO4HDR_CHECK(former.valid);
+    FO4HDR_CHECK(former.value.fallbackGradeLuminancePercent == 40.0);
+    FO4HDR_CHECK(former.value.fallbackGradeColorPercent == 30.0);
+    FO4HDR_CHECK(former.value.sdrSettings.fallbackGradeLuminancePercent == 20.0);
+    FO4HDR_CHECK(former.value.sdrSettings.fallbackGradeColorPercent == 10.0);
+    for (const auto* both : {"FallbackGradeLuminance=40\nVanillaGradeLuminanceStrength=40\n",
+             "VanillaGradeColorStrength=30\nFallbackGradeColor=30\n"})
+    {
+        const auto duplicate = ParsePluginConfiguration(
+            MinimalProductionConfiguration() + "[Effects]\n" + both);
+        FO4HDR_CHECK(!duplicate.valid && duplicate.error == PluginConfigurationError::duplicateKey);
+    }
 }
 
 void TestToneMapperConfigurationRanges()
@@ -330,7 +353,7 @@ void TestConfigurationEndpoints()
         "\n[Image]\nHighlightSaturation=200.01\n");
     FO4HDR_CHECK(!oversaturated.valid &&
         oversaturated.error == PluginConfigurationError::valueOutOfRange);
-    for (const auto key : {"VanillaGradeLuminanceStrength", "VanillaGradeColorStrength"})
+    for (const auto key : {"FallbackGradeLuminance", "FallbackGradeColor"})
         for (const auto endpointValue : {0.0, 100.0})
         {
             const auto endpoint = ParsePluginConfiguration(
@@ -338,9 +361,9 @@ void TestConfigurationEndpoints()
                 "\n[Effects]\n" + key + "=" +
                 std::to_string(endpointValue) + "\n");
             FO4HDR_CHECK(endpoint.valid);
-            FO4HDR_CHECK((std::string_view{key} == "VanillaGradeLuminanceStrength" ?
-                    endpoint.value.vanillaGradeLuminancePercent :
-                    endpoint.value.vanillaGradeColorPercent) == endpointValue);
+            FO4HDR_CHECK((std::string_view{key} == "FallbackGradeLuminance" ?
+                    endpoint.value.fallbackGradeLuminancePercent :
+                    endpoint.value.fallbackGradeColorPercent) == endpointValue);
         }
 
     const auto unknown = ParsePluginConfiguration(
@@ -386,8 +409,8 @@ void TestExtendedConfiguration()
     FO4HDR_CHECK(parsed.value.tint == -30.0);
     FO4HDR_CHECK(
         parsed.value.vanillaColorGradingStrengthPercent == 60.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeLuminancePercent == 75.0);
-    FO4HDR_CHECK(parsed.value.vanillaGradeColorPercent == 40.0);
+    FO4HDR_CHECK(parsed.value.fallbackGradeLuminancePercent == 75.0);
+    FO4HDR_CHECK(parsed.value.fallbackGradeColorPercent == 40.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 75.0);
 }
 
@@ -398,6 +421,7 @@ void TestOptionalConfigurationValues()
     TestProductionConfiguration();
     TestMinimalConfiguration();
     TestFormerAgxColorResponseName();
+    TestFormerFallbackGradeNames();
     TestOptionalDiagnosticKeys();
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
@@ -511,8 +535,8 @@ void TestConfigurationRangeErrors()
              "Temperature=-101",
              "Tint=101",
              "VanillaColorGradingStrength=101",
-             "VanillaGradeLuminanceStrength=-1",
-             "VanillaGradeColorStrength=nan",
+             "FallbackGradeLuminance=-1",
+             "FallbackGradeColor=nan",
              "BloomStrength=-1",
              "BloomStrength=100.01"})
     {
@@ -543,7 +567,7 @@ void TestConfigurationDuplicateEffects()
         PluginConfigurationError::duplicateKey);
 
     text = ExtendedProductionConfiguration();
-    text += "\n[Effects]\nVanillaGradeColorStrength=50\n";
+    text += "\n[Effects]\nFallbackGradeColor=50\n";
     parsed = ParsePluginConfiguration(text);
     FO4HDR_CHECK(!parsed.valid);
     FO4HDR_CHECK(parsed.error == PluginConfigurationError::duplicateKey);

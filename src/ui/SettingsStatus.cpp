@@ -119,14 +119,15 @@ WeatherResponseState WeatherResponseStatus(const WeatherLutResponseView& view, b
     if (view.gradingBypassed)
         return {"Bypassed", {"Grading replacement bypassed: the response is not applied.",
             StatusSeverity::warning}};
-    if (!active) return {"Off", {"The Global Grade settings apply."}};
+    if (!active) return {"Off", {"The Fallback Grade settings apply."}};
     if (view.validatedSlots == 0)
-        return {"Waiting", {"Waiting for a recognized vanilla LUT draw. The Global Grade settings apply."}};
+        return {"Waiting",
+            {"Waiting for a recognized vanilla LUT draw. The Fallback Grade settings apply."}};
     if (view.automaticSlots == 0)
         return {"Not recognized",
-            {"No weather response is recognized for this scene. The Global Grade settings apply."}};
+            {"No weather response is recognized for this scene. The Fallback Grade settings apply."}};
     if ((view.automaticSlots & view.validatedSlots) != view.validatedSlots)
-        return {"Partly active", {"Some contributors use the Global Grade settings."}};
+        return {"Partly active", {"Some contributors use the Fallback Grade settings."}};
     return {"Active", {}};
 }
 

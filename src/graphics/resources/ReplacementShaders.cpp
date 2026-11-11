@@ -272,7 +272,7 @@ void PublishReplacementConfiguration(
             &candidate.operatorConstants)))
         return false;
 
-    // Profile failure leaves the existing global grade controls available.
+    // Profile failure leaves the existing Fallback Grade controls available.
     (void)device->CreateBuffer(&description, &operatorData,
         &candidate.lutProfileConstants);
 

@@ -173,8 +173,8 @@ struct HdrSettings
     ColorGradingMethod colorGradingMethod{ColorGradingMethod::rgbRatio};
     ColorGradingCurve colorGradingCurve{ColorGradingCurve::gamma22};
     double vanillaColorGradingStrengthPercent{100.0};
-    double vanillaGradeLuminancePercent{67.0};
-    double vanillaGradeColorPercent{67.0};
+    double fallbackGradeLuminancePercent{67.0};
+    double fallbackGradeColorPercent{67.0};
     WeatherGradeResponseSettings weatherGradeResponse{};
     double bloomStrengthPercent{50.0};
     // SDR profile only; the HDR profile keeps it off. It turns the weather
@@ -244,8 +244,8 @@ struct HdrSettingsMath
     double saturationScale{1.0};
     double highlightSaturationScale{1.0};
     double vanillaColorGradingBlend{1.0};
-    double vanillaGradeLuminanceRemoval{};
-    double vanillaGradeColorRemoval{};
+    double fallbackGradeLuminanceRemoval{};
+    double fallbackGradeColorRemoval{};
     double bloomMultiplier{1.0};
     // Row-major linear BT.709 RGB transform. Neutral temperature/tint is the
     // exact identity matrix.

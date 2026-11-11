@@ -125,38 +125,39 @@ void TestWeatherCachePublication()
 void TestWeatherGradeResponse()
 {
     WeatherGradeResponseSettings settings{};
-    constexpr ResolvedLutGrade global{67.0, 82.0};
+    constexpr ResolvedLutGrade fallback{67.0, 82.0};
     constexpr WeatherGradeFeatures features{0.75, 0.6, 0.35, 0.25};
-    const auto result = EvaluateWeatherGradeResponse(settings, features, global);
+    const auto result = EvaluateWeatherGradeResponse(settings, features, fallback);
     FO4HDR_CHECK(test::Approx(result.luminancePercent, 52.11834505, 1.0e-12));
     FO4HDR_CHECK(test::Approx(result.colorPercent, 52.13001295, 1.0e-12));
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, {}, global) == ResolvedLutGrade{});
-    const auto suppressed = EvaluateWeatherGradeResponse(settings, {1.0, 1.0, 0.0, 1.0}, global);
+    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, {}, fallback) == ResolvedLutGrade{});
+    const auto suppressed = EvaluateWeatherGradeResponse(settings, {1.0, 1.0, 0.0, 1.0}, fallback);
     FO4HDR_CHECK(suppressed.luminancePercent == 0.0);
     FO4HDR_CHECK(suppressed.colorPercent == 0.0);
 
     settings.luminance = {50.0, 1.0, 0.0, 100.0, 120.0, {}};
     settings.color = {35.0, 0.0, 20.0, 90.0, -500.0, {}};
-    const auto shifted = EvaluateWeatherGradeResponse(settings, features, global);
+    const auto shifted = EvaluateWeatherGradeResponse(settings, features, fallback);
     FO4HDR_CHECK(shifted.luminancePercent == 70.0);
     FO4HDR_CHECK(shifted.colorPercent == 35.0);
     settings.luminance.minimum = 80.0;
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, global).luminancePercent == 80.0);
+    FO4HDR_CHECK(
+        EvaluateWeatherGradeResponse(settings, features, fallback).luminancePercent == 80.0);
     settings.luminance.maximum = 79.0;
     FO4HDR_CHECK(!ValidateWeatherGradeResponseSettings(settings));
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, global) == global);
+    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, fallback) == fallback);
 
     settings = {};
     settings.enabled = false;
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, global) == global);
+    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, fallback) == fallback);
     settings.enabled = true;
     auto invalidFeatures = features;
     invalidFeatures.ambient = std::numeric_limits<double>::quiet_NaN();
     FO4HDR_CHECK(!ValidateWeatherGradeFeatures(invalidFeatures));
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, invalidFeatures, global) == global);
+    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, invalidFeatures, fallback) == fallback);
     settings.color.coefficients[0] = std::numeric_limits<double>::infinity();
     FO4HDR_CHECK(!ValidateWeatherGradeChannel(settings.color));
-    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, global) == global);
+    FO4HDR_CHECK(EvaluateWeatherGradeResponse(settings, features, fallback) == fallback);
     TestWeatherCacheRefresh();
     TestWeatherCacheInvalidation();
     TestWeatherCacheCapacity();

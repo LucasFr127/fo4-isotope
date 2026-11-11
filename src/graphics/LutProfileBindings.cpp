@@ -44,14 +44,14 @@ StatusMessage NativeLutObserverMessage() noexcept
         std::pair{NativeLutObserverStatus::unsupportedRuntime,
             StatusMessage{"LUT identity observation is unavailable for this runtime.", warning}},
         std::pair{NativeLutObserverStatus::invalidTarget,
-            StatusMessage{"Vanilla LUT boundary could not be validated; global controls are used.", warning}},
+            StatusMessage{"Vanilla LUT boundary could not be validated; the Fallback Grade settings apply.", warning}},
         std::pair{NativeLutObserverStatus::conflictingHook,
-            StatusMessage{"Vanilla LUT boundary is owned by another hook; global controls are used.", warning}}};
+            StatusMessage{"Vanilla LUT boundary is owned by another hook; the Fallback Grade settings apply.", warning}}};
     const auto status = GetNativeLutObserverStatus();
     const auto found = std::find_if(messages.begin(), messages.end(),
         [status](const auto& entry) { return entry.first == status; });
     return found == messages.end() ?
-        StatusMessage{"Vanilla LUT observer unavailable; global controls are used.", warning} : found->second;
+        StatusMessage{"Vanilla LUT observer unavailable; the Fallback Grade settings apply.", warning} : found->second;
 
 }
 
@@ -63,19 +63,19 @@ void PublishImageSpaceStatus(const NativeLutObservation& native) noexcept
         std::pair{ImageSpaceObservationStatus::matched,
             StatusMessage{"ImageSpace contributors matched the vanilla LUT transfer."}},
         std::pair{ImageSpaceObservationStatus::catalogUnavailable,
-            StatusMessage{"ImageSpace record catalog unavailable; LUT/global controls are used.", warning}},
+            StatusMessage{"ImageSpace record catalog unavailable; the Fallback Grade settings apply.", warning}},
         std::pair{ImageSpaceObservationStatus::differentThread,
-            StatusMessage{"ImageSpace producer and draw threads do not match; LUT/global controls are used.", warning}},
+            StatusMessage{"ImageSpace producer and draw threads do not match; the Fallback Grade settings apply.", warning}},
         std::pair{ImageSpaceObservationStatus::overrideActive,
-            StatusMessage{"A vanilla ImageSpace override is active; LUT/global controls are used."}},
+            StatusMessage{"A vanilla ImageSpace override is active; the Fallback Grade settings apply."}},
         std::pair{ImageSpaceObservationStatus::unqualifiedSource,
-            StatusMessage{"Room, direct or unidentified ImageSpace blend; LUT/global controls are used."}},
+            StatusMessage{"Room, direct or unidentified ImageSpace blend; the Fallback Grade settings apply."}},
         std::pair{ImageSpaceObservationStatus::updating,
-            StatusMessage{"ImageSpace observation is updating; LUT/global controls are used."}},
+            StatusMessage{"ImageSpace observation is updating; the Fallback Grade settings apply."}},
         std::pair{ImageSpaceObservationStatus::stale,
-            StatusMessage{"ImageSpace transfer is stale or changed; LUT/global controls are used."}},
+            StatusMessage{"ImageSpace transfer is stale or changed; the Fallback Grade settings apply."}},
         std::pair{ImageSpaceObservationStatus::unavailable,
-            StatusMessage{"ImageSpace observation unavailable; LUT/global controls are used.", warning}}};
+            StatusMessage{"ImageSpace observation unavailable; the Fallback Grade settings apply.", warning}}};
     for (const auto& [status, message] : messages)
         if (native.imageSpaceStatus == status) {
             g_lutInspectorImageSpaceStatus = message;
@@ -111,8 +111,8 @@ bool ValidateLutProfileViews(ID3D11DeviceContext* context, const NativeLutObserv
 
 ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::size_t i) noexcept
 {
-    const ResolvedLutGrade global{g_activeSettings.vanillaGradeLuminancePercent,
-        g_activeSettings.vanillaGradeColorPercent};
+    const ResolvedLutGrade fallbackGrade{g_activeSettings.fallbackGradeLuminancePercent,
+        g_activeSettings.fallbackGradeColorPercent};
     const auto& aggregate = native.weatherGrades[i];
     g_lutInspectorReferencingContexts[i] = aggregate.referenceCount;
     if ((g_lutInspectorAutomaticSlots & (1U << i)) != 0)
@@ -121,7 +121,7 @@ ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::
         if (g_weatherGradeResponses.TryResolve(aggregate, resolved)) return resolved;
         g_lutInspectorAutomaticSlots &= ~(1U << i);
         g_lutInspectorFallbackReasons[i] = "Weather response cache does not match this source";
-        return global;
+        return fallbackGrade;
     }
 
     g_lutInspectorFallbackReasons[i] =
@@ -129,7 +129,7 @@ ResolvedLutGrade ResolveLutProfileSlot(const NativeLutObservation& native, std::
             "Weather source is not recognized" :
         aggregate.referenceCount == 0 ? "No weather references" :
             "Weather aggregate is unavailable or incomplete";
-    return global;
+    return fallbackGrade;
 }
 
 bool ResolveLutProfileConstants(const NativeLutObservation& native, OperatorConstants& constants) noexcept
@@ -151,11 +151,11 @@ bool ResolveLutProfileConstants(const NativeLutObservation& native, OperatorCons
     return customized;
 }
 
-void UseGlobalWeatherResponse(const char* reason) noexcept
+void UseFallbackGrade(const char* reason) noexcept
 {
     g_lutInspectorAutomaticSlots = 0;
-    g_lutInspectorResolved.fill({g_activeSettings.vanillaGradeLuminancePercent,
-        g_activeSettings.vanillaGradeColorPercent});
+    g_lutInspectorResolved.fill({g_activeSettings.fallbackGradeLuminancePercent,
+        g_activeSettings.fallbackGradeColorPercent});
     g_lutInspectorFallbackReasons.fill(reason);
 }
 
@@ -175,9 +175,9 @@ bool UpdateLutProfileBuffer(ID3D11DeviceContext* context, ID3D11Buffer* buffer,
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(context->Map(buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
     {
-        g_lutInspectorStatus = {"LUT identities verified; response upload failed. Global controls are used.",
+        g_lutInspectorStatus = {"LUT identities verified; response upload failed. The Fallback Grade settings apply.",
             StatusSeverity::warning};
-        UseGlobalWeatherResponse("Response upload failed");
+        UseFallbackGrade("Response upload failed");
         return false;
     }
     std::memcpy(mapped.pData, &constants, sizeof(constants));
@@ -194,9 +194,9 @@ ID3D11Buffer* UploadLutProfileConstants(ID3D11DeviceContext* context, OperatorCo
     auto* buffer = g_replacements.lutProfileConstants.Get();
     if (!buffer)
     {
-        g_lutInspectorStatus = {"LUT identities verified; response buffer unavailable. Global controls are used.",
+        g_lutInspectorStatus = {"LUT identities verified; response buffer unavailable. The Fallback Grade settings apply.",
             StatusSeverity::warning};
-        UseGlobalWeatherResponse("Response buffer is unavailable");
+        UseFallbackGrade("Response buffer is unavailable");
         return fallback;
     }
     constants.lutProfilesActive = 1;
@@ -205,7 +205,7 @@ ID3D11Buffer* UploadLutProfileConstants(ID3D11DeviceContext* context, OperatorCo
     {
         if (!UpdateLutProfileBuffer(context, buffer, constants)) return fallback;
     }
-    g_lutInspectorStatus = {"Fixed weather responses follow the vanilla blend; other slots use global controls."};
+    g_lutInspectorStatus = {"Fixed weather responses follow the vanilla blend; other slots use the Fallback Grade settings."};
     return buffer;
 
 }
@@ -218,8 +218,8 @@ void ResetLutProfileInspector() noexcept
     g_lutInspectorImageSpaces = {};
     g_lutInspectorImageSpaceSlots = 0;
     g_lutInspectorReferencingContexts = {};
-    g_lutInspectorResolved.fill({g_activeSettings.vanillaGradeLuminancePercent,
-        g_activeSettings.vanillaGradeColorPercent});
+    g_lutInspectorResolved.fill({g_activeSettings.fallbackGradeLuminancePercent,
+        g_activeSettings.fallbackGradeColorPercent});
     g_lutInspectorAutomaticSlots = 0;
     g_lutInspectorGradingBypassed = false;
     g_lutInspectorFallbackReasons.fill("Weather source is not recognized");
@@ -242,18 +242,18 @@ bool ValidateLutProfileIdentity(ID3D11DeviceContext* context, const NativeLutObs
     g_lutInspectorLuts = native.luts;
     g_lutInspectorImageSpaces = native.imageSpaces;
     PublishImageSpaceStatus(native);
-    g_lutInspectorStatus = {"LUT identities do not match this draw; global controls are used.",
+    g_lutInspectorStatus = {"LUT identities do not match this draw; the Fallback Grade settings apply.",
         StatusSeverity::warning};
     const bool mismatched = !ValidateLutProfileViews(context, native);
     if (mismatched || g_lutInspectorValidatedSlots == 0) {
-        g_lutInspectorImageSpaceStatus = {"ImageSpace identities are not verified for this draw; global controls are used."};
+        g_lutInspectorImageSpaceStatus = {"ImageSpace identities are not verified for this draw; the Fallback Grade settings apply."};
         return false;
     }
     g_lutInspectorImageSpaceSlots = EligibleImageSpaceSlots(native, g_lutInspectorValidatedSlots);
     if (native.imageSpaceValidSlots && !g_lutInspectorImageSpaceSlots)
-        g_lutInspectorImageSpaceStatus = {"ImageSpace provenance was revoked; LUT/global controls are used."};
+        g_lutInspectorImageSpaceStatus = {"ImageSpace provenance was revoked; the Fallback Grade settings apply."};
 
-    g_lutInspectorStatus = {"Verified weather slots can use automatic responses; other slots use global controls."};
+    g_lutInspectorStatus = {"Verified weather slots can use automatic responses; other slots use the Fallback Grade settings."};
     return true;
 }
 
@@ -266,13 +266,13 @@ bool PrepareLutProfileInspector(ID3D11DeviceContext* context, const DrawObservat
     const auto response = EffectiveWeatherGradeResponse(g_activeSettings);
     if (!response.enabled)
     {
-        g_lutInspectorStatus = {"Automatic weather response is disabled; global controls are used."};
+        g_lutInspectorStatus = {"Automatic weather response is disabled; the Fallback Grade settings apply."};
         g_lutInspectorFallbackReasons.fill("Automatic response is disabled");
         return false;
     }
     if (!g_weatherGradeResponses.Matches(ReadWeatherGradeCatalog(), response))
     {
-        g_lutInspectorStatus = {"Weather response cache is pending; global controls are used."};
+        g_lutInspectorStatus = {"Weather response cache is pending; the Fallback Grade settings apply."};
         g_lutInspectorFallbackReasons.fill("Weather response cache is pending");
         return false;
     }
@@ -306,8 +306,8 @@ ID3D11Buffer* PrepareLutProfileDraw(
     if (prepared == fallback) return fallback;
     if (!IsWeatherResponseDrawCurrent(context, record, native))
     {
-        g_lutInspectorStatus = {"Weather provenance changed; global controls are used."};
-        UseGlobalWeatherResponse("Weather provenance changed");
+        g_lutInspectorStatus = {"Weather provenance changed; the Fallback Grade settings apply."};
+        UseFallbackGrade("Weather provenance changed");
         return fallback;
     }
     return prepared;

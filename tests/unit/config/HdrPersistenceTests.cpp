@@ -79,14 +79,14 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(test::Approx(reloadedRewrite.value.sceneExposureMultiplier,
         std::exp2(settings.exposureEv), 1.0e-15));
     FO4HDR_CHECK(reloadedRewrite.value.blacks == settings.blacks);
-    FO4HDR_CHECK(reloadedRewrite.value.vanillaGradeLuminancePercent ==
-        settings.vanillaGradeLuminancePercent);
-    FO4HDR_CHECK(reloadedRewrite.value.vanillaGradeColorPercent ==
-        settings.vanillaGradeColorPercent);
+    FO4HDR_CHECK(reloadedRewrite.value.fallbackGradeLuminancePercent ==
+        settings.fallbackGradeLuminancePercent);
+    FO4HDR_CHECK(reloadedRewrite.value.fallbackGradeColorPercent ==
+        settings.fallbackGradeColorPercent);
     auto resetParameters = settings;
     resetParameters.toneMapperParameters = {};
-    resetParameters.vanillaGradeLuminancePercent = HdrSettings{}.vanillaGradeLuminancePercent;
-    resetParameters.vanillaGradeColorPercent = HdrSettings{}.vanillaGradeColorPercent;
+    resetParameters.fallbackGradeLuminancePercent = HdrSettings{}.fallbackGradeLuminancePercent;
+    resetParameters.fallbackGradeColorPercent = HdrSettings{}.fallbackGradeColorPercent;
     resetParameters.bloomStrengthPercent = HdrSettings{}.bloomStrengthPercent;
     const auto resetParametersReloaded = ParsePluginConfiguration(
         RewriteHdrSettingsIni(
@@ -95,9 +95,9 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(resetParametersReloaded.value.toneMapperParameters ==
         ToneMapperParameters{});
     FO4HDR_CHECK(
-        resetParametersReloaded.value.vanillaGradeLuminancePercent == 67.0);
+        resetParametersReloaded.value.fallbackGradeLuminancePercent == 67.0);
     FO4HDR_CHECK(
-        resetParametersReloaded.value.vanillaGradeColorPercent == 67.0);
+        resetParametersReloaded.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(resetParametersReloaded.value.bloomStrengthPercent == 50.0);
 }
 
@@ -106,7 +106,7 @@ void CheckRewrittenEffects(const std::string& rewritten)
     FO4HDR_CHECK(rewritten.find("[Effects]\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find(
         "VanillaColorGradingStrength=100\r\n"
-        "VanillaGradeLuminanceStrength=65\r\nVanillaGradeColorStrength=35\r\n"
+        "FallbackGradeLuminance=65\r\nFallbackGradeColor=35\r\n"
         "BloomStrength=75\r\n") != std::string::npos);
     FO4HDR_CHECK(rewritten.find("BloomStrength=75\r\n") !=
         std::string::npos);
@@ -156,6 +156,18 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(renamed.find("ShowDeveloperOverlay") == std::string::npos);
     FO4HDR_CHECK(renamed.find("[AgX]\nColorResponse=0.55\n") != std::string::npos);
     FO4HDR_CHECK(renamed.find("[SdrAgX]\nColorResponse=") != std::string::npos);
+
+    // A full save renames the former Fallback Grade keys in place in both profiles.
+    constexpr std::string_view formerGrade =
+        "[Effects]\nVanillaGradeLuminanceStrength=50\nVanillaGradeColorStrength=50\n"
+        "[SdrEffects]\nVanillaGradeLuminanceStrength=50\nVanillaGradeColorStrength=50\n";
+    const auto regraded = RewriteHdrSettingsIni(formerGrade, {settings}, interfaceSettings);
+    FO4HDR_CHECK(regraded.find("VanillaGradeLuminanceStrength") == std::string::npos);
+    FO4HDR_CHECK(regraded.find("VanillaGradeColorStrength") == std::string::npos);
+    FO4HDR_CHECK(regraded.find(
+        "[Effects]\nFallbackGradeLuminance=65\nFallbackGradeColor=35\n") != std::string::npos);
+    FO4HDR_CHECK(regraded.find(
+        "[SdrEffects]\nFallbackGradeLuminance=100\nFallbackGradeColor=100\n") != std::string::npos);
 
     // Former method names still load, and a full save writes the current names.
     for (const auto& [former, method, current] : {
@@ -272,8 +284,8 @@ void TestSettingsPersistenceRewrite()
     settings.exposureEv = 0.25;
     settings.contrast = -20.0;
     settings.blacks = -40.0;
-    settings.vanillaGradeLuminancePercent = 65.0;
-    settings.vanillaGradeColorPercent = 35.0;
+    settings.fallbackGradeLuminancePercent = 65.0;
+    settings.fallbackGradeColorPercent = 35.0;
     settings.bloomStrengthPercent = 75.0;
     constexpr std::string_view original =
         "# keep this comment\r\n"
@@ -362,8 +374,8 @@ PersistenceFixture CreatePersistenceFixture()
     settings.displayPeakNits = 430.0;
     settings.exposureEv = 0.75;
     settings.blacks = 35.0;
-    settings.vanillaGradeLuminancePercent = 60.0;
-    settings.vanillaGradeColorPercent = 30.0;
+    settings.fallbackGradeLuminancePercent = 60.0;
+    settings.fallbackGradeColorPercent = 30.0;
     settings.weatherGradeResponse.luminance.base = 85.0;
     settings.weatherGradeResponse.color.gain = 0.75;
     settings.toneMapperParameters = {
@@ -404,9 +416,9 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(persisted.find("[Image]\nExposureEV=0.75") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("Blacks=35") != std::string::npos);
-    FO4HDR_CHECK(persisted.find("VanillaGradeLuminanceStrength=60") !=
+    FO4HDR_CHECK(persisted.find("FallbackGradeLuminance=60") !=
         std::string::npos);
-    FO4HDR_CHECK(persisted.find("VanillaGradeColorStrength=30") !=
+    FO4HDR_CHECK(persisted.find("FallbackGradeColor=30") !=
         std::string::npos);
     FO4HDR_CHECK(persisted.find("[LUT:stale.dds]\nColor=1\n") != std::string::npos);
     std::ifstream personalInput(personalPath, std::ios::binary);
@@ -428,10 +440,10 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(reloaded.valid);
     FO4HDR_CHECK(!reloaded.value.developerMode);
     FO4HDR_CHECK(reloaded.value.blacks == settings.blacks);
-    FO4HDR_CHECK(reloaded.value.vanillaGradeLuminancePercent ==
-        settings.vanillaGradeLuminancePercent);
-    FO4HDR_CHECK(reloaded.value.vanillaGradeColorPercent ==
-        settings.vanillaGradeColorPercent);
+    FO4HDR_CHECK(reloaded.value.fallbackGradeLuminancePercent ==
+        settings.fallbackGradeLuminancePercent);
+    FO4HDR_CHECK(reloaded.value.fallbackGradeColorPercent ==
+        settings.fallbackGradeColorPercent);
     FO4HDR_CHECK(reloaded.value.weatherGradeResponse ==
         settings.weatherGradeResponse);
     FO4HDR_CHECK(reloaded.value.toneMapperParameters ==

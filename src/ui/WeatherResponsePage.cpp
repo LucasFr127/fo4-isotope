@@ -172,7 +172,7 @@ void DrawContributorResponse(const WeatherLutResponseView& view, std::size_t ind
             DrawMuted("Automatic");
             return;
         }
-        DrawMuted("Global Grade");
+        DrawMuted("Fallback Grade");
     }
     if (reason != nullptr && reason[0] != '\0') DrawUnformatted(reason);
 }
@@ -245,7 +245,7 @@ void AddEnabled(SettingsPageBuilder& page)
     page.Group("weather-response", "Response", "cloud-sun");
     auto& enabled = page.Toggle({"weather-enabled", "Enabled",
         "Sets the grade's luminance and color response per weather ImageSpace. "
-        "Other scenes use the Global Grade settings."},
+        "Other scenes use the Fallback Grade settings."},
         [](HdrSettings& settings) -> bool& { return settings.weatherGradeResponse.enabled; });
     enabled.binding.get = [] { return dmui::SettingValue{ResponseActive()}; };
     enabled.isEnabled = [] { return !OperatorForcesWeatherResponse(Draft()); };

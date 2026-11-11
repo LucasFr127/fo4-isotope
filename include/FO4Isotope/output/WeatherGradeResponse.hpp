@@ -77,7 +77,7 @@ struct ResolvedLutGrade
     const WeatherGradeResponseSettings& settings) noexcept;
 [[nodiscard]] ResolvedLutGrade EvaluateWeatherGradeResponse(
     const WeatherGradeResponseSettings& settings,
-    const WeatherGradeFeatures& features, ResolvedLutGrade global) noexcept;
+    const WeatherGradeFeatures& features, ResolvedLutGrade fallback) noexcept;
 
 // Startup publication copies plain aggregates and retains them until process exit.
 [[nodiscard]] bool PublishWeatherGradeCatalog(

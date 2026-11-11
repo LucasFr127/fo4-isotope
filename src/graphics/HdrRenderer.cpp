@@ -396,9 +396,9 @@ namespace {
         settings.selectiveColorRegions[index] = OperatorColorVector(
             selective.regions[index][0], selective.regions[index][1], selective.regions[index][2]);
     settings.selectiveColorPlaneA[3] =
-        static_cast<float>(math.vanillaGradeLuminanceRemoval);
+        static_cast<float>(math.fallbackGradeLuminanceRemoval);
     settings.selectiveColorPlaneB[3] =
-        static_cast<float>(math.vanillaGradeColorRemoval);
+        static_cast<float>(math.fallbackGradeColorRemoval);
     // SDR replacements read the scene, grade and operator lanes; the native
     // curve keeps mode 0 and needs no operator LUT.
     if (g_sdrModeActive.load(std::memory_order_acquire))

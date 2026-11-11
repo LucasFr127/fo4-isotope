@@ -81,11 +81,11 @@ bool ValidateWeatherGradeResponseSettings(
 
 ResolvedLutGrade EvaluateWeatherGradeResponse(
     const WeatherGradeResponseSettings& settings,
-    const WeatherGradeFeatures& features, ResolvedLutGrade global) noexcept
+    const WeatherGradeFeatures& features, ResolvedLutGrade fallback) noexcept
 {
-    if (!settings.enabled) return global;
-    if (!ValidateWeatherGradeFeatures(features)) return global;
-    if (!ValidateWeatherGradeResponseSettings(settings)) return global;
+    if (!settings.enabled) return fallback;
+    if (!ValidateWeatherGradeFeatures(features)) return fallback;
+    if (!ValidateWeatherGradeResponseSettings(settings)) return fallback;
     return {EvaluateChannel(settings.luminance, features),
         EvaluateChannel(settings.color, features)};
 }

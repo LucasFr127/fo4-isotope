@@ -284,10 +284,10 @@ HdrSettingsValidationError ValidateHdrGrading(const HdrSettings& settings) noexc
             kMinimumVanillaColorGradingPercent,
             kMaximumVanillaColorGradingPercent))
         return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
-    if (!InRange(settings.vanillaGradeLuminancePercent,
+    if (!InRange(settings.fallbackGradeLuminancePercent,
             kMinimumVanillaColorGradingPercent,
             kMaximumVanillaColorGradingPercent) ||
-        !InRange(settings.vanillaGradeColorPercent,
+        !InRange(settings.fallbackGradeColorPercent,
             kMinimumVanillaColorGradingPercent,
             kMaximumVanillaColorGradingPercent))
         return HdrSettingsValidationError::vanillaColorGradingOutOfRange;
@@ -341,10 +341,10 @@ HdrSettingsMath DeriveHdrSettingsMath(
     result.highlightSaturationScale = settings.highlightSaturationPercent / 100.0;
     result.vanillaColorGradingBlend =
         settings.vanillaColorGradingStrengthPercent / 100.0;
-    result.vanillaGradeLuminanceRemoval =
-        1.0 - settings.vanillaGradeLuminancePercent / 100.0;
-    result.vanillaGradeColorRemoval =
-        1.0 - settings.vanillaGradeColorPercent / 100.0;
+    result.fallbackGradeLuminanceRemoval =
+        1.0 - settings.fallbackGradeLuminancePercent / 100.0;
+    result.fallbackGradeColorRemoval =
+        1.0 - settings.fallbackGradeColorPercent / 100.0;
     result.bloomMultiplier = settings.bloomStrengthPercent / 100.0;
     result.colorBalanceBt709 =
         BuildColorBalanceMatrix(settings.temperature, settings.tint);
@@ -356,8 +356,8 @@ HdrSettings DefaultSdrSettings() noexcept
     HdrSettings settings{};
     settings.productionAlgorithm = ProductionToneMapperAlgorithm::native;
     settings.toneMapperParameters = kDefaultSdrToneMapperParameters;
-    settings.vanillaGradeLuminancePercent = 100.0;
-    settings.vanillaGradeColorPercent = 100.0;
+    settings.fallbackGradeLuminancePercent = 100.0;
+    settings.fallbackGradeColorPercent = 100.0;
     settings.weatherGradeResponse.enabled = false;
     settings.bloomStrengthPercent = 100.0;
     settings.sdrOperatorWeatherResponse = true;
@@ -380,8 +380,8 @@ bool SdrSceneControlsNeutral(const HdrSettings& settings) noexcept
 bool SdrGradeControlsNeutral(const HdrSettings& settings) noexcept
 {
     return settings.vanillaColorGradingStrengthPercent == 100.0 &&
-        settings.vanillaGradeLuminancePercent == 100.0 &&
-        settings.vanillaGradeColorPercent == 100.0 &&
+        settings.fallbackGradeLuminancePercent == 100.0 &&
+        settings.fallbackGradeColorPercent == 100.0 &&
         !EffectiveWeatherGradeResponse(settings).enabled;
 }
 

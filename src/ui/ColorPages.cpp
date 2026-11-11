@@ -62,13 +62,13 @@ constexpr std::array kGradingControls{
         &HdrSettings::vanillaColorGradingStrengthPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%", 1.0,
             Publish::whileDragging}},
-    ImageControl{{"global-luminance", "Global Grade Luminance",
+    ImageControl{{"fallback-grade-luminance", "Fallback Grade Luminance",
         "The grade's luminance response where Weather Response is off or does not apply."},
-        &HdrSettings::vanillaGradeLuminancePercent,
+        &HdrSettings::fallbackGradeLuminancePercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"}},
-    ImageControl{{"global-color", "Global Grade Color",
+    ImageControl{{"fallback-grade-color", "Fallback Grade Color",
         "The grade's hue and saturation response there. 0% keeps the original scene colors."},
-        &HdrSettings::vanillaGradeColorPercent,
+        &HdrSettings::fallbackGradeColorPercent,
         {kMinimumVanillaColorGradingPercent, kMaximumVanillaColorGradingPercent, "%.0f%%"}}};
 
 template <std::size_t Count>

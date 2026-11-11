@@ -43,8 +43,8 @@ ColorGradingCurve=sRGB
 GradeTransfer=PreserveHDRColor
 [Effects]
 VanillaColorGradingStrength=60
-VanillaGradeLuminanceStrength=75
-VanillaGradeColorStrength=40
+FallbackGradeLuminance=75
+FallbackGradeColor=40
 BloomStrength=75
 [ACES2]
 ContrastLookStrength=0.25

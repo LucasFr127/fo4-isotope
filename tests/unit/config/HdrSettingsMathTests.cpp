@@ -40,8 +40,8 @@ void TestDefaultSettingsValues()
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ToeStrength == 1.28);
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ShoulderStart == 0.444);
     FO4HDR_CHECK(defaults.toneMapperParameters.gt7ColorBlend == 0.6);
-    FO4HDR_CHECK(defaults.vanillaGradeLuminancePercent == 67.0);
-    FO4HDR_CHECK(defaults.vanillaGradeColorPercent == 67.0);
+    FO4HDR_CHECK(defaults.fallbackGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(defaults.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(defaults.bloomStrengthPercent == 50.0);
 }
 
@@ -88,8 +88,8 @@ void TestSdrProfileDefaults()
     brighter.exposureEv = 1.0;
     FO4HDR_CHECK(DeriveHdrSettingsMath(brighter).sceneExposureMultiplier == 2.0);
     FO4HDR_CHECK(sdr.bloomStrengthPercent == 100.0);
-    FO4HDR_CHECK(sdr.vanillaGradeLuminancePercent == 100.0);
-    FO4HDR_CHECK(sdr.vanillaGradeColorPercent == 100.0);
+    FO4HDR_CHECK(sdr.fallbackGradeLuminancePercent == 100.0);
+    FO4HDR_CHECK(sdr.fallbackGradeColorPercent == 100.0);
     FO4HDR_CHECK(!sdr.weatherGradeResponse.enabled);
     FO4HDR_CHECK(SdrSceneControlsNeutral(sdr) && SdrGradeControlsNeutral(sdr));
     // The HDR defaults change the vanilla image, so SDR keeps its own profile.
@@ -128,8 +128,8 @@ void TestSdrProfileDefaults()
              }}})
         FO4HDR_CHECK(sceneOnly(edit));
     for (const Edit edit : {Edit{[](HdrSettings& s) { s.vanillaColorGradingStrengthPercent = 50.0; }},
-             Edit{[](HdrSettings& s) { s.vanillaGradeLuminancePercent = 90.0; }},
-             Edit{[](HdrSettings& s) { s.vanillaGradeColorPercent = 0.0; }},
+             Edit{[](HdrSettings& s) { s.fallbackGradeLuminancePercent = 90.0; }},
+             Edit{[](HdrSettings& s) { s.fallbackGradeColorPercent = 0.0; }},
              Edit{[](HdrSettings& s) { s.weatherGradeResponse.enabled = true; }}})
         FO4HDR_CHECK(gradeOnly(edit));
     // Enabled Selective Color with neutral regions has no effect to draw.
@@ -274,8 +274,8 @@ void TestDefaultSettingsMath()
     FO4HDR_CHECK(derived.saturationScale == 1.0);
     FO4HDR_CHECK(derived.highlightSaturationScale == 1.0);
     FO4HDR_CHECK(derived.vanillaColorGradingBlend == 1.0);
-    FO4HDR_CHECK(test::Approx(derived.vanillaGradeLuminanceRemoval, 0.33, 1.0e-15));
-    FO4HDR_CHECK(test::Approx(derived.vanillaGradeColorRemoval, 0.33, 1.0e-15));
+    FO4HDR_CHECK(test::Approx(derived.fallbackGradeLuminanceRemoval, 0.33, 1.0e-15));
+    FO4HDR_CHECK(test::Approx(derived.fallbackGradeColorRemoval, 0.33, 1.0e-15));
     FO4HDR_CHECK(derived.bloomMultiplier == 0.5);
     constexpr std::array<double, 9> identity{
         1.0, 0.0, 0.0,
@@ -295,8 +295,8 @@ void TestAdjustedSettingsMath()
     adjusted.saturationPercent = 0.0;
     adjusted.highlightSaturationPercent = 150.0;
     adjusted.vanillaColorGradingStrengthPercent = 25.0;
-    adjusted.vanillaGradeLuminancePercent = 25.0;
-    adjusted.vanillaGradeColorPercent = 75.0;
+    adjusted.fallbackGradeLuminancePercent = 25.0;
+    adjusted.fallbackGradeColorPercent = 75.0;
     adjusted.bloomStrengthPercent = 50.0;
     const auto adjustedMath = DeriveHdrSettingsMath(adjusted);
     FO4HDR_CHECK(adjustedMath.sceneExposureMultiplier == 16.0);
@@ -307,8 +307,8 @@ void TestAdjustedSettingsMath()
     FO4HDR_CHECK(adjustedMath.saturationScale == 0.0);
     FO4HDR_CHECK(adjustedMath.highlightSaturationScale == 1.5);
     FO4HDR_CHECK(adjustedMath.vanillaColorGradingBlend == 0.25);
-    FO4HDR_CHECK(adjustedMath.vanillaGradeLuminanceRemoval == 0.75);
-    FO4HDR_CHECK(adjustedMath.vanillaGradeColorRemoval == 0.25);
+    FO4HDR_CHECK(adjustedMath.fallbackGradeLuminanceRemoval == 0.75);
+    FO4HDR_CHECK(adjustedMath.fallbackGradeColorRemoval == 0.25);
     FO4HDR_CHECK(adjustedMath.bloomMultiplier == 0.5);
     for (const auto strength : {0.0, 100.0})
     {
@@ -518,9 +518,9 @@ void TestSettingsValidation()
         HdrSettingsValidationError::tintOutOfRange);
     check(&HdrSettings::vanillaColorGradingStrengthPercent, 100.01,
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
-    check(&HdrSettings::vanillaGradeLuminancePercent, -0.01,
+    check(&HdrSettings::fallbackGradeLuminancePercent, -0.01,
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
-    check(&HdrSettings::vanillaGradeColorPercent, nan,
+    check(&HdrSettings::fallbackGradeColorPercent, nan,
         HdrSettingsValidationError::vanillaColorGradingOutOfRange);
     check(&HdrSettings::bloomStrengthPercent, -0.01,
         HdrSettingsValidationError::bloomStrengthOutOfRange);

@@ -44,8 +44,8 @@ void main(
     float luminanceRemoval;
     float colorRemoval;
     Fo4HdrResolveVanillaGradeRemoval(cb2[1], Fo4HdrLutProfilesActive,
-        Fo4HdrVanillaGradeLuminanceRemoval,
-        Fo4HdrVanillaGradeColorRemoval,
+        Fo4HdrFallbackGradeLuminanceRemoval,
+        Fo4HdrFallbackGradeColorRemoval,
         Fo4HdrLutProfileLuminanceRemoval,
         Fo4HdrLutProfileColorRemoval, luminanceRemoval, colorRemoval);
     const float strength = (asuint(Fo4HdrVanillaGradeStrength) & 0x7fffffffu) > 0x7f800000u

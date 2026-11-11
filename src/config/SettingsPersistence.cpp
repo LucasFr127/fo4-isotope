@@ -117,10 +117,12 @@ constexpr std::array<PersistedKey, 48> kPersistedKeys{{
     {.section = "Image", .key = "ColorGradingCurve", .colorGradingCurve = true},
     {"Effects", "VanillaColorGradingStrength",
         &HdrSettings::vanillaColorGradingStrengthPercent},
-    {"Effects", "VanillaGradeLuminanceStrength",
-        &HdrSettings::vanillaGradeLuminancePercent},
-    {"Effects", "VanillaGradeColorStrength",
-        &HdrSettings::vanillaGradeColorPercent},
+    {.section = "Effects", .key = "FallbackGradeLuminance",
+        .number = &HdrSettings::fallbackGradeLuminancePercent,
+        .formerKey = "VanillaGradeLuminanceStrength"},
+    {.section = "Effects", .key = "FallbackGradeColor",
+        .number = &HdrSettings::fallbackGradeColorPercent,
+        .formerKey = "VanillaGradeColorStrength"},
     {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent}
 }};
 

@@ -728,7 +728,7 @@ struct LutProfileRemovalCase
     std::array<float, 4> weights;
     std::array<float, 4> luminanceProfiles;
     std::array<float, 4> colorProfiles;
-    std::array<float, 2> global;
+    std::array<float, 2> fallback;
     bool active{true};
     float strength{1.0F};
 };
@@ -747,10 +747,10 @@ float MaximumProfileWeight(const std::array<float, 4> &weights)
 [[nodiscard]] std::array<float, 2> ResolveLutProfileRemovalOracle(const LutProfileRemovalCase &test)
 {
     if (!test.active)
-        return test.global;
+        return test.fallback;
     const auto maximum = MaximumProfileWeight(test.weights);
     if (!(maximum > 0.0F))
-        return test.global;
+        return test.fallback;
 
     std::array<float, 4> scaled{};
     float sum{};
@@ -759,7 +759,7 @@ float MaximumProfileWeight(const std::array<float, 4> &weights)
         sum += scaled[slot];
     }
     if (!(sum > 0.0F))
-        return test.global;
+        return test.fallback;
 
     std::array<float, 2> result{};
     for (std::size_t slot = 0; slot < scaled.size(); ++slot) {
@@ -825,7 +825,7 @@ void CheckLutProfileScenarios(const Render &render, const std::array<Float4, kWi
         for (std::size_t caseIndex = 0; caseIndex < cases.size(); ++caseIndex) {
             const auto &test = cases[caseIndex];
             const auto expectedRemoval = ResolveLutProfileRemovalOracle(test);
-            const auto actual = render(affineMethod, test, test.active, test.global);
+            const auto actual = render(affineMethod, test, test.active, test.fallback);
             const auto reference = render(affineMethod, test, false, expectedRemoval);
             LutProfileReadback{affineMethod, caseIndex, expectedRemoval, test, corpus, actual, reference}.Verify();
             if (caseIndex == 4 || caseIndex == 5)
@@ -854,7 +854,7 @@ std::array<LutProfileRemovalCase, 14> LutProfileRemovalCases()
         LutProfileRemovalCase{{1, 3, 0, 0}, {0.1F, 0.7F, 0.2F, 0.9F}, {0.9F, 0.3F, 0.8F, 0.1F}, {0.4F, 0.7F}},
         LutProfileRemovalCase{{3, 1, 0, 0}, {0.7F, 0.1F, 0.2F, 0.9F}, {0.3F, 0.9F, 0.8F, 0.1F}, {0.4F, 0.7F}},
         // Slots 0 and 1 represent one duplicate profile; slot 2 represents an
-        // unknown LUT populated with the current global values.
+        // unknown LUT populated with the current Fallback Grade values.
         LutProfileRemovalCase{
             {0.2F, 0.3F, 0.4F, 0.1F}, {0.2F, 0.2F, 0.4F, 0.8F}, {0.6F, 0.6F, 0.7F, 0.1F}, {0.4F, 0.7F}},
         LutProfileRemovalCase{{1, 0.5F, 0.25F, 0.125F}, {0, 0.25F, 0.75F, 1}, {1, 0.75F, 0.25F, 0}, {0.4F, 0.7F}},
@@ -906,15 +906,15 @@ struct LutProfileRenderer
     }
 
     std::array<Float4, kWidth> Render(bool affineMethod, const LutProfileRemovalCase &test, bool profilesActive,
-                                      const std::array<float, 2> &global) const
+                                      const std::array<float, 2> &fallback) const
     {
         LutConstants lut{};
         lut.values[1] = {test.weights[0], test.weights[1], test.weights[2], test.weights[3]};
         const auto lutBuffer = CreateConstantBuffer(*device.device.Get(), lut);
         ToneMapConstants settings{0, 1000, 203, 203, 1, 203, 0, 0};
         settings.vanillaGradeStrength = test.strength;
-        settings.selectiveColorPlaneA.alpha = global[0];
-        settings.selectiveColorPlaneB.alpha = global[1];
+        settings.selectiveColorPlaneA.alpha = fallback[0];
+        settings.selectiveColorPlaneB.alpha = fallback[1];
         settings.lutProfileLuminanceRemoval = {test.luminanceProfiles[0], test.luminanceProfiles[1],
                                                test.luminanceProfiles[2], test.luminanceProfiles[3]};
         settings.lutProfileColorRemoval = {test.colorProfiles[0], test.colorProfiles[1], test.colorProfiles[2],
@@ -989,8 +989,8 @@ void VerifyLutProfileGradeRemoval(Device &device, ID3D11VertexShader *vertexShad
     const LutProfileRenderer renderer{device,   vertexShader, sceneSampler, scene,  look,     linear,
                                       rgbRatio, affine,       prepare,      output, prepared, preparedUav};
     const auto render = [&](bool affineMethod, const LutProfileRemovalCase &test, bool active,
-                            const std::array<float, 2> &global) {
-        return renderer.Render(affineMethod, test, active, global);
+                            const std::array<float, 2> &fallback) {
+        return renderer.Render(affineMethod, test, active, fallback);
     };
 
     CheckLutProfileScenarios(render, corpus, cases);

@@ -57,9 +57,9 @@ cbuffer Fo4HdrToneMapConstants : register(b13)
     // c15-c16: precomputed origin-constrained neutral planes and grade-removal
     // amounts. The scalar lanes occupy the former plane padding.
     float3 Fo4HdrSelectivePlaneA;
-    float Fo4HdrVanillaGradeLuminanceRemoval;
+    float Fo4HdrFallbackGradeLuminanceRemoval;
     float3 Fo4HdrSelectivePlaneB;
-    float Fo4HdrVanillaGradeColorRemoval;
+    float Fo4HdrFallbackGradeColorRemoval;
 
     // c17-c18: per-native-LUT grade-removal profiles in native slot order.
     float4 Fo4HdrLutProfileLuminanceRemoval;

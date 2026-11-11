@@ -34,13 +34,13 @@ float3 Fo4HdrGradeCleanScene(float3 rgb)
 }
 
 void Fo4HdrResolveVanillaGradeRemoval(float4 nativeWeights,
-    uint profilesActive, float globalLuminanceRemoval,
-    float globalColorRemoval, float4 profileLuminanceRemoval,
+    uint profilesActive, float fallbackLuminanceRemoval,
+    float fallbackColorRemoval, float4 profileLuminanceRemoval,
     float4 profileColorRemoval, out float luminanceRemoval,
     out float colorRemoval)
 {
-    luminanceRemoval = globalLuminanceRemoval;
-    colorRemoval = globalColorRemoval;
+    luminanceRemoval = fallbackLuminanceRemoval;
+    colorRemoval = fallbackColorRemoval;
     if (profilesActive == 0u) return;
 
     const uint4 magnitudes = asuint(nativeWeights) & 0x7fffffffu;
