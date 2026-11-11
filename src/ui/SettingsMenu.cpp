@@ -46,7 +46,7 @@ std::optional<DMUI_PageHandle> g_exposureOverlay;
 // Callbacks cannot be unregistered, so the client lives for the process.
 dmui::Client& Client() noexcept
 {
-    static dmui::Client client{"fo4isotope", "Isotope", {1, 3}, "atom"};
+    static dmui::Client client{"fo4isotope", "Isotope", {1, 4}, "atom"};
     return client;
 }
 
