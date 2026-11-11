@@ -183,7 +183,7 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
 }
 
-// The settings window saves the HDR request for the next game start.
+// The settings menu saves the HDR request for the next game start.
 void CheckRewrittenHdrRequest(const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings, std::string_view original)
 {
