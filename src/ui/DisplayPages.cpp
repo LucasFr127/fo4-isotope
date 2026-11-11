@@ -101,20 +101,23 @@ void AddHdrRequest(SettingsPageBuilder& page)
 {
     page.Group("hdr", "HDR", "sun");
     AddRestartSwitch(page, {{"hdr-enabled", "Enable HDR",
-        "Uses HDR10 output on an HDR display with Windows HDR on. Applies after a restart."},
+        "Uses HDR10 output on an HDR display with Windows HDR on.\nApplies after a restart."},
         &HdrInterfaceSettings::hdrEnabled, true, &HdrRequestStatus});
 }
 
 void AddPresentation(SettingsPageBuilder& page)
 {
     page.Group("presentation", "Presentation", "monitor-play");
-    AddRestartSwitch(page, {{"hosted-presentation", "Present through Community Shaders",
-        "Lets Community Shaders create the device and present, so its upscaling and frame "
-        "generation can run. With Enable HDR on and Community Shaders' HDR Display in HDR, "
-        "FO4Isotope supplies the HDR tone mapping; otherwise its SDR color settings apply. "
-        "Needs a Community Shaders version that supports it. Applies after a restart."},
+    AddRestartSwitch(page, {{"hosted-presentation", "Hosted Presentation",
+        "Makes Isotope work with Community Shaders' upscaling and frame generation.\n"
+        "For HDR, also turn on Community Shaders' HDR Display.\n"
+        "Applies after a restart."},
         &HdrInterfaceSettings::hostedPresentation, false, &HostedPresentationStatus});
 }
+
+// Under hosted HDR the host owns the menu, HUD and video brightness; their rows
+// stay visible but disabled.
+[[nodiscard]] bool OwnsWhiteLevels() noexcept { return !View().hostedHdr; }
 
 void AddBrightness(SettingsPageBuilder& page)
 {
@@ -123,19 +126,16 @@ void AddBrightness(SettingsPageBuilder& page)
         "The brightest level highlights reach. Match your display's HDR peak."},
         {kMinimumPeakNits, kMaximumPeakNits, "%.0f nits"},
         [](HdrSettings& settings) -> double& { return settings.displayPeakNits; });
-    // Under hosted HDR the host owns the menu, HUD and video brightness.
-    const auto ownWhites = [] { return !View().hostedHdr; };
     page.Number({"ui-white", "Menu & HUD White", "Brightness of white menus and HUD."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
         [](HdrSettings& settings) -> double& { return settings.uiPaperWhiteNits; })
-        .isVisible = ownWhites;
+        .isEnabled = OwnsWhiteLevels;
     page.Number({"video-white", "Video White", "Brightness of white in videos."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
         [](HdrSettings& settings) -> double& { return settings.videoWhiteNits; })
-        .isVisible = ownWhites;
+        .isEnabled = OwnsWhiteLevels;
     page.Value({"host-paper-white", "Host Paper White",
-        "Community Shaders' Paper White. It sets the menu and HUD brightness; the scene "
-        "keeps the brightness FO4Isotope's tone mapper gives it."},
+        "Community Shaders' Paper White. It sets menu and HUD brightness, not the scene's."},
         [] { dmui::ui::TextUnformatted(Nits(View().hostPaperWhiteNits).data()); })
         .isVisible = [] { return View().hostedHdr; };
 }
@@ -187,7 +187,7 @@ void AddDisplay(SettingsPageBuilder& page)
             Draft().uiPaperWhiteNits = std::clamp(
                 static_cast<double>(View().display.sdrWhiteNits), kMinimumWhiteNits, kMaximumWhiteNits);
             RequestSettingsCommit();
-        }, known(&SettingsDisplayView::sdrWhiteNits));
+        }, known(&SettingsDisplayView::sdrWhiteNits)).isEnabled = OwnsWhiteLevels;
 }
 
 struct OperatorControl

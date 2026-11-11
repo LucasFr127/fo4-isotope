@@ -28,12 +28,12 @@ constexpr std::array<const char*, 11> kSdrModeReasonTexts{
         "swap chain. The F4SE log names the failed check.",
     "SDR is shown because HDR resources could not be created on this swap chain, for "
         "example under another graphics mod. The F4SE log names the failure.",
-    "Community Shaders presents the game, and Enable HDR is off.",
+    "SDR is shown because Community Shaders presents the game and Enable HDR is off.",
     "SDR is shown because Community Shaders reports SDR output. Turn on HDR in its HDR "
         "Display settings, in borderless or windowed mode, then restart the game.",
-    "SDR is shown because no Community Shaders HDR output was found. Present through "
-        "Community Shaders needs its HDR Display feature loaded, in a version that reports "
-        "its HDR state. Turn the setting off and restart to use FO4Isotope's own HDR."};
+    "SDR is shown because Community Shaders did not report its HDR output. Load its HDR "
+        "Display in a version that supports Isotope, or turn off Hosted Presentation, then "
+        "restart the game."};
 static_assert(kSdrModeReasonTexts.size() ==
     static_cast<std::size_t>(SdrModeReason::hostNotFound) + 1U);
 
@@ -52,12 +52,12 @@ constexpr std::array<SettingsMenuHealth, 11> kSdrModeHealth{{
         "HDR unavailable"},
     {HealthSeverity::info, "SDR output: Community Shaders presents."},
     {HealthSeverity::info, "SDR output: Community Shaders reports SDR."},
-    {HealthSeverity::warning, "SDR output: no Community Shaders HDR output found.",
+    {HealthSeverity::warning, "SDR output: Community Shaders did not report HDR.",
         "HDR unavailable"}}};
 static_assert(kSdrModeHealth.size() == kSdrModeReasonTexts.size());
 
 constexpr auto kHostStateMismatchText = "Community Shaders' HDR setting changed since the game "
-    "started, so its own tone mapping is shown. Restart the game to use FO4Isotope's again.";
+    "started, so its tone mapping is shown. Restart the game to use Isotope's.";
 
 [[nodiscard]] SettingsMenuHealth DescribeSdrHealth(const SettingsMenuView& view) noexcept
 {
@@ -139,8 +139,8 @@ const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept
 {
     if (!view.hostedHdr) return nullptr;
     return view.hostStateMismatch ? kHostStateMismatchText :
-        "Community Shaders presents in HDR. FO4Isotope supplies the tone mapping and color "
-        "settings; Community Shaders' Paper White and UI brightness set the menus and HUD.";
+        "Community Shaders presents in HDR with Isotope's tone mapping and color settings. "
+        "Its HDR Display settings set menu and HUD brightness.";
 }
 
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept

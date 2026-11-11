@@ -119,8 +119,8 @@ public:
     // Muted text across the row, for a short explanation inside a group.
     void Note(const char* id, const char* text);
     void Messages(std::function<StatusList()> messages);
-    void Action(const FieldText& text, const char* button, std::function<void()> activate,
-        std::function<bool()> visible = {});
+    dmui::SettingsActionRow& Action(const FieldText& text, const char* button,
+        std::function<void()> activate, std::function<bool()> visible = {});
 
 private:
     dmui::SettingDescriptor& Add(dmui::SettingDescriptor setting);

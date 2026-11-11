@@ -86,9 +86,15 @@ constexpr std::array<ChoiceEntry<ColorGradingCurve>, 2> kGradingCurves{{
     {ColorGradingCurve::gamma22, "gamma22", "Gamma 2.2"},
     {ColorGradingCurve::srgb, "srgb", "sRGB"}}};
 
-[[nodiscard]] std::optional<dmui::FieldFeedback> AffineStatusFeedback()
+// Hosted HDR grades with RGB Ratio only, so the method row stays visible but disabled.
+[[nodiscard]] bool OwnsGradingMethod() noexcept { return !CurrentSettingsFrame().view->hostedHdr; }
+
+[[nodiscard]] std::optional<dmui::FieldFeedback> GradingMethodFeedback()
 {
     const auto& view = *CurrentSettingsFrame().view;
+    if (view.hostedHdr)
+        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kInfo,
+            "Hosted Presentation uses RGB Ratio."};
     if (view.activeSettings.colorGradingMethod != ColorGradingMethod::affine ||
         view.affineStatus == nullptr)
         return std::nullopt;
@@ -99,12 +105,13 @@ constexpr std::array<ChoiceEntry<ColorGradingCurve>, 2> kGradingCurves{{
 void AddHdrConversion(SettingsPageBuilder& page)
 {
     page.Group("hdr-conversion", "HDR Conversion", "arrows-out");
-    page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
-        "RGB Ratio reads the LUT at each color's own hue and saturation. "
+    auto& method = page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
+        "RGB Ratio reads the LUT at each color's own hue and saturation.\n"
         "Affine reads it as the game does for closer vanilla tints, at a higher GPU cost."},
         [](HdrSettings& settings) -> ColorGradingMethod& { return settings.colorGradingMethod; },
-        std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods})
-        .resolveFeedback = AffineStatusFeedback;
+        std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods});
+    method.resolveFeedback = GradingMethodFeedback;
+    method.isEnabled = OwnsGradingMethod;
     (void)page.Choice<ColorGradingCurve>({"grading-curve", "Grading Curve",
         "How the game's LUT colors are read. Gamma 2.2 keeps deeper shadows; sRGB lifts them."},
         [](HdrSettings& settings) -> ColorGradingCurve& { return settings.colorGradingCurve; },
