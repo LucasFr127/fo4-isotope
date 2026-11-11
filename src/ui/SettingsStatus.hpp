@@ -40,6 +40,10 @@ struct SettingsMenuHealth
 [[nodiscard]] const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;
 // The note on the saved HDR request, or null when it needs none.
 [[nodiscard]] const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept;
+// The Output note of a hosted-HDR session, or null outside one.
+[[nodiscard]] const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept;
+// The note on the saved hosted-presentation request, or null when it needs none.
+[[nodiscard]] const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) noexcept;
 // The renderer rejected the last change, or null when it applied.
 [[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
 // Reports SDR mode as HDR off once the saved request turns HDR off, so the reason's

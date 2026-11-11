@@ -673,10 +673,24 @@ void TestSdrModeDecision()
     FO4HDR_CHECK(reason({.requested = true, .hdrPathRequested = true,
         .hdrCandidate = HdrCandidateDecision::descriptorUnsupported,
         .enbDetected = true}) == SdrModeReason::enbDetected);
+    // Hosted presentation names why the host's chain shows SDR; ENB still outranks it.
+    FO4HDR_CHECK(reason({.requested = true, .hostedPresentation = true}) ==
+        SdrModeReason::hostedPresentation);
+    FO4HDR_CHECK(reason({.requested = true, .enbDetected = true, .hostedPresentation = true}) ==
+        SdrModeReason::enbDetected);
+    FO4HDR_CHECK(reason({.hostedPresentation = true}) == SdrModeReason::none);
+    FO4HDR_CHECK(reason({.requested = true, .hostedPresentation = true, .hostedHdrRequested = true,
+        .hostAnswered = true}) == SdrModeReason::hostPresentsSdr);
+    FO4HDR_CHECK(reason({.requested = true, .hostedPresentation = true,
+        .hostedHdrRequested = true}) == SdrModeReason::hostNotFound);
+    // A hosted HDR latch runs the HDR profile, so SDR mode stays off.
+    FO4HDR_CHECK(reason({.requested = true, .hostedPresentation = true, .hostedHdrRequested = true,
+        .hostAnswered = true, .hostedHdr = true}) == SdrModeReason::none);
     for (const auto value : {SdrModeReason::hdrOff, SdrModeReason::configurationDefaults,
              SdrModeReason::enbDetected, SdrModeReason::displayNotHdr10,
              SdrModeReason::descriptorUnsupported, SdrModeReason::hdrCandidateRejected,
-             SdrModeReason::hdrInstallFailed})
+             SdrModeReason::hdrInstallFailed, SdrModeReason::hostedPresentation,
+             SdrModeReason::hostPresentsSdr, SdrModeReason::hostNotFound})
         FO4HDR_CHECK(std::string_view{SdrModeReasonName(value)} != "unknown");
 }
 

@@ -316,6 +316,39 @@ private:
     return current && heartbeat.toneMapFamilyObserved;
 }
 
+// What a hosted-HDR draw writes: the game's unpromoted working format, the
+// host's FP16 scene texture, or a target the hosted scene cannot use.
+enum class HostedTarget : std::uint8_t
+{
+    other,
+    workingR11g11b10,
+    rgba16Float
+};
+
+enum class HostedDrawAction : std::uint8_t
+{
+    native,
+    replace,
+    // The target stores no negative values, so the encode contains the color in BT.709.
+    replaceContained
+};
+
+// Hosted HDR replaces only the tone-map family and the LUT that follows it in
+// the same frame; every later pass belongs to the host.
+[[nodiscard]] constexpr HostedDrawAction DecideHostedDraw(RenoDxShaderPass pass,
+    HostedTarget target, const PipelineHeartbeatEvaluation& heartbeat) noexcept
+{
+    constexpr auto toneMaps = RenoDxShaderBit(RenoDxShaderPass::toneMapA) |
+        RenoDxShaderBit(RenoDxShaderPass::toneMapB) | RenoDxShaderBit(RenoDxShaderPass::toneMapNewA) |
+        RenoDxShaderBit(RenoDxShaderPass::toneMapNewB);
+    if ((RenoDxShaderBit(pass) & toneMaps) != 0)
+        return target == HostedTarget::other ? HostedDrawAction::native : HostedDrawAction::replace;
+    if (pass != RenoDxShaderPass::lut || !SceneReplacementAllowed(pass, heartbeat))
+        return HostedDrawAction::native;
+    return target == HostedTarget::rgba16Float ? HostedDrawAction::replace :
+        HostedDrawAction::replaceContained;
+}
+
 // Engine image-space effect whose Render call scopes a pixel-shader bind,
 // identifying a recompiled shader that matches no RenoDX identity.
 enum class NativeImageSpacePass : std::uint8_t

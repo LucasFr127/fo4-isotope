@@ -207,6 +207,22 @@ void CheckRewrittenHdrRequest(const HdrSettings& settings,
         RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hdrOff));
     FO4HDR_CHECK(reloaded.valid && !reloaded.value.enabled);
     FO4HDR_CHECK(!reloaded.value.interfaceSettings.hdrEnabled);
+    // An INI from before the key gains it once it is on, inside its one [General]
+    // section, where a Win32 profile reader finds it.
+    auto hosted = interfaceSettings;
+    hosted.hostedPresentation = true;
+    const auto hostedText = RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hosted);
+    FO4HDR_CHECK(hostedText.find("DeveloperMode=0\nHostedPresentation=1\n[Output]") !=
+        std::string::npos);
+    FO4HDR_CHECK(hostedText.find("[General]", 1) == std::string::npos);
+    FO4HDR_CHECK(RewriteHdrSettingsIni(original, {settings}, hosted).find(
+        "Unknown=kept\r\nHostedPresentation=1\r\n") != std::string::npos);
+    const auto hostedReloaded = ParsePluginConfiguration(hostedText);
+    FO4HDR_CHECK(hostedReloaded.valid && hostedReloaded.value.hostedPresentation);
+    FO4HDR_CHECK(hostedReloaded.value.interfaceSettings == hosted);
+    hosted.hostedPresentation = false;
+    FO4HDR_CHECK(RewriteHdrSettingsIni(hostedText, {settings}, hosted).find(
+        "HostedPresentation=0\n") != std::string::npos);
 }
 
 void CheckSdrProfileRewrite()

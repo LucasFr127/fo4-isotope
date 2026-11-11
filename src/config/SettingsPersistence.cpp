@@ -42,10 +42,14 @@ struct PersistedKey
     bool HdrInterfaceSettings::*interfaceFlag{};
     // A released former name, rewritten in place under the current one.
     std::string_view formerKey{};
+    // An interface switch that an INI without it gains only once it is on.
+    bool appendedWhenOn{};
 };
 
-constexpr std::array<PersistedKey, 48> kPersistedKeys{{
+constexpr std::array<PersistedKey, 49> kPersistedKeys{{
     {.section = "General", .key = "HdrEnabled", .interfaceFlag = &HdrInterfaceSettings::hdrEnabled},
+    {.section = "General", .key = "HostedPresentation",
+        .interfaceFlag = &HdrInterfaceSettings::hostedPresentation, .appendedWhenOn = true},
     {"WeatherLutResponse", "Enabled", nullptr, false, false, nullptr, nullptr, nullptr, 4, true},
     {"WeatherLutResponse", "LuminanceBase", nullptr, false, false, nullptr,
         &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
@@ -341,6 +345,7 @@ public:
         while (!original.empty()) AppendLine(TakeIniLine(original));
         CloseRetiredSection();
         FinishIniLine(result_, newline_);
+        InsertMissingSwitches();
         AppendMissingGroups();
         return std::move(result_);
     }
@@ -430,8 +435,26 @@ private:
         retiredSectionStart_.reset();
     }
 
+    // A switch the file lacks joins the section being closed, after its last
+    // non-blank line: Win32 profile readers see only the first section of a name.
+    void InsertMissingSwitches()
+    {
+        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
+        {
+            const auto& key = kPersistedKeys[index];
+            if (!key.appendedWhenOn || !Missing(index, section_)) continue;
+            auto line = KeyValue(key, settings_, interfaceSettings_);
+            line.append(newline_);
+            const auto position = std::min(contentEnd_, result_.size());
+            result_.insert(position, line);
+            contentEnd_ = position + line.size();
+            seen_[index] = true;
+        }
+    }
+
     void OpenSection(std::string_view name)
     {
+        InsertMissingSwitches();
         CloseRetiredSection();
         section_ = sdrProfile_ ? SdrProfileBaseSection(name) : name;
         if (!sdrProfile_ && section_ == kRetiredSection) retiredSectionStart_ = result_.size();
@@ -445,6 +468,14 @@ private:
         if (key && !replaced) retiredSectionStart_.reset();
         if (!replaced) result_.append(line.raw);
         if (line.terminated) result_.append(newline_);
+        NoteSectionContent(line);
+    }
+
+    // An unterminated last line ends where the finished file does.
+    void NoteSectionContent(const IniLine& line) noexcept
+    {
+        if (line.trimmed.empty()) return;
+        contentEnd_ = line.terminated ? result_.size() : std::string::npos;
     }
 
     [[nodiscard]] bool MissingSelectiveKeys() const noexcept
@@ -466,15 +497,23 @@ private:
                 result_.append(SelectiveKeyValue(kSelectivePersistedKeys[index], settings_)).append(newline_);
     }
 
+    // An absent switch that is still off stays out of the file.
+    [[nodiscard]] bool Missing(std::size_t index, std::string_view group) const noexcept
+    {
+        const auto& key = kPersistedKeys[index];
+        if (key.section != group || seen_[index]) return false;
+        return !key.appendedWhenOn || interfaceSettings_.*key.interfaceFlag;
+    }
+
     void AppendMissingGroup(std::string_view group)
     {
         bool missing{};
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            missing = missing || (kPersistedKeys[index].section == group && !seen_[index]);
+            missing = missing || Missing(index, group);
         if (!missing) return;
         result_.append("[").append(HeaderName(group)).append("]").append(newline_);
         for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            if (kPersistedKeys[index].section == group && !seen_[index])
+            if (Missing(index, group))
                 result_.append(KeyValue(kPersistedKeys[index], settings_, interfaceSettings_)).append(newline_);
     }
 
@@ -506,6 +545,8 @@ private:
     std::string_view section_;
     std::string_view newline_;
     std::optional<std::size_t> retiredSectionStart_;
+    // Where the current section's last non-blank line ends.
+    std::size_t contentEnd_{};
 };
 
 [[nodiscard]] std::string RewriteIni(std::string_view original,

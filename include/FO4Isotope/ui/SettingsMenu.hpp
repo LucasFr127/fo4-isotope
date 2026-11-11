@@ -84,8 +84,14 @@ struct SettingsMenuView
 {
     HdrSettings activeSettings;
     bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{}, sdrMode{};
-    // [General] HdrEnabled as this game session started.
+    // [General] HdrEnabled and HostedPresentation as this game session started.
     bool hdrEnabledAtStart{};
+    bool hostedPresentationAtStart{};
+    // Hosted HDR is latched: the host presents HDR10 from FO4Isotope's HDR scene.
+    bool hostedHdr{};
+    // The host's HDR setting changed since the latch, so its own shaders draw.
+    bool hostStateMismatch{};
+    float hostPaperWhiteNits{};
     SdrModeReason sdrModeReason{};
     // SDR mode kept the menu after its replacement shaders failed to build.
     bool sdrControlsUnavailable{};

@@ -21,6 +21,7 @@
 #include "../resources/DeveloperExposureResources.hpp"
 #include "../resources/HdrResourcePolicy.hpp"
 #include "../RendererLifetime.hpp"
+#include "../HostedPresentation.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
 #include "../OperatorConstants.hpp"
@@ -831,6 +832,78 @@ void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservat
     return true;
 }
 
+// The contained LUT replaces the plain one for a target that stores no negative values.
+[[nodiscard]] bool SelectHostedProgram(ID3D11DeviceContext* context, DrawObservation& record,
+    HostedDrawAction action) noexcept
+{
+    if (action != HostedDrawAction::replaceContained) return true;
+    auto* contained = g_replacements.lutHostedContained.Get();
+    if (contained == nullptr) return false;
+    BindOriginalPixelShader(context, contained);
+    ComPtr<ID3D11PixelShader> actual;
+    context->PSGetShader(&actual, nullptr, nullptr);
+    record.expectedBoundShader = actual.Get();
+    return actual.Get() == contained;
+}
+
+// Hosted HDR binds the operator constants on both passes and the operator table on the LUT.
+[[nodiscard]] bool BindHostedDraw(ID3D11DeviceContext* context, DrawObservation& record,
+    HostedDrawAction action, ScopedD3D11PixelBindings& bindings) noexcept
+{
+    if (!SelectHostedProgram(context, record, action)) return false;
+    const bool lutPass = record.currentPass == RenoDxShaderPass::lut;
+    auto* constants = g_replacements.operatorConstants.Get();
+    if (lutPass) constants = PrepareLutProfileDraw(context, record, constants);
+    const bool bindOperatorLut = lutPass && RequiresOperatorLut(g_replacements.configurationKey.mode);
+    return bindings.Bind(context, g_rendererDevice.activeContext1.Get(),
+        {.constantBufferSlot = kProductionOperatorConstantSlot, .constantBuffer = constants,
+        .shaderResourceSlot = kProductionOperatorLutSlot,
+        .shaderResource = g_replacements.operatorLutSrv.Get(),
+        .samplerSlot = kProductionOperatorSamplerSlot,
+        .sampler = g_replacements.operatorLutSampler.Get(), .bindShaderResource = bindOperatorLut});
+}
+
+// A hosted replacement writes the host's scene format. The LUT waits for the
+// frame's replaced tone map; a draw that cannot bind draws the original shader
+// and ends hosted substitution for the device generation.
+[[nodiscard]] bool DrawHostedReplacement(ID3D11DeviceContext* context, DrawObservation& record,
+    const DrawInvocation& draw) noexcept
+{
+    if (!record.currentReplacementActive || !g_hostedHdrActive.load(std::memory_order_acquire))
+        return false;
+    const auto pass = record.currentPass;
+    const auto action = DecideHostedDraw(pass, HostedTargetOf(record.currentPrimaryRtv),
+        g_heartbeat.Evaluate(g_evidence.resourceGeneration.load(std::memory_order_acquire), g_frame));
+    ScopedD3D11PixelBindings bindings;
+    bool replaced{};
+    if (action == HostedDrawAction::native)
+    {
+        (void)RestoreNativePixelShader(context, record);
+    }
+    else if (BindHostedDraw(context, record, action, bindings))
+    {
+        ObserveQualifiedSettingsDrawThread();
+        replaced = true;
+    }
+    else
+    {
+        DisableSdrSubstitution();
+        (void)RestoreNativePixelShader(context, record);
+    }
+    draw();
+    // Pairs this frame's LUT with its tone map; the HDR path's observer does not run here.
+    if (replaced) g_heartbeat.Observe(pass);
+    ObserveCompletedNativeDraw(context, record);
+    return true;
+}
+
+// Hosted HDR and SDR mode draw their own replacement sets outside the production path.
+[[nodiscard]] bool DrawLatchedModeReplacement(ID3D11DeviceContext* context, DrawObservation& record,
+    const DrawInvocation& draw) noexcept
+{
+    return DrawHostedReplacement(context, record, draw) || DrawSdrReplacement(context, record, draw);
+}
+
 [[nodiscard]] bool UnpairedSceneProducer(const DrawObservation& record) noexcept
 {
     if (g_sdrModeActive.load(std::memory_order_acquire) || g_armor.armorEncodedActive) return false;
@@ -886,7 +959,7 @@ void ExecuteObservedDraw(
         ObserveCompletedNativeDraw(context, record);
         return;
     }
-    if (DrawSdrReplacement(context, record, draw)) return;
+    if (DrawLatchedModeReplacement(context, record, draw)) return;
     PrepareNativeSceneDraw(context, record, draw.indexedTriangle);
     bool productionOperatorApplied{};
     SharedUiWriteEvidence write;

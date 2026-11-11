@@ -31,6 +31,11 @@ struct ReplacementShaderSet
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewASdr;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> toneMapNewBSdr;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> lutSdr;
+    // Hosted-HDR set: the HDR tone maps above and a LUT that writes the host's
+    // scene format, plain or contained for a target without negative values.
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> lutHosted;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> lutHostedContained;
+    // Ends SDR-mode or hosted substitution for the device generation.
     bool sdrSubstitutionDisabled{};
     Microsoft::WRL::ComPtr<ID3D11Buffer> bypassConstants;
     Microsoft::WRL::ComPtr<ID3D11Buffer> operatorConstants;
@@ -55,11 +60,15 @@ bool ReplacementSetMatchesConfiguration() noexcept;
 ID3D11PixelShader* FindReplacement(RenoDxShaderPass) noexcept;
 // Null for a neutral pass, so its original shader draws.
 ID3D11PixelShader* FindSdrReplacement(RenoDxShaderPass) noexcept;
+// Tone-map family and LUT only, in gameplay, while the host still reports HDR.
+ID3D11PixelShader* FindHostedReplacement(RenoDxShaderPass) noexcept;
 void DisableSdrSubstitution() noexcept;
 void ResetReplacementShaders() noexcept;
 bool BuildReplacementShaders(ID3D11Device*) noexcept;
 // Requires the SDR latch, so the constants carry the SDR operator mode.
 bool BuildSdrReplacementShaders(ID3D11Device*) noexcept;
+// Requires the hosted-HDR latch, so the constants carry the HDR operator mode.
+bool BuildHostedReplacementShaders(ID3D11Device*) noexcept;
 bool PublishReplacementSettings(ID3D11DeviceContext*, const HdrSettings&, std::uint64_t generation) noexcept;
 bool PublishReplacementLut(ID3D11Device*, ID3D11DeviceContext*,
     const OperatorLutBuildResult&, const HdrSettings&) noexcept;

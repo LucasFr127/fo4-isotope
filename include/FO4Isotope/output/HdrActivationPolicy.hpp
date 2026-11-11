@@ -103,7 +103,13 @@ enum class SdrModeReason : std::uint8_t
     displayNotHdr10,
     descriptorUnsupported,
     hdrCandidateRejected,
-    hdrInstallFailed
+    hdrInstallFailed,
+    // Hosted presentation leaves the swap chain to Community Shaders; HDR is off.
+    hostedPresentation,
+    // Hosted HDR was requested and the host answered that it presents SDR.
+    hostPresentsSdr,
+    // Hosted HDR was requested and no host answered the state query.
+    hostNotFound
 };
 
 // SDR mode runs on every owner chain without an HDR descriptor, so the settings
@@ -120,9 +126,44 @@ struct SdrModeInputs
     bool hdrInstallFailed{};
     // FO4Isotope.ini was unusable, so startup took the SDR-only defaults.
     bool configurationDefaults{};
+    // [General] HostedPresentation, which never requests the HDR path.
+    bool hostedPresentation{};
+    // HdrEnabled under hosted presentation, and whether a host answered.
+    bool hostedHdrRequested{};
+    bool hostAnswered{};
+    // Hosted HDR latched, so the chain runs the HDR profile instead of SDR mode.
+    bool hostedHdr{};
 };
 
 [[nodiscard]] SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept;
+
+// What a hosting presenter reports about its HDR output. The layout is the
+// host's exported contract; size is set by the caller.
+struct HostHdrOutputState
+{
+    std::uint32_t size{};
+    std::uint32_t hdrActive{};
+    float paperWhiteNits{};
+    float peakNits{};
+};
+
+// Trusts a host's answer, null when it gave none, only when it is complete and
+// its paper white is usable.
+[[nodiscard]] bool HostReportsHdr(const HostHdrOutputState* answer) noexcept;
+
+// Hosted HDR runs on the host's HDR container: a chain that reports
+// R8G8B8A8_UNORM while its back buffer is FP16.
+struct HostedHdrInputs
+{
+    bool hostedHdrRequested{};
+    bool enbDetected{};
+    bool configurationDefaults{};
+    bool hostReportsHdr{};
+    bool chainRgba8Unorm{};
+    bool backBufferFp16{};
+};
+
+[[nodiscard]] bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept;
 [[nodiscard]] const char* SdrModeReasonName(SdrModeReason reason) noexcept;
 
 enum class HdrRendererState : std::uint8_t

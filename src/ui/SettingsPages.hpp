@@ -24,9 +24,10 @@ struct SettingsFrame
     HdrSettings* draft{};
     // The values when the menu opened; Revert restores them.
     HdrSettings* session{};
-    // [General] HdrEnabled saves like the other settings and applies at the next game start.
-    bool* hdrEnabled{};
-    bool sessionHdrEnabled{};
+    // [General] HdrEnabled and HostedPresentation save like the other settings and
+    // apply at the next game start.
+    HdrInterfaceSettings* interfaceDraft{};
+    HdrInterfaceSettings sessionInterface{};
     const SettingsMenuView* view{};
     const SettingsMenuRenderer* renderer{};
     bool* commitRequested{};

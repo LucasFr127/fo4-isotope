@@ -59,6 +59,45 @@ void TestSdrModeReasonText()
         FO4HDR_CHECK(text(reason, false).empty());
     }
     FO4HDR_CHECK(text(SdrModeReason::configurationDefaults, false).contains("FO4Isotope.ini"));
+    // Hosted presentation keeps its note with HDR on or off.
+    FO4HDR_CHECK(text(SdrModeReason::hostedPresentation).contains("Community Shaders"));
+    FO4HDR_CHECK(text(SdrModeReason::hostedPresentation, false).contains("Community Shaders"));
+    FO4HDR_CHECK(text(SdrModeReason::hostPresentsSdr).contains("reports SDR"));
+    FO4HDR_CHECK(text(SdrModeReason::hostNotFound).contains("HDR Display"));
+}
+
+// A hosted-HDR session reports HDR through the host, and a changed host setting asks for a restart.
+void TestHostedHdrStatus()
+{
+    SettingsMenuView view{};
+    view.presenting = true;
+    FO4HDR_CHECK(HostedHdrStatusText(view) == nullptr);
+    view.hostedHdr = true;
+    FO4HDR_CHECK(std::string_view{HostedHdrStatusText(view)}.contains("presents in HDR"));
+    auto health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::success);
+    FO4HDR_CHECK(std::string_view{health.status}.contains("through Community Shaders"));
+    view.hostStateMismatch = true;
+    FO4HDR_CHECK(std::string_view{HostedHdrStatusText(view)}.contains("Restart the game"));
+    health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::warning && health.summary != nullptr);
+}
+
+// The hosted-presentation switch asks for a restart only when it differs from this session.
+void TestHostedPresentationStatus()
+{
+    const auto status = [](bool hosted, bool atStart) {
+        SettingsMenuView view{};
+        view.hostedPresentationAtStart = atStart;
+        const auto* text = HostedPresentationStatus(hosted, view);
+        return std::string_view{text != nullptr ? text : ""};
+    };
+    FO4HDR_CHECK(status(false, false).empty() && status(true, true).empty());
+    FO4HDR_CHECK(status(true, false).starts_with("Restart the game"));
+    FO4HDR_CHECK(status(false, true).starts_with("Restart the game"));
+    SettingsMenuView fallback{};
+    fallback.sdrModeReason = SdrModeReason::configurationDefaults;
+    FO4HDR_CHECK(HostedPresentationStatus(true, fallback) == nullptr);
 }
 
 
@@ -138,6 +177,8 @@ void TestSettingsStatus()
 {
     TestHdrRequestStatus();
     TestSdrModeReasonText();
+    TestHostedPresentationStatus();
+    TestHostedHdrStatus();
     TestWeatherResponseStatus();
     TestSettingsMenuHealth();
 }

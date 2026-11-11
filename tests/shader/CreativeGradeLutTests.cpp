@@ -351,6 +351,8 @@ private:
     Texture3D identityLut;
     ComPtr<ID3D11SamplerState> lutSampler;
     ComPtr<ID3D11PixelShader> shader;
+    // The plain and the contained hosted entry points of the same source.
+    std::array<ComPtr<ID3D11PixelShader>, 2> hostedShaders;
     LutConstants lutValues{};
     ComPtr<ID3D11Buffer> lutConstants;
     std::array<ID3D11ShaderResourceView*, 9> resources{};
@@ -388,6 +390,10 @@ private:
         lutSampler = CreateClampLinearSampler(*device.device.Get());
         shader = CreatePixelShader(
             *device.device.Get(), fo4hdr::generated::kCreativeGradeLut);
+        hostedShaders = {
+            CreatePixelShader(*device.device.Get(), fo4hdr::generated::kCreativeGradeLutHosted),
+            CreatePixelShader(*device.device.Get(),
+                fo4hdr::generated::kCreativeGradeLutHostedContained)};
         lutValues.values[1] = {1.0F, 0.0F, 0.0F, 0.0F};
         lutConstants = CreateConstantBuffer(
             *device.device.Get(), lutValues);
@@ -613,8 +619,58 @@ private:
             VerifyCreativeOperatorPixels(values, {
                 toneMappers[modeIndex], algorithmNames[modeIndex], peak, uiWhite,
                 gradedScene, scenePixels});
+            std::array<std::array<float, 3>, kWidth> transport{};
+            for (std::size_t index = 0; index < kWidth; ++index)
+                for (std::size_t channel = 0; channel < 3; ++channel)
+                    transport[index][channel] = Binary16ToFloat(values[index][channel]);
             device.context->Unmap(output.staging.Get(), 0);
+            for (std::size_t variant = 0; variant < hostedShaders.size(); ++variant)
+                VerifyHostedVariant(toneMapConstants.Get(), transport, variant == 1);
         }
+    }
+
+    // The hosted entry points encode the same transport result for the host:
+    // signed gamma 2.2 BT.709, contained when the target stores no negatives.
+    void VerifyHostedVariant(ID3D11Buffer* toneMapConstants,
+        const std::array<std::array<float, 3>, kWidth>& transport, bool contained)
+    {
+        DrawFullscreen(*device.context.Get(), { vertexShader,
+            hostedShaders[contained ? 1 : 0].Get(), lutConstants.Get(), toneMapConstants,
+            resources.data(), static_cast<UINT>(resources.size()), samplers.data(),
+            static_cast<UINT>(samplers.size()), target, 1});
+        device.context->CopyResource(output.staging.Get(), output.texture.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        CheckHresult(device.context->Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+            "Map CreativeGradeLut hosted pixel-shader output");
+        const auto* values = static_cast<const std::array<std::uint16_t, 4>*>(mapped.pData);
+        const auto decode = [](double code) {
+            return std::copysign(std::pow(std::abs(code), 2.2), code);
+        };
+        for (std::size_t index = 0; index < kWidth; ++index) {
+            // The transport is relative to uiWhite, the host's paper white here.
+            const auto expected = fo4hdr::EncodeHostedScene({transport[index][0] * uiWhite,
+                transport[index][1] * uiWhite, transport[index][2] * uiWhite}, uiWhite, contained);
+            const std::array linear{decode(expected.red), decode(expected.green),
+                decode(expected.blue)};
+            const auto largest = std::max({1.0, std::abs(linear[0]), std::abs(linear[1]),
+                std::abs(linear[2])});
+            for (std::size_t channel = 0; channel < linear.size(); ++channel) {
+                const auto actual = static_cast<double>(Binary16ToFloat(values[index][channel]));
+                // Compared in linear light: the encode's slope is unbounded at zero.
+                const auto acceptable = std::abs(decode(actual) - linear[channel]) <= 3.0e-3 * largest;
+                if (!acceptable) {
+                    std::cerr << "CreativeGradeLut hosted parity: contained=" << contained
+                              << " sample=" << index << " channel=" << channel
+                              << " actual_linear=" << decode(actual)
+                              << " expected_linear=" << linear[channel] << '\n';
+                }
+                FO4HDR_WARP_CHECK(std::isfinite(actual));
+                FO4HDR_WARP_CHECK(!contained || actual >= 0.0);
+                FO4HDR_WARP_CHECK(acceptable);
+            }
+            FO4HDR_WARP_CHECK(values[index][3] == scenePixels[index][3]);
+        }
+        device.context->Unmap(output.staging.Get(), 0);
     }
 
 };

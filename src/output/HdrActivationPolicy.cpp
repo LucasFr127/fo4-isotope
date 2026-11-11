@@ -110,19 +110,45 @@ namespace {
 
 constexpr std::array kSdrModeReasonNames{"none", "hdr-off", "configuration-defaults",
     "enb-detected", "display-not-hdr10", "swapchain-descriptor-unsupported",
-    "hdr-candidate-rejected", "hdr-install-failed"};
+    "hdr-candidate-rejected", "hdr-install-failed", "hosted-presentation",
+    "host-presents-sdr", "host-not-found"};
 static_assert(kSdrModeReasonNames.size() ==
-    static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
+    static_cast<std::size_t>(SdrModeReason::hostNotFound) + 1U);
+
+// HDR off under hosted presentation is the user's choice; a missing or SDR host is not.
+[[nodiscard]] SdrModeReason HostedSdrReason(const SdrModeInputs& inputs) noexcept
+{
+    if (!inputs.hostedHdrRequested) return SdrModeReason::hostedPresentation;
+    return inputs.hostAnswered ? SdrModeReason::hostPresentsSdr : SdrModeReason::hostNotFound;
+}
 
 }  // namespace
 
 SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept
 {
     if (!inputs.requested || inputs.hdrChainCreated) return SdrModeReason::none;
+    if (inputs.hostedHdr) return SdrModeReason::none;
     if (inputs.configurationDefaults) return SdrModeReason::configurationDefaults;
     // ENB prevents the HDR attempt but not SDR mode.
     if (inputs.enbDetected) return SdrModeReason::enbDetected;
+    if (inputs.hostedPresentation) return HostedSdrReason(inputs);
     return inputs.hdrPathRequested ? HdrUnavailableReason(inputs) : SdrModeReason::hdrOff;
+}
+
+bool HostReportsHdr(const HostHdrOutputState* answer) noexcept
+{
+    if (answer == nullptr || answer->size < sizeof(HostHdrOutputState)) return false;
+    // A NaN paper white fails both comparisons.
+    const bool whiteUsable = answer->paperWhiteNits > 0.0F && answer->paperWhiteNits <= 10000.0F;
+    return answer->hdrActive != 0U && whiteUsable;
+}
+
+bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept
+{
+    const bool blocked = inputs.enbDetected || inputs.configurationDefaults;
+    const bool container = inputs.chainRgba8Unorm && inputs.backBufferFp16;
+    if (!inputs.hostedHdrRequested || blocked) return false;
+    return inputs.hostReportsHdr && container;
 }
 
 const char* SdrModeReasonName(SdrModeReason reason) noexcept

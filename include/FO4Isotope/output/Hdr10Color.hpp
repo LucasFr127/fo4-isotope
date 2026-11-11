@@ -32,6 +32,14 @@ struct LinearRgb
     LinearRgb value,
     double displayPeakNits) noexcept;
 
+// The scene format of a hosting presenter: signed gamma 2.2 with BT.709
+// primaries, where 1.0 is the host's paper white. An invalid paper white gives
+// black; NaN channels become zero. Containment contracts chroma about BT.709
+// luminance until no channel is negative, for a target that cannot store
+// negative values.
+[[nodiscard]] LinearRgb EncodeHostedScene(
+    LinearRgb bt2020Nits, double hostPaperWhiteNits, bool containBt709) noexcept;
+
 // SMPTE ST 2084 maps absolute luminance in [0, 10000] nits to [0, 1]. The
 // final output boundary clamps only this encoded result, never the FP16 scene.
 [[nodiscard]] double EncodeSt2084Pq(double nits) noexcept;

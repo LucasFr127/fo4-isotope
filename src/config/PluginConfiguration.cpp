@@ -208,6 +208,7 @@ enum class RequiredKey : std::size_t
     weatherColorColorChange,
     sdrEnabled,
     sdrOperatorWeatherResponse,
+    hostedPresentation,
     count
 };
 
@@ -262,6 +263,7 @@ constexpr ConfigurationKey kConfigurationKeys[]{
     {"Debug", "ForceHdrSwapChainFailure", RequiredKey::forceHdrSwapChainFailure},
     {"General", "HdrEnabled", RequiredKey::enabled},
     {"General", "SdrEnabled", RequiredKey::sdrEnabled},
+    {"General", "HostedPresentation", RequiredKey::hostedPresentation},
     {"Output", "DisplayPeakNits", RequiredKey::displayPeakNits},
     {"Output", "UiPaperWhiteNits", RequiredKey::uiPaperWhiteNits},
     {"Output", "VideoWhiteNits", RequiredKey::videoWhiteNits},
@@ -560,7 +562,8 @@ bool& BooleanTarget(PluginConfiguration& parsed, RequiredKey key) noexcept
         {RequiredKey::measurePerformance, &parsed.measurePerformance},
         {RequiredKey::developerHdr10Reference, &parsed.developerHdr10Reference},
         {RequiredKey::forceHdrSwapChainFailure, &parsed.forceHdrSwapChainFailure},
-        {RequiredKey::sdrEnabled, &parsed.sdrEnabled}};
+        {RequiredKey::sdrEnabled, &parsed.sdrEnabled},
+        {RequiredKey::hostedPresentation, &parsed.hostedPresentation}};
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? parsed.enabled : *found->value;
 }
@@ -634,6 +637,9 @@ PluginConfigurationError ValidateDiagnosticConfiguration(const PluginConfigurati
     if (HasDiagnosticRequest(parsed) && !parsed.developerMode)
         return PluginConfigurationError::invalidCombination;
     if (!DiagnosticReferenceAvailable(parsed)) return PluginConfigurationError::invalidCombination;
+    // The reference requests its own HDR chain, which hosted presentation never creates.
+    if (parsed.hostedPresentation && parsed.developerHdr10Reference)
+        return PluginConfigurationError::invalidCombination;
     return PluginConfigurationError::none;
 }
 
@@ -739,6 +745,17 @@ private:
 
     bool Seen(RequiredKey key) const noexcept { return seen_[static_cast<std::size_t>(key)]; }
 
+    // An explicit diagnostic reference request suppresses the production path, and
+    // hosted presentation leaves the swap chain to Community Shaders: HdrEnabled
+    // then asks for HDR through it. Returns whether either HDR path is requested.
+    static bool SetHdrRequests(PluginConfiguration& parsed, bool productionKeys) noexcept
+    {
+        const bool requested = parsed.enabled && productionKeys && !parsed.developerHdr10Reference;
+        parsed.productionRequested = requested && !parsed.hostedPresentation;
+        parsed.hostedHdrRequested = requested && parsed.hostedPresentation;
+        return requested;
+    }
+
     PluginConfigurationError FinishProductionRequest() noexcept
     {
         const std::array productionKeys{Seen(RequiredKey::displayPeakNits), Seen(RequiredKey::uiPaperWhiteNits),
@@ -747,11 +764,11 @@ private:
         const auto complete = std::ranges::find(productionKeys, false) == productionKeys.end();
         if (present && !complete) return PluginConfigurationError::missingKey;
         auto& parsed = output_.value;
-        // An explicit diagnostic reference request suppresses the production path.
-        parsed.productionRequested = parsed.enabled && present && !parsed.developerHdr10Reference;
+        const bool hdrRequested = SetHdrRequests(parsed, present);
         if (!Seen(RequiredKey::weatherEnabled))
-            parsed.weatherGradeResponse.enabled = parsed.productionRequested;
+            parsed.weatherGradeResponse.enabled = hdrRequested;
         parsed.interfaceSettings.hdrEnabled = parsed.enabled;
+        parsed.interfaceSettings.hostedPresentation = parsed.hostedPresentation;
         return ValidateConfiguration(parsed);
     }
 

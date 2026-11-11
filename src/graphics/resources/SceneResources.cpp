@@ -77,6 +77,19 @@ bool SceneTargetAvailable(ID3D11RenderTargetView* rtv) noexcept
     return QualifiedSceneDescription(description);
 }
 
+HostedTarget HostedTargetOf(ID3D11RenderTargetView* rtv) noexcept
+{
+    ComPtr<ID3D11Resource> resource;
+    ComPtr<ID3D11Texture2D> texture;
+    if (rtv != nullptr) rtv->GetResource(&resource);
+    if (!resource || FAILED(resource.As(&texture))) return HostedTarget::other;
+    D3D11_TEXTURE2D_DESC description{};
+    texture->GetDesc(&description);
+    if (description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT) return HostedTarget::rgba16Float;
+    return description.Format == DXGI_FORMAT_R11G11B10_FLOAT ?
+        HostedTarget::workingR11g11b10 : HostedTarget::other;
+}
+
 std::uintptr_t CanonicalResourceIdentity(ID3D11Resource* resource) noexcept
 {
     Microsoft::WRL::ComPtr<IUnknown> identity;

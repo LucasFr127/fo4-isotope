@@ -23,6 +23,7 @@
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../LiveSettings.hpp"
+#include "../HostedPresentation.hpp"
 #include "../RendererLifetime.hpp"
 #include "../ShaderRegistry.hpp"
 #include "../resources/ScenePromotionPolicy.hpp"
@@ -941,13 +942,13 @@ private:
 
     void PublishInstallation()
     {
-        // SDR mode is ready before the renderer publishes.
-        (void)PrepareSdrMode({.requested = g_configuration.sdrEnabled,
+        // SDR mode or hosted HDR is ready before the renderer publishes.
+        PrepareLatchedModes({.requested = g_configuration.sdrEnabled,
             .hdrPathRequested = HdrPathRequested(), .hdrCandidate = candidateDecision_,
             .enbDetected = LoadedModuleExports("ENBGetSDKVersion"),
             .hdrChainCreated = hdrDescriptor_, .hdrInstallFailed = hdrInstallFailed_,
             .configurationDefaults = g_configuration.configurationDefaults},
-            *request_.device);
+            *request_.swapChain, *request_.device);
         g_evidence.rendererInstalled.store(true, std::memory_order_release);
         g_rendererDevice.activeDevice = *request_.device;
         g_rendererDevice.activeContext = *request_.context;
@@ -986,7 +987,7 @@ private:
         if (installed.chain) RollBackShadow(*request_.swapChain, FindSwapChain(*request_.swapChain));
         if (installed.context) RollBackShadow(*request_.context, FindContext(*request_.context));
         if (installed.device) RollBackShadow(*request_.device, FindDevice(*request_.device));
-        SetSdrModeActive(false);
+        ClearLatchedModes();
         g_evidence.rendererInstalled.store(false, std::memory_order_release);
         ResetResources();
         ResetReplacementShaders();

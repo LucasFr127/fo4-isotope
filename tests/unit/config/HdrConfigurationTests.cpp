@@ -49,6 +49,7 @@ void TestShippedConfiguration()
     FO4HDR_CHECK(shipped.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(shipped.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(!shipped.value.hostedPresentation);
     FO4HDR_CHECK(!shipped.value.developerMode);
     FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
     FO4HDR_CHECK(!shipped.value.measurePerformance);
@@ -279,6 +280,45 @@ void TestOptionalDiagnosticKeys()
     FO4HDR_CHECK(!parsed.value.forceHdrSwapChainFailure);
 }
 
+// Hosted presentation keeps the saved HDR request but never requests the HDR path.
+void TestHostedPresentationConfiguration()
+{
+    const auto minimal = ParsePluginConfiguration(MinimalProductionConfiguration());
+    FO4HDR_CHECK(minimal.valid && !minimal.value.hostedPresentation);
+    FO4HDR_CHECK(!minimal.value.interfaceSettings.hostedPresentation);
+    const auto hosted = ParsePluginConfiguration(
+        MinimalProductionConfiguration() + "[General]\nHostedPresentation=1\n");
+    FO4HDR_CHECK(hosted.valid && hosted.value.hostedPresentation);
+    FO4HDR_CHECK(hosted.value.enabled && !hosted.value.productionRequested);
+    // HdrEnabled then asks for HDR through the host, with the HDR weather default.
+    FO4HDR_CHECK(hosted.value.hostedHdrRequested && !minimal.value.hostedHdrRequested);
+    FO4HDR_CHECK(hosted.value.weatherGradeResponse.enabled ==
+        minimal.value.weatherGradeResponse.enabled);
+    const auto hostedSdr = ParsePluginConfiguration(
+        "[General]\nHdrEnabled=0\nHostedPresentation=1\n");
+    FO4HDR_CHECK(hostedSdr.valid && hostedSdr.value.hostedPresentation);
+    FO4HDR_CHECK(!hostedSdr.value.hostedHdrRequested);
+    FO4HDR_CHECK(hosted.value.sdrEnabled);
+    FO4HDR_CHECK(hosted.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(hosted.value.interfaceSettings.hostedPresentation);
+}
+
+void TestHostedPresentationErrors()
+{
+    // The developer reference and the forced failure both need an HDR chain.
+    for (const std::string_view debug : {"DeveloperHdr10Reference=1\n", "ForceHdrSwapChainFailure=1\n"})
+    {
+        const auto invalid = ParsePluginConfiguration("[General]\nHdrEnabled=1\nDeveloperMode=1\n"
+            "HostedPresentation=1\n[Debug]\n" + std::string(debug));
+        FO4HDR_CHECK(!invalid.valid &&
+            invalid.error == PluginConfigurationError::invalidCombination);
+    }
+    const auto invalidBoolean = ParsePluginConfiguration(
+        MinimalProductionConfiguration() + "[General]\nHostedPresentation=yes\n");
+    FO4HDR_CHECK(!invalidBoolean.valid &&
+        invalidBoolean.error == PluginConfigurationError::invalidBoolean);
+}
+
 // The former AgX name still loads; a file with both names is a duplicate.
 void TestFormerAgxColorResponseName()
 {
@@ -423,6 +463,8 @@ void TestOptionalConfigurationValues()
     TestFormerAgxColorResponseName();
     TestFormerFallbackGradeNames();
     TestOptionalDiagnosticKeys();
+    TestHostedPresentationConfiguration();
+    TestHostedPresentationErrors();
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();

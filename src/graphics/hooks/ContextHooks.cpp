@@ -20,6 +20,7 @@
 #include "../LiveSettings.hpp"
 #include "../PresentFrame.hpp"
 #include "../RendererLifetime.hpp"
+#include "../HostedPresentation.hpp"
 #include "../ShaderRegistry.hpp"
 #include "../passes/ArmorCompositionPass.hpp"
 #include "../passes/ObservedDraw.hpp"
@@ -255,9 +256,10 @@ bool PixelReplacementEligible()
         ReferenceDisplayStillEligible();
 }
 
-// SDR mode has its own replacement set and never takes the HDR path.
+// SDR mode and hosted HDR have their own replacement sets and never take the HDR path.
 ID3D11PixelShader* SelectReplacement(RenoDxShaderPass pass)
 {
+    if (g_hostedHdrActive.load(std::memory_order_acquire)) return FindHostedReplacement(pass);
     if (g_sdrModeActive.load(std::memory_order_acquire)) return FindSdrReplacement(pass);
     return PixelReplacementEligible() ? FindReplacement(pass) : nullptr;
 }
@@ -355,8 +357,9 @@ bool RestoreNativePixelShader(ID3D11DeviceContext* context, DrawObservation& rec
         return true;
     ComPtr<ID3D11PixelShader> actual;
     context->PSGetShader(&actual, nullptr, nullptr);
-    // SDR passes are independent, so HDR production health never applies to them.
-    const auto sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
+    // SDR and hosted passes are independent, so HDR production health never applies to them.
+    const auto sdrMode = g_sdrModeActive.load(std::memory_order_acquire) ||
+        g_hostedHdrActive.load(std::memory_order_acquire);
     if (actual.Get() == record.expectedBoundShader)
         return sdrMode || g_productionHealthy || RestoreNativePixelShader(context, record);
 

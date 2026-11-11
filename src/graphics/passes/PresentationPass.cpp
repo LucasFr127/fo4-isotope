@@ -16,6 +16,7 @@
 #include "../resources/PresentationResources.hpp"
 #include "../resources/SceneResources.hpp"
 #include "../RendererLifetime.hpp"
+#include "../HostedPresentation.hpp"
 #include "../LiveSettings.hpp"
 #include "../PresentFrame.hpp"
 #include "../SharedUiFrame.hpp"
@@ -130,6 +131,11 @@ SettingsMenuView UiSettingsSnapshot() noexcept
     result.hdrActive = g_evidence.hdrColorSpaceActive.load();
     result.sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
     result.hdrEnabledAtStart = g_configuration.enabled;
+    result.hostedPresentationAtStart = g_configuration.hostedPresentation;
+    result.hostedHdr = g_hostedHdrActive.load(std::memory_order_acquire);
+    result.hostStateMismatch = result.hostedHdr &&
+        !g_hostedState.matches.load(std::memory_order_acquire);
+    result.hostPaperWhiteNits = g_hostedState.paperWhiteNits;
     result.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load(std::memory_order_acquire));
     result.sdrControlsUnavailable = g_replacements.sdrSubstitutionDisabled;
     result.enbDetected = g_evidence.enbDetected.load(std::memory_order_acquire);
@@ -160,7 +166,7 @@ void RefreshSettingsView(SettingsMenuView& view) noexcept
 
 bool SettingsDraftApplied(const HdrSettings& draft) noexcept
 {
-    if (!g_configuration.productionRequested && !g_sdrModeActive.load(std::memory_order_acquire))
+    if (!HdrOperatorActive() && !g_sdrModeActive.load(std::memory_order_acquire))
         return true;
     return !g_lutPending && g_activeSettings == draft;
 }

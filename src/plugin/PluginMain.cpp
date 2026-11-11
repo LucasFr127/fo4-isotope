@@ -312,6 +312,35 @@ void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphi
     }
 }
 
+// HDR off and hosted presentation are the user's choice and need no warning;
+// every other SDR cause redirected from HDR or the INI.
+[[nodiscard]] bool SdrModeRedirected(fo4hdr::SdrModeReason reason) noexcept
+{
+    switch (reason)
+    {
+    case fo4hdr::SdrModeReason::none:
+    case fo4hdr::SdrModeReason::hdrOff:
+    case fo4hdr::SdrModeReason::hostedPresentation:
+        return false;
+    default:
+        return true;
+    }
+}
+
+void ReportHostedHdr() noexcept
+{
+    static std::atomic<bool> reported{};
+    if (reported.exchange(true, std::memory_order_acq_rel)) return;
+    try
+    {
+        REX::INFO("renderer hosted_hdr=true presenter=community-shaders");
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: hosted HDR status logging failed.\n");
+    }
+}
+
 // Names the otherwise silent cases that keep HDR off or hide another mod's UI:
 // a higher import interposer, such as Community Shaders upscaling or frame
 // generation, created the device itself; creation skipped or released the HDR
@@ -333,9 +362,8 @@ void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexce
                                  "hint=disable-community-shaders-upscaling-and-frame-generation");
     }
     ReportSkippedHdrCandidate(graphics);
-    // HDR simply off needs no warning; every other SDR cause redirected from HDR or the INI.
-    if (graphics.sdrModeReason != fo4hdr::SdrModeReason::none &&
-        graphics.sdrModeReason != fo4hdr::SdrModeReason::hdrOff)
+    if (graphics.hostedHdrActive) ReportHostedHdr();
+    if (SdrModeRedirected(graphics.sdrModeReason))
     {
         WarnOnceFormatted(sdrModeReported, "renderer sdr_mode=true reason={} hint=see-output-tab",
             fo4hdr::SdrModeReasonName(graphics.sdrModeReason));
@@ -437,8 +465,8 @@ namespace
     REX::INFO(
         "diagnostics_configuration valid={} error={} line={} "
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
-        "forced_failure={} enabled={} sdr_enabled={} production_requested={} "
-        "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
+        "forced_failure={} enabled={} sdr_enabled={} hosted_presentation={} "
+        "production_requested={} algorithm={} display_peak_nits={} ui_paper_white_nits={} "
         "exposure_ev={} exposure_multiplier={}",
         diagnosticsConfiguration.valid,
         fo4hdr::ToString(diagnosticsConfiguration.error),
@@ -451,6 +479,7 @@ namespace
         diagnosticsConfiguration.value.forceHdrSwapChainFailure,
         diagnosticsConfiguration.value.enabled,
         diagnosticsConfiguration.value.sdrEnabled,
+        diagnosticsConfiguration.value.hostedPresentation,
         diagnosticsConfiguration.value.productionRequested,
         fo4hdr::ToString(diagnosticsConfiguration.value.productionAlgorithm),
         diagnosticsConfiguration.value.displayPeakNits,
@@ -495,7 +524,8 @@ void ReportGameObserverStatus(bool observerActive) noexcept
 // The SDR weather response reads the same native LUT provenance as HDR production.
 [[nodiscard]] bool LutObservationRequested(const fo4hdr::PluginConfigurationResult& configuration) noexcept
 {
-    return ProductionRequested(configuration) || configuration.value.sdrEnabled;
+    return ProductionRequested(configuration) || configuration.value.sdrEnabled ||
+        configuration.value.hostedHdrRequested;
 }
 
 // Matches the renderer's HDR path request, which gates scene-target initialization.
@@ -679,6 +709,7 @@ void PrepareAdmittedStartup() noexcept
 
 // The first F4SE entry point admits the runtime and installs the D3D11 import:
 // Preload on NG/AE, so later Load-stage interposers chain above it; Load on OG.
+// Hosted presentation prepares here and installs the import at post-load.
 // Rejection precedes every side effect, so that caller may still fail and unload.
 [[nodiscard]] const PreparedStartup* PrepareStartup(
     const F4SE::QueryInterface* a_f4se, StartupStage stage)
@@ -701,6 +732,33 @@ void PrepareAdmittedStartup() noexcept
     return &g_startup;
 }
 
+// Hosted presentation installs the D3D11 import once, above every Load-stage
+// interposer, so Community Shaders' device reaches it.
+void InstallHostedGraphicsImport(std::string_view stage) noexcept
+{
+    static std::atomic<bool> attempted{};
+    const auto deferred =
+        g_startup.graphicsActive && g_startup.configuration.value.hostedPresentation;
+    if (!deferred || attempted.exchange(true, std::memory_order_acq_rel)) return;
+    const auto installed = fo4hdr::InstallDeferredGraphicsImport();
+    try
+    {
+        if (installed) REX::INFO("graphics import hosted=true stage={} installed=true", stage);
+        else REX::WARN("graphics import hosted=true stage={} installed=false", stage);
+    }
+    catch (...)
+    {
+        ::OutputDebugStringA("FO4Isotope: hosted import status logging failed.\n");
+    }
+}
+
+// F4SE's first message is post-load, sent after every plugin's Load.
+void ObserveLifecycleGraphics(const fo4hdr::GameHdrSnapshot& snapshot) noexcept
+{
+    InstallHostedGraphicsImport("post-load");
+    ReportLifecycleGraphics(snapshot);
+}
+
 [[nodiscard]] bool LoadPluginImpl(const F4SE::LoadInterface* a_f4se)
 {
     if (a_f4se == nullptr) return false;
@@ -713,8 +771,10 @@ void PrepareAdmittedStartup() noexcept
             services.messaging,
             services.task,
             services.pluginHandle,
-            &ReportLifecycleGraphics);
+            &ObserveLifecycleGraphics);
     ReportGameObserverStatus(observerActive);
+    // Without the listener no post-load message arrives, so install now.
+    if (!observerActive) InstallHostedGraphicsImport("load");
     InitializeObserverBoundaries(
         observerActive, startup->graphicsActive, startup->configuration, services);
     ReportInitializedRenderer(startup->configuration, startup->graphicsActive);

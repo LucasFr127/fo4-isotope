@@ -206,6 +206,8 @@ struct HdrInterfaceSettings
 {
     // [General] HdrEnabled; it applies at the next game start.
     bool hdrEnabled{true};
+    // [General] HostedPresentation; it applies at the next game start.
+    bool hostedPresentation{};
     bool operator==(const HdrInterfaceSettings&) const = default;
 };
 

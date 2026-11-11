@@ -42,11 +42,15 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
 {
     const auto& view = View();
     StatusList messages{};
+    if (const auto* hosted = HostedHdrStatusText(view))
+        messages[0] = {hosted, view.hostStateMismatch ? StatusSeverity::warning : StatusSeverity::info};
     if (!view.sdrMode) return messages;
-    // An SDR display is a normal setup; its note only points at the HDR switch.
+    // An SDR display and hosted presentation are normal setups; their notes only
+    // point at the switch that changes them.
+    const auto chosen = view.sdrModeReason == SdrModeReason::displayNotHdr10 ||
+        view.sdrModeReason == SdrModeReason::hostedPresentation;
     messages[0] = {SdrModeReasonText(view),
-        view.sdrModeReason == SdrModeReason::displayNotHdr10 ? StatusSeverity::info :
-            StatusSeverity::warning};
+        chosen ? StatusSeverity::info : StatusSeverity::warning};
     messages[1] = view.enbDetected ? StatusMessage{"ENB is installed, so the color settings have no "
             "effect and ENB's own effects stay intact.", StatusSeverity::warning} :
         view.sdrControlsUnavailable ? StatusMessage{"The SDR color settings are unavailable this "
@@ -56,31 +60,60 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     return messages;
 }
 
-// HdrEnabled is the interface draft's, not the color profile's, and applies at the next start.
+struct RestartSwitch
+{
+    FieldText text;
+    bool HdrInterfaceSettings::* flag;
+    bool defaultValue;
+    // The restart note for the saved value, or null when it needs none.
+    const char* (*status)(bool value, const SettingsMenuView& view) noexcept;
+};
+
+// These switches are the interface draft's, not the color profile's, and apply at the next start.
+void AddRestartSwitch(SettingsPageBuilder& page, const RestartSwitch& control)
+{
+    const auto flag = control.flag;
+    dmui::SettingDescriptor setting{.id = control.text.id, .label = control.text.label,
+        .description = control.text.description,
+        .control = dmui::CheckboxSettingControl{}, .defaultValue = control.defaultValue};
+    setting.binding = dmui::BindSetting(
+        [flag] { return CurrentSettingsFrame().interfaceDraft->*flag; },
+        [flag](bool enabled) { return CurrentSettingsFrame().interfaceDraft->*flag = enabled; });
+    setting.isModified = [flag, defaultValue = control.defaultValue] {
+        return CurrentSettingsFrame().interfaceDraft->*flag != defaultValue;
+    };
+    setting.isDirty = [flag] {
+        const auto& frame = CurrentSettingsFrame();
+        return frame.interfaceDraft->*flag != frame.sessionInterface.*flag;
+    };
+    setting.resolveFeedback = [flag, status = control.status]() -> std::optional<dmui::FieldFeedback> {
+        const auto* note = status(CurrentSettingsFrame().interfaceDraft->*flag, View());
+        if (note == nullptr) return std::nullopt;
+        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, note};
+    };
+    (void)page.Custom(std::move(setting), [flag] {
+        auto& frame = CurrentSettingsFrame();
+        frame.interfaceDraft->*flag = frame.sessionInterface.*flag;
+    });
+}
+
 void AddHdrRequest(SettingsPageBuilder& page)
 {
     page.Group("hdr", "HDR", "sun");
-    dmui::SettingDescriptor setting{.id = "hdr-enabled", .label = "Enable HDR",
-        .description = "Uses HDR10 output on an HDR display with Windows HDR on. "
-            "Applies after a restart.",
-        .control = dmui::CheckboxSettingControl{}, .defaultValue = true};
-    setting.binding = dmui::BindSetting(
-        [] { return *CurrentSettingsFrame().hdrEnabled; },
-        [](bool enabled) { return *CurrentSettingsFrame().hdrEnabled = enabled; });
-    setting.isModified = [] { return !*CurrentSettingsFrame().hdrEnabled; };
-    setting.isDirty = [] {
-        const auto& frame = CurrentSettingsFrame();
-        return *frame.hdrEnabled != frame.sessionHdrEnabled;
-    };
-    setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
-        const auto* status = HdrRequestStatus(*CurrentSettingsFrame().hdrEnabled, View());
-        if (status == nullptr) return std::nullopt;
-        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, status};
-    };
-    (void)page.Custom(std::move(setting), [] {
-        auto& frame = CurrentSettingsFrame();
-        *frame.hdrEnabled = frame.sessionHdrEnabled;
-    });
+    AddRestartSwitch(page, {{"hdr-enabled", "Enable HDR",
+        "Uses HDR10 output on an HDR display with Windows HDR on. Applies after a restart."},
+        &HdrInterfaceSettings::hdrEnabled, true, &HdrRequestStatus});
+}
+
+void AddPresentation(SettingsPageBuilder& page)
+{
+    page.Group("presentation", "Presentation", "monitor-play");
+    AddRestartSwitch(page, {{"hosted-presentation", "Present through Community Shaders",
+        "Lets Community Shaders create the device and present, so its upscaling and frame "
+        "generation can run. With Enable HDR on and Community Shaders' HDR Display in HDR, "
+        "FO4Isotope supplies the HDR tone mapping; otherwise its SDR color settings apply. "
+        "Needs a Community Shaders version that supports it. Applies after a restart."},
+        &HdrInterfaceSettings::hostedPresentation, false, &HostedPresentationStatus});
 }
 
 void AddBrightness(SettingsPageBuilder& page)
@@ -90,12 +123,21 @@ void AddBrightness(SettingsPageBuilder& page)
         "The brightest level highlights reach. Match your display's HDR peak."},
         {kMinimumPeakNits, kMaximumPeakNits, "%.0f nits"},
         [](HdrSettings& settings) -> double& { return settings.displayPeakNits; });
-    (void)page.Number({"ui-white", "Menu & HUD White", "Brightness of white menus and HUD."},
+    // Under hosted HDR the host owns the menu, HUD and video brightness.
+    const auto ownWhites = [] { return !View().hostedHdr; };
+    page.Number({"ui-white", "Menu & HUD White", "Brightness of white menus and HUD."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
-        [](HdrSettings& settings) -> double& { return settings.uiPaperWhiteNits; });
-    (void)page.Number({"video-white", "Video White", "Brightness of white in videos."},
+        [](HdrSettings& settings) -> double& { return settings.uiPaperWhiteNits; })
+        .isVisible = ownWhites;
+    page.Number({"video-white", "Video White", "Brightness of white in videos."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
-        [](HdrSettings& settings) -> double& { return settings.videoWhiteNits; });
+        [](HdrSettings& settings) -> double& { return settings.videoWhiteNits; })
+        .isVisible = ownWhites;
+    page.Value({"host-paper-white", "Host Paper White",
+        "Community Shaders' Paper White. It sets the menu and HUD brightness; the scene "
+        "keeps the brightness FO4Isotope's tone mapper gives it."},
+        [] { dmui::ui::TextUnformatted(Nits(View().hostPaperWhiteNits).data()); })
+        .isVisible = [] { return View().hostedHdr; };
 }
 
 void DrawDisplayName() noexcept
@@ -285,6 +327,7 @@ void BuildOutputPage(SettingsPageBuilder& page)
 {
     page.Status(OutputMessages);
     AddHdrRequest(page);
+    AddPresentation(page);
     if (page.Sdr()) return;
     AddBrightness(page);
     AddDisplay(page);

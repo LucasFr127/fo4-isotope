@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <utility>
 #include "RendererLifetime.hpp"
+#include "HostedPresentation.hpp"
 #include "LiveSettings.hpp"
 #include <array>
 #include <format>
@@ -127,6 +128,7 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
     snapshot.candidateCreateResult = g_evidence.candidateCreateResult.load();
     snapshot.candidateCreatedFormat = g_evidence.candidateCreatedFormat.load();
     snapshot.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load());
+    snapshot.hostedHdrActive = g_hostedHdrActive.load(std::memory_order_acquire);
     snapshot.rendererInstalled = g_evidence.rendererInstalled.load();
     snapshot.presentHookConflict = g_evidence.presentHookConflict.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();

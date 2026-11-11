@@ -11,7 +11,7 @@ namespace fo4hdr {
 namespace {
 
 // Indexed by SdrModeReason; HDR simply off needs no note.
-constexpr std::array<const char*, 8> kSdrModeReasonTexts{
+constexpr std::array<const char*, 11> kSdrModeReasonTexts{
     nullptr,
     nullptr,
     "FO4Isotope.ini is missing or has an invalid setting, so defaults are active and "
@@ -27,13 +27,20 @@ constexpr std::array<const char*, 8> kSdrModeReasonTexts{
     "SDR is shown because the graphics driver or another graphics mod refused the HDR "
         "swap chain. The F4SE log names the failed check.",
     "SDR is shown because HDR resources could not be created on this swap chain, for "
-        "example under another graphics mod. The F4SE log names the failure."};
+        "example under another graphics mod. The F4SE log names the failure.",
+    "Community Shaders presents the game, and Enable HDR is off.",
+    "SDR is shown because Community Shaders reports SDR output. Turn on HDR in its HDR "
+        "Display settings, in borderless or windowed mode, then restart the game.",
+    "SDR is shown because no Community Shaders HDR output was found. Present through "
+        "Community Shaders needs its HDR Display feature loaded, in a version that reports "
+        "its HDR state. Turn the setting off and restart to use FO4Isotope's own HDR."};
 static_assert(kSdrModeReasonTexts.size() ==
-    static_cast<std::size_t>(SdrModeReason::hdrInstallFailed) + 1U);
+    static_cast<std::size_t>(SdrModeReason::hostNotFound) + 1U);
 
-// The host status for each SdrModeReason. HDR off and an SDR display are normal setups,
-// so they carry no diagnostic: the host keeps diagnostics after the cause is gone.
-constexpr std::array<SettingsMenuHealth, 8> kSdrModeHealth{{
+// The host status for each SdrModeReason. HDR off, an SDR display and hosted presentation
+// are normal setups, so they carry no diagnostic: the host keeps diagnostics after the
+// cause is gone.
+constexpr std::array<SettingsMenuHealth, 11> kSdrModeHealth{{
     {HealthSeverity::info, "SDR output."},
     {HealthSeverity::info, "SDR output: HDR is off."},
     {HealthSeverity::warning, "SDR output: FO4Isotope.ini is invalid.", "HDR unavailable"},
@@ -42,8 +49,15 @@ constexpr std::array<SettingsMenuHealth, 8> kSdrModeHealth{{
     {HealthSeverity::warning, "SDR output: the swap chain cannot carry HDR.", "HDR unavailable"},
     {HealthSeverity::warning, "SDR output: the HDR swap chain was refused.", "HDR unavailable"},
     {HealthSeverity::warning, "SDR output: HDR resources could not be created.",
+        "HDR unavailable"},
+    {HealthSeverity::info, "SDR output: Community Shaders presents."},
+    {HealthSeverity::info, "SDR output: Community Shaders reports SDR."},
+    {HealthSeverity::warning, "SDR output: no Community Shaders HDR output found.",
         "HDR unavailable"}}};
 static_assert(kSdrModeHealth.size() == kSdrModeReasonTexts.size());
+
+constexpr auto kHostStateMismatchText = "Community Shaders' HDR setting changed since the game "
+    "started, so its own tone mapping is shown. Restart the game to use FO4Isotope's again.";
 
 [[nodiscard]] SettingsMenuHealth DescribeSdrHealth(const SettingsMenuView& view) noexcept
 {
@@ -81,6 +95,11 @@ SettingsMenuHealth DescribeSettingsMenuHealth(
         return {HealthSeverity::warning, "The last change was not applied.", "Change not applied",
             rejected};
     if (view.sdrMode) return DescribeSdrHealth(view);
+    if (view.hostStateMismatch)
+        return {HealthSeverity::warning, "Community Shaders' HDR setting changed.",
+            "Restart needed", kHostStateMismatchText};
+    if (view.hostedHdr)
+        return {HealthSeverity::success, "HDR10 output through Community Shaders."};
     if (view.hdrActive) return {HealthSeverity::success, "HDR10 output active."};
     return {HealthSeverity::info, "HDR10 output inactive."};
 }
@@ -101,10 +120,33 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
     return nullptr;
 }
 
+const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) noexcept
+{
+    // Defaults from an unusable INI cannot save the request; the reason names the fix.
+    if (view.sdrModeReason == SdrModeReason::configurationDefaults) return nullptr;
+    return hosted != view.hostedPresentationAtStart ? "Restart the game to apply." : nullptr;
+}
+
+// An unusable INI still needs a fix, and hosted presentation keeps its own note.
+[[nodiscard]] constexpr bool KeepsReasonWithHdrOff(SdrModeReason reason) noexcept
+{
+    return reason == SdrModeReason::configurationDefaults ||
+        reason == SdrModeReason::hostedPresentation;
+}
+
+// Community Shaders' own shaders draw until its state matches the session again.
+const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept
+{
+    if (!view.hostedHdr) return nullptr;
+    return view.hostStateMismatch ? kHostStateMismatchText :
+        "Community Shaders presents in HDR. FO4Isotope supplies the tone mapping and color "
+        "settings; Community Shaders' Paper White and UI brightness set the menus and HUD.";
+}
+
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept
 {
-    // Once HDR is turned off, SDR is the user's choice; only an unusable INI still needs a fix.
-    if (!hdrEnabled && view.sdrModeReason != SdrModeReason::configurationDefaults)
+    // Once HDR is turned off, SDR is the user's choice.
+    if (!hdrEnabled && !KeepsReasonWithHdrOff(view.sdrModeReason))
         view.sdrModeReason = SdrModeReason::hdrOff;
 }
 

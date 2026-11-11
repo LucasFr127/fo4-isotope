@@ -19,6 +19,7 @@
 // source response; only the three production operators are selectable.
 
 #include "../tonemap/OperatorLut.hlsli"
+#include "../output/DisplayMath.hlsli"
 #include "LiveSettingsConstants.hlsli"
 #include "SelectiveColor.hlsli"
 #include "ImageControls.hlsli"
@@ -65,10 +66,7 @@ float3 Fo4HdrSampleWeightedBlack()
     return mul(cb2[1], samples);
 }
 
-void main(
-    float4 position : SV_POSITION0,
-    float2 texcoord : TEXCOORD0,
-    out float4 output : SV_Target0)
+float4 Fo4HdrGradeAndMapScene(float2 texcoord)
 {
     const float4 sceneSample = SceneTexture.Sample(SceneSampler, texcoord);
     // Scene exposure was already applied by the qualified tone-map-family
@@ -111,5 +109,34 @@ void main(
         // locally undo this scale before using their fixed scene-white history.
         result = absoluteBt2020Nits / Fo4HdrUiTransportWhiteNits;
     }
-    output = float4(result, sceneSample.a);
+    return float4(result, sceneSample.a);
+}
+
+void main(
+    float4 position : SV_POSITION0,
+    float2 texcoord : TEXCOORD0,
+    out float4 output : SV_Target0)
+{
+    output = Fo4HdrGradeAndMapScene(texcoord);
+}
+
+// Hosted presentation: the transport white is the host's paper white, and the
+// result leaves in the host's scene format. Every later pass is the host's.
+void mainHosted(
+    float4 position : SV_POSITION0,
+    float2 texcoord : TEXCOORD0,
+    out float4 output : SV_Target0)
+{
+    const float4 scene = Fo4HdrGradeAndMapScene(texcoord);
+    output = float4(Fo4HdrEncodeHostedScene(scene.rgb, false), scene.a);
+}
+
+// The same for a target that stores no negative values.
+void mainHostedContained(
+    float4 position : SV_POSITION0,
+    float2 texcoord : TEXCOORD0,
+    out float4 output : SV_Target0)
+{
+    const float4 scene = Fo4HdrGradeAndMapScene(texcoord);
+    output = float4(Fo4HdrEncodeHostedScene(scene.rgb, true), scene.a);
 }

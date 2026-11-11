@@ -23,6 +23,10 @@ struct PluginConfiguration : HdrSettings
     bool enabled{};
     // The parser requests SDR mode by default; default construction stays inert.
     bool sdrEnabled{};
+    // Community Shaders creates the device and presents; no HDR chain is requested.
+    bool hostedPresentation{};
+    // HdrEnabled under hosted presentation: HDR through the host when it reports HDR.
+    bool hostedHdrRequested{};
     HdrSettings sdrSettings{DefaultSdrSettings()};
     bool productionRequested{};
     double sceneExposureMultiplier{1.0};

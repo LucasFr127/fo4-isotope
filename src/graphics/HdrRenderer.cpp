@@ -15,6 +15,7 @@
 #include "GraphicsDiagnostics.hpp"
 #include "FrameTrace.hpp"
 #include "LiveSettings.hpp"
+#include "HostedPresentation.hpp"
 #include "hooks/DeviceHooks.hpp"
 #include "passes/ArmorCompositionPass.hpp"
 #include "passes/PresentationPass.hpp"
@@ -266,6 +267,7 @@ void RetireLostDeviceGeneration() noexcept
     if (auto* record = FindDrawObservation(g_rendererDevice.activeContext)) record->nativePixelShader.Reset();
     g_presentation.applicationFacadeChain = nullptr;
     g_sdrModeActive.store(false, std::memory_order_release);
+    g_hostedHdrActive.store(false, std::memory_order_release);
     g_evidence.rendererInstalled.store(false, std::memory_order_release);
     ResetResources();
     ResetReplacementShaders();
@@ -407,11 +409,10 @@ namespace {
             static_cast<float>(math.sceneExposureMultiplier);
         return ApplySdrOperatorMode(values.productionAlgorithm, settings);
     }
-    if (!g_configuration.productionRequested) return true;
+    if (!HdrOperatorActive()) return true;
 
     if (!SetProductionOperatorMode(values.productionAlgorithm, settings)) return false;
-    settings.uiTransportWhiteNits =
-        static_cast<float>(values.uiPaperWhiteNits);
+    settings.uiTransportWhiteNits = OperatorTransportWhiteNits(values.uiPaperWhiteNits);
     settings.sceneExposureMultiplier =
         static_cast<float>(math.sceneExposureMultiplier);
     settings.videoWhiteNits = static_cast<float>(values.videoWhiteNits);
@@ -783,8 +784,7 @@ bool PrepareSdrMode(const SdrModeInputs& inputs, ID3D11Device* device) noexcept
 bool CanCommitLiveSettings(ID3D11Device* device,
     ID3D11DeviceContext* context) noexcept
 {
-    return (g_configuration.productionRequested ||
-               g_sdrModeActive.load(std::memory_order_acquire)) &&
+    return (HdrOperatorActive() || g_sdrModeActive.load(std::memory_order_acquire)) &&
         device != nullptr && context != nullptr;
 }
 
@@ -824,9 +824,9 @@ OneShotInitialization g_initialization;
 
 [[nodiscard]] bool GraphicsRequested(const PluginConfiguration& configuration) noexcept
 {
-    // SDR mode needs the renderer hooks even when HDR is off.
+    // SDR mode and hosted HDR need the renderer hooks without an HDR chain.
     return GraphicsHdrRequested(configuration) || configuration.sdrEnabled ||
-        GraphicsDiagnosticsRequested(configuration);
+        configuration.hostedHdrRequested || GraphicsDiagnosticsRequested(configuration);
 }
 
 void PublishGraphicsRequest(const PluginConfiguration& configuration, bool hdrRequested) noexcept
@@ -857,7 +857,9 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
 
 [[nodiscard]] bool PrepareInitialOperatorLut(const PluginConfiguration& configuration) noexcept
 {
-    if (!configuration.enabled || !configuration.productionRequested)
+    const bool hdrOperator = configuration.hostedHdrRequested ||
+        (configuration.enabled && configuration.productionRequested);
+    if (!hdrOperator)
     {
         // SDR tables build on demand; without the worker SDR keeps the native curve.
         if (configuration.sdrEnabled) (void)InitializeOperatorLutWorker();
@@ -884,6 +886,18 @@ void InitializeGraphicsSettings(const PluginConfiguration& configuration) noexce
     return false;
 }
 
+// Hosted presentation installs the import above every Load-stage interposer.
+std::atomic<bool> g_importDeferred{};
+
+[[nodiscard]] bool InstallImportAndPublish() noexcept
+{
+    const auto failure = InstallGraphicsImport();
+    RecordFailure(failure);
+    if (failure != GraphicsObservationFailure::none) return false;
+    g_evidence.initialized.store(true, std::memory_order_release);
+    return true;
+}
+
 }  // namespace
 
 bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noexcept
@@ -905,12 +919,17 @@ bool InitializeGraphicsObservation(const PluginConfiguration& configuration) noe
         return FailGraphicsInitialization(GraphicsObservationFailure::resourceCreationFailed);
     }
     ResetPerformanceMeasurement();
-    const auto failure = InstallGraphicsImport();
-    if (failure != GraphicsObservationFailure::none) return FailGraphicsInitialization(failure);
-    RecordFailure(GraphicsObservationFailure::none);
-    g_evidence.initialized.store(true, std::memory_order_release);
-    g_initialization.Complete(true);
-    return true;
+    g_importDeferred.store(configuration.hostedPresentation, std::memory_order_release);
+    const auto prepared = configuration.hostedPresentation || InstallImportAndPublish();
+    g_initialization.Complete(prepared);
+    return prepared;
+}
+
+bool InstallDeferredGraphicsImport() noexcept
+{
+    if (!g_importDeferred.exchange(false, std::memory_order_acq_rel))
+        return g_evidence.initialized.load(std::memory_order_acquire);
+    return InstallImportAndPublish();
 }
 
 } // namespace fo4hdr
