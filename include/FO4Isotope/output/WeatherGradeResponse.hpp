@@ -102,23 +102,28 @@ private:
     bool ready_{};
 };
 
-// Keeps the last applied per-slot response for a few frames, so a draw that
-// cannot verify its sources for a moment does not swap to the Fallback Grade.
+// Keeps the per-slot response of the last verified draw for a draw whose checks
+// return no answer. The response depends only on which LUT sits in which slot,
+// so it stays right while the same four views are bound.
 // Single-thread owner.
 class WeatherGradeResponseHold final
 {
 public:
     using Frame = std::uint64_t;
     using Grades = std::array<ResolvedLutGrade, 4>;
-    // Held draws do not renew the hold, so it ends this many frames after the last applied draw.
-    static constexpr Frame kFrames = 3;
+    // Identities of the views bound to the four LUT slots; compared, never dereferenced.
+    using Views = std::array<std::uint64_t, 4>;
+    // After a longer gap between draws an identity may name a different view.
+    static constexpr Frame kGapFrames = 3;
 
-    void Store(Frame frame, const Grades& grades) noexcept;
+    void Store(Frame frame, const Views& views, const Grades& grades) noexcept;
     void Reset() noexcept;
-    [[nodiscard]] bool TryHold(Frame frame, Grades& grades) const noexcept;
+    // A held draw renews the hold, so it lasts while the same views stay bound.
+    [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades) noexcept;
 
 private:
     Grades grades_{};
+    Views views_{};
     Frame frame_{};
     bool stored_{};
 };

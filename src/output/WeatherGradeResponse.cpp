@@ -147,9 +147,10 @@ bool WeatherGradeResponseCache::TryResolve(const WeatherGradeAggregate& aggregat
     return true;
 }
 
-void WeatherGradeResponseHold::Store(Frame frame, const Grades& grades) noexcept
+void WeatherGradeResponseHold::Store(Frame frame, const Views& views, const Grades& grades) noexcept
 {
     grades_ = grades;
+    views_ = views;
     frame_ = frame;
     stored_ = true;
 }
@@ -159,10 +160,12 @@ void WeatherGradeResponseHold::Reset() noexcept
     stored_ = false;
 }
 
-bool WeatherGradeResponseHold::TryHold(Frame frame, Grades& grades) const noexcept
+bool WeatherGradeResponseHold::TryHold(Frame frame, const Views& views, Grades& grades) noexcept
 {
+    if (!stored_ || views != views_) return false;
     // An earlier frame wraps to a large distance and is refused.
-    if (!stored_ || frame - frame_ > kFrames) return false;
+    if (frame - frame_ > kGapFrames) return false;
+    frame_ = frame;
     grades = grades_;
     return true;
 }

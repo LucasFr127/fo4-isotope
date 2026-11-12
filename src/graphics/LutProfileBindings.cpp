@@ -23,6 +23,25 @@ WeatherResponseDrops g_weatherResponseDrops;
 // Color grading draws that arrived off the Present thread and so kept the Fallback Grade.
 std::atomic<std::uint32_t> g_foreignThreadLutDraws{};
 std::atomic<std::uint32_t> g_heldLutDraws{};
+// Identities of the views this draw bound to the four LUT slots; zero until read.
+WeatherGradeResponseHold::Views g_lutDrawViews{};
+
+// How a color grading draw's weather checks ended.
+enum class LutDrawCheck : std::uint8_t
+{
+    // No draw can use the response now: wrong context, no observer, response off or pending.
+    unavailable,
+    // The checks gave no answer for this draw, so it may keep a held response.
+    unanswered,
+    // Every slot resolved to its response or to a source the response does not cover.
+    verified
+};
+
+struct LutProfileDraw
+{
+    ID3D11Buffer* constants{};
+    LutDrawCheck check{};
+};
 }
 
 void RefreshWeatherGradeResponses() noexcept
@@ -101,12 +120,23 @@ bool MatchesNativeLutView(ID3D11ShaderResourceView* view, std::uint64_t expected
     return IsQualifiedAffineLook(view);
 }
 
-bool ValidateLutProfileViews(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept
+// Reads the views bound to the four LUT slots and records their identities for the hold.
+std::array<ComPtr<ID3D11ShaderResourceView>, 4> CaptureLutDrawViews(ID3D11DeviceContext* context) noexcept
 {
     std::array<ID3D11ShaderResourceView*, 4> raw{};
     context->PSGetShaderResources(3, static_cast<UINT>(raw.size()), raw.data());
     std::array<ComPtr<ID3D11ShaderResourceView>, 4> views{};
-    for (std::size_t i = 0; i < views.size(); ++i) views[i].Attach(raw[i]);
+    for (std::size_t i = 0; i < views.size(); ++i)
+    {
+        views[i].Attach(raw[i]);
+        g_lutDrawViews[i] = reinterpret_cast<std::uintptr_t>(raw[i]);
+    }
+    return views;
+}
+
+bool ValidateLutProfileViews(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept
+{
+    const auto views = CaptureLutDrawViews(context);
     bool mismatched{};
     for (std::size_t i = 0; i < views.size(); ++i)
     {
@@ -230,6 +260,7 @@ ID3D11Buffer* UploadLutProfileConstants(ID3D11DeviceContext* context, OperatorCo
 void ResetLutProfileInspector() noexcept
 {
     g_lutInspectorFrame = g_frame;
+    g_lutDrawViews = {};
     g_lutInspectorLuts = {};
     g_lutInspectorValidatedSlots = 0;
     g_lutInspectorImageSpaces = {};
@@ -244,14 +275,17 @@ void ResetLutProfileInspector() noexcept
     g_lutInspectorStatus = NativeLutObserverMessage();
 }
 
+bool IsLutProfileContext(ID3D11DeviceContext* context, const DrawObservation& record) noexcept
+{
+    return record.immediate && context == g_rendererDevice.activeContext;
+}
+
 bool IsLutProfileDrawCurrent(ID3D11DeviceContext* context, const DrawObservation& record,
     const NativeLutObservation& native) noexcept
 {
     if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId())) return false;
     if ((native.validSlots & ~15U) != 0) return false;
-    if (!record.immediate || context != g_rendererDevice.activeContext) return false;
-
-    return true;
+    return IsLutProfileContext(context, record);
 }
 
 bool ValidateLutProfileIdentity(ID3D11DeviceContext* context, const NativeLutObservation& native) noexcept
@@ -274,12 +308,9 @@ bool ValidateLutProfileIdentity(ID3D11DeviceContext* context, const NativeLutObs
     return true;
 }
 
-bool PrepareLutProfileInspector(ID3D11DeviceContext* context, const DrawObservation& record,
-    const NativeLutObservation& native) noexcept
+// False, with the reason published, while no draw can use the response.
+bool ReportResponseReady() noexcept
 {
-    if (!IsLutProfileDrawCurrent(context, record, native)) return false;
-
-    if (!ValidateLutProfileIdentity(context, native)) return false;
     const auto response = EffectiveWeatherGradeResponse(g_activeSettings);
     if (!response.enabled)
     {
@@ -295,6 +326,19 @@ bool PrepareLutProfileInspector(ID3D11DeviceContext* context, const DrawObservat
     }
 
     return true;
+}
+
+LutDrawCheck CheckLutProfileDraw(ID3D11DeviceContext* context, const DrawObservation& record,
+    const NativeLutObservation& native) noexcept
+{
+    if (!IsLutProfileContext(context, record) ||
+        GetNativeLutObserverStatus() != NativeLutObserverStatus::ready)
+        return LutDrawCheck::unavailable;
+    // A draw without a current observation can still keep a held response.
+    const bool identified = IsLutProfileDrawCurrent(context, record, native) &&
+        ValidateLutProfileIdentity(context, native);
+    if (!ReportResponseReady()) return LutDrawCheck::unavailable;
+    return identified ? LutDrawCheck::verified : LutDrawCheck::unanswered;
 }
 
 bool IsWeatherResponseDrawCurrent(ID3D11DeviceContext* context,
@@ -320,14 +364,19 @@ const char* SlotDropReason(const NativeLutObservation& native, std::size_t i) no
     return g_lutInspectorFallbackReasons[i];
 }
 
+// A fainter slot cannot show a swap to the Fallback Grade.
+bool IsWeightedLutSlot(const NativeLutObservation& native, std::size_t i) noexcept
+{
+    return native.luts[i].weight > 0.05F;
+}
+
 // Names why a weighted slot of this draw does not use the response; null when all do.
 const char* WeatherResponseDropReason(const NativeLutObservation& native) noexcept
 {
     bool weighted{};
     for (std::size_t i = 0; i < native.luts.size(); ++i)
     {
-        // A slot this faint cannot show a swap to the Fallback Grade.
-        if (!(native.luts[i].weight > 0.05F)) continue;
+        if (!IsWeightedLutSlot(native, i)) continue;
         weighted = true;
         if ((g_lutInspectorAutomaticSlots & (1U << i)) == 0) return SlotDropReason(native, i);
     }
@@ -343,42 +392,75 @@ void ObserveWeatherResponseDrop(bool enabled, const char* reason) noexcept
         g_weatherResponseDrops.Forget();
 }
 
-// The game can set its LUTs on another thread while this pass draws, which fails
-// a frame's checks without changing the scene. Such a draw keeps the response of
-// the last draw that passed, for the few frames the hold allows.
-ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* fallback) noexcept
+bool IsUnsettledImageSpace(ImageSpaceObservationStatus status) noexcept
 {
+    using enum ImageSpaceObservationStatus;
+    return status == updating || status == stale || status == waiting;
+}
+
+bool HasUnverifiedWeightedSlot(const NativeLutObservation& native) noexcept
+{
+    for (std::size_t i = 0; i < native.luts.size(); ++i)
+        if (IsWeightedLutSlot(native, i) && (g_lutInspectorValidatedSlots & (1U << i)) == 0)
+            return true;
+    return false;
+}
+
+// The weather checks give no answer while the game is changing its LUT state, or
+// when a weighted slot's texture cannot be tied to the observation.
+bool IsWeatherSourceUnanswered(const NativeLutObservation& native) noexcept
+{
+    if (IsUnsettledImageSpace(native.imageSpaceStatus)) return true;
+    // A source the response does not cover is an answer for every slot.
+    if (native.imageSpaceStatus != ImageSpaceObservationStatus::matched) return false;
+    // Matched when the pass began and revoked since.
+    if (native.imageSpaceValidSlots != 0 &&
+        EligibleImageSpaceSlots(native, g_lutInspectorValidatedSlots) == 0) return true;
+    return HasUnverifiedWeightedSlot(native);
+}
+
+// The game can set its LUTs on another thread while this pass draws, which leaves
+// a draw's checks without an answer though the scene is unchanged. Such a draw
+// keeps the response of the last verified draw while it binds the same four LUT
+// views; with other views it keeps its own result.
+ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* own,
+    ID3D11Buffer* fallback) noexcept
+{
+    // A draw without a current observation has not read its views yet.
+    if (g_lutDrawViews == WeatherGradeResponseHold::Views{}) (void)CaptureLutDrawViews(context);
     WeatherGradeResponseHold::Grades held{};
-    if (!g_weatherResponseHold.TryHold(g_frame, held)) return fallback;
+    if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held)) return own;
+    g_lutInspectorResolved = held;
     auto constants = g_replacements.configurationKey;
     if (!ApplyLutProfileGrades(held, constants)) return fallback;
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
     if (prepared == fallback) return fallback;
-    g_lutInspectorResolved = held;
-    g_lutInspectorStatus = {
-        "Weather response held from a recent frame; this draw's sources are unverified."};
+    g_lutInspectorStatus = {"Weather response held from the last verified draw with the same LUTs."};
     g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
     return prepared;
 }
 
-ID3D11Buffer* ResolveLutProfileDraw(
+LutProfileDraw ResolveLutProfileDraw(
     ID3D11DeviceContext* context, const DrawObservation& record,
     const NativeLutObservation& native, ID3D11Buffer* fallback) noexcept
 {
-    if (!PrepareLutProfileInspector(context, record, native)) return fallback;
+    const auto check = CheckLutProfileDraw(context, record, native);
+    if (check != LutDrawCheck::verified) return {fallback, check};
 
     auto constants = g_replacements.configurationKey;
     const bool customized = ResolveLutProfileConstants(native, constants);
-    if (!customized) return fallback;
+    const auto resolved = IsWeatherSourceUnanswered(native) ?
+        LutDrawCheck::unanswered : LutDrawCheck::verified;
+    if (!customized) return {fallback, resolved};
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
-    if (prepared == fallback) return fallback;
+    if (prepared == fallback) return {fallback, resolved};
     if (!IsWeatherResponseDrawCurrent(context, record, native))
     {
         g_lutInspectorStatus = {"Weather provenance changed; the Fallback Grade settings apply."};
         UseFallbackGrade("Weather provenance changed");
-        return fallback;
+        return {fallback, LutDrawCheck::unanswered};
     }
-    return prepared;
+    return {prepared, resolved};
 
 }
 
@@ -395,14 +477,17 @@ ID3D11Buffer* PrepareLutProfileDraw(
     }
     ResetLutProfileInspector();
     const auto& native = CurrentNativeLutObservation();
-    auto* prepared = ResolveLutProfileDraw(context, record, native, fallback);
-    const bool enabled = EffectiveWeatherGradeResponse(g_activeSettings).enabled;
-    const auto* dropped = WeatherResponseDropReason(native);
-    ObserveWeatherResponseDrop(enabled, dropped);
-    if (!enabled) return prepared;
-    if (dropped != nullptr) return HoldWeatherResponse(context, fallback);
-    g_weatherResponseHold.Store(g_frame, g_lutInspectorResolved);
-    return prepared;
+    const auto draw = ResolveLutProfileDraw(context, record, native, fallback);
+    ObserveWeatherResponseDrop(EffectiveWeatherGradeResponse(g_activeSettings).enabled,
+        WeatherResponseDropReason(native));
+    if (draw.check == LutDrawCheck::unanswered)
+        return HoldWeatherResponse(context, draw.constants, fallback);
+    // A verified draw always uses its own per-slot result and becomes the held one.
+    if (draw.check == LutDrawCheck::verified)
+        g_weatherResponseHold.Store(g_frame, g_lutDrawViews, g_lutInspectorResolved);
+    else
+        g_weatherResponseHold.Reset();
+    return draw.constants;
 }
 
 void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink)

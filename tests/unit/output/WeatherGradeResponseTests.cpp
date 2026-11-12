@@ -122,27 +122,34 @@ void TestWeatherCachePublication()
 
 void TestWeatherResponseHold()
 {
-    constexpr WeatherGradeResponseHold::Grades applied{{{40.0, 50.0}, {60.0, 70.0}, {}, {}}};
-    constexpr auto last = WeatherGradeResponseHold::kFrames;
-    WeatherGradeResponseHold hold;
-    WeatherGradeResponseHold::Grades held{};
-    FO4HDR_CHECK(!hold.TryHold(1, held));
+    using Hold = WeatherGradeResponseHold;
+    constexpr Hold::Grades applied{{{40.0, 50.0}, {60.0, 70.0}, {}, {}}};
+    constexpr Hold::Views views{11, 12, 0, 0};
+    constexpr auto gap = Hold::kGapFrames;
+    Hold hold;
+    Hold::Grades held{};
+    FO4HDR_CHECK(!hold.TryHold(1, views, held));
 
-    hold.Store(10, applied);
-    FO4HDR_CHECK(hold.TryHold(10, held));
+    hold.Store(10, views, applied);
+    FO4HDR_CHECK(hold.TryHold(10, views, held));
     FO4HDR_CHECK(held == applied);
-    // Holding does not renew: the limit counts from the last applied draw.
+    // A held draw renews the hold, so it outlasts any number of frames.
     held = {};
-    FO4HDR_CHECK(hold.TryHold(10 + last, held));
+    FO4HDR_CHECK(hold.TryHold(10 + gap, views, held));
+    FO4HDR_CHECK(hold.TryHold(10 + 2 * gap, views, held));
     FO4HDR_CHECK(held == applied);
+    // Other views, or the same views in other slots, are another response.
     held = {};
-    FO4HDR_CHECK(!hold.TryHold(11 + last, held));
-    FO4HDR_CHECK(held == WeatherGradeResponseHold::Grades{});
-    FO4HDR_CHECK(!hold.TryHold(9, held));
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {11, 13, 0, 0}, held));
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {12, 11, 0, 0}, held));
+    FO4HDR_CHECK(held == Hold::Grades{});
+    // A refused draw does not renew, and a longer gap between draws ends the hold.
+    FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, views, held));
+    FO4HDR_CHECK(!hold.TryHold(9, views, held));
 
-    hold.Store(20, applied);
+    hold.Store(20, views, applied);
     hold.Reset();
-    FO4HDR_CHECK(!hold.TryHold(20, held));
+    FO4HDR_CHECK(!hold.TryHold(20, views, held));
 }
 
 }  // namespace
