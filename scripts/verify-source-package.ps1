@@ -76,7 +76,6 @@ try {
         & $powerShell `
             -NoProfile `
             -File (Join-Path $projectRoot "scripts\build.ps1") `
-            -Runtime $Runtime `
             -Mode $Mode
         if ($LASTEXITCODE -ne 0) {
             throw "Extracted source-package build failed."
