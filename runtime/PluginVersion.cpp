@@ -4,7 +4,7 @@
 
 F4SE_EXPORT constinit auto F4SEPlugin_Version = []() noexcept {
     F4SE::PluginVersionData v{};
-    v.PluginVersion({ 1, 3, 1, 0 });
+    v.PluginVersion({ 1, 3, 2, 0 });
     v.PluginName("FO4Isotope");
     v.AuthorName("Lucas Farias");
     // F4SE through 0.7.4 (game 1.11.137) reads the 1.10.980 bits and 0.7.5+
