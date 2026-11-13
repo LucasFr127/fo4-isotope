@@ -126,7 +126,8 @@ public:
     // response and the Fallback Grade, keeps none.
     [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades,
         std::uint32_t& automatic) noexcept;
-    // True when the last successful TryHold carried LUTs to other slots.
+    // True when the last TryHold carried LUTs to other slots; every call, a refused
+    // one too, clears it first.
     [[nodiscard]] bool Carried() const noexcept { return carried_; }
 
 private:

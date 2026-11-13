@@ -161,6 +161,10 @@ void TestWeatherResponseHold()
     FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {0, 13, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(held == Hold::Grades{});
     FO4HDR_CHECK(heldAutomatic == 0);
+    // A refused draw with other views neither ends nor renews the stored hold.
+    FO4HDR_CHECK(hold.TryHold(10 + 2 * gap, views, held, heldAutomatic));
+    FO4HDR_CHECK(held == applied);
+    FO4HDR_CHECK(heldAutomatic == automatic);
     // A carried draw does not renew, and a longer gap between draws ends the hold.
     FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, {11, 13, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, views, held, heldAutomatic));
