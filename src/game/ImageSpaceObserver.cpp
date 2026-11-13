@@ -259,7 +259,10 @@ void CompleteTransfer(RE::ImageSpaceManager* manager, bool prepared,
     if (prepared && TransferMatches(manager, candidate)) {
         candidate.manager = reinterpret_cast<std::uintptr_t>(manager);
         candidate.observationRevision = observationRevision;
-    } else if (candidate.status == provenance::Status::matched)
+    } else if (prepared && !g_weatherPublication.IsCurrent(candidate.revision))
+        // The weather changed during the copy, so its content proves nothing either way.
+        candidate.status = provenance::Status::stale;
+    else if (candidate.status == provenance::Status::matched)
         candidate.status = provenance::Status::unqualifiedSource;
 }
 
@@ -320,14 +323,6 @@ void RoomSetLutHook(RE::ImageSpaceManager* manager,
     if (!next || next == &RoomSetLutHook) return;
     ForwardUnqualifiedLut(manager, source, next);
     (void)g_weatherPublication.Finish(g_roomToken, {});
-}
-
-void UnqualifiedSetLutHook(RE::ImageSpaceManager* manager,
-    const RE::ImageSpaceLUTData* source) noexcept
-{
-    const auto next = g_setLut.load(std::memory_order_acquire);
-    if (!next || next == &UnqualifiedSetLutHook) return;
-    ForwardUnqualifiedLut(manager, source, next);
 }
 
 bool CurrentTransfer(const RE::ImageSpaceManager* manager, const provenance::LutValues& values,
@@ -416,13 +411,12 @@ class ImageSpaceInstallation
     std::array<patch::Site, 11> sites{};
     std::array<std::uintptr_t, 4> targets{};
     std::uintptr_t globalLut{}, globalBase{};
-    const std::array<std::uintptr_t, 6> hooks{
+    const std::array<std::uintptr_t, 5> hooks{
         reinterpret_cast<std::uintptr_t>(&WeatherHook),
         reinterpret_cast<std::uintptr_t>(&AccumulateHook),
         reinterpret_cast<std::uintptr_t>(&RoomBlendHook),
         reinterpret_cast<std::uintptr_t>(&SetLutHook),
-        reinterpret_cast<std::uintptr_t>(&RoomSetLutHook),
-        reinterpret_cast<std::uintptr_t>(&UnqualifiedSetLutHook)};
+        reinterpret_cast<std::uintptr_t>(&RoomSetLutHook)};
 
     bool InSection(const char* name, std::uintptr_t address, std::size_t size) const
     {
@@ -487,7 +481,8 @@ class ImageSpaceInstallation
     }
     bool PrepareRelay(std::size_t i, std::uint32_t handle)
     {
-        constexpr std::array<std::size_t, 11> callbacks{0, 0, 0, 1, 1, 1, 1, 2, 3, 4, 5};
+        // The sky reset (site 10) copies the weather LUT; SetLutHook qualifies it by content.
+        constexpr std::array<std::size_t, 11> callbacks{0, 0, 0, 1, 1, 1, 1, 2, 3, 4, 3};
         auto* relay = allocator.branch(handle, 14);
         MEMORY_BASIC_INFORMATION info{};
         if (!Executable(relay, 14) || !Region(relay, 14, info)) return false;
@@ -561,6 +556,10 @@ void AttachImageSpaceObservation(const RE::ImageSpaceManager* manager,
     if (transfer.status != provenance::Status::matched) return;
     provenance::LutValues values{};
     result.imageSpaceStatus = ManagerValues(manager, data, values);
+    // The matched transfer's values read cleanly after its copy, so a failed read
+    // here is a copy in progress or a change since, not an uncovered source.
+    if (result.imageSpaceStatus == provenance::Status::unqualifiedSource)
+        result.imageSpaceStatus = ImageSpaceObservationStatus::stale;
     if (result.imageSpaceStatus != provenance::Status::matched) return;
     if (!CurrentTransfer(manager, values, transfer)) {
         result.imageSpaceStatus = ImageSpaceObservationStatus::stale;
