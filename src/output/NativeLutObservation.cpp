@@ -9,6 +9,10 @@ std::atomic<NativeLutObserverStatus> g_status{};
 std::atomic<bool> g_imageSpaceReady{};
 std::atomic<std::uint64_t> g_imageSpaceRevision{1};
 std::atomic<std::uint64_t> g_generation{1};
+std::atomic<std::uint64_t> g_lutCopies{};
+std::atomic<std::uint64_t> g_reinstalledLutCopies{};
+std::atomic<std::uint64_t> g_lutCopyThreadChanges{};
+std::atomic<std::uint32_t> g_lastLutCopyThread{};
 thread_local NativeLutObservation g_current{};
 thread_local std::uint64_t g_serial{};
 thread_local std::uint32_t g_depth{};
@@ -61,6 +65,22 @@ std::uint64_t CurrentImageSpaceObservationRevision() noexcept
 std::uint64_t InvalidateImageSpaceObservation() noexcept
 {
     return g_imageSpaceRevision.fetch_add(1, std::memory_order_acq_rel) + 1;
+}
+
+void CountImageSpaceCopy(bool reinstalled, std::uint32_t threadId) noexcept
+{
+    g_lutCopies.fetch_add(1, std::memory_order_relaxed);
+    if (reinstalled) g_reinstalledLutCopies.fetch_add(1, std::memory_order_relaxed);
+    const auto previous = g_lastLutCopyThread.exchange(threadId, std::memory_order_relaxed);
+    if (previous != 0 && previous != threadId)
+        g_lutCopyThreadChanges.fetch_add(1, std::memory_order_relaxed);
+}
+
+ImageSpaceCopyCounts ReadImageSpaceCopyCounts() noexcept
+{
+    return {g_lutCopies.load(std::memory_order_relaxed),
+        g_reinstalledLutCopies.load(std::memory_order_relaxed),
+        g_lutCopyThreadChanges.load(std::memory_order_relaxed)};
 }
 
 std::uint32_t EligibleImageSpaceSlots(

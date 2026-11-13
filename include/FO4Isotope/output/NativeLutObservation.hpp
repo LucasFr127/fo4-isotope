@@ -63,6 +63,18 @@ void SetImageSpaceObservationReady(bool ready) noexcept;
 [[nodiscard]] bool IsImageSpaceObservationReady() noexcept;
 [[nodiscard]] std::uint64_t CurrentImageSpaceObservationRevision() noexcept;
 [[nodiscard]] std::uint64_t InvalidateImageSpaceObservation() noexcept;
+
+// Diagnostic counts of the manager LUT copies the hooks saw.
+struct ImageSpaceCopyCounts
+{
+    std::uint64_t copies{};
+    // Copies that reinstalled the published LUTs and so opened no transfer.
+    std::uint64_t reinstalled{};
+    // Copies made on a different thread from the copy before.
+    std::uint64_t threadChanges{};
+};
+void CountImageSpaceCopy(bool reinstalled, std::uint32_t threadId) noexcept;
+[[nodiscard]] ImageSpaceCopyCounts ReadImageSpaceCopyCounts() noexcept;
 [[nodiscard]] std::uint32_t EligibleImageSpaceSlots(
     const NativeLutObservation& observation, std::uint32_t validatedLuts) noexcept;
 [[nodiscard]] std::uint32_t EligibleWeatherGradeSlots(

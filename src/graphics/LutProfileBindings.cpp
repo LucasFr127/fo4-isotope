@@ -354,8 +354,10 @@ bool IsWeatherResponseDrawCurrent(ID3D11DeviceContext* context,
 
 const char* UnverifiedLutReason(const NativeLutObservation& native) noexcept
 {
-    if (native.serial == 0) return "No vanilla LUT observation for this draw";
-    return g_lutInspectorValidatedSlots == 0 ? g_lutInspectorStatus.text :
+    if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId()))
+        return "No vanilla LUT observation for this draw";
+    // A fixed text: the inspector status is replaced when a held draw is uploaded.
+    return g_lutInspectorValidatedSlots == 0 ? "LUT identities do not match this draw" :
         "A weighted LUT slot has no verified texture";
 }
 
@@ -401,8 +403,10 @@ const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, b
     const char* reason) noexcept
 {
     if (!held) return reason;
-    // A held draw without a current observation has no slot weights to check.
-    if (native.serial == 0) return g_lutInspectorAutomaticSlots != 0 ? nullptr : reason;
+    // A held draw without a current observation has no slot weights to check; a failed
+    // render-entry read still has a serial, so the serial alone does not tell.
+    if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId()))
+        return g_lutInspectorAutomaticSlots != 0 ? nullptr : reason;
     return WeatherResponseDropReason(native);
 }
 
@@ -521,11 +525,15 @@ ID3D11Buffer* PrepareLutProfileDraw(
 void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink)
 {
     if (!g_configuration.developerMode || !sink) return;
+    const auto copies = ReadImageSpaceCopyCounts();
     sink(std::format(
-        "weather_response foreign_thread_draws={} held_draws={} unlisted_drops={} brief_frames={}",
+        "weather_response foreign_thread_draws={} held_draws={} unlisted_drops={} "
+        "shown_unlisted_drops={} brief_frames={} lut_copies={} reinstalled_lut_copies={} "
+        "lut_copy_thread_changes={}",
         g_foreignThreadLutDraws.load(std::memory_order_relaxed),
         g_heldLutDraws.load(std::memory_order_relaxed), g_weatherResponseDrops.Unlisted(),
-        WeatherResponseDrops::kBriefFrames));
+        g_shownWeatherResponseDrops.Unlisted(), WeatherResponseDrops::kBriefFrames,
+        copies.copies, copies.reinstalled, copies.threadChanges));
     const auto report = [sink](std::string_view name, const WeatherResponseDrops& drops) {
         drops.ForEach([sink, name](const WeatherResponseDrops::Entry& entry) {
             sink(std::format(

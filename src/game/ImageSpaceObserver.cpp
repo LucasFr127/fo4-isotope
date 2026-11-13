@@ -312,10 +312,13 @@ bool ReinstallLastTransfer(RE::ImageSpaceManager* manager, const RE::ImageSpaceL
     try {
         next(manager, source);
     } catch (...) {
+        fo4hdr::CountImageSpaceCopy(false, ::GetCurrentThreadId());
         DisableObservation();
         return true;
     }
-    if (TransferMatches(manager, candidate)) return true;
+    const auto kept = TransferMatches(manager, candidate);
+    fo4hdr::CountImageSpaceCopy(kept, ::GetCurrentThreadId());
+    if (kept) return true;
     g_transferPublication.Invalidate();
     (void)fo4hdr::InvalidateImageSpaceObservation();
     return true;
@@ -324,6 +327,7 @@ bool ReinstallLastTransfer(RE::ImageSpaceManager* manager, const RE::ImageSpaceL
 // Publishes the transfer and keeps it, so a later copy can recognize a reinstall.
 void PublishTransfer(TransferStart& start, const provenance::Provenance& candidate) noexcept
 {
+    fo4hdr::CountImageSpaceCopy(false, ::GetCurrentThreadId());
     const auto revision = start.token.revision;
     g_lastTransfer = {};
     if (!g_transferPublication.Finish(start.token, candidate)) return;
@@ -360,6 +364,7 @@ void ForwardUnqualifiedLut(RE::ImageSpaceManager* manager,
     if (observe) {
         (void)fo4hdr::InvalidateImageSpaceObservation();
         g_weatherPublication.Invalidate();
+        fo4hdr::CountImageSpaceCopy(false, ::GetCurrentThreadId());
     }
     try {
         next(manager, source);
