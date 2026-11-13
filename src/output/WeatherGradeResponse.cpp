@@ -165,52 +165,12 @@ void WeatherGradeResponseHold::Reset() noexcept
 bool WeatherGradeResponseHold::TryHold(Frame frame, const Views& views, Grades& grades,
     std::uint32_t& automatic) noexcept
 {
-    carried_ = false;
+    if (!stored_ || views != views_) return false;
     // An earlier frame wraps to a large distance and is refused.
-    if (!stored_ || frame - frame_ > kGapFrames) return false;
-    if (views != views_)
-    {
-        carried_ = Carry(views, grades, automatic);
-        return carried_;
-    }
+    if (frame - frame_ > kGapFrames) return false;
     frame_ = frame;
     grades = grades_;
     automatic = automatic_;
-    return true;
-}
-
-bool WeatherGradeResponseHold::StoredResponse(std::uint64_t view,
-    ResolvedLutGrade& grade) const noexcept
-{
-    if (view == 0) return false;
-    bool found{};
-    for (std::size_t slot = 0; slot < views_.size(); ++slot)
-    {
-        if (views_[slot] != view) continue;
-        // The same LUT also used the Fallback Grade, so its ImageSpace is unknown.
-        if ((automatic_ & (1U << slot)) == 0) return false;
-        if (found && grade != grades_[slot]) return false;
-        grade = grades_[slot];
-        found = true;
-    }
-    return found;
-}
-
-bool WeatherGradeResponseHold::Carry(const Views& views, Grades& grades,
-    std::uint32_t& automatic) const noexcept
-{
-    Grades carried{};
-    std::uint32_t mask{};
-    for (std::size_t slot = 0; slot < views.size(); ++slot)
-    {
-        if (StoredResponse(views[slot], carried[slot]))
-            mask |= 1U << slot;
-        else
-            carried[slot] = {};
-    }
-    if (mask == 0) return false;
-    grades = carried;
-    automatic = mask;
     return true;
 }
 

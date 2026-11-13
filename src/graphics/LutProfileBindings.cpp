@@ -408,39 +408,6 @@ void ObserveWeatherResponseDrop(WeatherResponseDrops& drops, bool enabled,
         drops.Forget();
 }
 
-// True when this LUT view is bound in a slot that drew with the response.
-bool IsDrawnWithResponse(std::uint64_t view) noexcept
-{
-    if (view == 0) return false;
-    for (std::size_t slot = 0; slot < g_lutDrawViews.size(); ++slot)
-        if (g_lutDrawViews[slot] == view && (g_lutInspectorAutomaticSlots & (1U << slot)) != 0)
-            return true;
-    return false;
-}
-
-// A carried hold can bind a weighted LUT in another slot, so each weighted LUT of
-// the observation is found by its view.
-bool HeldDrawShowsResponse(const NativeLutObservation& native) noexcept
-{
-    for (std::size_t i = 0; i < native.luts.size(); ++i)
-    {
-        if (!IsWeightedLutSlot(native, i)) continue;
-        const auto view = native.expectedShaderViews[i] != 0 ?
-            native.expectedShaderViews[i] : g_lutDrawViews[i];
-        if (!IsDrawnWithResponse(view)) return false;
-    }
-    return true;
-}
-
-// Without weights, any bound LUT that a carry left without the response may show.
-bool CarryLeftBoundLut() noexcept
-{
-    for (std::size_t slot = 0; slot < g_lutDrawViews.size(); ++slot)
-        if (g_lutDrawViews[slot] != 0 && (g_lutInspectorAutomaticSlots & (1U << slot)) == 0)
-            return true;
-    return false;
-}
-
 // Names why the drawn result lacks the response; null when it has it.
 const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, bool held,
     const char* reason) noexcept
@@ -449,13 +416,9 @@ const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, b
     const auto* missing = reason ? reason : "A weighted LUT has no held weather response";
     if (g_lutInspectorAutomaticSlots == 0) return missing;
     // A failed render-entry read still has a serial, so the serial alone does not tell.
-    // Without weights, a same-view hold shows what the stored draw showed.
-    if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId()))
-    {
-        if (!g_weatherResponseHold.Carried()) return g_heldShownReason;
-        return CarryLeftBoundLut() ? missing : nullptr;
-    }
-    return HeldDrawShowsResponse(native) ? nullptr : missing;
+    // Without weights, a held draw shows what the stored draw showed.
+    if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId())) return g_heldShownReason;
+    return WeatherResponseDropReason(native) ? missing : nullptr;
 }
 
 bool IsUnsettledImageSpace(ImageSpaceObservationStatus status) noexcept
@@ -518,8 +481,7 @@ void MergeHeldGrades(const NativeLutObservation& native, WeatherGradeResponseHol
 // The game can set its LUTs on another thread while this pass draws, which leaves
 // a draw's checks without an answer though the scene is unchanged. Such a draw
 // keeps the response of the last verified draw while it binds the same four LUT
-// views, and for a short time each of those LUTs keeps its response in another
-// slot; otherwise it keeps its own result.
+// views; with other views it keeps its own result.
 ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* own,
     ID3D11Buffer* fallback, bool& applied) noexcept
 {
@@ -537,7 +499,7 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
     if (prepared == fallback) return fallback;
     g_lutInspectorHeld = true;
-    g_lutInspectorStatus = {"Weather response held from the last verified draw's LUTs."};
+    g_lutInspectorStatus = {"Weather response held from the last verified draw with the same LUTs."};
     if (g_configuration.developerMode) g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
     return prepared;
 }
