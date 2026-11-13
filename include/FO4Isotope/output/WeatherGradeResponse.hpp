@@ -116,15 +116,19 @@ public:
     // After a longer gap between draws an identity may name a different view.
     static constexpr Frame kGapFrames = 3;
 
-    void Store(Frame frame, const Views& views, const Grades& grades) noexcept;
+    // Automatic is the mask of slots whose grade came from the weather response.
+    void Store(Frame frame, const Views& views, const Grades& grades,
+        std::uint32_t automatic) noexcept;
     void Reset() noexcept;
     // A held draw renews the hold, so it lasts while the same views stay bound.
-    [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades) noexcept;
+    [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades,
+        std::uint32_t& automatic) noexcept;
 
 private:
     Grades grades_{};
     Views views_{};
     Frame frame_{};
+    std::uint32_t automatic_{};
     bool stored_{};
 };
 

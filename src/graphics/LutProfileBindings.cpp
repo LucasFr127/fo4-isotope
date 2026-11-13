@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cstring>
 #include <format>
+#include <string_view>
 
 namespace fo4hdr {
 using Microsoft::WRL::ComPtr;
@@ -20,6 +21,8 @@ namespace {
 WeatherGradeResponseCache g_weatherGradeResponses;
 WeatherGradeResponseHold g_weatherResponseHold;
 WeatherResponseDrops g_weatherResponseDrops;
+// The same drops after the hold decision: what reached the screen.
+WeatherResponseDrops g_shownWeatherResponseDrops;
 // Color grading draws that arrived off the Present thread and so kept the Fallback Grade.
 std::atomic<std::uint32_t> g_foreignThreadLutDraws{};
 std::atomic<std::uint32_t> g_heldLutDraws{};
@@ -383,13 +386,24 @@ const char* WeatherResponseDropReason(const NativeLutObservation& native) noexce
     return weighted ? nullptr : UnverifiedLutReason(native);
 }
 
-void ObserveWeatherResponseDrop(bool enabled, const char* reason) noexcept
+void ObserveWeatherResponseDrop(WeatherResponseDrops& drops, bool enabled,
+    const char* reason) noexcept
 {
     if (!g_configuration.developerMode) return;
     if (enabled)
-        g_weatherResponseDrops.Observe(g_frame, reason);
+        drops.Observe(g_frame, reason);
     else
-        g_weatherResponseDrops.Forget();
+        drops.Forget();
+}
+
+// Names why the drawn result lacks the response; null when it has it.
+const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, bool held,
+    const char* reason) noexcept
+{
+    if (!held) return reason;
+    // A held draw without a current observation has no slot weights to check.
+    if (native.serial == 0) return g_lutInspectorAutomaticSlots != 0 ? nullptr : reason;
+    return WeatherResponseDropReason(native);
 }
 
 bool IsUnsettledImageSpace(ImageSpaceObservationStatus status) noexcept
@@ -424,13 +438,16 @@ bool IsWeatherSourceUnanswered(const NativeLutObservation& native) noexcept
 // keeps the response of the last verified draw while it binds the same four LUT
 // views; with other views it keeps its own result.
 ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* own,
-    ID3D11Buffer* fallback) noexcept
+    ID3D11Buffer* fallback, bool& applied) noexcept
 {
     // A draw without a current observation has not read its views yet.
     if (g_lutDrawViews == WeatherGradeResponseHold::Views{}) (void)CaptureLutDrawViews(context);
     WeatherGradeResponseHold::Grades held{};
-    if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held)) return own;
+    std::uint32_t automatic{};
+    if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held, automatic)) return own;
+    applied = true;
     g_lutInspectorResolved = held;
+    g_lutInspectorAutomaticSlots = automatic;
     auto constants = g_replacements.configurationKey;
     if (!ApplyLutProfileGrades(held, constants)) return fallback;
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
@@ -478,16 +495,22 @@ ID3D11Buffer* PrepareLutProfileDraw(
     ResetLutProfileInspector();
     const auto& native = CurrentNativeLutObservation();
     const auto draw = ResolveLutProfileDraw(context, record, native, fallback);
-    ObserveWeatherResponseDrop(EffectiveWeatherGradeResponse(g_activeSettings).enabled,
-        WeatherResponseDropReason(native));
+    const bool enabled = EffectiveWeatherGradeResponse(g_activeSettings).enabled;
+    const auto* reason = WeatherResponseDropReason(native);
+    ObserveWeatherResponseDrop(g_weatherResponseDrops, enabled, reason);
+    auto* constants = draw.constants;
+    bool held{};
     if (draw.check == LutDrawCheck::unanswered)
-        return HoldWeatherResponse(context, draw.constants, fallback);
+        constants = HoldWeatherResponse(context, draw.constants, fallback, held);
     // A verified draw always uses its own per-slot result and becomes the held one.
-    if (draw.check == LutDrawCheck::verified)
-        g_weatherResponseHold.Store(g_frame, g_lutDrawViews, g_lutInspectorResolved);
+    else if (draw.check == LutDrawCheck::verified)
+        g_weatherResponseHold.Store(g_frame, g_lutDrawViews, g_lutInspectorResolved,
+            g_lutInspectorAutomaticSlots);
     else
         g_weatherResponseHold.Reset();
-    return draw.constants;
+    ObserveWeatherResponseDrop(g_shownWeatherResponseDrops, enabled,
+        ShownWeatherResponseDropReason(native, held, reason));
+    return constants;
 }
 
 void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink)
@@ -498,11 +521,15 @@ void ReportWeatherResponseDrops(GraphicsDiagnosticSink sink)
         g_foreignThreadLutDraws.load(std::memory_order_relaxed),
         g_heldLutDraws.load(std::memory_order_relaxed), g_weatherResponseDrops.Unlisted(),
         WeatherResponseDrops::kBriefFrames));
-    g_weatherResponseDrops.ForEach([sink](const WeatherResponseDrops::Entry& entry) {
-        sink(std::format(
-            "weather_response_drop drops={} brief={} longest_brief_frames={} reason=\"{}\"",
-            entry.drops, entry.brief, entry.longestBriefFrames, entry.reason));
-    });
+    const auto report = [sink](std::string_view name, const WeatherResponseDrops& drops) {
+        drops.ForEach([sink, name](const WeatherResponseDrops::Entry& entry) {
+            sink(std::format(
+                "{} drops={} brief={} longest_brief_frames={} reason=\"{}\"",
+                name, entry.drops, entry.brief, entry.longestBriefFrames, entry.reason));
+        });
+    };
+    report("weather_response_drop", g_weatherResponseDrops);
+    report("weather_response_shown_drop", g_shownWeatherResponseDrops);
 }
 
 }  // namespace fo4hdr

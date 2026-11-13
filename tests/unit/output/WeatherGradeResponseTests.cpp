@@ -126,30 +126,38 @@ void TestWeatherResponseHold()
     constexpr Hold::Grades applied{{{40.0, 50.0}, {60.0, 70.0}, {}, {}}};
     constexpr Hold::Views views{11, 12, 0, 0};
     constexpr auto gap = Hold::kGapFrames;
+    constexpr std::uint32_t automatic = 0b01;
     Hold hold;
     Hold::Grades held{};
-    FO4HDR_CHECK(!hold.TryHold(1, views, held));
+    std::uint32_t heldAutomatic{};
+    FO4HDR_CHECK(!hold.TryHold(1, views, held, heldAutomatic));
 
-    hold.Store(10, views, applied);
-    FO4HDR_CHECK(hold.TryHold(10, views, held));
+    hold.Store(10, views, applied, automatic);
+    FO4HDR_CHECK(hold.TryHold(10, views, held, heldAutomatic));
     FO4HDR_CHECK(held == applied);
+    FO4HDR_CHECK(heldAutomatic == automatic);
     // A held draw renews the hold, so it outlasts any number of frames.
     held = {};
-    FO4HDR_CHECK(hold.TryHold(10 + gap, views, held));
-    FO4HDR_CHECK(hold.TryHold(10 + 2 * gap, views, held));
+    heldAutomatic = 0;
+    FO4HDR_CHECK(hold.TryHold(10 + gap, views, held, heldAutomatic));
+    FO4HDR_CHECK(hold.TryHold(10 + 2 * gap, views, held, heldAutomatic));
     FO4HDR_CHECK(held == applied);
+    FO4HDR_CHECK(heldAutomatic == automatic);
     // Other views, or the same views in other slots, are another response.
     held = {};
-    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {11, 13, 0, 0}, held));
-    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {12, 11, 0, 0}, held));
+    heldAutomatic = 0;
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {11, 13, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {12, 11, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(held == Hold::Grades{});
+    FO4HDR_CHECK(heldAutomatic == 0);
     // A refused draw does not renew, and a longer gap between draws ends the hold.
-    FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, views, held));
-    FO4HDR_CHECK(!hold.TryHold(9, views, held));
+    FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, views, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.TryHold(9, views, held, heldAutomatic));
 
-    hold.Store(20, views, applied);
+    hold.Store(20, views, applied, automatic);
     hold.Reset();
-    FO4HDR_CHECK(!hold.TryHold(20, views, held));
+    FO4HDR_CHECK(!hold.TryHold(20, views, held, heldAutomatic));
+    FO4HDR_CHECK(heldAutomatic == 0);
 }
 
 }  // namespace
