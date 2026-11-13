@@ -398,16 +398,51 @@ void ObserveWeatherResponseDrop(WeatherResponseDrops& drops, bool enabled,
         drops.Forget();
 }
 
+// True when this LUT view is bound in a slot that drew with the response.
+bool IsDrawnWithResponse(std::uint64_t view) noexcept
+{
+    if (view == 0) return false;
+    for (std::size_t slot = 0; slot < g_lutDrawViews.size(); ++slot)
+        if (g_lutDrawViews[slot] == view && (g_lutInspectorAutomaticSlots & (1U << slot)) != 0)
+            return true;
+    return false;
+}
+
+// A carried hold can bind a weighted LUT in another slot, so each weighted LUT of
+// the observation is found by its view.
+bool HeldDrawShowsResponse(const NativeLutObservation& native) noexcept
+{
+    for (std::size_t i = 0; i < native.luts.size(); ++i)
+    {
+        if (!IsWeightedLutSlot(native, i)) continue;
+        const auto view = native.expectedShaderViews[i] != 0 ?
+            native.expectedShaderViews[i] : g_lutDrawViews[i];
+        if (!IsDrawnWithResponse(view)) return false;
+    }
+    return true;
+}
+
+// Without weights, any bound LUT that a carry left without the response may show.
+bool CarryLeftBoundLut() noexcept
+{
+    if (!g_weatherResponseHold.Carried()) return false;
+    for (std::size_t slot = 0; slot < g_lutDrawViews.size(); ++slot)
+        if (g_lutDrawViews[slot] != 0 && (g_lutInspectorAutomaticSlots & (1U << slot)) == 0)
+            return true;
+    return false;
+}
+
 // Names why the drawn result lacks the response; null when it has it.
 const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, bool held,
     const char* reason) noexcept
 {
     if (!held) return reason;
-    // A held draw without a current observation has no slot weights to check; a failed
-    // render-entry read still has a serial, so the serial alone does not tell.
+    const auto* missing = reason ? reason : "A weighted LUT has no held weather response";
+    if (g_lutInspectorAutomaticSlots == 0) return missing;
+    // A failed render-entry read still has a serial, so the serial alone does not tell.
     if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId()))
-        return g_lutInspectorAutomaticSlots != 0 ? nullptr : reason;
-    return WeatherResponseDropReason(native);
+        return CarryLeftBoundLut() ? missing : nullptr;
+    return HeldDrawShowsResponse(native) ? nullptr : missing;
 }
 
 bool IsUnsettledImageSpace(ImageSpaceObservationStatus status) noexcept
@@ -437,10 +472,29 @@ bool IsWeatherSourceUnanswered(const NativeLutObservation& native) noexcept
     return HasUnverifiedWeightedSlot(native);
 }
 
+// A slot this draw verified with the response keeps its own grade, since it passed
+// the draw-time revision check; other slots not held follow the current Fallback
+// Grade settings.
+void MergeHeldGrades(WeatherGradeResponseHold::Grades& held, std::uint32_t& automatic) noexcept
+{
+    const auto own = g_lutInspectorAutomaticSlots;
+    for (std::size_t i = 0; i < held.size(); ++i)
+    {
+        const auto slot = 1U << i;
+        if ((own & slot) != 0)
+            held[i] = g_lutInspectorResolved[i];
+        else if ((automatic & slot) == 0)
+            held[i] = {g_activeSettings.fallbackGradeLuminancePercent,
+                g_activeSettings.fallbackGradeColorPercent};
+    }
+    automatic |= own;
+}
+
 // The game can set its LUTs on another thread while this pass draws, which leaves
 // a draw's checks without an answer though the scene is unchanged. Such a draw
 // keeps the response of the last verified draw while it binds the same four LUT
-// views; with other views it keeps its own result.
+// views, and for a short time each of those LUTs keeps its response in another
+// slot; otherwise it keeps its own result.
 ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* own,
     ID3D11Buffer* fallback, bool& applied) noexcept
 {
@@ -450,18 +504,14 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     std::uint32_t automatic{};
     if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held, automatic)) return own;
     applied = true;
-    // Only the response is held; other slots follow the current Fallback Grade settings.
-    for (std::size_t i = 0; i < held.size(); ++i)
-        if ((automatic & (1U << i)) == 0)
-            held[i] = {g_activeSettings.fallbackGradeLuminancePercent,
-                g_activeSettings.fallbackGradeColorPercent};
+    MergeHeldGrades(held, automatic);
     g_lutInspectorResolved = held;
     g_lutInspectorAutomaticSlots = automatic;
     auto constants = g_replacements.configurationKey;
     if (!ApplyLutProfileGrades(held, constants)) return fallback;
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
     if (prepared == fallback) return fallback;
-    g_lutInspectorStatus = {"Weather response held from the last verified draw with the same LUTs."};
+    g_lutInspectorStatus = {"Weather response held from the last verified draw's LUTs."};
     g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
     return prepared;
 }

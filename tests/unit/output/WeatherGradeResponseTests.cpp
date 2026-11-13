@@ -143,19 +143,46 @@ void TestWeatherResponseHold()
     FO4HDR_CHECK(hold.TryHold(10 + 2 * gap, views, held, heldAutomatic));
     FO4HDR_CHECK(held == applied);
     FO4HDR_CHECK(heldAutomatic == automatic);
-    // Other views, or the same views in other slots, are another response.
+    // After a slot change each stored LUT keeps its response in its new slot.
     held = {};
     heldAutomatic = 0;
-    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {11, 13, 0, 0}, held, heldAutomatic));
-    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {12, 11, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.Carried());
+    FO4HDR_CHECK(hold.TryHold(11 + 2 * gap, {11, 13, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(held == (Hold::Grades{{{40.0, 50.0}, {}, {}, {}}}));
+    FO4HDR_CHECK(heldAutomatic == 0b01);
+    FO4HDR_CHECK(hold.Carried());
+    FO4HDR_CHECK(hold.TryHold(11 + 2 * gap, {12, 11, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(held == (Hold::Grades{{{}, {40.0, 50.0}, {}, {}}}));
+    FO4HDR_CHECK(heldAutomatic == 0b10);
+    // A view without a stored response carries nothing; empty slots never match.
+    held = {};
+    heldAutomatic = 0;
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {12, 13, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.TryHold(11 + 2 * gap, {0, 13, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(held == Hold::Grades{});
     FO4HDR_CHECK(heldAutomatic == 0);
-    // A refused draw does not renew, and a longer gap between draws ends the hold.
+    // A carried draw does not renew, and a longer gap between draws ends the hold.
+    FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, {11, 13, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(!hold.TryHold(11 + 3 * gap, views, held, heldAutomatic));
     FO4HDR_CHECK(!hold.TryHold(9, views, held, heldAutomatic));
 
+    // One LUT stored with two responses carries none.
+    hold.Store(30, {11, 11, 12, 0}, {{{40.0, 50.0}, {60.0, 70.0}, {20.0, 30.0}, {}}}, 0b111);
+    FO4HDR_CHECK(hold.TryHold(31, {12, 11, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(held == (Hold::Grades{{{20.0, 30.0}, {}, {}, {}}}));
+    FO4HDR_CHECK(heldAutomatic == 0b01);
+    FO4HDR_CHECK(!hold.TryHold(31, {11, 0, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.Carried());
+
+    // An empty slot carries nothing, even when an empty slot was stored as automatic.
+    hold.Store(40, {11, 0, 0, 0}, {{{40.0, 50.0}, {60.0, 70.0}, {}, {}}}, 0b11);
+    FO4HDR_CHECK(hold.TryHold(41, {0, 11, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(held == (Hold::Grades{{{}, {40.0, 50.0}, {}, {}}}));
+    FO4HDR_CHECK(heldAutomatic == 0b10);
+
     hold.Store(20, views, applied, automatic);
     hold.Reset();
+    heldAutomatic = 0;
     FO4HDR_CHECK(!hold.TryHold(20, views, held, heldAutomatic));
     FO4HDR_CHECK(heldAutomatic == 0);
 }

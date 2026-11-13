@@ -120,16 +120,26 @@ public:
     void Store(Frame frame, const Views& views, const Grades& grades,
         std::uint32_t automatic) noexcept;
     void Reset() noexcept;
-    // A held draw renews the hold, so it lasts while the same views stay bound.
+    // A draw that binds the same views renews the hold, so it lasts while they stay
+    // bound. After a slot change each stored LUT keeps its response in its new slot,
+    // without renewing, until the gap ends; a LUT stored with two responses keeps none.
     [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades,
         std::uint32_t& automatic) noexcept;
+    // True when the last successful TryHold carried LUTs to other slots.
+    [[nodiscard]] bool Carried() const noexcept { return carried_; }
 
 private:
+    // The response stored for this view; false when it has none or two different ones.
+    [[nodiscard]] bool StoredResponse(std::uint64_t view, ResolvedLutGrade& grade) const noexcept;
+    [[nodiscard]] bool Carry(const Views& views, Grades& grades,
+        std::uint32_t& automatic) const noexcept;
+
     Grades grades_{};
     Views views_{};
     Frame frame_{};
     std::uint32_t automatic_{};
     bool stored_{};
+    bool carried_{};
 };
 
 }  // namespace fo4hdr
