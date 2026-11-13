@@ -280,16 +280,16 @@ TransferStart BeginTransfer(bool observe) noexcept
     const auto revision = observe ? fo4hdr::InvalidateImageSpaceObservation() : 0;
     return {token, revision};
 }
-bool InstalledValues(RE::ImageSpaceManager* manager, const provenance::LutValues& expected) noexcept
+bool InstalledPaths(RE::ImageSpaceManager* manager, const provenance::LutValues& expected) noexcept
 {
     provenance::LutValues values{};
     return manager &&
         ManagerValues(manager, &manager->lutData, values) == provenance::Status::matched &&
-        values == expected;
+        values.paths == expected.paths;
 }
 
-// True when this copy would install the transfer this thread last published,
-// which is still current and still installed.
+// True when this copy would install the LUTs and ImageSpaces of the transfer this
+// thread last published, at any weights, while that transfer is current and installed.
 bool ReinstallsLastTransfer(RE::ImageSpaceManager* manager,
     const provenance::Provenance& candidate) noexcept
 {
@@ -298,11 +298,12 @@ bool ReinstallsLastTransfer(RE::ImageSpaceManager* manager,
         last.manager == reinterpret_cast<std::uintptr_t>(manager) &&
         g_transferPublication.IsCurrent(last.revision) &&
         last.observationRevision == fo4hdr::CurrentImageSpaceObservationRevision() &&
-        candidate.SameContent(last) && InstalledValues(manager, last.values);
+        candidate.SameContent(last) && InstalledPaths(manager, last.values);
 }
 
-// Opening a transfer for unchanged content would refuse every draw that overlaps
-// the copy, so the copy runs with the published transfer left current.
+// Opening a transfer for unchanged LUTs would refuse every draw that overlaps
+// the copy, so the copy runs with the published transfer left current. The copy
+// is still checked against its own weather tuple, weights included.
 // False, with nothing forwarded, when this copy is not such a reinstall.
 bool ReinstallLastTransfer(RE::ImageSpaceManager* manager, const RE::ImageSpaceLUTData* source,
     SetLut next, const provenance::Provenance& candidate) noexcept
@@ -314,7 +315,7 @@ bool ReinstallLastTransfer(RE::ImageSpaceManager* manager, const RE::ImageSpaceL
         DisableObservation();
         return true;
     }
-    if (InstalledValues(manager, g_lastTransfer.values)) return true;
+    if (TransferMatches(manager, candidate)) return true;
     g_transferPublication.Invalidate();
     (void)fo4hdr::InvalidateImageSpaceObservation();
     return true;
@@ -381,7 +382,7 @@ bool CurrentTransfer(const RE::ImageSpaceManager* manager, const provenance::Lut
     const provenance::Provenance& transfer) noexcept
 {
     return transfer.manager == reinterpret_cast<std::uintptr_t>(manager) &&
-        transfer.Matches(values, fo4hdr::NativeLutObservationGeneration()) &&
+        transfer.MatchesPaths(values, fo4hdr::NativeLutObservationGeneration()) &&
         g_transferPublication.IsCurrent(transfer.revision) &&
         transfer.observationRevision == fo4hdr::CurrentImageSpaceObservationRevision();
 }

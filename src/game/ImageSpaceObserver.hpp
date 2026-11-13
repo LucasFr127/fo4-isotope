@@ -79,14 +79,18 @@ struct Provenance
     std::uintptr_t manager{};
     Status status{Status::waiting};
 
-    bool Matches(const LutValues& current, std::uint64_t epoch) const noexcept
-    { return status == Status::matched && generation == epoch && values == current; }
+    // Weights only blend the slots on the GPU; which LUT fills each slot is the provenance.
+    bool MatchesPaths(const LutValues& current, std::uint64_t epoch) const noexcept
+    { return status == Status::matched && generation == epoch && values.paths == current.paths; }
 
-    // Same LUTs from the same ImageSpaces; publication bookkeeping is not content.
+    bool Matches(const LutValues& current, std::uint64_t epoch) const noexcept
+    { return MatchesPaths(current, epoch) && values.weights == current.weights; }
+
+    // Same LUTs from the same ImageSpaces at any weights; publication bookkeeping is not content.
     bool SameContent(const Provenance& other) const noexcept
     {
         return status == other.status && generation == other.generation &&
-            values == other.values && identities == other.identities &&
+            values.paths == other.values.paths && identities == other.identities &&
             weatherGrades == other.weatherGrades && validSlots == other.validSlots &&
             weatherGradeValidSlots == other.weatherGradeValidSlots;
     }

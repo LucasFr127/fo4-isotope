@@ -151,6 +151,18 @@ void VerifyReinstalledContent()
     reinstalled.manager = 0;
     reinstalled.observationRevision = 0;
     FO4HDR_CHECK(reinstalled.SameContent(published));
+    // Weights only blend the slots, so a weight change keeps the content.
+    reinstalled.values.weights[0] = 0.5F;
+    FO4HDR_CHECK(reinstalled.SameContent(published));
+    FO4HDR_CHECK(published.MatchesPaths(reinstalled.values, 7));
+    FO4HDR_CHECK(!published.Matches(reinstalled.values, 7));
+    auto renamed = published.values;
+    renamed.paths[0][0] = 'b';
+    FO4HDR_CHECK(!published.MatchesPaths(renamed, 7));
+    FO4HDR_CHECK(!published.MatchesPaths(published.values, 8));
+    auto unqualified = published;
+    unqualified.status = Status::unqualifiedSource;
+    FO4HDR_CHECK(!unqualified.MatchesPaths(published.values, 7));
 
     const auto differs = [&published](auto change) {
         auto other = published;
@@ -160,7 +172,6 @@ void VerifyReinstalledContent()
     FO4HDR_CHECK(differs([](Provenance& p) { p.identities[0].formId = 12; }));
     FO4HDR_CHECK(differs([](Provenance& p) { p.identities[1].editorId[0] = 'x'; }));
     FO4HDR_CHECK(differs([](Provenance& p) { p.weatherGrades[0].referenceCount = 12; }));
-    FO4HDR_CHECK(differs([](Provenance& p) { p.values.weights[0] = 0.5F; }));
     FO4HDR_CHECK(differs([](Provenance& p) { p.values.paths[1][0] = 'b'; }));
     FO4HDR_CHECK(differs([](Provenance& p) { p.generation = 8; }));
     FO4HDR_CHECK(differs([](Provenance& p) { p.status = Status::unqualifiedSource; }));

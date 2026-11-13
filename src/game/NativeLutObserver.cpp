@@ -127,11 +127,11 @@ struct SlotIdentity
     const char* name;
     float weight;
 
+    // A new weight leaves the slot's LUT in place, so only the texture and name are rechecked.
     bool Unchanged(const RE::ImageSpaceLUTData& data, std::size_t i) const noexcept
     {
         return data.texture[i] == texture && data.niTexture[i].get() == native &&
-            data.filename[i].c_str() == name && data.weight[i] == weight &&
-            native->rendererTexture == texture;
+            data.filename[i].c_str() == name && native->rendererTexture == texture;
     }
 };
 bool LoadedPathMatches(const RE::NiTexture& native, const fo4hdr::LutSnapshot& lut) noexcept
