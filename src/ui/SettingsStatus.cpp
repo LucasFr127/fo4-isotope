@@ -120,6 +120,8 @@ WeatherResponseState WeatherResponseStatus(const WeatherLutResponseView& view, b
         return {"Bypassed", {"Grading replacement bypassed: the response is not applied.",
             StatusSeverity::warning}};
     if (!active) return {"Off", {"The Fallback Grade settings apply."}};
+    if (view.held)
+        return {"Held", {"The game is changing its LUTs; the last verified response is held."}};
     if (view.validatedSlots == 0)
         return {"Waiting",
             {"Waiting for a recognized vanilla LUT draw. The Fallback Grade settings apply."}};

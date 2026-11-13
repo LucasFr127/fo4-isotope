@@ -76,6 +76,11 @@ void TestWeatherResponseStatus()
     WeatherLutResponseView view{};
     FO4HDR_CHECK(value(view, false) == "Off" && info(view, false));
     FO4HDR_CHECK(value(view, true) == "Waiting" && info(view, true));
+    // A held draw used the response even when it verified no LUT itself.
+    view.held = true;
+    FO4HDR_CHECK(value(view, true) == "Held" && info(view, true));
+    FO4HDR_CHECK(value(view, false) == "Off");
+    view.held = false;
     view.validatedSlots = 0b11U;
     FO4HDR_CHECK(value(view, true) == "Not recognized" && info(view, true));
     view.automaticSlots = 0b01U;
@@ -83,6 +88,8 @@ void TestWeatherResponseStatus()
     view.automaticSlots = 0b11U;
     FO4HDR_CHECK(value(view, true) == "Active");
     FO4HDR_CHECK(WeatherResponseStatus(view, true).detail.text == nullptr);
+    // A bypass outranks a held response.
+    view.held = true;
     view.gradingBypassed = true;
     for (const auto active : {true, false})
     {

@@ -75,6 +75,7 @@ std::array<ResolvedLutGrade, 4> g_lutInspectorResolved{};
 std::uint32_t g_lutInspectorAutomaticSlots{};
 std::array<const char*, 4> g_lutInspectorFallbackReasons{};
 bool g_lutInspectorGradingBypassed{};
+bool g_lutInspectorHeld{};
 
 StatusMessage NativeLutObserverMessage() noexcept
 {
@@ -281,6 +282,7 @@ void ResetLutProfileInspector() noexcept
         g_activeSettings.fallbackGradeColorPercent});
     g_lutInspectorAutomaticSlots = 0;
     g_lutInspectorGradingBypassed = false;
+    g_lutInspectorHeld = false;
     g_lutInspectorFallbackReasons.fill("Weather source is not recognized");
     g_lutInspectorImageSpaceStatus = kImageSpaceWaitingStatus;
     g_lutInspectorStatus = NativeLutObserverMessage();
@@ -534,6 +536,7 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     if (!ApplyLutProfileGrades(held, constants)) return fallback;
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
     if (prepared == fallback) return fallback;
+    g_lutInspectorHeld = true;
     g_lutInspectorStatus = {"Weather response held from the last verified draw's LUTs."};
     if (g_configuration.developerMode) g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
     return prepared;

@@ -24,6 +24,8 @@ extern std::array<ResolvedLutGrade, 4> g_lutInspectorResolved;
 extern std::uint32_t g_lutInspectorAutomaticSlots;
 extern std::array<const char*, 4> g_lutInspectorFallbackReasons;
 extern bool g_lutInspectorGradingBypassed;
+// The draw used a response held from the last verified draw.
+extern bool g_lutInspectorHeld;
 
 ID3D11Buffer* PrepareLutProfileDraw(ID3D11DeviceContext*, const DrawObservation&, ID3D11Buffer*) noexcept;
 void MarkWeatherResponseBypassed() noexcept;

@@ -42,6 +42,8 @@ struct WeatherLutResponseView
     std::uint32_t automaticSlots{};
     std::array<const char*, 4> fallbackReasons{};
     bool gradingBypassed{};
+    // The draw used the response held from the last verified draw.
+    bool held{};
 };
 
 struct SettingsDisplayView

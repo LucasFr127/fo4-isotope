@@ -108,7 +108,7 @@ WeatherLutResponseView UiWeatherLutResponseSnapshot() noexcept
             g_lutInspectorImageSpaces, g_lutInspectorImageSpaceSlots, g_lutInspectorImageSpaceStatus,
             g_lutInspectorReferencingContexts, g_lutInspectorResolved,
             g_lutInspectorAutomaticSlots, g_lutInspectorFallbackReasons,
-            g_lutInspectorGradingBypassed};
+            g_lutInspectorGradingBypassed, g_lutInspectorHeld};
     WeatherLutResponseView view;
     view.status = NativeLutObserverMessage();
     view.imageSpaceStatus = kImageSpaceWaitingStatus;
