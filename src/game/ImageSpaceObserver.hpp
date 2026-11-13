@@ -81,6 +81,15 @@ struct Provenance
 
     bool Matches(const LutValues& current, std::uint64_t epoch) const noexcept
     { return status == Status::matched && generation == epoch && values == current; }
+
+    // Same LUTs from the same ImageSpaces; publication bookkeeping is not content.
+    bool SameContent(const Provenance& other) const noexcept
+    {
+        return status == other.status && generation == other.generation &&
+            values == other.values && identities == other.identities &&
+            weatherGrades == other.weatherGrades && validSlots == other.validSlots &&
+            weatherGradeValidSlots == other.weatherGradeValidSlots;
+    }
 };
 
 class Publication final

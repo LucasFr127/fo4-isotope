@@ -23,6 +23,7 @@ struct ImageSpaceIdentity
     std::array<char, 260> key{};
     std::array<char, 128> editorId{};
     std::uint32_t formId{};
+    bool operator==(const ImageSpaceIdentity&) const = default;
 };
 
 enum class ImageSpaceObservationStatus : std::uint8_t

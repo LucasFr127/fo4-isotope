@@ -142,6 +142,32 @@ void VerifyRoomGapAndInvalidation()
     FO4HDR_CHECK(!result.Matches(Candidate(33).values, 7));
 }
 
+void VerifyReinstalledContent()
+{
+    const auto published = Candidate(11);
+    auto reinstalled = published;
+    // Publication bookkeeping differs between a weather read and its transfer.
+    reinstalled.revision = published.revision + 5;
+    reinstalled.manager = 0;
+    reinstalled.observationRevision = 0;
+    FO4HDR_CHECK(reinstalled.SameContent(published));
+
+    const auto differs = [&published](auto change) {
+        auto other = published;
+        change(other);
+        return !other.SameContent(published);
+    };
+    FO4HDR_CHECK(differs([](Provenance& p) { p.identities[0].formId = 12; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.identities[1].editorId[0] = 'x'; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.weatherGrades[0].referenceCount = 12; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.values.weights[0] = 0.5F; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.values.paths[1][0] = 'b'; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.generation = 8; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.status = Status::unqualifiedSource; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.validSlots = 3; }));
+    FO4HDR_CHECK(differs([](Provenance& p) { p.weatherGradeValidSlots = 0; }));
+}
+
 void VerifyWeatherColorFeatures()
 {
     constexpr std::array<std::uint8_t, 8> ring{4, 0, 5, 1, 6, 2, 7, 3};
@@ -228,6 +254,7 @@ void RunImageSpaceProvenanceTests()
     VerifyOverlapAndRecovery(true);
     VerifyOverlapAndRecovery(false);
     VerifyRoomGapAndInvalidation();
+    VerifyReinstalledContent();
     VerifyWeatherColorFeatures();
     VerifyFixedWeatherAggregation();
 }

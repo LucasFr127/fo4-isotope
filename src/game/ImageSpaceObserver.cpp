@@ -49,6 +49,8 @@ provenance::Publication g_weatherPublication, g_transferPublication;
 RE::ImageSpaceLUTData* g_globalLut{};
 RE::ImageSpaceBaseData* g_globalBase{};
 thread_local provenance::Provenance g_weatherCandidate;
+// The transfer this thread last published, kept to recognize a reinstall of it.
+thread_local provenance::Provenance g_lastTransfer;
 thread_local provenance::Publication::Token g_roomToken;
 thread_local std::uint32_t g_depth{};
 thread_local bool g_nested{};
@@ -278,25 +280,75 @@ TransferStart BeginTransfer(bool observe) noexcept
     const auto revision = observe ? fo4hdr::InvalidateImageSpaceObservation() : 0;
     return {token, revision};
 }
+bool InstalledValues(RE::ImageSpaceManager* manager, const provenance::LutValues& expected) noexcept
+{
+    provenance::LutValues values{};
+    return manager &&
+        ManagerValues(manager, &manager->lutData, values) == provenance::Status::matched &&
+        values == expected;
+}
+
+// True when this copy would install the transfer this thread last published,
+// which is still current and still installed.
+bool ReinstallsLastTransfer(RE::ImageSpaceManager* manager,
+    const provenance::Provenance& candidate) noexcept
+{
+    const auto& last = g_lastTransfer;
+    return last.status == provenance::Status::matched &&
+        last.manager == reinterpret_cast<std::uintptr_t>(manager) &&
+        g_transferPublication.IsCurrent(last.revision) &&
+        last.observationRevision == fo4hdr::CurrentImageSpaceObservationRevision() &&
+        candidate.SameContent(last) && InstalledValues(manager, last.values);
+}
+
+// Opening a transfer for unchanged content would refuse every draw that overlaps
+// the copy, so the copy runs with the published transfer left current.
+// False, with nothing forwarded, when this copy is not such a reinstall.
+bool ReinstallLastTransfer(RE::ImageSpaceManager* manager, const RE::ImageSpaceLUTData* source,
+    SetLut next, const provenance::Provenance& candidate) noexcept
+{
+    if (!ReinstallsLastTransfer(manager, candidate)) return false;
+    try {
+        next(manager, source);
+    } catch (...) {
+        DisableObservation();
+        return true;
+    }
+    if (InstalledValues(manager, g_lastTransfer.values)) return true;
+    g_transferPublication.Invalidate();
+    (void)fo4hdr::InvalidateImageSpaceObservation();
+    return true;
+}
+
+// Publishes the transfer and keeps it, so a later copy can recognize a reinstall.
+void PublishTransfer(TransferStart& start, const provenance::Provenance& candidate) noexcept
+{
+    const auto revision = start.token.revision;
+    g_lastTransfer = {};
+    if (!g_transferPublication.Finish(start.token, candidate)) return;
+    g_lastTransfer = candidate;
+    g_lastTransfer.revision = revision;
+}
+
 void SetLutHook(RE::ImageSpaceManager* manager, const RE::ImageSpaceLUTData* source) noexcept
 {
     const auto next = g_setLut.load(std::memory_order_acquire);
     if (!next || next == &SetLutHook) return;
     const auto observe = g_installed.load(std::memory_order_acquire);
-    auto start = BeginTransfer(observe);
     provenance::Provenance candidate{};
     candidate.status = provenance::Status::unqualifiedSource;
+    const auto prepared = observe && PrepareTransfer(source, candidate);
+    if (prepared && ReinstallLastTransfer(manager, source, next, candidate)) return;
+    auto start = BeginTransfer(observe);
     try {
-        const auto prepared = observe && PrepareTransfer(source, candidate);
         next(manager, source);
-        if (observe) {
-            CompleteTransfer(manager, prepared, start.revision, candidate);
-        }
+        // Without observation the transfer is unprepared and unqualified, so this keeps it.
+        CompleteTransfer(manager, prepared, start.revision, candidate);
     } catch (...) {
         DisableObservation();
         candidate.status = provenance::Status::unqualifiedSource;
     }
-    if (observe) (void)g_transferPublication.Finish(start.token, candidate);
+    if (observe) PublishTransfer(start, candidate);
 }
 
 void ForwardUnqualifiedLut(RE::ImageSpaceManager* manager,
