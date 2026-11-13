@@ -174,6 +174,11 @@ void TestWeatherResponseHold()
     FO4HDR_CHECK(!hold.TryHold(31, {11, 0, 0, 0}, held, heldAutomatic));
     FO4HDR_CHECK(!hold.Carried());
 
+    // One LUT stored with a response and the Fallback Grade carries nothing.
+    hold.Store(35, {11, 11, 0, 0}, applied, 0b01);
+    FO4HDR_CHECK(!hold.TryHold(36, {11, 0, 0, 0}, held, heldAutomatic));
+    FO4HDR_CHECK(!hold.Carried());
+
     // An empty slot carries nothing, even when an empty slot was stored as automatic.
     hold.Store(40, {11, 0, 0, 0}, {{{40.0, 50.0}, {60.0, 70.0}, {}, {}}}, 0b11);
     FO4HDR_CHECK(hold.TryHold(41, {0, 11, 0, 0}, held, heldAutomatic));

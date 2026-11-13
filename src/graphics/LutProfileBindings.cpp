@@ -472,22 +472,34 @@ bool IsWeatherSourceUnanswered(const NativeLutObservation& native) noexcept
     return HasUnverifiedWeightedSlot(native);
 }
 
-// A slot this draw verified with the response keeps its own grade, since it passed
-// the draw-time revision check; other slots not held follow the current Fallback
+// The slots this draw resolved from ImageSpace provenance that is still current,
+// with the response or with the Fallback Grade; zero when that provenance moved.
+std::uint32_t AnsweredLutSlots(const NativeLutObservation& native) noexcept
+{
+    const auto answered = EligibleImageSpaceSlots(native, g_lutInspectorValidatedSlots);
+    const bool current = answered == g_lutInspectorImageSpaceSlots &&
+        g_lutInspectorAutomaticSlots == EligibleWeatherGradeSlots(native, g_lutInspectorValidatedSlots);
+    return current ? answered : 0U;
+}
+
+// A slot this draw answered itself keeps its own grade, since it passed the
+// draw-time revision check; other slots not held follow the current Fallback
 // Grade settings.
-void MergeHeldGrades(WeatherGradeResponseHold::Grades& held, std::uint32_t& automatic) noexcept
+void MergeHeldGrades(const NativeLutObservation& native, WeatherGradeResponseHold::Grades& held,
+    std::uint32_t& automatic) noexcept
 {
     const auto own = g_lutInspectorAutomaticSlots;
+    const auto answered = AnsweredLutSlots(native) | own;
     for (std::size_t i = 0; i < held.size(); ++i)
     {
         const auto slot = 1U << i;
-        if ((own & slot) != 0)
+        if ((answered & slot) != 0)
             held[i] = g_lutInspectorResolved[i];
         else if ((automatic & slot) == 0)
             held[i] = {g_activeSettings.fallbackGradeLuminancePercent,
                 g_activeSettings.fallbackGradeColorPercent};
     }
-    automatic |= own;
+    automatic = (automatic & ~answered) | own;
 }
 
 // The game can set its LUTs on another thread while this pass draws, which leaves
@@ -504,7 +516,7 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     std::uint32_t automatic{};
     if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held, automatic)) return own;
     applied = true;
-    MergeHeldGrades(held, automatic);
+    MergeHeldGrades(CurrentNativeLutObservation(), held, automatic);
     g_lutInspectorResolved = held;
     g_lutInspectorAutomaticSlots = automatic;
     auto constants = g_replacements.configurationKey;

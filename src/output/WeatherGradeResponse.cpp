@@ -186,7 +186,9 @@ bool WeatherGradeResponseHold::StoredResponse(std::uint64_t view,
     bool found{};
     for (std::size_t slot = 0; slot < views_.size(); ++slot)
     {
-        if (views_[slot] != view || (automatic_ & (1U << slot)) == 0) continue;
+        if (views_[slot] != view) continue;
+        // The same LUT also used the Fallback Grade, so its ImageSpace is unknown.
+        if ((automatic_ & (1U << slot)) == 0) return false;
         if (found && grade != grades_[slot]) return false;
         grade = grades_[slot];
         found = true;

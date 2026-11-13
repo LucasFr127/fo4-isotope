@@ -122,14 +122,16 @@ public:
     void Reset() noexcept;
     // A draw that binds the same views renews the hold, so it lasts while they stay
     // bound. After a slot change each stored LUT keeps its response in its new slot,
-    // without renewing, until the gap ends; a LUT stored with two responses keeps none.
+    // without renewing, until the gap ends; a LUT stored with two responses, or with a
+    // response and the Fallback Grade, keeps none.
     [[nodiscard]] bool TryHold(Frame frame, const Views& views, Grades& grades,
         std::uint32_t& automatic) noexcept;
     // True when the last successful TryHold carried LUTs to other slots.
     [[nodiscard]] bool Carried() const noexcept { return carried_; }
 
 private:
-    // The response stored for this view; false when it has none or two different ones.
+    // The response stored for this view; false when it has none, two different ones,
+    // or also a slot that used the Fallback Grade.
     [[nodiscard]] bool StoredResponse(std::uint64_t view, ResolvedLutGrade& grade) const noexcept;
     [[nodiscard]] bool Carry(const Views& views, Grades& grades,
         std::uint32_t& automatic) const noexcept;
