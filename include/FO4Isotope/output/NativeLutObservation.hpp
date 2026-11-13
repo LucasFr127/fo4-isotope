@@ -64,7 +64,8 @@ void SetImageSpaceObservationReady(bool ready) noexcept;
 [[nodiscard]] std::uint64_t CurrentImageSpaceObservationRevision() noexcept;
 [[nodiscard]] std::uint64_t InvalidateImageSpaceObservation() noexcept;
 
-// Diagnostic counts of the manager LUT copies the hooks saw.
+// DeveloperMode diagnostic counts of the manager LUT copies the hooks saw; nothing
+// is counted until counting is enabled.
 struct ImageSpaceCopyCounts
 {
     std::uint64_t copies{};
@@ -73,6 +74,7 @@ struct ImageSpaceCopyCounts
     // Copies made on a different thread from the copy before.
     std::uint64_t threadChanges{};
 };
+void EnableImageSpaceCopyCounts(bool enabled) noexcept;
 void CountImageSpaceCopy(bool reinstalled, std::uint32_t threadId) noexcept;
 [[nodiscard]] ImageSpaceCopyCounts ReadImageSpaceCopyCounts() noexcept;
 [[nodiscard]] std::uint32_t EligibleImageSpaceSlots(

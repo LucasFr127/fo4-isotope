@@ -28,6 +28,8 @@ std::atomic<std::uint32_t> g_foreignThreadLutDraws{};
 std::atomic<std::uint32_t> g_heldLutDraws{};
 // Identities of the views this draw bound to the four LUT slots; zero until read.
 WeatherGradeResponseHold::Views g_lutDrawViews{};
+// DeveloperMode: the shown-drop reason of the draw the hold stored, null when it showed the response.
+const char* g_heldShownReason{};
 
 // How a color grading draw's weather checks ended.
 enum class LutDrawCheck : std::uint8_t
@@ -47,12 +49,18 @@ struct LutProfileDraw
 };
 }
 
+void ResetWeatherResponseHold() noexcept
+{
+    g_weatherResponseHold.Reset();
+    g_heldShownReason = nullptr;
+}
+
 void RefreshWeatherGradeResponses() noexcept
 {
     // A held response was resolved under the previous settings.
     if (g_weatherGradeResponses.Refresh(ReadWeatherGradeCatalog(),
             EffectiveWeatherGradeResponse(g_activeSettings)))
-        g_weatherResponseHold.Reset();
+        ResetWeatherResponseHold();
 }
 
 std::array<LutSnapshot, 4> g_lutInspectorLuts{};
@@ -425,7 +433,6 @@ bool HeldDrawShowsResponse(const NativeLutObservation& native) noexcept
 // Without weights, any bound LUT that a carry left without the response may show.
 bool CarryLeftBoundLut() noexcept
 {
-    if (!g_weatherResponseHold.Carried()) return false;
     for (std::size_t slot = 0; slot < g_lutDrawViews.size(); ++slot)
         if (g_lutDrawViews[slot] != 0 && (g_lutInspectorAutomaticSlots & (1U << slot)) == 0)
             return true;
@@ -440,8 +447,12 @@ const char* ShownWeatherResponseDropReason(const NativeLutObservation& native, b
     const auto* missing = reason ? reason : "A weighted LUT has no held weather response";
     if (g_lutInspectorAutomaticSlots == 0) return missing;
     // A failed render-entry read still has a serial, so the serial alone does not tell.
+    // Without weights, a same-view hold shows what the stored draw showed.
     if (!IsCurrentNativeLutObservation(native, GetCurrentThreadId()))
+    {
+        if (!g_weatherResponseHold.Carried()) return g_heldShownReason;
         return CarryLeftBoundLut() ? missing : nullptr;
+    }
     return HeldDrawShowsResponse(native) ? nullptr : missing;
 }
 
@@ -524,8 +535,35 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     auto* prepared = UploadLutProfileConstants(context, constants, fallback);
     if (prepared == fallback) return fallback;
     g_lutInspectorStatus = {"Weather response held from the last verified draw's LUTs."};
-    g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
+    if (g_configuration.developerMode) g_heldLutDraws.fetch_add(1, std::memory_order_relaxed);
     return prepared;
+}
+
+// DeveloperMode only: records why this draw lacks the response, before the hold.
+const char* RecordWeatherResponseDrop(const NativeLutObservation& native) noexcept
+{
+    if (!g_configuration.developerMode) return nullptr;
+    const auto* reason = WeatherResponseDropReason(native);
+    ObserveWeatherResponseDrop(g_weatherResponseDrops,
+        EffectiveWeatherGradeResponse(g_activeSettings).enabled, reason);
+    return reason;
+}
+
+// DeveloperMode only: records what reached the screen after the hold.
+void RecordShownWeatherResponseDrop(const NativeLutObservation& native, bool held,
+    const char* reason) noexcept
+{
+    if (!g_configuration.developerMode) return;
+    ObserveWeatherResponseDrop(g_shownWeatherResponseDrops,
+        EffectiveWeatherGradeResponse(g_activeSettings).enabled,
+        ShownWeatherResponseDropReason(native, held, reason));
+}
+
+void StoreWeatherResponse(const char* reason) noexcept
+{
+    g_weatherResponseHold.Store(g_frame, g_lutDrawViews, g_lutInspectorResolved,
+        g_lutInspectorAutomaticSlots);
+    g_heldShownReason = reason;
 }
 
 LutProfileDraw ResolveLutProfileDraw(
@@ -560,27 +598,24 @@ ID3D11Buffer* PrepareLutProfileDraw(
         !g_liveSettingsThreadCompatible.load(std::memory_order_acquire))
     {
         // The inspector and drop record belong to the Present thread.
-        g_foreignThreadLutDraws.fetch_add(1, std::memory_order_relaxed);
+        if (g_configuration.developerMode)
+            g_foreignThreadLutDraws.fetch_add(1, std::memory_order_relaxed);
         return fallback;
     }
     ResetLutProfileInspector();
     const auto& native = CurrentNativeLutObservation();
     const auto draw = ResolveLutProfileDraw(context, record, native, fallback);
-    const bool enabled = EffectiveWeatherGradeResponse(g_activeSettings).enabled;
-    const auto* reason = WeatherResponseDropReason(native);
-    ObserveWeatherResponseDrop(g_weatherResponseDrops, enabled, reason);
+    const auto* reason = RecordWeatherResponseDrop(native);
     auto* constants = draw.constants;
     bool held{};
     if (draw.check == LutDrawCheck::unanswered)
         constants = HoldWeatherResponse(context, draw.constants, fallback, held);
     // A verified draw always uses its own per-slot result and becomes the held one.
     else if (draw.check == LutDrawCheck::verified)
-        g_weatherResponseHold.Store(g_frame, g_lutDrawViews, g_lutInspectorResolved,
-            g_lutInspectorAutomaticSlots);
+        StoreWeatherResponse(reason);
     else
-        g_weatherResponseHold.Reset();
-    ObserveWeatherResponseDrop(g_shownWeatherResponseDrops, enabled,
-        ShownWeatherResponseDropReason(native, held, reason));
+        ResetWeatherResponseHold();
+    RecordShownWeatherResponseDrop(native, held, reason);
     return constants;
 }
 

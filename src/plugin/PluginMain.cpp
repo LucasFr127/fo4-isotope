@@ -573,6 +573,8 @@ void InitializeObserverBoundaries(bool observerActive,
     (void)ReportBoundary("native depth-of-field pass",
         NativeImageSpacePassInstalled(NativeImageSpacePass::distantBlur));
     (void)ReportBoundary("native FXAA pass", NativeImageSpacePassInstalled(NativeImageSpacePass::fxaa));
+    fo4hdr::EnableImageSpaceCopyCounts(
+        diagnosticsConfiguration.valid && diagnosticsConfiguration.value.developerMode);
     (void)ReportBoundary("ImageSpace provenance",
         fo4hdr::game::InitializeImageSpaceObserver(
             nativeLut, services.trampoline, services.pluginHandle));
