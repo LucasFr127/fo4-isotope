@@ -446,6 +446,11 @@ ID3D11Buffer* HoldWeatherResponse(ID3D11DeviceContext* context, ID3D11Buffer* ow
     std::uint32_t automatic{};
     if (!g_weatherResponseHold.TryHold(g_frame, g_lutDrawViews, held, automatic)) return own;
     applied = true;
+    // Only the response is held; other slots follow the current Fallback Grade settings.
+    for (std::size_t i = 0; i < held.size(); ++i)
+        if ((automatic & (1U << i)) == 0)
+            held[i] = {g_activeSettings.fallbackGradeLuminancePercent,
+                g_activeSettings.fallbackGradeColorPercent};
     g_lutInspectorResolved = held;
     g_lutInspectorAutomaticSlots = automatic;
     auto constants = g_replacements.configurationKey;
