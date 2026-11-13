@@ -98,9 +98,9 @@ constexpr std::array<ChoiceEntry<ColorGradingCurve>, 2> kGradingCurves{{
 // Both lift the game's SDR LUTs into HDR, so SDR has neither.
 void AddHdrConversion(SettingsPageBuilder& page)
 {
-    page.Group("hdr-conversion", "HDR Conversion", "arrows-out");
+    page.Group("hdr-conversion", "HDR Conversion", "intersect-square");
     page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
-        "RGB Ratio reads the LUT at each color's own hue and saturation. "
+        "RGB Ratio reads the LUT at each color's own hue and saturation.\n"
         "Affine reads it as the game does for closer vanilla tints, at a higher GPU cost."},
         [](HdrSettings& settings) -> ColorGradingMethod& { return settings.colorGradingMethod; },
         std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods})
@@ -234,7 +234,7 @@ void BuildAdjustmentsPage(SettingsPageBuilder& page)
 void BuildColorGradingPage(SettingsPageBuilder& page)
 {
     page.Status();
-    page.Group("grading-strength", "Strength", "gauge");
+    page.Group("grading-strength", "Strength", "intersect-three");
     AddImageControls(page, kGradingControls);
     if (!page.Sdr()) AddHdrConversion(page);
 }

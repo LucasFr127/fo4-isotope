@@ -59,7 +59,7 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
 // HdrEnabled is the interface draft's, not the color profile's, and applies at the next start.
 void AddHdrRequest(SettingsPageBuilder& page)
 {
-    page.Group("hdr", "HDR", "sun");
+    page.Group("hdr", "HDR", "circle-half");
     dmui::SettingDescriptor setting{.id = "hdr-enabled", .label = "Enable HDR",
         .description = "Uses HDR10 output on an HDR display with Windows HDR on. "
             "Applies after a restart.",
@@ -85,7 +85,7 @@ void AddHdrRequest(SettingsPageBuilder& page)
 
 void AddBrightness(SettingsPageBuilder& page)
 {
-    page.Group("brightness", "Brightness", "sun-dim");
+    page.Group("brightness", "Brightness", "sun");
     (void)page.Number({"display-peak", "Peak Brightness",
         "The brightest level highlights reach. Match your display's HDR peak."},
         {kMinimumPeakNits, kMaximumPeakNits, "%.0f nits"},
@@ -115,10 +115,10 @@ void DrawDisplayName() noexcept
 }
 
 // Reported values are references; the actions copy them into the brightness settings.
-void AddDisplay(SettingsPageBuilder& page)
+void AddInfo(SettingsPageBuilder& page)
 {
-    page.Group("display", "Display", "monitor");
-    (void)page.Value({"display-name", "Display", kDisplayDescription}, DrawDisplayName);
+    page.Group("info", "Info", "info");
+    (void)page.Value({"display-name", "Display Name", kDisplayDescription}, DrawDisplayName);
     const auto reported = [](float SettingsDisplayView::* nits) {
         return [nits] { dmui::ui::TextUnformatted(Nits(View().display.*nits).data()); };
     };
@@ -174,7 +174,7 @@ void Recommend(dmui::SettingDescriptor& setting, const OperatorControl& control)
         std::snprintf(maximum.data(), maximum.size(), slider.format,
             recommended.maximum * slider.displayScale);
         Text text{};
-        std::snprintf(text.data(), text.size(), "%s Recommended at %.0f nits: %s to %s.",
+        std::snprintf(text.data(), text.size(), "%s\nRecommended at %.0f nits: %s to %s.",
             description.c_str(), recommended.testedPeakNits, minimum.data(), maximum.data());
         return std::string{text.data()};
     };
@@ -201,10 +201,10 @@ void AddOperatorControl(SettingsPageBuilder& page, ProductionToneMapperAlgorithm
 
 // SDR keeps Middle Gray at or below neutral, has no HDR shoulder and lets
 // GT7's shoulder start lower, where its toe ends.
-void AddLook(SettingsPageBuilder& page)
+void AddToneMapperSettings(SettingsPageBuilder& page)
 {
     const auto sdr = page.Sdr();
-    page.Group("look", "Look", "sliders");
+    page.Group("settings", "Settings", "sliders-horizontal");
     AddOperatorControl(page, aces2, {{"aces-look", "Contrast Look",
         "Strength of the ACES 2 contrast look. 0% removes it."},
         &ToneMapperParameters::acesLookStrength,
@@ -265,7 +265,7 @@ void AddToneMapper(SettingsPageBuilder& page)
     const auto sdr = page.Sdr();
     page.Group("tone-mapper", "Tone Mapper", "chart-line");
     const std::span<const ChoiceEntry<ProductionToneMapperAlgorithm>> entries{kToneMappers};
-    page.Choice<ProductionToneMapperAlgorithm>({"tone-mapper", "Tone Mapper", sdr ?
+    page.Choice<ProductionToneMapperAlgorithm>({"method", "Method", sdr ?
         "Vanilla keeps the game's curve; ACES 2, AgX and GT7 replace it." :
         "How scene colors and highlights fit the display."},
         [](HdrSettings& settings) -> ProductionToneMapperAlgorithm& {
@@ -287,14 +287,14 @@ void BuildOutputPage(SettingsPageBuilder& page)
     AddHdrRequest(page);
     if (page.Sdr()) return;
     AddBrightness(page);
-    AddDisplay(page);
+    AddInfo(page);
 }
 
 void BuildToneMappingPage(SettingsPageBuilder& page)
 {
     page.Status();
     AddToneMapper(page);
-    AddLook(page);
+    AddToneMapperSettings(page);
 }
 
 }  // namespace fo4hdr

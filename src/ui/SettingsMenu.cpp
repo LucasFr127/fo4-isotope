@@ -189,27 +189,27 @@ struct PageEntry
 // Two sidebar categories; within each, pages sort by key.
 const std::array kCategories{
     dmui::CategoryDescriptor{"display", "Display", 0, "monitor"},
-    dmui::CategoryDescriptor{"color", "Color", 100, "palette"}};
+    dmui::CategoryDescriptor{"image", "Image", 100, "image"}};
 const std::array kPages{
     PageEntry{{.id = "output", .displayName = "Output", .categoryId = "display",
                   .summary = "HDR output and display brightness.", .sortKey = 0, .iconName = "sun"},
         &DrawPage<BuildOutputPage>},
     PageEntry{{.id = "tone-mapping", .displayName = "Tone Mapping", .categoryId = "display",
-                  .summary = "Tone mapper and its look.", .sortKey = 100, .iconName = "chart-line"},
+                  .summary = "Tone mapper and its settings.", .sortKey = 100, .iconName = "chart-line"},
         &DrawPage<BuildToneMappingPage>},
-    PageEntry{{.id = "adjustments", .displayName = "Adjustments", .categoryId = "color",
+    PageEntry{{.id = "adjustments", .displayName = "Adjustments", .categoryId = "image",
                   .summary = "Exposure, contrast, white balance and bloom.", .sortKey = 0,
                   .iconName = "sliders"},
         &DrawPage<BuildAdjustmentsPage>},
-    PageEntry{{.id = "color-grading", .displayName = "Color Grading", .categoryId = "color",
+    PageEntry{{.id = "color-grading", .displayName = "Color Grading", .categoryId = "image",
                   .summary = "How the game's color grading applies.", .sortKey = 100,
                   .iconName = "palette"},
         &DrawPage<BuildColorGradingPage>},
-    PageEntry{{.id = "selective-color", .displayName = "Selective Color", .categoryId = "color",
+    PageEntry{{.id = "selective-color", .displayName = "Selective Color", .categoryId = "image",
                   .summary = "Hue, saturation and brightness per color.", .sortKey = 200,
                   .iconName = "swatches"},
         &DrawPage<BuildSelectiveColorPage>},
-    PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "color",
+    PageEntry{{.id = "weather-response", .displayName = "Weather Response", .categoryId = "image",
                   .summary = "Color grading response per weather.", .sortKey = 300,
                   .iconName = "cloud-sun"},
         &DrawPage<BuildWeatherResponsePage>}};
