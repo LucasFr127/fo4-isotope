@@ -104,9 +104,13 @@ float Fo4HdrNativeCurve(float value)
 
 float Fo4HdrRgbRatioGuideScale(float peak)
 {
+    // Above a one-stop margin, reduce only lookup exposure with Affine's C1
+    // shoulder tending to native white (5.6). Clipping at white instead creases
+    // the graded highlight wherever the look is flat at its top.
+    if (peak > 2.8f)
+        return Fo4HdrNativeCurve(2.0f * (5.6f - 7.84f / peak)) /
+            (Fo4HdrNativeCurve(11.2f) * peak);
     // Factor f(peak)/peak so the inverse scale remains finite at exact black.
-    // Only lookup exposure is bounded at native white; scene RGB is retained.
-    if (peak >= 5.6f) return 1.0f / peak;
     const float value = 2.0f * peak;
     return 2.0f * (0.14f * value + 1.0f / 60.0f) /
         ((value * (0.15f * value + 0.5f) + 0.06f) * Fo4HdrNativeCurve(11.2f));

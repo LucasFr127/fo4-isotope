@@ -182,6 +182,30 @@ void VerifyHdrGradeBlackContinuity(const HdrGradeTransferTarget& target)
     }
 }
 
+void VerifyHdrGradeHighlightContinuity(const HdrGradeTransferTarget& target)
+{
+    // Checked against the contract rather than the oracle: a look that is flat
+    // at its top must not crease the graded highlight where the lookup shoulder
+    // starts or where it nears native white, so one-sided slopes agree there.
+    const auto look = [](double code) { return 1.0 - (1.0 - code) * (1.0 - code); };
+    for (const std::uint32_t curve : {kHdrGradeCurveGamma22, kHdrGradeCurveSrgb})
+    for (const double knee : {2.8, 5.6}) {
+        std::array<double, 3> values{};
+        for (std::size_t step = 0; step < values.size(); ++step) {
+            const double scene = knee + (static_cast<double>(step) - 1.0) * 0.01;
+            const double code = look(std::pow(scene * NativeGradeScale(scene), 1.0 / 2.2));
+            HdrGradeTransferCase test{{scene, scene, scene}, {code, code, code}};
+            values[step] = DispatchHdrGradeTransfer(target, test, {1.0, 0, 0, curve}).green;
+        }
+        const double below = values[1] - values[0];
+        const double above = values[2] - values[1];
+        if (std::abs(above - below) > 0.01 * above)
+            std::cerr << "RGB Ratio highlight crease curve=" << curve << " knee=" << knee
+                      << " below=" << below << " above=" << above << '\n';
+        FO4HDR_WARP_CHECK(std::abs(above - below) <= 0.01 * above);
+    }
+}
+
 void VerifyHdrGradeTransferMath(Device& device)
 {
     const double nan = std::numeric_limits<float>::quiet_NaN();
@@ -202,6 +226,7 @@ void VerifyHdrGradeTransferMath(Device& device)
         }
     }
     VerifyHdrGradeBlackContinuity({device, *shader.Get(), output});
+    VerifyHdrGradeHighlightContinuity({device, *shader.Get(), output});
 }
 
 struct HdrGradeIntegrationSample

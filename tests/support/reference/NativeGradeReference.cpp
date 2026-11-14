@@ -28,9 +28,12 @@ namespace fo4hdr::tests::gpu {
 
 [[nodiscard]] double NativeGradeScale(double peak)
 {
-    if (peak >= 5.6) return 1.0 / peak;
-    constexpr double white = 11.2 * (0.14 * 11.2 + 1.0 / 60.0) /
-        (11.2 * (0.15 * 11.2 + 0.5) + 0.06);
+    constexpr auto curve = [](double x) {
+        return x * (0.14 * x + 1.0 / 60.0) / (x * (0.15 * x + 0.5) + 0.06);
+    };
+    constexpr double white = curve(11.2);
+    // Lookup exposure follows Affine's C1 shoulder above 2.8, tending to 5.6.
+    if (peak > 2.8) return curve(2.0 * (5.6 - 7.84 / peak)) / (white * peak);
     const double x = 2.0 * peak;
     return 2.0 * (0.14 * x + 1.0 / 60.0) /
         ((x * (0.15 * x + 0.5) + 0.06) * white);
