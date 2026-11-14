@@ -524,6 +524,10 @@ void TestConfigurationNormalization()
     FO4HDR_CHECK(!spelled.value.sdrEnabled && spelled.value.displayPeakNits == 1200.0);
     FO4HDR_CHECK(spelled.repairs.counts == RepairCounts{});
     FO4HDR_CHECK(HasIniLine(spelled.text, "SdrEnabled=0"));
+    // A plus sign before a minus sign does not parse.
+    auto signs = canonical;
+    Replace(signs, "ExposureEV=0\r\n", "ExposureEV=+-1\r\n");
+    FO4HDR_CHECK(RepairCount(ParsePluginConfiguration(signs), defaulted) == 1);
 
     // A channel Maximum below its Minimum rises to it.
     auto channel = canonical;
@@ -708,7 +712,8 @@ void TestConfigurationRangeRepairs()
              "FallbackGradeLuminance=-1",
              "FallbackGradeColor=nan",
              "BloomStrength=-1",
-             "BloomStrength=100.01"})
+             "BloomStrength=100.01",
+             "DisplayPeakNits=1e70"})
     {
         auto text = ExtendedProductionConfiguration();
         const std::string_view replacement{keyValue};

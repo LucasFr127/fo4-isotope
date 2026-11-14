@@ -9,6 +9,7 @@
 #include <atomic>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -221,7 +222,9 @@ std::string RewriteHdrSettingsIni(
         return std::string(original);
     // The file keeps the keys the menu does not edit, such as DeveloperMode.
     auto parsed = ParsePluginConfiguration(original);
-    if (!parsed.valid) return std::string(original);
+    // Only data of 1 GiB or more, or exhausted memory, fails to parse. Throwing makes
+    // the worker report a failed save instead of writing the file back unchanged.
+    if (!parsed.valid) throw std::runtime_error("FO4Isotope.ini could not be parsed for saving.");
     auto& stored = parsed.stored;
     static_cast<HdrSettings&>(stored) = settings.hdr;
     stored.sdrSettings = settings.sdr;

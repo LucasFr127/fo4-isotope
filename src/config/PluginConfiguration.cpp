@@ -704,6 +704,9 @@ bool* ProfileBooleanTarget(HdrSettings& profile, SettingField key) noexcept
     const auto result = precise ?
         std::to_chars(buffer.data(), end, value) :
         std::to_chars(buffer.data(), end, value, std::chars_format::fixed, 3);
+    // Fixed notation overflows only far outside every range. Returning nothing
+    // lets CanonicalNumber keep the value, which the clamp then bounds.
+    if (result.ec != std::errc{}) return {};
     std::string text(buffer.data(), result.ptr);
     if (!precise)
     {
@@ -715,7 +718,8 @@ bool* ProfileBooleanTarget(HdrSettings& profile, SettingField key) noexcept
 
 [[nodiscard]] std::optional<double> ParseNumber(std::string_view text) noexcept
 {
-    if (text.starts_with('+')) text.remove_prefix(1);
+    // from_chars takes no plus sign; strip one, but not before a minus sign.
+    if (text.starts_with('+') && !text.starts_with("+-")) text.remove_prefix(1);
     double number{};
     const auto* const end = text.data() + text.size();
     const auto result = std::from_chars(text.data(), end, number);
