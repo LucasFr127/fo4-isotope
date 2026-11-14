@@ -16,6 +16,17 @@ float3 Fo4HdrExpandPrimaries(float3 light)
     return mul(transform, light);
 }
 
+// The inverse D65 conversion, inverse(RGB709_to_XYZ) * RGB2020_to_XYZ.
+float3 Fo4HdrReducePrimaries(float3 light)
+{
+    const float3x3 transform = {
+        1.660491002108435f, -0.587641138788550f, -0.072849863319884f,
+        -0.124550474521591f, 1.132899897125960f, -0.008349422604369f,
+        -0.018150763354905f, -0.100578898008007f, 1.118729661362912f
+    };
+    return mul(transform, light);
+}
+
 float3 Fo4HdrBoundLight(float3 light, float ceiling)
 {
     if ((asuint(ceiling) & 0x7fffffffu) >= 0x7f800000u || ceiling <= 0.0f || ceiling > 10000.0f)
@@ -36,12 +47,7 @@ float3 Fo4HdrEncodeSdrLight(float3 nits, float white)
 {
     if ((asuint(white) & 0x7fffffffu) >= 0x7f800000u || white <= 0.0f)
         return 0.0f;
-    const float3x3 to709 = {
-        1.660491002108435f, -0.587641138788550f, -0.072849863319884f,
-        -0.124550474521591f, 1.132899897125960f, -0.008349422604369f,
-        -0.018150763354905f, -0.100578898008007f, 1.118729661362912f
-    };
-    return pow(Fo4HdrBoundLight(mul(to709, nits / white), 1.0f), 1.0f / 2.2f);
+    return pow(Fo4HdrBoundLight(Fo4HdrReducePrimaries(nits / white), 1.0f), 1.0f / 2.2f);
 }
 
 // BT.2100 Table 4 inverse EOTF: input is display light, not camera light.
