@@ -118,7 +118,7 @@ struct SdrModeInputs
     bool hdrChainCreated{};
     // An HDR chain whose installation rolled back to the original descriptor.
     bool hdrInstallFailed{};
-    // FO4Isotope.ini was unusable, so startup took the SDR-only defaults.
+    // FO4Isotope.ini could not be read, so startup took the SDR-only defaults.
     bool configurationDefaults{};
 };
 

@@ -959,7 +959,7 @@ private:
     std::vector<std::pair<std::string_view, std::string_view>> consumed_;
 };
 
-// The shipped defaults: production HDR and SDR mode requested, diagnostics off.
+// Missing or invalid keys keep these: production HDR and SDR mode requested, diagnostics off.
 [[nodiscard]] PluginConfiguration StoredDefaults() noexcept
 {
     PluginConfiguration stored{};

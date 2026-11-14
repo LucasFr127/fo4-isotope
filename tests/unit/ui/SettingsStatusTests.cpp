@@ -29,7 +29,7 @@ void TestHdrRequestStatus()
     // HDR off at start: turning it on needs a restart.
     FO4HDR_CHECK(status(false, false, true).empty());
     FO4HDR_CHECK(status(true, false, true).starts_with("Restart the game to turn HDR on"));
-    // Defaults from an unusable INI cannot save the request, so no restart is offered.
+    // Defaults from an unreadable INI cannot save the request, so no restart is offered.
     SettingsMenuView fallback{};
     fallback.sdrMode = true;
     fallback.sdrModeReason = SdrModeReason::configurationDefaults;

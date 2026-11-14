@@ -93,7 +93,7 @@ const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm)
 
 const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept
 {
-    // Defaults from an unusable INI cannot save the request; the reason names the fix.
+    // Defaults from an unreadable INI cannot save the request; the reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return nullptr;
     if (hdrEnabled && !view.hdrEnabledAtStart) return "Restart the game to turn HDR on.";
     // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
@@ -103,7 +103,7 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
 
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept
 {
-    // Once HDR is turned off, SDR is the user's choice; only an unusable INI still needs a fix.
+    // Once HDR is turned off, SDR is the user's choice; only an unreadable INI still needs a fix.
     if (!hdrEnabled && view.sdrModeReason != SdrModeReason::configurationDefaults)
         view.sdrModeReason = SdrModeReason::hdrOff;
 }
