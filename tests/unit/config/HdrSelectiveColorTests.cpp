@@ -112,9 +112,10 @@ void TestSelectiveColorPersistence()
     const auto parsed = ParsePluginConfiguration(rewritten);
     FO4HDR_CHECK(parsed.valid);
     FO4HDR_CHECK(parsed.value.selectiveColor == persisted.selectiveColor);
-    FO4HDR_CHECK(rewritten.find("RedHue=-3\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("OrangeSaturation=111\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("MagentaBrightness=-24\n") != std::string::npos);
+    const auto section = IniSection(rewritten, "SelectiveColor");
+    FO4HDR_CHECK(HasIniLine(section, "RedHue=-3"));
+    FO4HDR_CHECK(HasIniLine(section, "OrangeSaturation=111"));
+    FO4HDR_CHECK(HasIniLine(section, "MagentaBrightness=-24"));
 }
 
 bool CheckSelectiveColorParity(SelectiveColorRgb input, const SelectiveColorPrepared& prepared)

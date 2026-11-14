@@ -223,11 +223,10 @@ TraceRenderPipeline=1
 DeveloperHdr10Reference=0
 ForceHdrSwapChainFailure=0
 )ini";
+    // Without DeveloperMode the trace switch keeps its saved value and has no effect.
     parsed = ParsePluginConfiguration(unsafe);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(
-        parsed.error ==
-        PluginConfigurationError::invalidCombination);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(!parsed.value.traceRenderPipeline && parsed.stored.traceRenderPipeline);
 
     constexpr std::string_view duplicate = R"ini(
 [General]
@@ -239,11 +238,9 @@ TraceRenderPipeline=1
 DeveloperHdr10Reference=0
 ForceHdrSwapChainFailure=0
 )ini";
+    // A repeated key keeps its last value.
     parsed = ParsePluginConfiguration(duplicate);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(
-        parsed.error ==
-        PluginConfigurationError::duplicateKey);
+    FO4HDR_CHECK(parsed.valid && parsed.value.developerMode && parsed.value.traceRenderPipeline);
 }
 
 }  // namespace

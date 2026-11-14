@@ -1,9 +1,42 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #pragma once
 
+#include "FO4Isotope/config/PluginConfiguration.hpp"
+
+#include <cstddef>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace fo4hdr::tests {
+
+// One rendered section, from its header through the line before the next one.
+[[nodiscard]] inline std::string IniSection(const std::string& text, std::string_view header)
+{
+    const auto begin = text.find("[" + std::string(header) + "]\r\n");
+    if (begin == std::string::npos) return {};
+    const auto end = text.find("\r\n[", begin);
+    return text.substr(begin, end == std::string::npos ? end : end + 2 - begin);
+}
+
+// True when the rendered text holds exactly this line.
+[[nodiscard]] inline bool HasIniLine(std::string_view text, std::string_view line)
+{
+    for (std::size_t start = 0; start < text.size();)
+    {
+        const auto end = text.find("\r\n", start);
+        if (text.substr(start, end - start) == line) return true;
+        if (end == std::string_view::npos) break;
+        start = end + 2;
+    }
+    return false;
+}
+
+[[nodiscard]] inline std::uint32_t RepairCount(
+    const PluginConfigurationResult& result, ConfigurationRepairKind kind)
+{
+    return result.repairs.counts[static_cast<std::size_t>(kind)];
+}
 
 [[nodiscard]] inline std::string MinimalProductionConfiguration()
 {

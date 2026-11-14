@@ -18,48 +18,30 @@
 
 namespace fo4hdr::tests {
 
+// A save renders the canonical file: foreign keys and comments are gone.
 void CheckRewrittenOutput(const std::string& rewritten, const std::string& bomRewritten)
 {
-    FO4HDR_CHECK(bomRewritten.starts_with("\xEF\xBB\xBF[General]\n"));
-    FO4HDR_CHECK(bomRewritten.find("\xEF\xBB\xBF", 3) ==
-        std::string::npos);
-    FO4HDR_CHECK(bomRewritten.find("[General]", 4) == std::string::npos);
-    FO4HDR_CHECK(rewritten.find("# keep this comment\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("Unknown=kept\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("ThirdPartyEffect=kept\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("ThirdPartyNumber=2\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("DisplayPeakNits=430\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("UiPaperWhiteNits=180\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("VideoWhiteNits=220\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("ColorGradingMethod=Affine\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find("ColorGradingCurve=sRGB\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "[ToneMapper]\r\nAlgorithm=ACES2\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "[ACES2]\r\nContrastLookStrength=0.35\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "[AgX]\r\nMiddleGrayOffsetEV=-0.25\r\nContrast=2.8\r\n"
-        "ColorResponse=0.55\r\nShoulderPower=2.05\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "[GT7]\r\nToeStrength=1.4\r\nShoulderStart=0.52\r\n"
-        "ColorBlend=0.3\r\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("[Image]\r\nExposureEV=0.25\r\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "ExposureEV=0.25\r\nContrast=-20\r\nBlacks=-40\r\n") !=
-        std::string::npos);
+    FO4HDR_CHECK(bomRewritten.starts_with("# Isotope settings."));
+    FO4HDR_CHECK(rewritten.starts_with("# Isotope settings."));
+    for (const auto* dropped : {"keep this comment", "Unknown", "ThirdPartyEffect", "ThirdPartyNumber"})
+        FO4HDR_CHECK(!rewritten.contains(dropped));
+    FO4HDR_CHECK(HasIniLine(rewritten, "DisplayPeakNits=430"));
+    FO4HDR_CHECK(HasIniLine(rewritten, "UiPaperWhiteNits=180"));
+    FO4HDR_CHECK(HasIniLine(rewritten, "VideoWhiteNits=220"));
+    FO4HDR_CHECK(HasIniLine(rewritten, "ColorGradingMethod=Affine"));
+    FO4HDR_CHECK(HasIniLine(rewritten, "ColorGradingCurve=sRGB"));
+    FO4HDR_CHECK(HasIniLine(IniSection(rewritten, "ToneMapper"), "Algorithm=ACES2"));
+    FO4HDR_CHECK(HasIniLine(IniSection(rewritten, "ACES2"), "ContrastLookStrength=0.35"));
+    const auto agx = IniSection(rewritten, "AgX");
+    for (const auto* line : {"MiddleGrayOffsetEV=-0.25", "Contrast=2.8", "ColorResponse=0.55",
+             "ShoulderPower=2.05"})
+        FO4HDR_CHECK(HasIniLine(agx, line));
+    const auto gt7 = IniSection(rewritten, "GT7");
+    for (const auto* line : {"ToeStrength=1.4", "ShoulderStart=0.52", "ColorBlend=0.3"})
+        FO4HDR_CHECK(HasIniLine(gt7, line));
+    const auto image = IniSection(rewritten, "Image");
+    for (const auto* line : {"ExposureEV=0.25", "Contrast=-20", "Blacks=-40"})
+        FO4HDR_CHECK(HasIniLine(image, line));
 }
 
 void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
@@ -70,7 +52,7 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
         roundTripRewrite, {settings}, interfaceSettings) == roundTripRewrite);
     const auto reloadedRewrite =
         ParsePluginConfiguration(roundTripRewrite);
-    FO4HDR_CHECK(reloadedRewrite.valid);
+    FO4HDR_CHECK(reloadedRewrite.valid && !reloadedRewrite.rewriteNeeded);
     FO4HDR_CHECK(reloadedRewrite.value.exposureEv == settings.exposureEv);
     FO4HDR_CHECK(reloadedRewrite.value.toneMapperParameters ==
         settings.toneMapperParameters);
@@ -103,17 +85,13 @@ void CheckRewrittenRoundTrip(const HdrSettings& settings, const HdrInterfaceSett
 
 void CheckRewrittenEffects(const std::string& rewritten)
 {
-    FO4HDR_CHECK(rewritten.find("[Effects]\r\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find(
-        "VanillaColorGradingStrength=100\r\n"
-        "FallbackGradeLuminance=65\r\nFallbackGradeColor=35\r\n"
-        "BloomStrength=75\r\n") != std::string::npos);
-    FO4HDR_CHECK(rewritten.find("BloomStrength=75\r\n") !=
-        std::string::npos);
+    const auto effects = IniSection(rewritten, "Effects");
+    for (const auto* line : {"VanillaColorGradingStrength=100", "FallbackGradeLuminance=65",
+             "FallbackGradeColor=35", "BloomStrength=75"})
+        FO4HDR_CHECK(HasIniLine(effects, line));
 }
 
-// A full save removes the released settings-window keys, and their section
-// once it holds no other key.
+// A save drops the released settings-window keys with their section and comments.
 void CheckRewrittenRetiredInterface(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
 {
     constexpr std::string_view released =
@@ -121,19 +99,17 @@ void CheckRewrittenRetiredInterface(const HdrSettings& settings, const HdrInterf
         "Scale=1.25\nWindowWidth=700\nWindowHeight=680\nWindowX=-1\nWindowY=-1\n\n"
         "[Debug]\nTraceRenderPipeline=0\n";
     const auto saved = RewriteHdrSettingsIni(released, {settings}, interfaceSettings);
-    FO4HDR_CHECK(saved.find("BloomStrength=75\n\n[Debug]\nTraceRenderPipeline=0\n") !=
-        std::string::npos);
-    FO4HDR_CHECK(saved.find("[Interface]") == std::string::npos);
-    FO4HDR_CHECK(saved.find("Shortcut comment") == std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "Effects"), "BloomStrength=75"));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "Debug"), "TraceRenderPipeline=0"));
+    FO4HDR_CHECK(!saved.contains("[Interface]"));
+    FO4HDR_CHECK(!saved.contains("Shortcut comment"));
     for (const auto* key : {"ToggleKey", "Scale", "WindowWidth", "WindowHeight", "WindowX", "WindowY"})
-        FO4HDR_CHECK(saved.find(key) == std::string::npos);
+        FO4HDR_CHECK(!saved.contains(key));
     FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {settings}, interfaceSettings) == saved);
 
     const auto extended = RewriteHdrSettingsIni(
         "[Interface]\nScale=1.25\nThirdPartyInterface=kept\n", {settings}, interfaceSettings);
-    FO4HDR_CHECK(extended.starts_with("[Interface]\n"));
-    FO4HDR_CHECK(extended.find("ThirdPartyInterface=kept\n") != std::string::npos);
-    FO4HDR_CHECK(extended.find("Scale") == std::string::npos);
+    FO4HDR_CHECK(!extended.contains("[Interface]") && !extended.contains("ThirdPartyInterface"));
 }
 
 void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSettings& interfaceSettings)
@@ -143,33 +119,35 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
         "[Image]\nGradeTransfer=PreserveHDRColor\nContrast=0\n";
     const auto migrated = RewriteHdrSettingsIni(
         retiredGradeTransfer, {settings}, interfaceSettings);
-    FO4HDR_CHECK(migrated.find("GradeTransfer") == std::string::npos);
-    FO4HDR_CHECK(migrated.find("ExposureEV=0.25") != std::string::npos);
+    FO4HDR_CHECK(!migrated.contains("GradeTransfer"));
+    FO4HDR_CHECK(HasIniLine(migrated, "ExposureEV=0.25"));
 
-    // A full save renames HdrColorResponse in place in both profiles and drops
-    // the retired overlay switch.
+    // A save renames HdrColorResponse in both profiles and drops the retired
+    // overlay switch.
     constexpr std::string_view formerNames =
         "[AgX]\nHdrColorResponse=0.4\n[SdrAgX]\nHdrColorResponse=0.4\n"
         "[Debug]\nShowDeveloperOverlay=0\n";
     const auto renamed = RewriteHdrSettingsIni(formerNames, {settings}, interfaceSettings);
-    FO4HDR_CHECK(renamed.find("HdrColorResponse") == std::string::npos);
-    FO4HDR_CHECK(renamed.find("ShowDeveloperOverlay") == std::string::npos);
-    FO4HDR_CHECK(renamed.find("[AgX]\nColorResponse=0.55\n") != std::string::npos);
-    FO4HDR_CHECK(renamed.find("[SdrAgX]\nColorResponse=") != std::string::npos);
+    FO4HDR_CHECK(!renamed.contains("HdrColorResponse"));
+    FO4HDR_CHECK(!renamed.contains("ShowDeveloperOverlay"));
+    FO4HDR_CHECK(HasIniLine(IniSection(renamed, "AgX"), "ColorResponse=0.55"));
+    FO4HDR_CHECK(HasIniLine(IniSection(renamed, "SdrAgX"), "ColorResponse=0.5"));
 
-    // A full save renames the former Fallback Grade keys in place in both profiles.
+    // A save renames the former Fallback Grade keys in both profiles.
     constexpr std::string_view formerGrade =
         "[Effects]\nVanillaGradeLuminanceStrength=50\nVanillaGradeColorStrength=50\n"
         "[SdrEffects]\nVanillaGradeLuminanceStrength=50\nVanillaGradeColorStrength=50\n";
     const auto regraded = RewriteHdrSettingsIni(formerGrade, {settings}, interfaceSettings);
-    FO4HDR_CHECK(regraded.find("VanillaGradeLuminanceStrength") == std::string::npos);
-    FO4HDR_CHECK(regraded.find("VanillaGradeColorStrength") == std::string::npos);
-    FO4HDR_CHECK(regraded.find(
-        "[Effects]\nFallbackGradeLuminance=65\nFallbackGradeColor=35\n") != std::string::npos);
-    FO4HDR_CHECK(regraded.find(
-        "[SdrEffects]\nFallbackGradeLuminance=100\nFallbackGradeColor=100\n") != std::string::npos);
+    FO4HDR_CHECK(!regraded.contains("VanillaGradeLuminanceStrength"));
+    FO4HDR_CHECK(!regraded.contains("VanillaGradeColorStrength"));
+    const auto effects = IniSection(regraded, "Effects");
+    FO4HDR_CHECK(HasIniLine(effects, "FallbackGradeLuminance=65"));
+    FO4HDR_CHECK(HasIniLine(effects, "FallbackGradeColor=35"));
+    const auto sdrEffects = IniSection(regraded, "SdrEffects");
+    FO4HDR_CHECK(HasIniLine(sdrEffects, "FallbackGradeLuminance=100"));
+    FO4HDR_CHECK(HasIniLine(sdrEffects, "FallbackGradeColor=100"));
 
-    // Former method names still load, and a full save writes the current names.
+    // Former method names still load, and a save writes the current names.
     for (const auto& [former, method, current] : {
              std::tuple{"Radial", ColorGradingMethod::rgbRatio, "RgbRatio"},
              std::tuple{"NativeReference", ColorGradingMethod::affine, "Affine"}})
@@ -181,9 +159,8 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
         FO4HDR_CHECK(loaded.value.colorGradingMethod == method);
         const HdrSettings loadedSettings = loaded.value;
         const auto saved = RewriteHdrSettingsIni(text, {loadedSettings}, interfaceSettings);
-        FO4HDR_CHECK(saved.find(std::string("ColorGradingMethod=") + current + "\n") !=
-            std::string::npos);
-        FO4HDR_CHECK(saved.find(former) == std::string::npos);
+        FO4HDR_CHECK(HasIniLine(saved, std::string("ColorGradingMethod=") + current));
+        FO4HDR_CHECK(!saved.contains(former));
     }
 
     auto precise = settings;
@@ -195,18 +172,25 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
 }
 
-// The settings menu saves the HDR request for the next game start.
+// The settings menu saves the HDR request for the next game start and keeps the
+// switches it does not edit.
 void CheckRewrittenHdrRequest(const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings, std::string_view original)
 {
     auto hdrOff = interfaceSettings;
     hdrOff.hdrEnabled = false;
-    FO4HDR_CHECK(RewriteHdrSettingsIni(original, {settings}, hdrOff).find(
-        "[General]\r\nHdrEnabled=0\r\nUnknown=kept\r\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(RewriteHdrSettingsIni(original, {settings}, hdrOff),
+        "General"), "HdrEnabled=0"));
     const auto reloaded = ParsePluginConfiguration(
         RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hdrOff));
     FO4HDR_CHECK(reloaded.valid && !reloaded.value.enabled);
     FO4HDR_CHECK(!reloaded.value.interfaceSettings.hdrEnabled);
+
+    const auto switches = RewriteHdrSettingsIni(
+        "[General]\nSdrEnabled=0\nDeveloperMode=1\n[Debug]\nTraceRenderPipeline=1\n",
+        {settings}, interfaceSettings);
+    for (const auto* line : {"SdrEnabled=0", "DeveloperMode=1", "TraceRenderPipeline=1"})
+        FO4HDR_CHECK(HasIniLine(switches, line));
 }
 
 void CheckSdrProfileRewrite()
@@ -222,30 +206,23 @@ void CheckSdrProfileRewrite()
     sdr.toneMapperParameters.agxContrast = 2.5;
     sdr.toneMapperParameters.gt7ShoulderStart = kMinimumSdrGt7ShoulderStart;
     const HdrSettingsProfiles profiles{.hdr = HdrSettings{}, .sdr = sdr};
-    // Missing SDR sections are appended under their own names, without HDR-only keys.
+    // Every SDR section is written under its own name, without HDR-only keys.
     const auto saved = RewriteHdrSettingsIni(MinimalProductionConfiguration(), profiles, {});
-    // A section runs through the newline that ends its last key.
-    const auto section = [&saved](std::string_view header) {
-        const auto begin = saved.find(header);
-        if (begin == std::string::npos) return std::string{};
-        const auto end = saved.find("\n[", begin);
-        return saved.substr(begin, end == std::string::npos ? end : end + 1 - begin);
-    };
-    FO4HDR_CHECK(section("[SdrToneMapper]").find("Algorithm=Vanilla\n") != std::string::npos);
-    FO4HDR_CHECK(section("[SdrAgX]").find("Contrast=2.5\n") != std::string::npos);
-    FO4HDR_CHECK(section("[SdrAgX]").find("ShoulderPower") == std::string::npos);
-    FO4HDR_CHECK(section("[SdrGT7]").find("ToeStrength=1.28\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrToneMapper"), "Algorithm=Vanilla"));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrAgX"), "Contrast=2.5"));
+    FO4HDR_CHECK(!IniSection(saved, "SdrAgX").contains("\r\nShoulderPower="));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrGT7"), "ToeStrength=1.28"));
     // The SDR-only key is written only to its SDR section.
-    FO4HDR_CHECK(section("[SdrToneMapper]").find("AutomaticWeatherResponse=1\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrToneMapper"), "AutomaticWeatherResponse=1"));
     FO4HDR_CHECK(saved.find("AutomaticWeatherResponse=") == saved.rfind("AutomaticWeatherResponse="));
     // The SDR shoulder minimum survives the saved 0.001 precision.
-    FO4HDR_CHECK(section("[SdrGT7]").find("ShoulderStart=0.216\n") != std::string::npos);
-    FO4HDR_CHECK(saved.find("[SdrImage]\nExposureEV=-0.5\nContrast=15\n") != std::string::npos);
-    FO4HDR_CHECK(section("[SdrImage]").find("HighlightSaturation=70\n") != std::string::npos);
-    FO4HDR_CHECK(saved.find("[SdrEffects]\n") != std::string::npos);
-    FO4HDR_CHECK(saved.find("BloomStrength=60\n") != std::string::npos);
-    FO4HDR_CHECK(saved.find("[SdrSelectiveColor]\nEnabled=1\n") != std::string::npos);
-    FO4HDR_CHECK(saved.find("[SdrWeatherLutResponse]\nEnabled=1\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrGT7"), "ShoulderStart=0.216"));
+    const auto image = IniSection(saved, "SdrImage");
+    for (const auto* line : {"ExposureEV=-0.5", "Contrast=15", "HighlightSaturation=70"})
+        FO4HDR_CHECK(HasIniLine(image, line));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrEffects"), "BloomStrength=60"));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrSelectiveColor"), "Enabled=1"));
+    FO4HDR_CHECK(HasIniLine(IniSection(saved, "SdrWeatherLutResponse"), "Enabled=1"));
     FO4HDR_CHECK(saved.find("ColorGradingCurve=") == saved.rfind("ColorGradingCurve="));
     FO4HDR_CHECK(RewriteHdrSettingsIni(saved, profiles, {}) == saved);
     const auto reloaded = ParsePluginConfiguration(saved);
@@ -254,12 +231,12 @@ void CheckSdrProfileRewrite()
     FO4HDR_CHECK(reloaded.value.exposureEv == 0.0);
     FO4HDR_CHECK(reloaded.value.bloomStrengthPercent == HdrSettings{}.bloomStrengthPercent);
 
-    // An existing SDR section is rewritten in place; foreign and HDR-only names stay.
-    constexpr std::string_view existing =
-        "[SdrImage]\nExposureEV=1\nColorGradingMethod=Affine\nThirdParty=kept\n";
-    FO4HDR_CHECK(RewriteHdrSettingsIni(existing, profiles, {}).find(
-        "[SdrImage]\nExposureEV=-0.5\nColorGradingMethod=Affine\nThirdParty=kept\n") !=
-        std::string::npos);
+    // Foreign and HDR-only names in an SDR section are dropped.
+    const auto existing = IniSection(RewriteHdrSettingsIni(
+        "[SdrImage]\nExposureEV=1\nColorGradingMethod=Affine\nThirdParty=kept\n", profiles, {}),
+        "SdrImage");
+    FO4HDR_CHECK(HasIniLine(existing, "ExposureEV=-0.5"));
+    FO4HDR_CHECK(!existing.contains("\r\nColorGradingMethod=") && !existing.contains("ThirdParty"));
 }
 
 void TestSettingsPersistenceRewrite()
@@ -392,12 +369,8 @@ PersistenceFixture CreatePersistenceFixture()
     return {root, path, profileDirectory, personalPath, settings, HdrInterfaceSettings{}};
 }
 
-void TestPersistedMainSettings(PersistenceFixture& fixture)
+[[nodiscard]] SettingsPersistenceSnapshot WaitForGeneration(std::uint64_t generation)
 {
-    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
-    const auto generation =
-        RequestHdrSettingsSave({settings}, interfaceSettings);
-    FO4HDR_CHECK(generation != 0);
     SettingsPersistenceSnapshot snapshot{};
     for (unsigned attempt = 0; attempt < 2000; ++attempt)
     {
@@ -407,37 +380,42 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
             break;
         Sleep(1);
     }
+    return snapshot;
+}
+
+void TestPersistedMainSettings(PersistenceFixture& fixture)
+{
+    auto& [root, path, profileDirectory, personalPath, settings, interfaceSettings] = fixture;
+    const auto generation =
+        RequestHdrSettingsSave({settings}, interfaceSettings);
+    FO4HDR_CHECK(generation != 0);
+    const auto snapshot = WaitForGeneration(generation);
     FO4HDR_CHECK(snapshot.generation == generation);
     FO4HDR_CHECK(snapshot.state == SettingsPersistenceState::saved);
     std::ifstream input(path, std::ios::binary);
     const std::string persisted(std::istreambuf_iterator<char>(input), {});
-    FO4HDR_CHECK(persisted.find("DisplayPeakNits=430") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("[Image]\nExposureEV=0.75") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("Blacks=35") != std::string::npos);
-    FO4HDR_CHECK(persisted.find("FallbackGradeLuminance=60") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("FallbackGradeColor=30") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("[LUT:stale.dds]\nColor=1\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(persisted, "DisplayPeakNits=430"));
+    const auto image = IniSection(persisted, "Image");
+    FO4HDR_CHECK(HasIniLine(image, "ExposureEV=0.75"));
+    FO4HDR_CHECK(HasIniLine(image, "Blacks=35"));
+    FO4HDR_CHECK(HasIniLine(persisted, "FallbackGradeLuminance=60"));
+    FO4HDR_CHECK(HasIniLine(persisted, "FallbackGradeColor=30"));
+    FO4HDR_CHECK(!persisted.contains("[LUT:stale.dds]"));
     std::ifstream personalInput(personalPath, std::ios::binary);
     const std::string personalBytes(std::istreambuf_iterator<char>(personalInput), {});
     FO4HDR_CHECK(personalBytes == "user-owned sidecar\r\n[LUT:test.dds]\r\nColor=nan\r\n");
     std::ifstream distributedInput(profileDirectory / "Z.ini", std::ios::binary);
     const std::string distributedBytes(std::istreambuf_iterator<char>(distributedInput), {});
     FO4HDR_CHECK(distributedBytes == "[LUT:textures/distributed.dds]\nColor=66\n");
-    FO4HDR_CHECK(persisted.find("[ACES2]\nContrastLookStrength=0.4") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("[AgX]\nMiddleGrayOffsetEV=0.25\nContrast=3") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find(
-        "[GT7]\nToeStrength=1.5\nShoulderStart=0.5") !=
-        std::string::npos);
-    FO4HDR_CHECK(persisted.find("GradeTransfer") == std::string::npos);
-    FO4HDR_CHECK(persisted.find("[Interface]") == std::string::npos);
+    FO4HDR_CHECK(HasIniLine(IniSection(persisted, "ACES2"), "ContrastLookStrength=0.4"));
+    const auto agx = IniSection(persisted, "AgX");
+    FO4HDR_CHECK(HasIniLine(agx, "MiddleGrayOffsetEV=0.25") && HasIniLine(agx, "Contrast=3"));
+    const auto gt7 = IniSection(persisted, "GT7");
+    FO4HDR_CHECK(HasIniLine(gt7, "ToeStrength=1.5") && HasIniLine(gt7, "ShoulderStart=0.5"));
+    FO4HDR_CHECK(!persisted.contains("GradeTransfer"));
+    FO4HDR_CHECK(!persisted.contains("[Interface]"));
     const auto reloaded = LoadPluginConfiguration(path);
-    FO4HDR_CHECK(reloaded.valid);
+    FO4HDR_CHECK(reloaded.valid && !reloaded.rewriteNeeded);
     FO4HDR_CHECK(!reloaded.value.developerMode);
     FO4HDR_CHECK(reloaded.value.blacks == settings.blacks);
     FO4HDR_CHECK(reloaded.value.fallbackGradeLuminancePercent ==
@@ -449,7 +427,7 @@ void TestPersistedMainSettings(PersistenceFixture& fixture)
     FO4HDR_CHECK(reloaded.value.toneMapperParameters ==
         settings.toneMapperParameters);
     FO4HDR_CHECK(reloaded.value.colorGradingMethod == settings.colorGradingMethod);
-    FO4HDR_CHECK(persisted.find("ColorGradingCurve=sRGB\n") != std::string::npos);
+    FO4HDR_CHECK(HasIniLine(persisted, "ColorGradingCurve=sRGB"));
     FO4HDR_CHECK(reloaded.value.colorGradingCurve == settings.colorGradingCurve);
     input.close();
 }
@@ -520,12 +498,28 @@ void TestSettingsAutosaveRetry(PersistenceFixture& fixture)
     FO4HDR_CHECK(LoadPluginConfiguration(fixture.path).value.exposureEv == fixture.settings.exposureEv);
 }
 
+// A save after the INI was deleted writes it again from the saved settings.
+void TestSettingsSaveRecreatesMissingFile(PersistenceFixture& fixture)
+{
+    std::error_code error;
+    FO4HDR_CHECK(std::filesystem::remove(fixture.path, error) && !error);
+    auto settings = fixture.settings;
+    settings.exposureEv = -0.5;
+    const auto generation = RequestHdrSettingsSave({settings}, fixture.interfaceSettings);
+    FO4HDR_CHECK(generation != 0);
+    FO4HDR_CHECK(WaitForGeneration(generation).state == SettingsPersistenceState::saved);
+    const auto reloaded = LoadPluginConfiguration(fixture.path);
+    FO4HDR_CHECK(reloaded.valid && !reloaded.fileMissing && !reloaded.rewriteNeeded);
+    FO4HDR_CHECK(reloaded.value.exposureEv == -0.5);
+}
+
 void TestSettingsPersistenceSave()
 {
     auto fixture = CreatePersistenceFixture();
     TestPersistedMainSettings(fixture);
     TestSettingsAutosaveDebounce(fixture);
     TestSettingsAutosaveRetry(fixture);
+    TestSettingsSaveRecreatesMissingFile(fixture);
     const auto& root = fixture.root;
     std::error_code error;
     FO4HDR_CHECK(std::filesystem::remove_all(root, error) != 0 && !error);

@@ -1017,12 +1017,13 @@ TraceRenderPipeline=0
 DeveloperHdr10Reference=1
 ForceHdrSwapChainFailure=0
 )ini";
+    // Without DeveloperMode the reference keeps its saved value and has no effect.
     parsed = ParsePluginConfiguration(referenceWithoutDeveloper);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(
-        parsed.error ==
-        PluginConfigurationError::invalidCombination);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(!parsed.value.developerHdr10Reference && parsed.stored.developerHdr10Reference);
+    FO4HDR_CHECK(parsed.value.productionRequested);
 
+    // The forced failure needs an HDR request: production HDR or the reference.
     constexpr std::string_view failureWithoutReference = R"ini(
 [General]
 HdrEnabled=1
@@ -1033,10 +1034,12 @@ DeveloperHdr10Reference=0
 ForceHdrSwapChainFailure=1
 )ini";
     parsed = ParsePluginConfiguration(failureWithoutReference);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(
-        parsed.error ==
-        PluginConfigurationError::invalidCombination);
+    FO4HDR_CHECK(parsed.valid && parsed.value.forceHdrSwapChainFailure);
+    std::string failureWithoutRequest{failureWithoutReference};
+    failureWithoutRequest.replace(failureWithoutRequest.find("HdrEnabled=1"), 12, "HdrEnabled=0");
+    parsed = ParsePluginConfiguration(failureWithoutRequest);
+    FO4HDR_CHECK(parsed.valid && !parsed.value.forceHdrSwapChainFailure);
+    FO4HDR_CHECK(parsed.stored.forceHdrSwapChainFailure);
 }
 
 }  // namespace

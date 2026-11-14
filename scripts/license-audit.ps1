@@ -347,6 +347,7 @@ function Get-Fo4HdrForbiddenArtifactReason {
 function Assert-Fo4HdrSafeArtifactRules {
     foreach ($relative in @(
             "third_party/xmake-package-sources/spdlog-v1.16.0.zip",
+            "third_party/xmake-package-sources/simpleini-v4.25.tar.gz",
             "src/plugin/PluginMain.cpp"
     )) {
         if (Get-Fo4HdrForbiddenArtifactReason $relative) {

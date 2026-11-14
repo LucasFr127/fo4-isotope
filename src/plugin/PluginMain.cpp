@@ -418,6 +418,25 @@ namespace
     return true;
 }
 
+// Writes the generated or repaired INI and logs what the load pass changed.
+void WriteNormalizedSettings(const std::filesystem::path& settingsPath,
+    const fo4hdr::PluginConfigurationResult& configuration)
+{
+    const auto file = configuration.fileMissing ? "generated" :
+        configuration.rewriteNeeded ? "normalized" : "unchanged";
+    if (configuration.rewriteNeeded &&
+        !fo4hdr::WriteSettingsFile(settingsPath, configuration.text))
+        REX::WARN("configuration file={} written=false", file);
+    const auto& counts = configuration.repairs.counts;
+    REX::INFO("configuration file={} added={} renamed={} defaulted={} clamped={} dropped={}",
+        file, counts[0], counts[1], counts[2], counts[3], counts[4]);
+    // A generated file adds every key; there is nothing to list.
+    if (configuration.fileMissing) return;
+    for (const auto& repair : configuration.repairs.entries)
+        REX::INFO("configuration repair={} key=[{}]{} text={}",
+            fo4hdr::ToString(repair.kind), repair.section, repair.key, repair.text);
+}
+
 [[nodiscard]] fo4hdr::PluginConfigurationResult LoadDiagnosticsConfiguration(
     const std::optional<std::filesystem::path>& executable)
 {
@@ -432,17 +451,19 @@ namespace
             fo4hdr::LoadPluginConfiguration(
                 *settingsPath);
         if (diagnosticsConfiguration.valid)
+        {
+            WriteNormalizedSettings(*settingsPath, diagnosticsConfiguration);
             (void)fo4hdr::InitializeSettingsPersistence(*settingsPath);
+        }
     }
     REX::INFO(
-        "diagnostics_configuration valid={} error={} line={} "
+        "diagnostics_configuration valid={} error={} "
         "developer_mode={} trace_render_pipeline={} measure_performance={} shared_ui={} reference={} "
         "forced_failure={} enabled={} sdr_enabled={} production_requested={} "
         "algorithm={} display_peak_nits={} ui_paper_white_nits={} "
         "exposure_ev={} exposure_multiplier={}",
         diagnosticsConfiguration.valid,
         fo4hdr::ToString(diagnosticsConfiguration.error),
-        diagnosticsConfiguration.line,
         diagnosticsConfiguration.value.developerMode,
         diagnosticsConfiguration.value.traceRenderPipeline,
         diagnosticsConfiguration.value.measurePerformance,
@@ -460,15 +481,16 @@ namespace
     return diagnosticsConfiguration;
 }
 
-// An unusable INI still starts SDR mode, so the settings menu can open and
-// name the problem; the INI is left untouched because saving stays off.
+// An INI that exists but cannot be read still starts SDR mode, so the settings
+// menu can open and name the problem; the INI is left untouched because
+// saving stays off.
 void UseFallbackConfiguration(fo4hdr::PluginConfigurationResult& configuration)
 {
     if (configuration.valid) return;
     configuration.value = fo4hdr::FallbackPluginConfiguration();
-    REX::WARN("configuration valid=false error={} line={} fallback=sdr-defaults "
-              "hint=replace-FO4Isotope.ini-with-the-shipped-file",
-        fo4hdr::ToString(configuration.error), configuration.line);
+    REX::WARN("configuration valid=false error={} fallback=sdr-defaults "
+              "hint=check-FO4Isotope.ini-permissions-or-delete-it",
+        fo4hdr::ToString(configuration.error));
 }
 
 void ReportGameObserverStatus(bool observerActive) noexcept

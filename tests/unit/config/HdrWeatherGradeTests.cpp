@@ -48,17 +48,18 @@ void TestGradePathNormalization()
         "bad\xC0\xAF.esm|000001", normalized));
 }
 
+// Absent production keys take their defaults; only the reference turns production off.
 void TestNeutralWeatherGradeConfiguration()
 {
-    for (const auto reference : {"0", "1"})
+    for (const auto [reference, production] : {std::pair{"0", true}, std::pair{"1", false}})
     {
         const auto text = std::string{"[General]\nHdrEnabled=1\nDeveloperMode=1\n"
             "[Debug]\nTraceRenderPipeline=1\n"
             "ForceHdrSwapChainFailure=0\nDeveloperHdr10Reference="} + reference + "\n";
         const auto parsed = ParsePluginConfiguration(text);
         FO4HDR_CHECK(parsed.valid);
-        FO4HDR_CHECK(!parsed.value.productionRequested);
-        FO4HDR_CHECK(!parsed.value.weatherGradeResponse.enabled);
+        FO4HDR_CHECK(parsed.value.productionRequested == production);
+        FO4HDR_CHECK(parsed.value.weatherGradeResponse == WeatherGradeResponseSettings{});
     }
 }
 
@@ -88,19 +89,25 @@ void TestWeatherGradeConfiguration()
     const auto reloaded = ParsePluginConfiguration(saved);
     FO4HDR_CHECK(reloaded.valid);
     FO4HDR_CHECK(reloaded.value.weatherGradeResponse == parsed.value.weatherGradeResponse);
-    FO4HDR_CHECK(saved.find("GradeProfilesEnabled") == std::string::npos);
-    FO4HDR_CHECK(saved.find("[LUT:test.dds]\nColor=25\n") != std::string::npos);
+    // The retired grade-profile switch and sections are dropped.
+    FO4HDR_CHECK(!saved.contains("GradeProfilesEnabled"));
+    FO4HDR_CHECK(!saved.contains("[LUT:test.dds]") && !saved.contains("[IMGS:"));
     FO4HDR_CHECK(RewriteHdrSettingsIni(saved, {parsed.value}, {}) == saved);
+    // Invalid values are repaired into a valid response.
     for (const auto invalid : {
              "Enabled=2", "ColorGain=-0.01", "LuminanceGain=2.01",
              "LuminanceBase=101", "ColorMinimum=70\nColorMaximum=60",
              "ColorSunlight=nan", "ColorColorChange=1001",
              "LuminanceIntercept=-1001", "Enabled=0\nEnabled=1"})
     {
-        const auto rejected = ParsePluginConfiguration(
+        const auto repaired = ParsePluginConfiguration(
             minimal + "\n[WeatherLutResponse]\n" + invalid + "\n");
-        FO4HDR_CHECK(!rejected.valid);
+        FO4HDR_CHECK(repaired.valid);
+        FO4HDR_CHECK(ValidateWeatherGradeResponseSettings(repaired.value.weatherGradeResponse));
     }
+    const auto raised = ParsePluginConfiguration(
+        minimal + "\n[WeatherLutResponse]\nColorMinimum=70\nColorMaximum=60\n");
+    FO4HDR_CHECK(raised.value.weatherGradeResponse.color.maximum == 70.0);
 }
 
 }  // namespace fo4hdr::tests

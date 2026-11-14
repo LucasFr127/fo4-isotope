@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <string_view>
 
 namespace fo4hdr {
 
@@ -50,6 +51,9 @@ private:
     bool requestFailed_{};
 };
 
+// Replaces the INI behind iniPath with text through a sibling temporary file.
+[[nodiscard]] bool WriteSettingsFile(
+    const std::filesystem::path& iniPath, std::string_view text) noexcept;
 [[nodiscard]] bool InitializeSettingsPersistence(
     const std::filesystem::path& iniPath) noexcept;
 [[nodiscard]] std::uint64_t RequestHdrSettingsSave(

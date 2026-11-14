@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace fo4hdr {
 
@@ -33,100 +35,80 @@ struct PluginConfiguration : HdrSettings
     // Numerical/display reference validation is independent of production HDR.
     bool developerHdr10Reference{};
     bool forceHdrSwapChainFailure{};
-    // Startup took FallbackPluginConfiguration because the INI was unusable.
+    // Startup took FallbackPluginConfiguration because the INI was unreadable.
     bool configurationDefaults{};
     bool operator==(const PluginConfiguration&) const = default;
 };
 
-// Neutral SDR-only settings for an unusable INI, so the settings menu can
-// still open and name the problem. HDR, diagnostics and saving stay off.
+// Neutral SDR-only settings for an INI that exists but cannot be read, so the
+// settings menu can still open and name the problem. HDR, diagnostics and
+// saving stay off.
 [[nodiscard]] PluginConfiguration FallbackPluginConfiguration() noexcept;
-
-// SDR profile sections reuse their HDR section's key names.
-struct SdrProfileSection { std::string_view sdr; std::string_view base; };
-inline constexpr std::array kSdrProfileSections{
-    SdrProfileSection{"SdrToneMapper", "ToneMapper"},
-    SdrProfileSection{"SdrACES2", "ACES2"},
-    SdrProfileSection{"SdrAgX", "AgX"},
-    SdrProfileSection{"SdrGT7", "GT7"},
-    SdrProfileSection{"SdrImage", "Image"},
-    SdrProfileSection{"SdrSelectiveColor", "SelectiveColor"},
-    SdrProfileSection{"SdrEffects", "Effects"},
-    SdrProfileSection{"SdrWeatherLutResponse", "WeatherLutResponse"}};
-
-// HDR-only keys of those sections: the grading method and curve lift the LUTs
-// into HDR, and AgX Shoulder Power has no effect at the SDR white.
-struct SdrExcludedKey { std::string_view base; std::string_view key; };
-inline constexpr std::array kHdrOnlyProfileKeys{
-    SdrExcludedKey{"Image", "ColorGradingMethod"},
-    SdrExcludedKey{"Image", "ColorGradingCurve"},
-    SdrExcludedKey{"AgX", "ShoulderPower"}};
-
-// SDR-only keys of those sections, ignored in the HDR sections.
-inline constexpr std::array kSdrOnlyProfileKeys{
-    SdrExcludedKey{"ToneMapper", "AutomaticWeatherResponse"}};
-
-[[nodiscard]] constexpr bool IsSdrOnlyProfileKey(std::string_view base, std::string_view key) noexcept
-{
-    for (const auto& entry : kSdrOnlyProfileKeys)
-        if (entry.base == base && entry.key == key) return true;
-    return false;
-}
-
-// The HDR base section of an SDR profile section, or empty for any other section.
-[[nodiscard]] constexpr std::string_view SdrProfileBaseSection(std::string_view section) noexcept
-{
-    for (const auto& entry : kSdrProfileSections)
-        if (entry.sdr == section) return entry.base;
-    return {};
-}
-
-// The SDR profile section for an HDR base section, or empty when it has none.
-[[nodiscard]] constexpr std::string_view SdrProfileSectionName(std::string_view base) noexcept
-{
-    for (const auto& entry : kSdrProfileSections)
-        if (entry.base == base) return entry.sdr;
-    return {};
-}
-
-[[nodiscard]] constexpr bool IsSdrProfileKey(std::string_view base, std::string_view key) noexcept
-{
-    if (SdrProfileSectionName(base).empty()) return false;
-    for (const auto& excluded : kHdrOnlyProfileKeys)
-        if (excluded.base == base && excluded.key == key) return false;
-    return true;
-}
 
 enum class PluginConfigurationError
 {
     none,
-    fileUnavailable,
-    invalidSyntax,
-    missingKey,
-    duplicateKey,
-    invalidBoolean,
-    invalidNumber,
-    valueOutOfRange,
-    unsupportedAlgorithm,
-    unsupportedColorGradingMethod,
-    unsupportedColorGradingCurve,
-    invalidCombination
+    fileUnavailable
+};
+
+// How the load pass changed one INI entry. An added key was absent
+// and takes its default; a defaulted key had text that does not parse.
+enum class ConfigurationRepairKind : std::uint8_t
+{
+    added,
+    renamed,
+    defaulted,
+    clamped,
+    dropped
+};
+
+struct ConfigurationRepair
+{
+    ConfigurationRepairKind kind{};
+    std::string section;
+    std::string key;
+    // The entry's text before the repair; empty for an added key.
+    std::string text;
+};
+
+inline constexpr std::size_t kMaximumListedConfigurationRepairs{32};
+
+struct ConfigurationRepairs
+{
+    // Indexed by ConfigurationRepairKind; complete even when entries is full.
+    std::array<std::uint32_t, 5> counts{};
+    std::vector<ConfigurationRepair> entries;
 };
 
 struct PluginConfigurationResult
 {
+    // The configuration in effect: diagnostics without DeveloperMode are off.
     PluginConfiguration value{};
+    // Every key as resolved from the file, which the render writes back.
+    PluginConfiguration stored{};
     PluginConfigurationError error{
         PluginConfigurationError::fileUnavailable};
-    std::size_t line{};
     bool valid{};
+    // The canonical INI text of stored.
+    std::string text;
+    ConfigurationRepairs repairs;
+    bool fileMissing{};
+    // The file is missing or its bytes differ from text.
+    bool rewriteNeeded{};
 };
 
+// Resolves every key from INI text: unknown entries are dropped, former names
+// renamed, invalid values defaulted and out-of-range numbers clamped.
 [[nodiscard]] PluginConfigurationResult
 ParsePluginConfiguration(std::string_view text) noexcept;
+// A missing file reads as empty; an unreadable one returns an invalid result.
 [[nodiscard]] PluginConfigurationResult
 LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;
+// The canonical INI text, comments included, for stored values; throws on
+// allocation failure.
+[[nodiscard]] std::string RenderPluginConfiguration(
+    const PluginConfiguration& stored);
 [[nodiscard]] std::string_view ToString(
     ProductionToneMapperAlgorithm algorithm) noexcept;
 [[nodiscard]] std::string_view ToString(
@@ -135,5 +117,7 @@ LoadPluginConfiguration(
     ColorGradingCurve curve) noexcept;
 [[nodiscard]] std::string_view ToString(
     PluginConfigurationError error) noexcept;
+[[nodiscard]] std::string_view ToString(
+    ConfigurationRepairKind kind) noexcept;
 
 }  // namespace fo4hdr

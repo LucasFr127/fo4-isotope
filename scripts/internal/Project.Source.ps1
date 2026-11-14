@@ -200,9 +200,10 @@ function Test-Fo4HdrDependencySources {
     }
 
     $packages = @($manifest.packages)
-    if ($packages.Count -ne 1 -or $packages[0].name -ne "spdlog") {
+    if ($packages.Count -ne 2 -or
+        (Compare-Object @($packages.name | Sort-Object) @("simpleini", "spdlog"))) {
         throw (
-            "The linked XMake source manifest must contain exactly spdlog; " +
+            "The linked XMake source manifest must contain exactly SimpleIni and spdlog; " +
             "CMake and Ninja in the XMake lock are build tools, not linked " +
             "libraries."
         )
@@ -210,8 +211,10 @@ function Test-Fo4HdrDependencySources {
 
     Assert-Fo4HdrSpdlogSources $packages $versions $dependencyLock.Spdlog $ArtifactRoot
 
+    Assert-Fo4HdrSimpleIniSources $packages $versions $dependencyLock.SimpleIni $ArtifactRoot
+
     Assert-Fo4HdrDependencyNotices $RepoRoot
-    Write-Host "Validated locked spdlog source, recipe, license, and notice identities."
+    Write-Host "Validated locked SimpleIni and spdlog source, recipe, license, and notice identities."
 }
 
 function Get-Fo4HdrSourceInventoryEntries {
@@ -308,7 +311,18 @@ function Read-Fo4HdrDependencyLock {
         throw "xmake-requires.lock does not contain spdlog."
     }
 
-    return [pscustomobject]@{ Versions = $versions; Spdlog = $lockedSpdlog }
+    $lockedSimpleIni = [regex]::Match(
+        $lockText,
+        '(?ms)^ {8}\["simpleini (?<version>v[0-9.]+)#[0-9a-f]+"\]\s*=\s*\{(?<body>.*?)(?=^ {8}\["|^ {4}\})')
+    if (-not $lockedSimpleIni.Success) {
+        throw "xmake-requires.lock does not contain SimpleIni."
+    }
+
+    return [pscustomobject]@{
+        Versions = $versions
+        Spdlog = $lockedSpdlog
+        SimpleIni = $lockedSimpleIni
+    }
 }
 
 function Assert-Fo4HdrSpdlogSources {
@@ -332,6 +346,75 @@ function Assert-Fo4HdrSpdlogSources {
 
 }
 
+function Assert-Fo4HdrSimpleIniSources {
+    param([object[]]$Packages, [psobject]$Versions, [Text.RegularExpressions.Match]$LockedSimpleIni, [string]$ArtifactRoot)
+    $package = @($packages | Where-Object name -eq "simpleini")[0]
+    Assert-Fo4HdrSimpleIniIdentity $package $versions.xmake.packages.simpleini $LockedSimpleIni
+    Assert-Fo4HdrSimpleIniArchives $package (Get-Fo4HdrPackageSourceArtifacts $package $ArtifactRoot)
+
+}
+
+function Assert-Fo4HdrSimpleIniIdentity {
+    param([psobject]$Package, [psobject]$Locked, [Text.RegularExpressions.Match]$LockedSimpleIni)
+    $differing = @(
+        @("version", "sourceSha256", "recipeCommit", "recipeTreeSha1", "recipeSha256", "licenseSha256") |
+            Where-Object { [string]$Package.$_ -ne [string]$Locked.$_ })
+    if ($differing.Count) {
+        throw "The SimpleIni $($differing[0]) differs across source authorities."
+    }
+    $lockedBody = $LockedSimpleIni.Groups['body'].Value
+    $canonical = @(
+        ($Package.repository -eq "https://github.com/brofield/simpleini.git"),
+        ($Package.sourceRevision -eq $Locked.version),
+        ($Package.sourceArchiveFormat -eq "tar.gz"),
+        ($Package.recipeRepository -eq "https://github.com/xmake-io/xmake-repo.git"),
+        ($LockedSimpleIni.Groups['version'].Value -eq $Locked.version),
+        $lockedBody.Contains($Package.recipeCommit),
+        $lockedBody.Contains($Package.recipeRepository))
+    if ($canonical -contains $false) {
+        throw "The SimpleIni source, recipe or XMake lock identity is not canonical."
+    }
+
+}
+
+function Assert-Fo4HdrSimpleIniArchives {
+    param([psobject]$Package, [psobject]$Artifacts)
+    $archiveHashes = @(
+        ((Get-Sha256 $Artifacts.Source) -eq $Package.sourceSha256.ToLowerInvariant()),
+        ((Get-Sha256 $Artifacts.Recipe) -eq $Package.recipeSha256.ToLowerInvariant()))
+    if ($archiveHashes -contains $false) {
+        throw "The cached SimpleIni source or recipe hash differs from its manifest."
+    }
+    $licenseHashes = @($Package.licenseFiles | ForEach-Object {
+        Get-Fo4HdrSourceArchiveEntrySha256 $Artifacts.Source "tar.gz" $_ })
+    if (@($licenseHashes | Where-Object { $_ -ne $Package.licenseSha256.ToLowerInvariant() }).Count) {
+        throw "The SimpleIni MIT license hash differs from its manifest."
+    }
+    Assert-Fo4HdrSimpleIniRecipeContents $Package $Artifacts.Recipe
+
+}
+
+function Assert-Fo4HdrSimpleIniRecipeContents {
+    param([psobject]$Package, [string]$RecipePath)
+    $recipeArchive = Open-Fo4HdrValidatedZipArchive $recipePath
+    try {
+        $recipeText = Read-Fo4HdrZipEntryUtf8Text `
+            $recipeArchive `
+            "xmake-repo/packages/s/simpleini/xmake.lua"
+        $missing = @(
+            @('set_license("MIT")', $package.version, $package.sourceSha256.ToLowerInvariant(),
+                'https://github.com/brofield/simpleini') |
+                Where-Object { -not $recipeText.Contains($_) })
+        if ($missing.Count) {
+            throw "The archived SimpleIni recipe is missing: $($missing[0])"
+        }
+    }
+    finally {
+        $recipeArchive.Dispose()
+    }
+
+}
+
 function Assert-Fo4HdrDependencyNotices {
     param([string]$RepoRoot)
     $notices = Get-Content `
@@ -340,6 +423,8 @@ function Assert-Fo4HdrDependencyNotices {
     foreach ($noticeIdentity in @(
         "spdlog",
         "Copyright (c) 2016 Gabi Melman",
+        "SimpleIni",
+        "Copyright (c) 2006-2024 Brodie Thiesfield",
         "MIT"
     )) {
         if ($notices -notlike "*$noticeIdentity*") {
@@ -618,6 +703,7 @@ function Assert-Fo4HdrLockedPackageSet {
     $expectedLockKeys = @(
         "cmake#f56260b5",
         "ninja#f56260b5",
+        "simpleini v4.25#f56260b5",
         "spdlog v1.16.0#09c8c173"
     )
     if ($lockedPackageKeys.Count -ne $expectedLockKeys.Count -or

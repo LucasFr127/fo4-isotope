@@ -14,9 +14,9 @@ namespace {
 constexpr std::array<const char*, 8> kSdrModeReasonTexts{
     nullptr,
     nullptr,
-    "FO4Isotope.ini is missing or has an invalid setting, so defaults are active and "
-        "changes are not saved. The F4SE log names the setting. Replace the INI with the "
-        "one from the download, then restart the game.",
+    "FO4Isotope.ini could not be read, so defaults are active and changes are not saved. "
+        "The F4SE log names the error. Check the file's permissions, or delete it so "
+        "Isotope creates a new one, then restart the game.",
     "SDR is shown because ENB is installed. Remove ENB to use HDR.",
     "SDR is shown because Windows HDR was off or no HDR display was found when the game "
         "started. On an SDR display, turn off Enable HDR. On an HDR display, turn on Use HDR "
@@ -36,7 +36,7 @@ static_assert(kSdrModeReasonTexts.size() ==
 constexpr std::array<SettingsMenuHealth, 8> kSdrModeHealth{{
     {HealthSeverity::info, "SDR output."},
     {HealthSeverity::info, "SDR output: HDR is off."},
-    {HealthSeverity::warning, "SDR output: FO4Isotope.ini is invalid.", "HDR unavailable"},
+    {HealthSeverity::warning, "SDR output: FO4Isotope.ini could not be read.", "HDR unavailable"},
     {HealthSeverity::warning, "SDR output: ENB is installed.", "HDR unavailable"},
     {HealthSeverity::info, "SDR output: no HDR display. On an SDR display, turn off Enable HDR."},
     {HealthSeverity::warning, "SDR output: the swap chain cannot carry HDR.", "HDR unavailable"},

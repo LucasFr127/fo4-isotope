@@ -40,6 +40,10 @@ add_defines("NOMINMAX")
 add_rules("mode.debug", "mode.releasedbg")
 add_rules("plugin.vsxmake.autoupdate")
 
+-- SimpleIni reads and writes the INI. CommonLib's optional INI
+-- support stays off; it requests this same version.
+add_requires("simpleini v4.25")
+
 option("fo4hdr_build_tests")
     set_default(true)
     set_showmenu(true)
@@ -179,6 +183,7 @@ target("fo4hdr-core")
         "src/config/HdrSettings.cpp",
         "src/config/PluginConfiguration.cpp",
         "src/config/SettingsPersistence.cpp")
+    add_packages("simpleini")
     add_files(
         "src/output/RenderPipelineContract.cpp",
         "src/output/NativeLutObservation.cpp",

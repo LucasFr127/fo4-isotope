@@ -436,54 +436,36 @@ void Replace(std::string& text, std::string_view before,
         text.replace(position, before.size(), after);
 }
 
-void CheckUnsupportedAlgorithm(std::string_view algorithm)
+// Names match in any case; retired and unknown names take the default operator.
+void CheckAlgorithmName(std::string_view algorithm, ProductionToneMapperAlgorithm expected)
 {
     auto text = ProductionConfiguration();
     Replace(text, "Algorithm=ACES2", "Algorithm=" + std::string(algorithm));
     const auto parsed = ParsePluginConfiguration(text);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(parsed.error ==
-        PluginConfigurationError::unsupportedAlgorithm);
+    FO4HDR_CHECK(parsed.valid);
+    FO4HDR_CHECK(parsed.value.productionAlgorithm == expected);
 }
 
+[[nodiscard]] double ParsedPeak(std::string_view peak)
+{
+    auto text = ProductionConfiguration();
+    Replace(text, "DisplayPeakNits=1000", "DisplayPeakNits=" + std::string(peak));
+    const auto parsed = ParsePluginConfiguration(text);
+    FO4HDR_CHECK(parsed.valid);
+    return parsed.value.displayPeakNits;
+}
+
+// Out-of-range peaks clamp; text that does not parse takes the default.
 void CheckConfigurationPeak()
 {
-    std::string text;
-    PluginConfigurationResult parsed;
-    for (const auto peak : {"400", "2000"})
-    {
-        text = ProductionConfiguration();
-        Replace(text, "DisplayPeakNits=1000",
-            "DisplayPeakNits=" + std::string(peak));
-        FO4HDR_CHECK(ParsePluginConfiguration(text).valid);
-    }
-    for (const auto peak : {"399", "2001", "-1"})
-    {
-        text = ProductionConfiguration();
-        Replace(text, "DisplayPeakNits=1000",
-            "DisplayPeakNits=" + std::string(peak));
-        parsed = ParsePluginConfiguration(text);
-        FO4HDR_CHECK(!parsed.valid);
-        FO4HDR_CHECK(parsed.error ==
-            PluginConfigurationError::valueOutOfRange);
-    }
-
-    for (const auto invalid : {"nan", "inf", "1000junk"})
-    {
-        text = ProductionConfiguration();
-        Replace(text, "DisplayPeakNits=1000",
-            "DisplayPeakNits=" + std::string(invalid));
-        parsed = ParsePluginConfiguration(text);
-        FO4HDR_CHECK(!parsed.valid);
-        FO4HDR_CHECK(parsed.error ==
-            PluginConfigurationError::invalidNumber);
-    }
-    text = ProductionConfiguration();
+    for (const auto [peak, expected] : {std::pair{"400", 400.0}, std::pair{"2000", 2000.0},
+             std::pair{"399", 400.0}, std::pair{"2001", 2000.0}, std::pair{"-1", 400.0},
+             std::pair{"nan", 1000.0}, std::pair{"inf", 1000.0}, std::pair{"1000junk", 1000.0}})
+        FO4HDR_CHECK(ParsedPeak(peak) == expected);
+    auto text = ProductionConfiguration();
     Replace(text, "UiPaperWhiteNits=203", "UiPaperWhiteNits=99");
-    parsed = ParsePluginConfiguration(text);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(parsed.error ==
-        PluginConfigurationError::valueOutOfRange);
+    FO4HDR_CHECK(ParsePluginConfiguration(text).value.uiPaperWhiteNits ==
+        kMinimumUiPaperWhiteNits);
 }
 
 void CheckConfigurationExposure()
@@ -502,29 +484,27 @@ void CheckConfigurationExposure()
         FO4HDR_CHECK(test::Approx(parsed.value.sceneExposureMultiplier,
             exposure.second, 1.0e-15));
     }
-    for (const auto invalid : {"-4.0001", "4.0001"})
+    // Exposure clamps to its range, a repeated key keeps its last value and an
+    // absent one takes the default.
+    for (const auto exposure : {std::pair{"-4.0001", 0.0625}, std::pair{"4.0001", 16.0}})
     {
         text = ProductionConfiguration();
         Replace(text, "ExposureEV=0",
-            "ExposureEV=" + std::string(invalid));
+            "ExposureEV=" + std::string(exposure.first));
         parsed = ParsePluginConfiguration(text);
-        FO4HDR_CHECK(!parsed.valid);
-        FO4HDR_CHECK(parsed.error ==
-            PluginConfigurationError::valueOutOfRange);
+        FO4HDR_CHECK(parsed.valid);
+        FO4HDR_CHECK(test::Approx(parsed.value.sceneExposureMultiplier,
+            exposure.second, 1.0e-15));
     }
 
     text = ProductionConfiguration();
     Replace(text, "ExposureEV=0", "ExposureEV=0\nExposureEV=1");
     parsed = ParsePluginConfiguration(text);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(parsed.error ==
-        PluginConfigurationError::duplicateKey);
+    FO4HDR_CHECK(parsed.valid && parsed.value.sceneExposureMultiplier == 2.0);
     text = ProductionConfiguration();
     Replace(text, "ExposureEV=0\n", "");
     parsed = ParsePluginConfiguration(text);
-    FO4HDR_CHECK(!parsed.valid);
-    FO4HDR_CHECK(parsed.error ==
-        PluginConfigurationError::missingKey);
+    FO4HDR_CHECK(parsed.valid && parsed.value.sceneExposureMultiplier == 1.0);
 }
 
 void CheckConfigurationModes()
@@ -540,9 +520,10 @@ TraceRenderPipeline=1
 DeveloperHdr10Reference=0
 ForceHdrSwapChainFailure=0
 )ini";
+    // Absent production keys take their defaults, so HDR is still requested.
     parsed = ParsePluginConfiguration(diagnosticOnly);
     FO4HDR_CHECK(parsed.valid);
-    FO4HDR_CHECK(!parsed.value.productionRequested);
+    FO4HDR_CHECK(parsed.value.productionRequested && parsed.value.traceRenderPipeline);
     FO4HDR_CHECK(parsed.value.sceneExposureMultiplier == 1.0);
 
     text = ProductionConfiguration();
@@ -585,9 +566,12 @@ void TestProductionConfiguration()
 
     for (const auto retiredOrUnknown : {
              "ACES2LMT", "ACES1", "ACESFitted", "AgXPunchy", "ACES",
-             "ACES 2", "ACES 2 LMT", "ACES2-LMT", "ACESLMT", "aces2",
-             "aces2lmt", "agx", "gt7"})
-        CheckUnsupportedAlgorithm(retiredOrUnknown);
+             "ACES 2", "ACES 2 LMT", "ACES2-LMT", "ACESLMT", "aces2lmt"})
+        CheckAlgorithmName(retiredOrUnknown, HdrSettings{}.productionAlgorithm);
+    for (const auto [name, algorithm] : {std::pair{"aces2", ProductionToneMapperAlgorithm::aces2},
+             std::pair{"agx", ProductionToneMapperAlgorithm::agX},
+             std::pair{"gt7", ProductionToneMapperAlgorithm::gt7}})
+        CheckAlgorithmName(name, algorithm);
 
     CheckConfigurationPeak();
     CheckConfigurationExposure();

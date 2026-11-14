@@ -6,156 +6,15 @@
 
 #include <Windows.h>
 
-#include <algorithm>
-#include <array>
 #include <atomic>
-#include <charconv>
 #include <fstream>
-#include <iomanip>
 #include <iterator>
-#include <new>
-#include <limits>
-#include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace fo4hdr {
 namespace {
-
-struct PersistedKey
-{
-    std::string_view section;
-    std::string_view key;
-    double HdrSettings::*number{};
-    bool algorithm{};
-    bool colorGradingMethod{};
-    double ToneMapperParameters::*toneMapperNumber{};
-    WeatherGradeChannel WeatherGradeResponseSettings::*weatherChannel{};
-    double WeatherGradeChannel::*weatherNumber{};
-    std::size_t weatherCoefficient{4};
-    bool weatherEnabled{};
-    // Last, so earlier positional rows are unaffected.
-    bool colorGradingCurve{};
-    bool HdrSettings::*flag{};
-    bool HdrInterfaceSettings::*interfaceFlag{};
-    // A released former name, rewritten in place under the current one.
-    std::string_view formerKey{};
-};
-
-constexpr std::array<PersistedKey, 48> kPersistedKeys{{
-    {.section = "General", .key = "HdrEnabled", .interfaceFlag = &HdrInterfaceSettings::hdrEnabled},
-    {"WeatherLutResponse", "Enabled", nullptr, false, false, nullptr, nullptr, nullptr, 4, true},
-    {"WeatherLutResponse", "LuminanceBase", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::base, 4},
-    {"WeatherLutResponse", "LuminanceGain", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::gain, 4},
-    {"WeatherLutResponse", "LuminanceMinimum", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::minimum, 4},
-    {"WeatherLutResponse", "LuminanceMaximum", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::maximum, 4},
-    {"WeatherLutResponse", "LuminanceIntercept", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, &WeatherGradeChannel::intercept, 4},
-    {"WeatherLutResponse", "LuminanceSunlight", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, nullptr, 0},
-    {"WeatherLutResponse", "LuminanceGlare", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, nullptr, 1},
-    {"WeatherLutResponse", "LuminanceAmbient", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, nullptr, 2},
-    {"WeatherLutResponse", "LuminanceColorChange", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::luminance, nullptr, 3},
-    {"WeatherLutResponse", "ColorBase", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::base, 4},
-    {"WeatherLutResponse", "ColorGain", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::gain, 4},
-    {"WeatherLutResponse", "ColorMinimum", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::minimum, 4},
-    {"WeatherLutResponse", "ColorMaximum", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::maximum, 4},
-    {"WeatherLutResponse", "ColorIntercept", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, &WeatherGradeChannel::intercept, 4},
-    {"WeatherLutResponse", "ColorSunlight", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, nullptr, 0},
-    {"WeatherLutResponse", "ColorGlare", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, nullptr, 1},
-    {"WeatherLutResponse", "ColorAmbient", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, nullptr, 2},
-    {"WeatherLutResponse", "ColorColorChange", nullptr, false, false, nullptr,
-        &WeatherGradeResponseSettings::color, nullptr, 3},
-    {"Output", "DisplayPeakNits", &HdrSettings::displayPeakNits},
-    {"Output", "UiPaperWhiteNits", &HdrSettings::uiPaperWhiteNits},
-    {"Output", "VideoWhiteNits", &HdrSettings::videoWhiteNits},
-    {"ToneMapper", "Algorithm", nullptr, true},
-    {.section = "ToneMapper", .key = "AutomaticWeatherResponse", .flag = &HdrSettings::sdrOperatorWeatherResponse},
-    {"ACES2", "ContrastLookStrength", nullptr, false, false,
-        &ToneMapperParameters::acesLookStrength},
-    {"AgX", "MiddleGrayOffsetEV", nullptr, false, false,
-        &ToneMapperParameters::agxMiddleGrayEv},
-    {"AgX", "Contrast", nullptr, false, false,
-        &ToneMapperParameters::agxContrast},
-    {.section = "AgX", .key = "ColorResponse",
-        .toneMapperNumber = &ToneMapperParameters::agxHdrPurity, .formerKey = "HdrColorResponse"},
-    {"AgX", "ShoulderPower", nullptr, false, false,
-        &ToneMapperParameters::agxHdrShoulderPower},
-    {"GT7", "ToeStrength", nullptr, false, false,
-        &ToneMapperParameters::gt7ToeStrength},
-    {"GT7", "ShoulderStart", nullptr, false, false,
-        &ToneMapperParameters::gt7ShoulderStart},
-    {"GT7", "ColorBlend", nullptr, false, false,
-        &ToneMapperParameters::gt7ColorBlend},
-    {"Image", "ExposureEV", &HdrSettings::exposureEv},
-    {"Image", "Contrast", &HdrSettings::contrast},
-    {"Image", "Blacks", &HdrSettings::blacks},
-    {"Image", "Highlights", &HdrSettings::highlights},
-    {"Image", "Shadows", &HdrSettings::shadows},
-    {"Image", "Saturation", &HdrSettings::saturationPercent},
-    {"Image", "HighlightSaturation", &HdrSettings::highlightSaturationPercent},
-    {"Image", "Temperature", &HdrSettings::temperature},
-    {"Image", "Tint", &HdrSettings::tint},
-    {"Image", "ColorGradingMethod", nullptr, false, true},
-    {.section = "Image", .key = "ColorGradingCurve", .colorGradingCurve = true},
-    {"Effects", "VanillaColorGradingStrength",
-        &HdrSettings::vanillaColorGradingStrengthPercent},
-    {.section = "Effects", .key = "FallbackGradeLuminance",
-        .number = &HdrSettings::fallbackGradeLuminancePercent,
-        .formerKey = "VanillaGradeLuminanceStrength"},
-    {.section = "Effects", .key = "FallbackGradeColor",
-        .number = &HdrSettings::fallbackGradeColorPercent,
-        .formerKey = "VanillaGradeColorStrength"},
-    {"Effects", "BloomStrength", &HdrSettings::bloomStrengthPercent}
-}};
-
-struct SelectivePersistedKey
-{
-    std::string_view key;
-    std::size_t region{};
-    double SelectiveColorRegionSettings::*number{};
-};
-
-constexpr std::array<SelectivePersistedKey, 21> kSelectivePersistedKeys{{
-    {"RedHue", 0, &SelectiveColorRegionSettings::hueDegrees},
-    {"RedSaturation", 0, &SelectiveColorRegionSettings::saturationPercent},
-    {"RedBrightness", 0, &SelectiveColorRegionSettings::brightness},
-    {"OrangeHue", 1, &SelectiveColorRegionSettings::hueDegrees},
-    {"OrangeSaturation", 1, &SelectiveColorRegionSettings::saturationPercent},
-    {"OrangeBrightness", 1, &SelectiveColorRegionSettings::brightness},
-    {"YellowHue", 2, &SelectiveColorRegionSettings::hueDegrees},
-    {"YellowSaturation", 2, &SelectiveColorRegionSettings::saturationPercent},
-    {"YellowBrightness", 2, &SelectiveColorRegionSettings::brightness},
-    {"GreenHue", 3, &SelectiveColorRegionSettings::hueDegrees},
-    {"GreenSaturation", 3, &SelectiveColorRegionSettings::saturationPercent},
-    {"GreenBrightness", 3, &SelectiveColorRegionSettings::brightness},
-    {"CyanHue", 4, &SelectiveColorRegionSettings::hueDegrees},
-    {"CyanSaturation", 4, &SelectiveColorRegionSettings::saturationPercent},
-    {"CyanBrightness", 4, &SelectiveColorRegionSettings::brightness},
-    {"BlueHue", 5, &SelectiveColorRegionSettings::hueDegrees},
-    {"BlueSaturation", 5, &SelectiveColorRegionSettings::saturationPercent},
-    {"BlueBrightness", 5, &SelectiveColorRegionSettings::brightness},
-    {"MagentaHue", 6, &SelectiveColorRegionSettings::hueDegrees},
-    {"MagentaSaturation", 6, &SelectiveColorRegionSettings::saturationPercent},
-    {"MagentaBrightness", 6, &SelectiveColorRegionSettings::brightness}
-}};
 
 std::filesystem::path g_iniPath;
 HdrSettingsProfiles g_requestedSettings{};
@@ -172,347 +31,6 @@ void LockPersistenceWorker() noexcept
 {
     while (g_requestLock.test_and_set(std::memory_order_acquire))
         YieldProcessor();
-}
-
-[[nodiscard]] constexpr std::string_view Trim(std::string_view value) noexcept
-{
-    const auto first = value.find_first_not_of(" \t\r");
-    if (first == std::string_view::npos) return value.substr(value.size());
-    const auto last = value.find_last_not_of(" \t\r");
-    return value.substr(first, last - first + 1);
-}
-
-struct IniLine
-{
-    std::string_view raw;
-    std::string_view trimmed;
-    bool terminated{};
-
-    [[nodiscard]] bool IsSection() const noexcept
-    {
-        return trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']';
-    }
-
-    [[nodiscard]] std::string_view Section() const noexcept
-    {
-        return Trim(trimmed.substr(1, trimmed.size() - 2));
-    }
-
-    [[nodiscard]] std::optional<std::string_view> Key() const noexcept
-    {
-        if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#')
-            return std::nullopt;
-        const auto equals = trimmed.find('=');
-        if (equals == std::string_view::npos) return std::nullopt;
-        return Trim(trimmed.substr(0, equals));
-    }
-};
-
-[[nodiscard]] IniLine TakeIniLine(std::string_view& remaining) noexcept
-{
-    const auto end = remaining.find('\n');
-    auto raw = remaining.substr(0, end);
-    if (!raw.empty() && raw.back() == '\r') raw.remove_suffix(1);
-    const bool terminated = end != std::string_view::npos;
-    remaining = terminated ? remaining.substr(end + 1) : std::string_view{};
-    return {raw, Trim(raw), terminated};
-}
-
-[[nodiscard]] std::string_view IniNewline(std::string_view original) noexcept
-{
-    return original.find("\r\n") != std::string_view::npos ? "\r\n" : "\n";
-}
-
-void FinishIniLine(std::string& result, std::string_view newline)
-{
-    if (!result.empty() && !result.ends_with(newline)) result.append(newline);
-}
-
-constexpr std::string_view kUtf8Bom{"\xEF\xBB\xBF"};
-// The released settings-window keys; the host menu now owns them.
-constexpr std::string_view kRetiredSection{"Interface"};
-
-[[nodiscard]] std::string FormatNumber(double value)
-{
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(3) << value;
-    auto result = stream.str();
-    while (result.size() > 1 && result.back() == '0') result.pop_back();
-    if (!result.empty() && result.back() == '.') result.pop_back();
-    return result;
-}
-
-[[nodiscard]] std::string WeatherKeyValue(
-    const PersistedKey& key, const WeatherGradeResponseSettings& settings)
-{
-    std::string result(key.key);
-    result.push_back('=');
-    if (key.weatherEnabled)
-    {
-        result.push_back(settings.enabled ? '1' : '0');
-        return result;
-    }
-    const auto& channel = settings.*key.weatherChannel;
-    const auto value = key.weatherNumber != nullptr ? channel.*key.weatherNumber :
-        channel.coefficients[key.weatherCoefficient];
-    std::array<char, 64> buffer{};
-    const auto formatted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
-        std::chars_format::general, std::numeric_limits<double>::max_digits10);
-    result.append(buffer.data(), formatted.ptr);
-    return result;
-}
-
-// The value of a switch key; other keys have none.
-[[nodiscard]] std::optional<std::string> FlagKeyValue(
-    const PersistedKey& key,
-    const HdrSettings& settings,
-    const HdrInterfaceSettings& interfaceSettings)
-{
-    if (key.flag != nullptr) return settings.*key.flag ? "1" : "0";
-    if (key.interfaceFlag != nullptr) return interfaceSettings.*key.interfaceFlag ? "1" : "0";
-    return std::nullopt;
-}
-
-// The value of a key that names a choice or a switch; numbers have none.
-[[nodiscard]] std::optional<std::string> NamedKeyValue(
-    const PersistedKey& key,
-    const HdrSettings& settings,
-    const HdrInterfaceSettings& interfaceSettings)
-{
-    if (key.algorithm) return std::string(ToString(settings.productionAlgorithm));
-    if (key.colorGradingMethod) return std::string(ToString(settings.colorGradingMethod));
-    if (key.colorGradingCurve) return std::string(ToString(settings.colorGradingCurve));
-    return FlagKeyValue(key, settings, interfaceSettings);
-}
-
-[[nodiscard]] std::string KeyValue(
-    const PersistedKey& key,
-    const HdrSettings& settings,
-    const HdrInterfaceSettings& interfaceSettings)
-{
-    if (key.section == "WeatherLutResponse")
-        return WeatherKeyValue(key, settings.weatherGradeResponse);
-    std::string result(key.key);
-    result.push_back('=');
-    if (const auto named = NamedKeyValue(key, settings, interfaceSettings))
-        result.append(*named);
-    else if (key.toneMapperNumber != nullptr)
-        result.append(FormatNumber(
-            settings.toneMapperParameters.*key.toneMapperNumber));
-    else
-        result.append(FormatNumber(settings.*key.number));
-    return result;
-}
-
-[[nodiscard]] std::string SelectiveKeyValue(
-    const SelectivePersistedKey& key,
-    const HdrSettings& settings)
-{
-    const auto& region = settings.selectiveColor.regions[key.region];
-    return std::string(key.key) + "=" + FormatNumber(region.*key.number);
-}
-
-class SettingsIniWriter
-{
-public:
-    SettingsIniWriter(const HdrSettings& settings,
-        const HdrInterfaceSettings& interfaceSettings, bool sdrProfile = false) :
-        settings_(settings), interfaceSettings_(interfaceSettings), sdrProfile_(sdrProfile)
-    {
-        if (sdrProfile_)
-        {
-            // The SDR pass rewrites only its own sections; HDR rows are already written.
-            for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-                seen_[index] = !IsSdrProfileKey(kPersistedKeys[index].section, kPersistedKeys[index].key);
-            return;
-        }
-        // The HDR pass leaves SDR-only rows to the SDR pass.
-        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            seen_[index] = IsSdrOnlyProfileKey(kPersistedKeys[index].section, kPersistedKeys[index].key);
-    }
-
-    [[nodiscard]] std::string Rewrite(std::string_view original)
-    {
-        const auto hasBom = original.starts_with(kUtf8Bom);
-        if (hasBom) original.remove_prefix(kUtf8Bom.size());
-        newline_ = IniNewline(original);
-        result_.reserve(original.size() + kUtf8Bom.size() + 512);
-        if (hasBom) result_.append(kUtf8Bom);
-        while (!original.empty()) AppendLine(TakeIniLine(original));
-        CloseRetiredSection();
-        FinishIniLine(result_, newline_);
-        AppendMissingGroups();
-        return std::move(result_);
-    }
-
-private:
-    [[nodiscard]] bool IsRetiredKey(std::string_view name) const noexcept
-    {
-        // A full save performs one-way migration of retired names.
-        if (sdrProfile_) return false;
-        constexpr std::array<std::string_view, 6> interfaceKeys{"ToggleKey", "Scale",
-            "WindowWidth", "WindowHeight", "WindowX", "WindowY"};
-        if (section_ == kRetiredSection)
-            return std::ranges::find(interfaceKeys, name) != interfaceKeys.end();
-        return (section_ == "Image" && name == "GradeTransfer") ||
-            (section_ == "Effects" && name == "GradeProfilesEnabled") ||
-            (section_ == "Debug" && name == "ShowDeveloperOverlay");
-    }
-
-    [[nodiscard]] static bool NamesKey(const PersistedKey& key, std::string_view name) noexcept
-    {
-        return name == key.key || (!key.formerKey.empty() && name == key.formerKey);
-    }
-
-    [[nodiscard]] bool Writes(const PersistedKey& key) const noexcept
-    {
-        return sdrProfile_ ? IsSdrProfileKey(key.section, key.key) :
-            !IsSdrOnlyProfileKey(key.section, key.key);
-    }
-
-    [[nodiscard]] bool ReplaceKnownKey(std::string_view name)
-    {
-        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-        {
-            const auto& key = kPersistedKeys[index];
-            if (!Writes(key)) continue;
-            if (section_ != key.section || !NamesKey(key, name)) continue;
-            result_.append(KeyValue(key, settings_, interfaceSettings_));
-            seen_[index] = true;
-            return true;
-        }
-        return false;
-    }
-
-    [[nodiscard]] bool ReplaceSelectiveRegion(std::string_view name)
-    {
-        for (std::size_t index = 0; index < kSelectivePersistedKeys.size(); ++index)
-        {
-            if (name != kSelectivePersistedKeys[index].key) continue;
-            result_.append(SelectiveKeyValue(kSelectivePersistedKeys[index], settings_));
-            selectiveSeen_[index] = true;
-            return true;
-        }
-        return false;
-    }
-
-    [[nodiscard]] bool ReplaceSelectiveKey(std::string_view name)
-    {
-        if (name == "Enabled")
-        {
-            result_.append("Enabled=").push_back(settings_.selectiveColor.enabled ? '1' : '0');
-            selectiveEnabledSeen_ = true;
-            return true;
-        }
-        if (name == "Amount")
-        {
-            result_.append("Amount=").append(FormatNumber(settings_.selectiveColor.amountPercent));
-            selectiveAmountSeen_ = true;
-            return true;
-        }
-        return ReplaceSelectiveRegion(name);
-    }
-
-    [[nodiscard]] bool ReplaceKey(std::string_view name)
-    {
-        const auto retired = IsRetiredKey(name);
-        const auto known = ReplaceKnownKey(name);
-        if (section_ == "SelectiveColor")
-            return ReplaceSelectiveKey(name) || known || retired;
-        return known || retired;
-    }
-
-    // A full save drops the retired section, with its comments, unless it
-    // still holds a key it does not retire.
-    void CloseRetiredSection()
-    {
-        if (retiredSectionStart_) result_.resize(*retiredSectionStart_);
-        retiredSectionStart_.reset();
-    }
-
-    void OpenSection(std::string_view name)
-    {
-        CloseRetiredSection();
-        section_ = sdrProfile_ ? SdrProfileBaseSection(name) : name;
-        if (!sdrProfile_ && section_ == kRetiredSection) retiredSectionStart_ = result_.size();
-    }
-
-    void AppendLine(const IniLine& line)
-    {
-        if (line.IsSection()) OpenSection(line.Section());
-        const auto key = line.Key();
-        const auto replaced = key && ReplaceKey(*key);
-        if (key && !replaced) retiredSectionStart_.reset();
-        if (!replaced) result_.append(line.raw);
-        if (line.terminated) result_.append(newline_);
-    }
-
-    [[nodiscard]] bool MissingSelectiveKeys() const noexcept
-    {
-        return !selectiveEnabledSeen_ || !selectiveAmountSeen_ ||
-            std::ranges::find(selectiveSeen_, false) != selectiveSeen_.end();
-    }
-    void AppendMissingSelective()
-    {
-        const auto missing = MissingSelectiveKeys();
-        if (!missing) return;
-        result_.append("[").append(HeaderName("SelectiveColor")).append("]").append(newline_);
-        if (!selectiveEnabledSeen_)
-            result_.append("Enabled=").append(settings_.selectiveColor.enabled ? "1" : "0").append(newline_);
-        if (!selectiveAmountSeen_)
-            result_.append("Amount=").append(FormatNumber(settings_.selectiveColor.amountPercent)).append(newline_);
-        for (std::size_t index = 0; index < kSelectivePersistedKeys.size(); ++index)
-            if (!selectiveSeen_[index])
-                result_.append(SelectiveKeyValue(kSelectivePersistedKeys[index], settings_)).append(newline_);
-    }
-
-    void AppendMissingGroup(std::string_view group)
-    {
-        bool missing{};
-        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            missing = missing || (kPersistedKeys[index].section == group && !seen_[index]);
-        if (!missing) return;
-        result_.append("[").append(HeaderName(group)).append("]").append(newline_);
-        for (std::size_t index = 0; index < kPersistedKeys.size(); ++index)
-            if (kPersistedKeys[index].section == group && !seen_[index])
-                result_.append(KeyValue(kPersistedKeys[index], settings_, interfaceSettings_)).append(newline_);
-    }
-
-    void AppendMissingGroups()
-    {
-        constexpr std::array<std::string_view, 10> groups{"General", "Output", "ToneMapper",
-            "ACES2", "AgX", "GT7", "Image", "SelectiveColor", "Effects", "WeatherLutResponse"};
-        for (const auto group : groups)
-        {
-            if (sdrProfile_ && SdrProfileSectionName(group).empty()) continue;
-            if (group == "SelectiveColor") AppendMissingSelective();
-            else AppendMissingGroup(group);
-        }
-    }
-
-    [[nodiscard]] std::string_view HeaderName(std::string_view group) const noexcept
-    {
-        return sdrProfile_ ? SdrProfileSectionName(group) : group;
-    }
-
-    const HdrSettings& settings_;
-    const HdrInterfaceSettings& interfaceSettings_;
-    bool sdrProfile_{};
-    std::array<bool, kPersistedKeys.size()> seen_{};
-    std::array<bool, kSelectivePersistedKeys.size()> selectiveSeen_{};
-    bool selectiveEnabledSeen_{};
-    bool selectiveAmountSeen_{};
-    std::string result_;
-    std::string_view section_;
-    std::string_view newline_;
-    std::optional<std::size_t> retiredSectionStart_;
-};
-
-[[nodiscard]] std::string RewriteIni(std::string_view original,
-    const HdrSettingsProfiles& settings, const HdrInterfaceSettings& interfaceSettings)
-{
-    auto rewritten = SettingsIniWriter(settings.hdr, interfaceSettings).Rewrite(original);
-    return SettingsIniWriter(settings.sdr, interfaceSettings, true).Rewrite(rewritten);
 }
 
 [[nodiscard]] std::filesystem::path ResolveBackingPath(
@@ -542,20 +60,17 @@ private:
 // INI while std::ifstream owns its non-delete-sharing handle.
 [[nodiscard]] bool ReadPersistenceFile(
     const std::filesystem::path& path,
-    std::string& contents,
-    bool allowMissing = false) noexcept
+    std::string& contents) noexcept
 {
     try
     {
-        if (allowMissing)
+        // A deleted INI is rendered again from the saved settings.
+        std::error_code error;
+        if (!std::filesystem::exists(path, error))
         {
-            std::error_code error;
-            if (!std::filesystem::exists(path, error))
-            {
-                if (error) return false;
-                contents.clear();
-                return true;
-            }
+            if (error) return false;
+            contents.clear();
+            return true;
         }
         std::ifstream input(path, std::ios::binary);
         if (!input) return false;
@@ -704,7 +219,28 @@ std::string RewriteHdrSettingsIni(
 {
     if (!ValidSettingsForPersistence(settings))
         return std::string(original);
-    return RewriteIni(original, settings, interfaceSettings);
+    // The file keeps the keys the menu does not edit, such as DeveloperMode.
+    auto parsed = ParsePluginConfiguration(original);
+    if (!parsed.valid) return std::string(original);
+    auto& stored = parsed.stored;
+    static_cast<HdrSettings&>(stored) = settings.hdr;
+    stored.sdrSettings = settings.sdr;
+    stored.enabled = interfaceSettings.hdrEnabled;
+    return RenderPluginConfiguration(stored);
+}
+
+bool WriteSettingsFile(
+    const std::filesystem::path& iniPath, std::string_view text) noexcept
+{
+    try
+    {
+        return ReplacePersistenceFile(
+            ResolveBackingPath(std::filesystem::absolute(iniPath)), text);
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
 bool InitializeSettingsPersistence(

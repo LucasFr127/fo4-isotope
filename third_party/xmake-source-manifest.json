@@ -20,6 +20,25 @@
         "spdlog-1.16.0/LICENSE"
       ],
       "licenseSha256": "4ccecab18d1ff0b61174fe3d6c430541625d3ddb865b0d5887db296f883c76e7"
+    },
+    {
+      "name": "simpleini",
+      "version": "v4.25",
+      "repository": "https://github.com/brofield/simpleini.git",
+      "sourceRevision": "v4.25",
+      "sourceCacheFile": "simpleini-v4.25.tar.gz",
+      "sourceArchiveFormat": "tar.gz",
+      "sourceSha256": "10001ee1486ae55259a5408786262bc0f72d699bc9637d536ebc62765d3ecd3b",
+      "recipeRepository": "https://github.com/xmake-io/xmake-repo.git",
+      "recipeCommit": "eae3fab4e0c58f19dca872427a660d33ddfdb2d0",
+      "recipeTreeSha1": "fad2350f6a9f7c1ba8fcff540e2fe54e7120ab48",
+      "recipeCacheFile": "xmake-recipe-simpleini-eae3fab4e0c58f19dca872427a660d33ddfdb2d0.zip",
+      "recipeSha256": "926c20455a8bffe9441124214542e1cbf3ae6de697af2331cd8d044787b17046",
+      "license": "MIT",
+      "licenseFiles": [
+        "simpleini-4.25/LICENCE.txt"
+      ],
+      "licenseSha256": "1f8d19cba3d929f45f74b8e7cdf84b2fee5b96be69d08d0084ed728316f9f2c2"
     }
   ]
 }
