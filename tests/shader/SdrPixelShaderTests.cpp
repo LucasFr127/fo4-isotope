@@ -4,6 +4,7 @@
 #include "FO4Isotope/ShippingShaders.generated.hpp"
 #include "d3d11/GpuHarness.hpp"
 #include "reference/ImageControlReference.hpp"
+#include "reference/NativeGradeReference.hpp"
 #include "reference/OperatorLutTestSupport.hpp"
 #include "reference/ShaderReference.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
@@ -298,20 +299,86 @@ void VerifySdrToneMapPixelShaders(Device& device, ID3D11VertexShader* vertexShad
         std::pow(light[2], 1.0 / 2.2)};
 }
 
+constexpr std::array<Float4, kWidth> kSdrLutDisplayPixels{{
+    {0.0F, 0.0F, 0.0F, 1.0F},
+    {0.0625F, 0.0625F, 0.0625F, 1.0F},
+    {0.25F, 0.25F, 0.25F, 0.5F},
+    {0.5F, 0.5F, 0.5F, 1.0F},
+    {0.75F, 0.75F, 0.75F, 1.0F},
+    {1.0F, 1.0F, 1.0F, 1.0F},
+    {1.5F, 1.5F, 1.5F, 1.0F},
+    {0.75F, 0.25F, 0.0625F, 0.25F},
+}};
+
+[[nodiscard]] NativeGradeRgb SdrLutDisplay(const Float4& input)
+{
+    return {std::min(input.red, 1.0F), std::min(input.green, 1.0F), std::min(input.blue, 1.0F)};
+}
+
+[[nodiscard]] NativeGradeRgb ExpectedVaryingSdrGrade(const NativeGradeRgb& display,
+    const std::array<float, 4>& mix, float strength)
+{
+    // Trilinear filtering reproduces each affine look exactly at the encoded coordinate.
+    NativeGradeRgb codes{};
+    for (unsigned slot = 0; slot < mix.size(); ++slot) {
+        const auto sample = SyntheticNativeGrade(EncodeGamma22(display), slot);
+        for (std::size_t channel = 0; channel < 3; ++channel)
+            codes[channel] += mix[slot] * sample[channel];
+    }
+    if (strength >= 1.0F) return codes;
+    NativeGradeRgb graded{};
+    for (std::size_t channel = 0; channel < 3; ++channel)
+        graded[channel] = display[channel] +
+            strength * (std::pow(codes[channel], 2.2) - display[channel]);
+    return EncodeGamma22(graded);
+}
+
+// Uniform looks hide the 16-cube coordinate and zero weights hide slots 2-3;
+// four distinct affine looks at nonzero weights expose both.
+void VerifySdrVaryingGradeLuts(Device& device, ID3D11VertexShader* vertexShader,
+    ID3D11SamplerState* sceneSampler)
+{
+    auto& d3d = *device.device.Get();
+    const auto scene = CreatePixelTexture(device, kSdrLutDisplayPixels);
+    std::array<Texture3D, 4> looks;
+    for (unsigned slot = 0; slot < looks.size(); ++slot) looks[slot] = CreateNativeGrade(d3d, slot);
+    const auto lutSampler = CreateClampLinearSampler(d3d);
+    auto output = CreateTexture(d3d, DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_RENDER_TARGET);
+    const auto shader = CreatePixelShader(d3d, fo4hdr::generated::kCreativeGradeLutSdr);
+    constexpr std::array<float, 4> mix{0.1F, 0.2F, 0.3F, 0.4F};
+    LutConstants weights{};
+    weights.values[1] = {mix[0], mix[1], mix[2], mix[3]};
+    const auto cb2 = CreateConstantBuffer(d3d, weights);
+    std::array<ID3D11ShaderResourceView*, 7> resources{scene.srv.Get(), nullptr, nullptr,
+        looks[0].srv.Get(), looks[1].srv.Get(), looks[2].srv.Get(), looks[3].srv.Get()};
+    std::array<ID3D11SamplerState*, 7> samplers{sceneSampler, nullptr, nullptr,
+        lutSampler.Get(), lutSampler.Get(), lutSampler.Get(), lutSampler.Get()};
+    ID3D11RenderTargetView* targets[]{output.rtv.Get()};
+    for (const float strength : {1.0F, 0.5F})
+    {
+        auto settings = NeutralSdrConstants();
+        settings.vanillaGradeStrength = strength;
+        const auto settingsBuffer = CreateConstantBuffer(d3d, settings);
+        DrawFullscreen(*device.context.Get(), {vertexShader, shader.Get(), cb2.Get(),
+            settingsBuffer.Get(), resources.data(), 7U, samplers.data(), 7U, targets, 1});
+        const auto pixels = ReadPixels(device, output);
+        for (std::size_t sample = 0; sample < kWidth; ++sample)
+        {
+            const auto expected = ExpectedVaryingSdrGrade(
+                SdrLutDisplay(kSdrLutDisplayPixels[sample]), mix, strength);
+            // The affine slopes are at most one and the weights sum to one:
+            // allow two 8-bit hardware fraction steps plus FP32 roundoff.
+            CheckPixel(pixels[sample], expected,
+                {"varying looks", sample, 2.0 / (15.0 * 256.0) + 2.0e-6});
+        }
+    }
+}
+
 void VerifySdrGradeLutPixelShader(Device& device, ID3D11VertexShader* vertexShader,
     ID3D11SamplerState* sceneSampler)
 {
     auto& d3d = *device.device.Get();
-    constexpr std::array<Float4, kWidth> displayPixels{{
-        {0.0F, 0.0F, 0.0F, 1.0F},
-        {0.0625F, 0.0625F, 0.0625F, 1.0F},
-        {0.25F, 0.25F, 0.25F, 0.5F},
-        {0.5F, 0.5F, 0.5F, 1.0F},
-        {0.75F, 0.75F, 0.75F, 1.0F},
-        {1.0F, 1.0F, 1.0F, 1.0F},
-        {1.5F, 1.5F, 1.5F, 1.0F},
-        {0.75F, 0.25F, 0.0625F, 0.25F},
-    }};
+    const auto& displayPixels = kSdrLutDisplayPixels;
     const auto scene = CreatePixelTexture(device, displayPixels);
     constexpr Float4 firstCode{0.2F, 0.4F, 0.8F, 1.0F};
     constexpr Float4 secondCode{0.6F, 0.3F, 0.1F, 1.0F};
@@ -349,8 +416,7 @@ void VerifySdrGradeLutPixelShader(Device& device, ID3D11VertexShader* vertexShad
         for (std::size_t sample = 0; sample < kWidth; ++sample)
         {
             const auto& input = displayPixels[sample];
-            const NativeGradeRgb display{std::min(input.red, 1.0F), std::min(input.green, 1.0F),
-                std::min(input.blue, 1.0F)};
+            const NativeGradeRgb display = SdrLutDisplay(input);
             NativeGradeRgb expected = codes;
             const bool blended = test.strength < 1.0F || test.luminanceRemoval > 0.0F ||
                 test.colorRemoval > 0.0F;
@@ -376,6 +442,7 @@ void VerifySdrPixelShaders(Device& device, ID3D11VertexShader* vertexShader,
 {
     VerifySdrToneMapPixelShaders(device, vertexShader, sampler);
     VerifySdrGradeLutPixelShader(device, vertexShader, sampler);
+    VerifySdrVaryingGradeLuts(device, vertexShader, sampler);
 }
 
 }  // namespace fo4hdr::tests::gpu
