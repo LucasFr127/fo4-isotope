@@ -138,6 +138,7 @@ $specifications = @(
     [ordered]@{ Name = "TemporalAa2"; Symbol = "kTemporalAa2"; Source = "shaders/fallout4/TemporalAa2.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB2[6]", "dcl_constantbuffer CB13[1]", "dcl_sampler s0", "dcl_sampler s1", "dcl_sampler s2", "dcl_sampler s3", "dcl_sampler s4", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture2d (float,float,float,float) t1", "dcl_resource_texture2d (float,float,float,float) t2", "dcl_resource_texture2d (float,float,float,float) t3", "dcl_resource_texture2d (float,float,float,float) t4", "dcl_output o0.xyzw", "dcl_output o1.xyzw") },
     [ordered]@{ Name = "Fxaa"; Symbol = "kFxaa"; Source = "shaders/fallout4/Fxaa.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB2[1]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "Video"; Symbol = "kVideo"; Source = "shaders/fallout4/Video.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB13[2]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
+    [ordered]@{ Name = "UiBackdrop"; Symbol = "kUiBackdrop"; Source = "shaders/fallout4/UiBackdrop.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[20], dynamicIndexed", "dcl_constantbuffer CB1[1]", "dcl_constantbuffer CB2[15]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentPixelsPs"; Symbol = "kPresentPixelsPs"; Source = "shaders/output/PresentPixels.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[3]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "SharedUiSeedPs"; Symbol = "kSharedUiSeedPs"; Source = "shaders/output/SharedUiSeed.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[1]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentFullscreenVs"; Symbol = "kPresentFullscreenVs"; Source = "shaders/output/PresentFullscreen.vs.hlsl"; Profile = "vs_5_0"; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position") }
@@ -157,7 +158,9 @@ $testSpecifications = @(
     [ordered]@{ Name = "NativeGradeSamplingPs"; Symbol = "kNativeGradeSamplingPs"; Source = "tests/shader/shaders/NativeGradeSampling.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB2[2]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture3d (float,float,float,float) t3", "dcl_resource_texture3d (float,float,float,float) t6", "dcl_sampler s3", "dcl_sampler s6", "dcl_output o0.xyzw", "dcl_output o1.xyzw") },
     [ordered]@{ Name = "OperatorLutCs"; Symbol = "kOperatorLutCs"; Source = "tests/shader/shaders/OperatorLut.cs.hlsl"; Profile = "cs_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB0[2]", "dcl_sampler s7", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture3d (float,float,float,float) t7", "dcl_uav_typed_texture2d (float,float,float,float) u0") },
     [ordered]@{ Name = "SdrOperatorLutCs"; Symbol = "kSdrOperatorLutCs"; Source = "tests/shader/shaders/SdrOperatorLut.cs.hlsl"; Profile = "cs_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB0[2]", "dcl_sampler s7", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_resource_texture3d (float,float,float,float) t7", "dcl_uav_typed_texture2d (float,float,float,float) u0") },
-    [ordered]@{ Name = "FullscreenVs"; Symbol = "kFullscreenVs"; Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position", "dcl_output o1.xyzw", "dcl_output o2.xyzw") }
+    [ordered]@{ Name = "FullscreenVs"; Symbol = "kFullscreenVs"; Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; Profile = "vs_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position", "dcl_output o1.xyzw", "dcl_output o2.xyzw") },
+    [ordered]@{ Name = "FullscreenUiBackdropVs"; Symbol = "kFullscreenUiBackdropVs"; Source = "tests/shader/shaders/Fullscreen.vs.hlsl"; EntryPoint = "mainUiBackdrop"; Profile = "vs_5_0"; TestOnly = $true; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position", "dcl_output o1.xyzw", "dcl_output o2.xyzw") },
+    [ordered]@{ Name = "UiBackdropStrippedPs"; Symbol = "kUiBackdropStrippedPs"; Source = "shaders/fallout4/UiBackdrop.ps.hlsl"; Profile = "ps_5_0"; TestOnly = $true; StripReflection = $true; RequiredReflectionTokens = @("dcl_constantbuffer CB0[20], dynamicIndexed", "dcl_output o0.xyzw") }
 )
 $allSpecifications = @($specifications) + @($testSpecifications)
 
@@ -274,6 +277,20 @@ function Assert-ShaderReflection {
 
 }
 
+function Get-FxcArguments {
+    param([System.Collections.IDictionary]$Specification, [string]$SourcePath, [string]$OutputPath)
+    $entryPoint = if ($specification.Contains("EntryPoint")) { $specification.EntryPoint } else { "main" }
+    $arguments = @(
+        "/nologo", "/T", $specification.Profile, "/E", $entryPoint,
+        "/WX", "/Ges", "/O3", "/Zpc", "/Qstrip_debug",
+        "/Fo", $outputPath, $sourcePath
+    )
+    if ($specification.Contains("StripReflection") -and $specification.StripReflection) {
+        $arguments = @("/Qstrip_reflect") + $arguments
+    }
+    return $arguments
+}
+
 function Invoke-ShaderCompilation {
     param([System.Collections.IDictionary]$Specification)
     $sourcePath = Join-Path $repoRoot $specification.Source
@@ -283,12 +300,7 @@ function Invoke-ShaderCompilation {
 
     $temporaryCso = Join-Path $temporaryRoot (
         $specification.Name + ".cso")
-    $entryPoint = if ($specification.Contains("EntryPoint")) { $specification.EntryPoint } else { "main" }
-    $arguments = @(
-        "/nologo", "/T", $specification.Profile, "/E", $entryPoint,
-        "/WX", "/Ges", "/O3", "/Zpc", "/Qstrip_debug",
-        "/Fo", $temporaryCso, $sourcePath
-    )
+    $arguments = Get-FxcArguments $specification $sourcePath $temporaryCso
     $compilerOutput = @(& $fxc @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw (

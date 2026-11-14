@@ -23,6 +23,8 @@ struct PresentationResources
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> presentationProxyUav;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> presentShader;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> presentVertexShader;
+    // Optional; without it the game's backdrop draws on the public image unclamped.
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> uiBackdropShader;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> presentRasterizer;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> presentDepth;
     Microsoft::WRL::ComPtr<ID3D11BlendState> presentBlend;

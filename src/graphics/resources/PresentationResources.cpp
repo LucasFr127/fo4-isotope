@@ -279,11 +279,21 @@ bool EnsurePresentationTarget(IDXGISwapChain* swapChain, ID3D11Device* device) n
     return true;
 }
 
+// Optional: a failure leaves the game's own backdrop drawing, as before.
+void CreateUiBackdropShader(ID3D11Device* device) noexcept
+{
+    if (FAILED(device->CreatePixelShader(generated::kUiBackdrop.data(),
+            generated::kUiBackdrop.size(), nullptr, &g_presentation.uiBackdropShader)))
+        g_presentation.uiBackdropShader.Reset();
+}
+
 [[nodiscard]] bool CreatePresentationComposition(ID3D11Device* device) noexcept
 {
     if (g_presentation.width == 0 || g_presentation.height == 0) return false;
     if (!CreatePresentationShaders(device) || !CreatePresentationPipelineStates(device)) return false;
-    return RecreatePresentationConstants(device);
+    if (!RecreatePresentationConstants(device)) return false;
+    CreateUiBackdropShader(device);
+    return true;
 }
 
 bool PresentationColorSupported(bool hdr) noexcept
@@ -385,6 +395,7 @@ void ResetPresentationResources(bool retainColorControl, bool retainPresentation
     g_presentation.constants.Reset();
     g_presentation.presentShader.Reset();
     g_presentation.presentVertexShader.Reset();
+    g_presentation.uiBackdropShader.Reset();
     g_presentation.presentRasterizer.Reset();
     g_presentation.presentDepth.Reset();
     g_presentation.presentBlend.Reset();

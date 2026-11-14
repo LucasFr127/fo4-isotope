@@ -11,6 +11,7 @@
 // display output are project implementations of the Fallout 4 and DXGI contracts.
 
 #include "ShaderRegistry.hpp"
+#include "DxbcChecksum.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "RenoDxShaderIdentity.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
@@ -117,14 +118,16 @@ BoundShaderIdentity IdentifyBoundShader(ID3D11PixelShader* shader) noexcept
 
 enum class LateGameUiShaderKind { composite, backdrop };
 
-[[nodiscard]] bool MatchesLateGameUiBytecode(const void* bytecode,
-    std::size_t bytecodeLength, LateGameUiShaderKind kind) noexcept
+// A recompile that keeps reflection, such as Community Shaders' copy of the
+// backdrop, wraps the same program in a container with a different checksum.
+[[nodiscard]] bool MatchesLateGameUiBytecode(const void* bytecode, std::size_t bytecodeLength,
+    const std::optional<DxbcChecksum>& program, LateGameUiShaderKind kind) noexcept
 {
     const auto* profile = ActiveRuntimeProfile();
     if (!profile) return false;
     const auto& hash = kind == LateGameUiShaderKind::composite ?
         profile->lateGameUiCompositeHash : profile->lateGameUiBackdropHash;
-    return MatchesDxbcHash(bytecode, bytecodeLength, hash);
+    return MatchesDxbcHash(bytecode, bytecodeLength, hash) || program == hash;
 }
 
 template <std::size_t Count>
@@ -264,8 +267,12 @@ void CreatedShaderIdentity::RecordKnownShader(std::uint32_t crc32) const
 void CreatedShaderIdentity::Observe(const void* bytecode, std::size_t length, bool developerMode)
 {
     if (bytecode == nullptr || length == 0) return;
-    lateGameUiComposite = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::composite);
-    lateGameUiBackdrop = MatchesLateGameUiBytecode(bytecode, length, LateGameUiShaderKind::backdrop);
+    const auto program = ComputeDxbcProgramChecksum(
+        std::span<const std::byte>(static_cast<const std::byte*>(bytecode), length));
+    lateGameUiComposite =
+        MatchesLateGameUiBytecode(bytecode, length, program, LateGameUiShaderKind::composite);
+    lateGameUiBackdrop =
+        MatchesLateGameUiBytecode(bytecode, length, program, LateGameUiShaderKind::backdrop);
     const auto* profile = ActiveRuntimeProfile();
     nativeSceneComposite = profile && profile->hasNativeSceneComposite && MatchesDxbcHash(
         bytecode, length, profile->nativeSceneCompositeHash);

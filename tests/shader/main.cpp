@@ -110,6 +110,7 @@ struct ShippingShaderRun
             VerifySharedUiFallback(device);
             VerifyEnginePassScopes(device);
             VerifyUnpairedSceneFallback(device);
+            VerifyUiBackdrop(device);
         });
         RunSection(options.filter, "scoped-pixel-binding-restoration", [&] {
             VerifyScopedPixelBindingRestoration(device);

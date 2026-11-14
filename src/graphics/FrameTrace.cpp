@@ -8,6 +8,7 @@
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
 #include "ShaderRegistry.hpp"
+#include "resources/PresentationResources.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/output/NativeMenuState.hpp"
 
@@ -246,6 +247,8 @@ void DescribeDraw(ID3D11DeviceContext* context, const DrawObservation& observati
         }
         if (IsLateGameUiShader(shader.Get())) event.flags |= 4U;
         if (IsLateGameUiBackdropShader(shader.Get())) event.flags |= 8U;
+        // The clamped backdrop stands in for the game's: a backdrop draw with a replacement.
+        if (shader.Get() == g_presentation.uiBackdropShader.Get()) event.flags |= 8U | 64U;
     }
     ID3D11RenderTargetView* targets[2]{};
     context->OMGetRenderTargets(2, targets, nullptr);

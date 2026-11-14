@@ -21,3 +21,21 @@ FullscreenVertex main(uint vertexId : SV_VertexID)
     output.texcoord1 = texcoord.xyxy;
     return output;
 }
+
+// The game's backdrop vertex stage passes COLOR1 in the second varying.
+struct UiBackdropVertex
+{
+    float4 position : SV_POSITION0;
+    float4 texcoord : TEXCOORD0;
+    float4 color : COLOR1;
+};
+
+UiBackdropVertex mainUiBackdrop(uint vertexId : SV_VertexID)
+{
+    const FullscreenVertex fullscreen = main(vertexId);
+    UiBackdropVertex output;
+    output.position = fullscreen.position;
+    output.texcoord = fullscreen.texcoord0;
+    output.color = 1.0f;
+    return output;
+}

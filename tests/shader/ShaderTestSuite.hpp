@@ -56,6 +56,7 @@ void VerifySharedUiContext(Device& device);
 void VerifySdrOperatorPresentation(Device& device);
 void VerifySharedUiFallback(Device& device);
 void VerifySharedSdrFrame(Device& device);
+void VerifyUiBackdrop(Device& device);
 
 void VerifyUiRelativeTemporalTransport(TestedToneMapper toneMapper);
 

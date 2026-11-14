@@ -767,6 +767,57 @@ private:
     bool preparedBound_{};
 };
 
+// The game's late UI backdrop relies on an 8-bit target to contain its output.
+// On the FP16 public image the clamped equivalent draws instead, with the same
+// bindings, and the game's shader is bound again before observation resumes.
+class ScopedUiBackdropDraw
+{
+public:
+    ScopedUiBackdropDraw(ID3D11DeviceContext* context, const DrawObservation& record) noexcept :
+        context_(context)
+    {
+        auto* replacement = g_presentation.uiBackdropShader.Get();
+        if (!replacement || !Eligible(record)) return;
+        // Own the game's shader while ours is bound in its place.
+        native_ = record.expectedBoundShader;
+        BindOriginalPixelShader(context_, replacement);
+        if (!Bound(replacement)) Restore();
+    }
+
+    ~ScopedUiBackdropDraw() noexcept { Restore(); }
+
+    ScopedUiBackdropDraw(const ScopedUiBackdropDraw&) = delete;
+    ScopedUiBackdropDraw& operator=(const ScopedUiBackdropDraw&) = delete;
+
+private:
+    [[nodiscard]] bool Eligible(const DrawObservation& record) const noexcept
+    {
+        auto* native = record.expectedBoundShader;
+        // Most draws are not the backdrop; check its identity before any D3D query.
+        if (!IsLateGameUiBackdropShader(native) ||
+            !IsPresentationProxyTarget(record.currentPrimaryRtv))
+            return false;
+        return HasOriginalPixelShaderSetter(context_) && Bound(native);
+    }
+
+    [[nodiscard]] bool Bound(ID3D11PixelShader* shader) const noexcept
+    {
+        ComPtr<ID3D11PixelShader> actual;
+        context_->PSGetShader(&actual, nullptr, nullptr);
+        return actual.Get() == shader;
+    }
+
+    void Restore() noexcept
+    {
+        if (!native_) return;
+        BindOriginalPixelShader(context_, native_.Get());
+        native_.Reset();
+    }
+
+    ID3D11DeviceContext* context_{};
+    ComPtr<ID3D11PixelShader> native_;
+};
+
 void CloseConflictingArmorDraw(const DrawObservation& record, bool sharedUiRejected) noexcept
 {
     if (g_armor.armorEncodedSharedSrgb ? sharedUiRejected : record.currentReplacementActive)
@@ -876,7 +927,10 @@ void ExecuteObservedDraw(
     if (g_armor.armorEncodedActive)
     {
         CloseConflictingArmorDraw(record, sharedUiRejected);
-        draw();
+        {
+            const ScopedUiBackdropDraw backdrop(context, record);
+            draw();
+        }
         ObserveCompletedNativeDraw(context, record);
         return;
     }
@@ -898,6 +952,7 @@ void ExecuteObservedDraw(
         {
             ScopedAffineDraw grading(context, record,
                 operatorBindings.UsesProductionSettings());
+            const ScopedUiBackdropDraw backdrop(context, record);
             draw();
         }
         ObserveCompletedNativeDraw(context, record, unpaired);
