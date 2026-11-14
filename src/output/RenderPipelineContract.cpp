@@ -48,11 +48,8 @@ void PipelineHeartbeat::BeginFrame(
     std::uint64_t generation,
     std::uint64_t frame) noexcept
 {
-    if (generation_ != generation) Reset(generation);
+    Reset(generation);
     frame_ = frame;
-    toneMapFamilyObserved_ = false;
-    lutObserved_ = false;
-    orderedPairObserved_ = false;
 }
 
 void PipelineHeartbeat::Observe(RenoDxShaderPass pass) noexcept
