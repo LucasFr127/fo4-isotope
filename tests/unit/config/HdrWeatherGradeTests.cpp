@@ -19,10 +19,10 @@ void TestGradePathNormalization()
         "Textures\\Effects/LUT_\xC3\x84.DDS", normalized));
     FO4HDR_CHECK(std::string_view(normalized.data()) ==
         "textures/effects/lut_\xC3\x84.dds");
-    FO4HDR_CHECK(!NormalizeLutGradePath(" leading.dds", normalized));
-    FO4HDR_CHECK(!NormalizeLutGradePath("trailing.dds ", normalized));
-    FO4HDR_CHECK(!NormalizeLutGradePath("bad[path.dds", normalized));
-    FO4HDR_CHECK(!NormalizeLutGradePath("bad]path.dds", normalized));
+    FO4HDR_CHECK(NormalizeLutGradePath(" Textures/[Mod] LUT.dds ", normalized));
+    FO4HDR_CHECK(std::string_view(normalized.data()) == " textures/[mod] lut.dds ");
+    FO4HDR_CHECK(!NormalizeLutGradePath("bad\npath.dds", normalized));
+    FO4HDR_CHECK(!NormalizeLutGradePath("bad\x7F" "path.dds", normalized));
     FO4HDR_CHECK(!NormalizeLutGradePath("\xC0\xAF", normalized));
     FO4HDR_CHECK(!NormalizeLutGradePath("\xE2\x82", normalized));
     FO4HDR_CHECK(!NormalizeLutGradePath(
@@ -32,6 +32,8 @@ void TestGradePathNormalization()
         "Fallout4.ESM|00AbCd", normalized));
     FO4HDR_CHECK(std::string_view(normalized.data()) ==
         "fallout4.esm|00abcd");
+    FO4HDR_CHECK(NormalizeImageSpaceGradeKey("[Mod] Weathers.esp|000123", normalized));
+    FO4HDR_CHECK(std::string_view(normalized.data()) == "[mod] weathers.esp|000123");
     for (const auto invalid : {
              "fallout4.esm|000000",
              "fallout4.esm|00001",

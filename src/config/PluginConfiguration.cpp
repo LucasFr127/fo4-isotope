@@ -64,7 +64,6 @@ std::size_t ValidUtf8Prefix(std::string_view text) noexcept
 char NormalizeGradeAscii(unsigned char byte) noexcept
 {
     if (byte < 0x20U || byte == 0x7FU) return '\0';
-    if (byte == '[' || byte == ']') return '\0';
     if (byte == '\\') return '/';
     if (byte >= 'A' && byte <= 'Z') return static_cast<char>(byte - 'A' + 'a');
     return static_cast<char>(byte);
@@ -72,8 +71,7 @@ char NormalizeGradeAscii(unsigned char byte) noexcept
 
 bool ValidGradePathBounds(std::string_view path) noexcept
 {
-    if (path.empty() || path.size() > kMaximumLutGradePathLength) return false;
-    return path.front() != ' ' && path.back() != ' ';
+    return !path.empty() && path.size() <= kMaximumLutGradePathLength;
 }
 
 bool ValidGradePlugin(std::string_view plugin) noexcept
