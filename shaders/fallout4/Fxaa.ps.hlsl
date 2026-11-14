@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024 Carlos Lopez Jr.
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/fxaa_0x4FB4DA20.ps_5_0.hlsl
-// Whole-file adaptation for FO4Isotope. Modification: retain the original
-// Fallout 4 FXAA body while preserving the sign of the FP16 HDR input around
-// the algorithm's luminance-domain absolute-value operations.
+// Whole-file adaptation for FO4Isotope. Modification: gather green luma as the
+// original Fallout 4 bytecode does, read every edge-search luma through a
+// gamma-2.2 encoding of the linear HDR input, and return the unmodified center
+// or filtered sample instead of the source's sign and absolute-value handling.
 // See THIRD_PARTY_NOTICES.md.
 
 Texture2D<float4> t0 : register(t0);
@@ -17,6 +18,12 @@ cbuffer cb2 : register(b2) {
 // 3Dmigoto declarations
 #define cmp -
 
+// The game applies FXAA's 0.0833 and 0.166 thresholds to gamma-encoded
+// display codes, so linear luma is encoded the same way before every test.
+// shortcut: the 0.0833 floor tracks UI white (about 0.4-1.3 nits), as in RenoDX; bind b13 and scale by UI/scene white if it must not.
+float Fo4HdrFxaaLuma(float green) { return pow(max(green, 0.0f), 1.0f / 2.2f); }
+float3 Fo4HdrFxaaLuma(float3 green) { return pow(max(green, 0.0f), 1.0f / 2.2f); }
+
 void main(
   float4 v0 : SV_POSITION0,
               float4 v1 : TEXCOORD0,
@@ -25,12 +32,11 @@ void main(
 ) {
   float4 r0, r1, r2, r3, r4, r5;
 
-  r0.xyzw = t0.SampleLevel(s0_s, v1.xy, 0).xyzw;
-  float3 signs = sign(r0.xyz);
-  r1.xyz = t0.Gather(s0_s, v1.xy).xyz;
-  r1.xyz = abs(r1.xyz);
-  r2.xyz = t0.Gather(s0_s, v1.xy, int2(-1, -1)).xzw;
-  r2.xyz = abs(r2.xyz);
+  // Without an edge the center sample passes through unchanged.
+  o0.xyzw = t0.SampleLevel(s0_s, v1.xy, 0).xyzw;
+  r0.y = Fo4HdrFxaaLuma(o0.y);
+  r1.xyz = Fo4HdrFxaaLuma(t0.GatherGreen(s0_s, v1.xy).xyz);
+  r2.xyz = Fo4HdrFxaaLuma(t0.GatherGreen(s0_s, v1.xy, int2(-1, -1)).xzw);
 
   r1.w = max(r1.x, r0.y);
   r2.w = min(r1.x, r0.y);
@@ -45,10 +51,8 @@ void main(
   r2.w = max(0.0833000019, r3.x);
   r2.w = cmp(r1.w >= r2.w);
   if (r2.w != 0) {
-    r2.w = t0.SampleLevel(s0_s, v1.xy, 0, int2(1, -1)).y;
-    r2.w = abs(r2.w);
-    r3.x = t0.SampleLevel(s0_s, v1.xy, 0, int2(-1, 1)).y;
-    r3.x = abs(r3.x);
+    r2.w = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, v1.xy, 0, int2(1, -1)).y);
+    r3.x = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, v1.xy, 0, int2(-1, 1)).y);
 
     r3.yz = r2.yx + r1.xz;
     r1.w = 1 / r1.w;
@@ -89,11 +93,9 @@ void main(
     r4.xy = r3.yz + -r2.yw;
     r5.xy = r3.yz + r2.yw;
     r3.y = r1.w * -2 + 3;
-    r3.z = t0.SampleLevel(s0_s, r4.xy, 0).y;
-    r3.z = abs(r3.z);
+    r3.z = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r4.xy, 0).y);
     r1.w = r1.w * r1.w;
-    r3.w = t0.SampleLevel(s0_s, r5.xy, 0).y;
-    r3.w = abs(r3.w);
+    r3.w = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r5.xy, 0).y);
     r1.x = r3.x ? r2.x : r1.x;
     r2.x = 0.25 * r2.z;
     r2.z = -r1.x * 0.5 + r0.y;
@@ -114,12 +116,10 @@ void main(
     r5.z = r3.w ? r5.y : r4.w;
     if (r4.y != 0) {
       if (r3.z == 0) {
-        r3.x = t0.SampleLevel(s0_s, r4.xz, 0).y;
-        r3.x = abs(r3.x);
+        r3.x = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r4.xz, 0).y);
       }
       if (r3.w == 0) {
-        r3.y = t0.SampleLevel(s0_s, r5.xz, 0).y;
-        r3.y = abs(r3.y);
+        r3.y = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r5.xz, 0).y);
       }
       r4.y = -r1.x * 0.5 + r3.x;
       r3.x = r3.z ? r3.x : r4.y;
@@ -138,12 +138,10 @@ void main(
       r5.z = r3.w ? r5.z : r4.w;
       if (r4.y != 0) {
         if (r3.z == 0) {
-          r3.x = t0.SampleLevel(s0_s, r4.xz, 0).y;
-          r3.x = abs(r3.x);
+          r3.x = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r4.xz, 0).y);
         }
         if (r3.w == 0) {
-          r3.y = t0.SampleLevel(s0_s, r5.xz, 0).y;
-          r3.y = abs(r3.y);
+          r3.y = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r5.xz, 0).y);
         }
         r4.y = -r1.x * 0.5 + r3.x;
         r3.x = r3.z ? r3.x : r4.y;
@@ -162,12 +160,10 @@ void main(
         r5.z = r3.w ? r5.z : r4.w;
         if (r4.y != 0) {
           if (r3.z == 0) {
-            r3.x = t0.SampleLevel(s0_s, r4.xz, 0).y;
-            r3.x = abs(r3.x);
+            r3.x = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r4.xz, 0).y);
           }
           if (r3.w == 0) {
-            r3.y = t0.SampleLevel(s0_s, r5.xz, 0).y;
-            r3.y = abs(r3.y);
+            r3.y = Fo4HdrFxaaLuma(t0.SampleLevel(s0_s, r5.xz, 0).y);
           }
           r4.y = -r1.x * 0.5 + r3.x;
           r3.x = r3.z ? r3.x : r4.y;
@@ -205,10 +201,7 @@ void main(
     r1.xz = r1.xx * r1.zz + v1.xy;
     r2.x = r1.y ? v1.x : r1.x;
     r2.y = r1.y ? r1.z : v1.y;
-    r0.xyz = t0.SampleLevel(s0_s, r2.xy, 0).xyz;
-    r0.xyz = abs(r0.xyz);
+    o0.xyz = t0.SampleLevel(s0_s, r2.xy, 0).xyz;
   }
-  o0.xyzw = r0.xyzw;
-  o0.xyz *= signs;
   return;
 }

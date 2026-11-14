@@ -311,14 +311,11 @@ void VerifyBloomStrengthPixelShader(
     }
 }
 
-void VerifyFxaaWideGamutPixelShader(
-    Device& device,
-    ID3D11VertexShader* vertexShader,
-    ID3D11SamplerState* sampler)
+using Fp16Pixels = std::array<std::array<std::uint16_t, 4>, kWidth>;
+
+[[nodiscard]] Fp16Pixels DrawFxaa(Device& device, ID3D11VertexShader* vertexShader,
+    ID3D11SamplerState* sampler, const Fp16Pixels& inputPixels)
 {
-    constexpr Float4 wideBt2020{4.0F, 0.25F, 0.05F, 1.0F};
-    const auto samples = UniformPixels(wideBt2020);
-    const auto inputPixels = MakeFp16Pixels(samples);
     D3D11_SUBRESOURCE_DATA inputData{
         inputPixels.data(), static_cast<UINT>(sizeof(inputPixels)), 0};
     auto input = CreateTexture(
@@ -344,9 +341,58 @@ void VerifyFxaaWideGamutPixelShader(
     D3D11_MAPPED_SUBRESOURCE mapped{};
     CheckHresult(device.context->Map(
         output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
-        "Map FXAA wide-gamut shipping pixel-shader output");
-    const auto* values = static_cast<
-        const std::array<std::uint16_t, 4>*>(mapped.pData);
+        "Map FXAA shipping pixel-shader output");
+    Fp16Pixels result{};
+    std::copy_n(static_cast<const std::array<std::uint16_t, 4>*>(mapped.pData),
+        kWidth, result.begin());
+    device.context->Unmap(output.staging.Get(), 0);
+    return result;
+}
+
+// Fallout 4 FXAA reads green luma and applies its thresholds to gamma-encoded
+// codes; on linear HDR input it must still find dark edges and keep signs.
+void VerifyFxaaEdges(Device& device, ID3D11VertexShader* vertexShader)
+{
+    const auto sampler = CreateClampLinearSampler(*device.device.Get());
+    const auto draw = [&](const Fp16Pixels& pixels) {
+        return DrawFxaa(device, vertexShader, sampler.Get(), pixels);
+    };
+    const auto edge = [](Float4 left, Float4 right) {
+        std::array<Float4, kWidth> samples{};
+        for (std::size_t index = 0; index < kWidth; ++index)
+            samples[index] = index < kWidth / 2 ? left : right;
+        return MakeFp16Pixels(samples);
+    };
+
+    // At 203-nit UI white this 2-to-10-nit edge is below the linear 0.0833 floor.
+    const auto darkInput = edge({0.01F, 0.01F, 0.01F, 1.0F}, {0.05F, 0.05F, 0.05F, 1.0F});
+    const auto dark = draw(darkInput);
+    bool darkEdgeFiltered{};
+    for (std::size_t index = 0; index < kWidth; ++index)
+        darkEdgeFiltered = darkEdgeFiltered || CodeDistance(dark[index][1], darkInput[index][1]) > 1U;
+    FO4HDR_WARP_CHECK(darkEdgeFiltered);
+
+    // An exactly black pixel beside a bright edge takes light from it.
+    const auto black = draw(edge({0.0F, 0.0F, 0.0F, 1.0F}, {1.0F, 1.0F, 1.0F, 1.0F}));
+    FO4HDR_WARP_CHECK(Binary16ToFloat(black[kWidth / 2 - 1][1]) > 0.0F);
+
+    // Luma is green: a green-only edge is filtered even when red is uniform.
+    const auto green = draw(edge({0.5F, 0.0F, 0.25F, 1.0F}, {0.5F, 1.0F, 0.25F, 1.0F}));
+    FO4HDR_WARP_CHECK(Binary16ToFloat(green[kWidth / 2 - 1][1]) > 0.0F);
+
+    // Without an edge every channel passes unchanged, including a negative one.
+    const auto signedInput = MakeFp16Pixels(UniformPixels({-0.5F, 0.5F, 0.125F, 0.75F}));
+    FO4HDR_WARP_CHECK(draw(signedInput) == signedInput);
+}
+
+void VerifyFxaaWideGamutPixelShader(
+    Device& device,
+    ID3D11VertexShader* vertexShader,
+    ID3D11SamplerState* sampler)
+{
+    constexpr Float4 wideBt2020{4.0F, 0.25F, 0.05F, 1.0F};
+    const auto inputPixels = MakeFp16Pixels(UniformPixels(wideBt2020));
+    const auto values = DrawFxaa(device, vertexShader, sampler, inputPixels);
     for (std::size_t index = 0; index < kWidth; ++index) {
         for (std::size_t channel = 0; channel < 4; ++channel) {
             const auto actual = Binary16ToFloat(values[index][channel]);
@@ -362,7 +408,7 @@ void VerifyFxaaWideGamutPixelShader(
             Binary16ToFloat(values[index][2])});
         FO4HDR_WARP_CHECK(bt709.green < 0.0);
     }
-    device.context->Unmap(output.staging.Get(), 0);
+    VerifyFxaaEdges(device, vertexShader);
 }
 
 }  // namespace fo4hdr::tests::gpu
