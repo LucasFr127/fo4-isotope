@@ -139,11 +139,12 @@ SharedPresentationContextFixture::SharedPresentationContextFixture(Device& value
 {
     ResetSharedUiResources();
     SetSharedUiPauseResourcesReady(false);
-    static const auto shipped = LoadPluginConfiguration(std::filesystem::path{"config/FO4Isotope.ini"});
-    FO4HDR_WARP_CHECK(shipped.valid);
-    FO4HDR_WARP_CHECK(shipped.value.productionRequested && !shipped.value.developerMode);
-    g_configuration = shipped.value;
-    g_activeSettings = shipped.value;
+    static const auto defaults =
+        LoadPluginConfiguration(std::filesystem::path{"config/FO4Isotope.ini"});
+    FO4HDR_WARP_CHECK(defaults.valid);
+    FO4HDR_WARP_CHECK(defaults.value.productionRequested && !defaults.value.developerMode);
+    g_configuration = defaults.value;
+    g_activeSettings = defaults.value;
     PrepareResources();
     FO4HDR_WARP_CHECK(EnsureSharedUiResources(device.device.Get()));
     InstallHooks();

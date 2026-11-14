@@ -63,47 +63,47 @@ void TestExpectedDefaultConfiguration()
     }
     FO4HDR_CHECK(generated.text == expected);
     FO4HDR_CHECK(expected.starts_with("# Isotope settings."));
-    const auto shipped = ParsePluginConfiguration(expected);
-    FO4HDR_CHECK(shipped.valid && !shipped.rewriteNeeded);
-    FO4HDR_CHECK(shipped.repairs.counts == RepairCounts{});
-    FO4HDR_CHECK(shipped.stored == generated.stored);
-    FO4HDR_CHECK(shipped.value.enabled && shipped.value.productionRequested);
-    FO4HDR_CHECK(shipped.value.weatherGradeResponse == WeatherGradeResponseSettings{});
-    FO4HDR_CHECK(shipped.value.productionAlgorithm ==
+    const auto reparsed = ParsePluginConfiguration(expected);
+    FO4HDR_CHECK(reparsed.valid && !reparsed.rewriteNeeded);
+    FO4HDR_CHECK(reparsed.repairs.counts == RepairCounts{});
+    FO4HDR_CHECK(reparsed.stored == generated.stored);
+    FO4HDR_CHECK(reparsed.value.enabled && reparsed.value.productionRequested);
+    FO4HDR_CHECK(reparsed.value.weatherGradeResponse == WeatherGradeResponseSettings{});
+    FO4HDR_CHECK(reparsed.value.productionAlgorithm ==
         ProductionToneMapperAlgorithm::gt7);
-    FO4HDR_CHECK(shipped.value.toneMapperParameters ==
+    FO4HDR_CHECK(reparsed.value.toneMapperParameters ==
         ToneMapperParameters{});
-    FO4HDR_CHECK(shipped.value.toneMapperParameters.agxContrast == 2.7);
-    FO4HDR_CHECK(shipped.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
-    FO4HDR_CHECK(shipped.value.colorGradingCurve == ColorGradingCurve::gamma22);
-    FO4HDR_CHECK(shipped.value.exposureEv == 0.0);
-    FO4HDR_CHECK(shipped.value.displayPeakNits == 1000.0);
-    FO4HDR_CHECK(shipped.value.uiPaperWhiteNits == 203.0);
-    FO4HDR_CHECK(shipped.value.videoWhiteNits == 203.0);
-    FO4HDR_CHECK(shipped.value.contrast == 0.0);
-    FO4HDR_CHECK(shipped.value.blacks == 0.0);
-    FO4HDR_CHECK(shipped.value.highlights == 0.0);
-    FO4HDR_CHECK(shipped.value.shadows == 0.0);
-    FO4HDR_CHECK(shipped.value.saturationPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.highlightSaturationPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.temperature == 0.0);
-    FO4HDR_CHECK(shipped.value.tint == 0.0);
-    FO4HDR_CHECK(!shipped.value.selectiveColor.enabled);
-    FO4HDR_CHECK(shipped.value.selectiveColor.amountPercent == 100.0);
-    FO4HDR_CHECK(!IsSelectiveColorEffective(shipped.value.selectiveColor));
+    FO4HDR_CHECK(reparsed.value.toneMapperParameters.agxContrast == 2.7);
+    FO4HDR_CHECK(reparsed.value.colorGradingMethod == ColorGradingMethod::rgbRatio);
+    FO4HDR_CHECK(reparsed.value.colorGradingCurve == ColorGradingCurve::gamma22);
+    FO4HDR_CHECK(reparsed.value.exposureEv == 0.0);
+    FO4HDR_CHECK(reparsed.value.displayPeakNits == 1000.0);
+    FO4HDR_CHECK(reparsed.value.uiPaperWhiteNits == 203.0);
+    FO4HDR_CHECK(reparsed.value.videoWhiteNits == 203.0);
+    FO4HDR_CHECK(reparsed.value.contrast == 0.0);
+    FO4HDR_CHECK(reparsed.value.blacks == 0.0);
+    FO4HDR_CHECK(reparsed.value.highlights == 0.0);
+    FO4HDR_CHECK(reparsed.value.shadows == 0.0);
+    FO4HDR_CHECK(reparsed.value.saturationPercent == 100.0);
+    FO4HDR_CHECK(reparsed.value.highlightSaturationPercent == 100.0);
+    FO4HDR_CHECK(reparsed.value.temperature == 0.0);
+    FO4HDR_CHECK(reparsed.value.tint == 0.0);
+    FO4HDR_CHECK(!reparsed.value.selectiveColor.enabled);
+    FO4HDR_CHECK(reparsed.value.selectiveColor.amountPercent == 100.0);
+    FO4HDR_CHECK(!IsSelectiveColorEffective(reparsed.value.selectiveColor));
     FO4HDR_CHECK(
-        shipped.value.vanillaColorGradingStrengthPercent == 100.0);
-    FO4HDR_CHECK(shipped.value.fallbackGradeLuminancePercent == 67.0);
-    FO4HDR_CHECK(shipped.value.fallbackGradeColorPercent == 67.0);
-    FO4HDR_CHECK(shipped.value.bloomStrengthPercent == 50.0);
-    FO4HDR_CHECK(shipped.value.interfaceSettings.hdrEnabled);
-    FO4HDR_CHECK(!shipped.value.developerMode);
-    FO4HDR_CHECK(!shipped.value.traceRenderPipeline);
-    FO4HDR_CHECK(!shipped.value.measurePerformance);
-    FO4HDR_CHECK(!shipped.value.developerHdr10Reference);
-    FO4HDR_CHECK(!shipped.value.forceHdrSwapChainFailure);
-    FO4HDR_CHECK(shipped.value.sdrEnabled);
-    FO4HDR_CHECK(shipped.value.sdrSettings == DefaultSdrSettings());
+        reparsed.value.vanillaColorGradingStrengthPercent == 100.0);
+    FO4HDR_CHECK(reparsed.value.fallbackGradeLuminancePercent == 67.0);
+    FO4HDR_CHECK(reparsed.value.fallbackGradeColorPercent == 67.0);
+    FO4HDR_CHECK(reparsed.value.bloomStrengthPercent == 50.0);
+    FO4HDR_CHECK(reparsed.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(!reparsed.value.developerMode);
+    FO4HDR_CHECK(!reparsed.value.traceRenderPipeline);
+    FO4HDR_CHECK(!reparsed.value.measurePerformance);
+    FO4HDR_CHECK(!reparsed.value.developerHdr10Reference);
+    FO4HDR_CHECK(!reparsed.value.forceHdrSwapChainFailure);
+    FO4HDR_CHECK(reparsed.value.sdrEnabled);
+    FO4HDR_CHECK(reparsed.value.sdrSettings == DefaultSdrSettings());
     // The parser still accepts the former names; the expected file must not use them.
     FO4HDR_CHECK(HasIniLine(expected, "ColorGradingMethod=RgbRatio"));
     for (const auto* former : {"Radial", "NativeReference", "HdrColorResponse",
@@ -582,7 +582,7 @@ void TestConfigurationFiles()
     FO4HDR_CHECK(std::filesystem::remove_all(root, error) != 0 && !error);
 }
 
-void TestOptionalConfigurationValues()
+void TestConfigurationValues()
 {
     TestExpectedDefaultConfiguration();
     TestReleasedConfigurationUpgrade();
@@ -761,7 +761,7 @@ void TestFallbackConfiguration()
     FO4HDR_CHECK(fallback.sdrSettings == DefaultSdrSettings());
 }
 
-void TestOptionalConfigurationFailures()
+void TestConfigurationRepairs()
 {
     TestFallbackConfiguration();
     TestConfigurationMethodRepairs();

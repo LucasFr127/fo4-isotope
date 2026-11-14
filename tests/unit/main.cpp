@@ -23,8 +23,8 @@ void RunHdrSettingsTests()
     TestWeatherGradeResponse();
     TestToneMapperRecommendations();
     TestSettingsStatus();
-    TestOptionalConfigurationValues();
-    TestOptionalConfigurationFailures();
+    TestConfigurationValues();
+    TestConfigurationRepairs();
     TestSettingsPersistenceRewrite();
     TestSettingsPersistenceSave();
     TestOperatorLutDeviceReplacementTransitions();
