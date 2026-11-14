@@ -30,7 +30,7 @@ end
 includes("lib/commonlibf4")
 
 set_project("FO4Isotope")
-set_version("1.3.2")
+set_version("1.3.3")
 set_license("LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions")
 set_languages("c++23")
 set_warnings("allextra")
