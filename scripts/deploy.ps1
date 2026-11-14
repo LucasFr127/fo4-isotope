@@ -28,9 +28,10 @@ if (-not (Test-Path $source)) {
 
 $expectedRelativeFiles = @(
     "F4SE\Plugins\FO4Isotope.dll",
-    "F4SE\Plugins\FO4Isotope.pdb",
-    "F4SE\Plugins\FO4Isotope.ini"
+    "F4SE\Plugins\FO4Isotope.pdb"
 )
+# The plugin generates the INI at first launch; it is the user's.
+$userOwnedRelativeFile = "F4SE\Plugins\FO4Isotope.ini"
 $actualRelativeFiles = @(
     Get-ChildItem $source -Recurse -File |
         ForEach-Object {
@@ -95,9 +96,10 @@ if (Test-Path $ownedManifestPath) {
 $obsolete = @(
     $oldRelativeFiles |
     Where-Object {
+        $relative = ([string]$_).Replace('/', '\')
         $_ -notin $newRelativeFiles -and
-        ([string]$_).Replace('/', '\') -inotlike
-            "F4SE\Plugins\FO4Isotope\*.ini"
+        $relative -inotlike "F4SE\Plugins\FO4Isotope\*.ini" -and
+        $relative -ine $userOwnedRelativeFile
     }
 )
 

@@ -41,11 +41,13 @@ function Test-DeploymentRejections {
     Assert-DeployRejected 'Staged plugin file set is not exact.'
     Remove-Item -LiteralPath $extraFile
     New-Item -ItemType Directory -Path (Join-Path $stage 'F4SE/Plugins/FO4Isotope') -Force | Out-Null
-    foreach ($name in @('Default.ini', 'Personal.ini', 'Weather.ini')) {
-        $sidecarStage = Join-Path $stage "F4SE/Plugins/FO4Isotope/$name"
-        [IO.File]::WriteAllText($sidecarStage, 'must not ship')
+    # The plugin generates its INI at first launch, so no INI may ship.
+    foreach ($relative in @('F4SE/Plugins/FO4Isotope.ini', 'F4SE/Plugins/FO4Isotope/Default.ini',
+            'F4SE/Plugins/FO4Isotope/Personal.ini', 'F4SE/Plugins/FO4Isotope/Weather.ini')) {
+        $iniStage = Join-Path $stage $relative
+        [IO.File]::WriteAllText($iniStage, 'must not ship')
         Assert-DeployRejected 'Staged plugin file set is not exact.'
-        Remove-Item -LiteralPath $sidecarStage
+        Remove-Item -LiteralPath $iniStage
     }
     $requiredFile = Join-Path $stage $relativeFiles[0]
     Remove-Item -LiteralPath $requiredFile
@@ -72,16 +74,19 @@ function Test-DeploymentOwnedFiles {
     $personal = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Personal.ini'
     $default = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Default.ini'
     $weather = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Weather.ini'
+    $settings = Join-Path $destination 'F4SE/Plugins/FO4Isotope.ini'
     New-Item -ItemType Directory -Path (Split-Path $personal) -Force | Out-Null
     [IO.File]::WriteAllText($unrelated, 'keep')
     [IO.File]::WriteAllText($obsolete, 'owned')
     [IO.File]::WriteAllText($personal, 'personal')
+    [IO.File]::WriteAllText($settings, 'user settings')
     $sidecarBytes = [byte[]](0xEF, 0xBB, 0xBF, 0x23, 0x0D, 0x0A, 0xFF)
     [IO.File]::WriteAllBytes($default, $sidecarBytes)
     [IO.File]::WriteAllBytes($weather, $sidecarBytes)
+    # Earlier deployments owned the shipped INI; the user's copy must survive.
     $ownedManifest = Join-Path $destination '.fo4isotope-owned-files.json'
     [IO.File]::WriteAllText($ownedManifest,
-        '{"files":["obsolete.txt","F4SE/Plugins/FO4Isotope/Personal.ini","F4SE\\Plugins\\FO4Isotope\\Default.ini","F4SE/Plugins/FO4Isotope/Weather.ini"]}')
+        '{"files":["obsolete.txt","F4SE\\Plugins\\FO4Isotope.ini","F4SE/Plugins/FO4Isotope/Personal.ini","F4SE\\Plugins\\FO4Isotope\\Default.ini","F4SE/Plugins/FO4Isotope/Weather.ini"]}')
     & $deploy -Confirm:$false
     Assert-PreservedDeploymentFiles
     Assert-DeployedFiles $ownedManifest
@@ -93,9 +98,11 @@ function Assert-PreservedDeploymentFiles {
     $personal = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Personal.ini'
     $default = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Default.ini'
     $weather = Join-Path $destination 'F4SE/Plugins/FO4Isotope/Weather.ini'
+    $settings = Join-Path $destination 'F4SE/Plugins/FO4Isotope.ini'
     $sidecarBytes = [byte[]](0xEF, 0xBB, 0xBF, 0x23, 0x0D, 0x0A, 0xFF)
     $preserved = [IO.File]::ReadAllText($unrelated) -ceq 'keep' -and
-        [IO.File]::ReadAllText($personal) -ceq 'personal'
+        [IO.File]::ReadAllText($personal) -ceq 'personal' -and
+        [IO.File]::ReadAllText($settings) -ceq 'user settings'
     foreach ($sidecar in @($default, $weather)) {
         $preserved = $preserved -and (Test-Path -LiteralPath $sidecar) -and
             ([Convert]::ToHexString($sidecarBytes) -ceq
@@ -167,8 +174,7 @@ function Initialize-DeploymentStage {
 
 $relativeFiles = @(
     'F4SE/Plugins/FO4Isotope.dll',
-    'F4SE/Plugins/FO4Isotope.pdb',
-    'F4SE/Plugins/FO4Isotope.ini'
+    'F4SE/Plugins/FO4Isotope.pdb'
 )
 
 try {

@@ -92,10 +92,6 @@ rule("fo4hdr.plugin")
             "installfiles",
             target:symbolfile(),
             { prefixdir = "F4SE/Plugins" })
-        target:add(
-            "installfiles",
-            "config/FO4Isotope.ini",
-            { prefixdir = "F4SE/Plugins" })
     end)
 rule_end()
 

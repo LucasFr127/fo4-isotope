@@ -146,12 +146,16 @@ function Assert-Fo4HdrBuiltPlugin {
 function Assert-Fo4HdrPluginStaging {
     foreach ($path in @(
         $stagedDll,
-        (Join-Path $pluginRoot "FO4Isotope.pdb"),
-        (Join-Path $pluginRoot "FO4Isotope.ini")
+        (Join-Path $pluginRoot "FO4Isotope.pdb")
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
             throw "Expected built/staged plugin file is missing: $path"
         }
+    }
+    # The plugin generates its INI at first launch.
+    $stagedIni = Join-Path $pluginRoot "FO4Isotope.ini"
+    if (Test-Path -LiteralPath $stagedIni) {
+        throw "The stage must not ship FO4Isotope.ini: $stagedIni"
     }
 
     if (-not $StageOnly) { Assert-Fo4HdrBuiltPlugin }
