@@ -8,6 +8,7 @@
 #include "SettingsPersistence.hpp"
 #include "TestHarness.hpp"
 #include <Windows.h>
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -111,10 +112,19 @@ void TestExpectedDefaultConfiguration()
         FO4HDR_CHECK(!expected.contains(former));
 }
 
-// The INI of the last release upgrades to the expected default, keeping its values.
+// The INIs that 1.3.0 to 1.3.2 shipped upgrade to the expected default, keeping their values.
 void TestReleasedConfigurationUpgrade()
 {
-    const auto released = ReadText("tests/unit/config/ReleasedFO4Isotope.ini");
+    // 1.3.0 and 1.3.1 shipped the former Fallback Grade names in both profiles.
+    const auto previous =
+        ParsePluginConfiguration(ReadText("tests/unit/config/FO4Isotope-1.3.1.ini"));
+    auto renamedOnly = RepairCounts{};
+    renamedOnly[static_cast<std::size_t>(renamed)] = 4;
+    FO4HDR_CHECK(previous.valid && previous.rewriteNeeded);
+    FO4HDR_CHECK(previous.repairs.counts == renamedOnly);
+    FO4HDR_CHECK(previous.text == ReadText("config/FO4Isotope.ini"));
+
+    const auto released = ReadText("tests/unit/config/FO4Isotope-1.3.2.ini");
     const auto upgraded = ParsePluginConfiguration(released);
     FO4HDR_CHECK(upgraded.valid && upgraded.rewriteNeeded);
     FO4HDR_CHECK(upgraded.repairs.counts == RepairCounts{});
@@ -333,8 +343,12 @@ void TestMinimalConfiguration()
     FO4HDR_CHECK(parsed.value.fallbackGradeLuminancePercent == 67.0);
     FO4HDR_CHECK(parsed.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(parsed.value.bloomStrengthPercent == 50.0);
-    // Absent keys are added with their defaults.
-    FO4HDR_CHECK(RepairCount(parsed, added) > 0 && RepairCount(parsed, defaulted) == 0);
+    // Each schema key the file lacks is added with its default.
+    const auto present = static_cast<std::uint32_t>(
+        std::ranges::count(MinimalProductionConfiguration(), '='));
+    FO4HDR_CHECK(RepairCount(parsed, added) + present ==
+        RepairCount(ParsePluginConfiguration(""), added));
+    FO4HDR_CHECK(RepairCount(parsed, defaulted) == 0);
 }
 
 // DeveloperMode and the Debug keys default to off when absent.
@@ -766,9 +780,35 @@ void TestFallbackConfiguration()
     FO4HDR_CHECK(fallback.sdrSettings == DefaultSdrSettings());
 }
 
+// Each listed repair names its kind, section and key, and keeps the entry's old text.
+void TestConfigurationRepairEntries()
+{
+    auto text = ParsePluginConfiguration("").text;
+    Replace(text, "UiPaperWhiteNits=203\r\n", "");
+    Replace(text, "ColorResponse=0.5", "HdrColorResponse=0.55");
+    Replace(text, "ColorGradingCurve=Gamma22", "ColorGradingCurve=Linear");
+    Replace(text, "DisplayPeakNits=1000", "DisplayPeakNits=5000");
+    Replace(text, "[Output]\r\n", "[Output]\r\nThirdParty=kept\r\n");
+    const auto parsed = ParsePluginConfiguration(text);
+    const auto listed = [&parsed](ConfigurationRepairKind kind, std::string_view section,
+                            std::string_view key, std::string_view old) {
+        return std::ranges::any_of(parsed.repairs.entries, [&](const ConfigurationRepair& entry) {
+            return entry.kind == kind && entry.section == section && entry.key == key &&
+                entry.text == old;
+        });
+    };
+    FO4HDR_CHECK(parsed.repairs.entries.size() == 5);
+    FO4HDR_CHECK(listed(added, "Output", "UiPaperWhiteNits", ""));
+    FO4HDR_CHECK(listed(renamed, "AgX", "ColorResponse", "0.55"));
+    FO4HDR_CHECK(listed(defaulted, "Image", "ColorGradingCurve", "Linear"));
+    FO4HDR_CHECK(listed(clamped, "Output", "DisplayPeakNits", "5000"));
+    FO4HDR_CHECK(listed(dropped, "Output", "ThirdParty", "kept"));
+}
+
 void TestConfigurationRepairs()
 {
     TestFallbackConfiguration();
+    TestConfigurationRepairEntries();
     TestConfigurationMethodRepairs();
     TestConfigurationCurveRepairs();
     TestConfigurationOperatorRepairs();
