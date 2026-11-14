@@ -70,10 +70,10 @@ void CheckVideoPixels(const std::array<std::uint16_t, 4>* values,
     const auto& inputPixels, double scale)
 {
     for (std::size_t index = 0; index < kWidth; ++index) {
-        const auto bt2020 = fo4hdr::ConvertBt709ToBt2020({
-            DecodeSrgb(Binary16ToFloat(inputPixels[index][2])),
-            DecodeSrgb(Binary16ToFloat(inputPixels[index][1])),
-            DecodeSrgb(Binary16ToFloat(inputPixels[index][0]))});
+        const auto decode = [&](std::size_t channel) {
+            return std::pow(static_cast<double>(Binary16ToFloat(inputPixels[index][channel])), 2.2);
+        };
+        const auto bt2020 = fo4hdr::ConvertBt709ToBt2020({decode(2), decode(1), decode(0)});
         const std::array expected{
             bt2020.red * scale, bt2020.green * scale,
             bt2020.blue * scale};
