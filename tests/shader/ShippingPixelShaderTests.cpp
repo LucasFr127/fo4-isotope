@@ -9,6 +9,7 @@
 #include "d3d11/GpuHarness.hpp"
 #include "reference/ShaderReference.hpp"
 #include "FO4Isotope/output/Hdr10Color.hpp"
+#include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -418,7 +419,10 @@ namespace fo4hdr::tests::gpu {
 struct TemporalScenario : TemporalVariant
 {
     Device& device;
-    static constexpr Float4 wideBt2020{4.0F, 0.25F, 0.05F, 1.0F};
+    static constexpr float displayPeakNits = 1000.0F;
+    static constexpr float uiWhiteNits = 300.0F;
+    // 900 nits: production TAA input stays at or below the display peak.
+    static constexpr Float4 wideBt2020{3.0F, 0.25F, 0.05F, 1.0F};
     std::array<std::array<std::uint16_t, 4>, kWidth> scenePixels{};
     Texture scene, zero, depth, metadata, filtered;
     TemporalConstants temporalValues{};
@@ -482,7 +486,7 @@ struct TemporalScenario : TemporalVariant
             *device.device.Get(), temporalValues);
         toneMapConstants = CreateConstantBuffer(
             *device.device.Get(), ToneMapConstants{
-                1U, 1000.0F, kReferenceWhiteNits, 300.0F,
+                1U, displayPeakNits, kReferenceWhiteNits, uiWhiteNits,
                 1.0F, kReferenceWhiteNits,
                 static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
                     fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0)),
@@ -555,8 +559,30 @@ struct TemporalScenario : TemporalVariant
         for (std::size_t index = 0; index < kWidth * 4U; ++index)
             metadataWritten = metadataWritten || metadataValues[index] != 255U;
         FO4HDR_WARP_CHECK(metadataWritten);
+        CheckStoredHistory(metadataValues);
         device.context->Unmap(metadata.staging.Get(), 0);
 
+    }
+
+    // A uniform frame over empty history stores its own luma as a history code.
+    void CheckStoredHistory(const std::uint8_t* metadataValues) const
+    {
+        for (std::size_t index = 0; index < kWidth; ++index) {
+            const auto code = [&](std::size_t channel) {
+                return fo4hdr::EncodeTemporalIntermediate(
+                    Binary16ToFloat(scenePixels[index][channel]) * uiWhiteNits /
+                        kReferenceWhiteNits, displayPeakNits);
+            };
+            const auto luma = 0.5 * code(1) + 0.25 * code(0) + 0.25 * code(2);
+            const auto expected = TemporalHistoryCode(
+                fo4hdr::EncodeTemporalHistory(luma, displayPeakNits));
+            const unsigned actual = metadataValues[index * 4U];
+            const auto distance = std::max(actual, expected) - std::min(actual, expected);
+            if (distance > 1U)
+                std::cerr << variantName << " stored history luma: sample=" << index
+                          << " actual=" << actual << " expected=" << expected << '\n';
+            FO4HDR_WARP_CHECK(distance <= 1U);
+        }
     }
 
     void InitializeHistory()
@@ -603,7 +629,7 @@ struct TemporalScenario : TemporalVariant
         resources[3] = hostileDepth.srv.Get();
         if (secondVariant) resources[4] = zero.srv.Get();
         resetSettings = {
-            1U, 1000.0F, kReferenceWhiteNits, 300.0F,
+            1U, displayPeakNits, kReferenceWhiteNits, uiWhiteNits,
             1.0F, kReferenceWhiteNits,
             static_cast<float>(fo4hdr::OperatorLutInputShaperMinimum(
                 fo4hdr::ProductionToneMapperAlgorithm::aces2, 1000.0)),
@@ -690,6 +716,18 @@ struct TemporalScenario : TemporalVariant
         }
         FO4HDR_WARP_CHECK(nativeMetadataAdaptedOutput);
     }
+    // The hostile scene saturates the temporal code; it must decode to the
+    // display peak at the drawn UI white, never past FP16.
+    void CheckPeakBound(const std::array<Float4, kWidth>& output) const
+    {
+        const auto bound = displayPeakNits / resetSettings.uiTransportWhiteNits * 1.001F;
+        for (const auto& pixel : output) {
+            for (const float channel : {pixel.red, pixel.green, pixel.blue}) {
+                FO4HDR_WARP_CHECK(std::isfinite(channel));
+                FO4HDR_WARP_CHECK(channel >= 0.0F && channel <= bound);
+            }
+        }
+    }
     void CheckHistory()
     {
         const auto staleOutput = DrawTemporal(0U, "stale-history");
@@ -707,6 +745,12 @@ struct TemporalScenario : TemporalVariant
         const auto repeatedAdaptedOutput = DrawTemporal(
             0U, "native-adaptation-repeat");
         CheckAdaptedOutput(adaptedOutput, repeatedAdaptedOutput, staleOutput);
+        for (const auto* output : {&staleOutput, &reservedOutput, &adaptedOutput})
+            CheckPeakBound(*output);
+
+        // Below 203 nits the UI-white restore scales the decoded peak up.
+        resetSettings.uiTransportWhiteNits = 100.0F;
+        CheckPeakBound(DrawTemporal(0U, "dim-ui-white"));
     }
     std::array<Float4, kWidth> DrawTemporal(std::uint32_t reservedValue, std::string_view phase)
     {

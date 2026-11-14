@@ -403,31 +403,47 @@ void TestAboveWhiteSurvivesReferencePipeline()
 
 void TestTemporalIntermediateRoundTrip()
 {
-    constexpr std::array samples{
-        0.0, 0.001, 0.01, 0.18, 1.0, 2.0, 4.0, 8.0, 16.0,
-        65504.0};
-    double priorEncoded = -1.0;
-    for (const auto sample : samples)
+    constexpr std::array samples{0.0, 0.001, 0.01, 0.18, 1.0, 1.9, 4.0, 9.8, 16.0, 65504.0};
+    for (const double peakNits : {400.0, 1000.0, 2000.0})
     {
-        const auto encoded = EncodeTemporalIntermediate(sample);
-        const auto decoded = DecodeTemporalIntermediate(encoded);
-        FO4HDR_CHECK(std::isfinite(encoded));
-        FO4HDR_CHECK(std::isfinite(decoded));
-        FO4HDR_CHECK(encoded >= priorEncoded);
-        FO4HDR_CHECK(encoded >= 0.0 && encoded <= 1.0);
-        FO4HDR_CHECK(test::Approx(
-            decoded, sample, std::max(1.0e-9, sample * 1.0e-9)));
-        priorEncoded = encoded;
+        const auto peak = peakNits / kSceneReferenceWhiteNits;
+        double priorCode = -1.0;
+        double priorHistory = -1.0;
+        for (const auto sample : samples)
+        {
+            const auto code = EncodeTemporalIntermediate(sample, peakNits);
+            const auto history = EncodeTemporalHistory(code, peakNits);
+            FO4HDR_CHECK(code >= priorCode && code <= 1.0);
+            FO4HDR_CHECK(history >= priorHistory && history <= 1.0);
+            // Both codes invert below the peak; a saturated code decodes to it.
+            const auto bounded = std::min(sample, peak);
+            FO4HDR_CHECK(test::Approx(DecodeTemporalIntermediate(code, peakNits), bounded,
+                std::max(1.0e-9, bounded * 1.0e-9)));
+            FO4HDR_CHECK(test::Approx(DecodeTemporalHistory(history, peakNits), code, 1.0e-9));
+            priorCode = code;
+            priorHistory = history;
+        }
+
+        // The stored history spends more of its steps on middle gray than the code.
+        const auto gray = EncodeTemporalIntermediate(0.18, peakNits);
+        const auto lighter = EncodeTemporalIntermediate(0.18 * 1.01, peakNits);
+        FO4HDR_CHECK(EncodeTemporalHistory(lighter, peakNits) -
+                EncodeTemporalHistory(gray, peakNits) > lighter - gray);
+        FO4HDR_CHECK(EncodeTemporalHistory(1.0, peakNits) == 1.0);
+        FO4HDR_CHECK(DecodeTemporalIntermediate(1.0, peakNits) == peak);
     }
 
-    FO4HDR_CHECK(EncodeTemporalIntermediate(-1.0) == 0.0);
-    FO4HDR_CHECK(DecodeTemporalIntermediate(-1.0) == 0.0);
-    FO4HDR_CHECK(EncodeTemporalIntermediate(
-        std::numeric_limits<double>::quiet_NaN()) == 0.0);
-    FO4HDR_CHECK(DecodeTemporalIntermediate(
-        std::numeric_limits<double>::quiet_NaN()) == 0.0);
-    FO4HDR_CHECK(DecodeTemporalIntermediate(
-        std::numeric_limits<double>::infinity()) == 65504.0);
+    constexpr auto nan = std::numeric_limits<double>::quiet_NaN();
+    constexpr auto infinity = std::numeric_limits<double>::infinity();
+    FO4HDR_CHECK(EncodeTemporalIntermediate(-1.0, 1000.0) == 0.0);
+    FO4HDR_CHECK(DecodeTemporalIntermediate(-1.0, 1000.0) == 0.0);
+    FO4HDR_CHECK(EncodeTemporalIntermediate(nan, 1000.0) == 0.0);
+    FO4HDR_CHECK(DecodeTemporalIntermediate(nan, 1000.0) == 0.0);
+    FO4HDR_CHECK(EncodeTemporalIntermediate(infinity, 1000.0) == 1.0);
+    FO4HDR_CHECK(DecodeTemporalIntermediate(infinity, 1000.0) ==
+        1000.0 / kSceneReferenceWhiteNits);
+    FO4HDR_CHECK(EncodeTemporalHistory(nan, 1000.0) == 0.0);
+    FO4HDR_CHECK(DecodeTemporalHistory(nan, 1000.0) == 0.0);
 }
 
 void TestResourcePromotionPredicate()

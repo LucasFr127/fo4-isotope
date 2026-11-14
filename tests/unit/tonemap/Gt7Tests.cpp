@@ -520,7 +520,7 @@ void TestDisplayAdapterAndGamutBoundaries()
         FO4HDR_CHECK(highlight.red > white.red);
         const auto relative = highlight.red / kSceneReferenceWhiteNits;
         FO4HDR_CHECK(test::Approx(
-            DecodeTemporalIntermediate(EncodeTemporalIntermediate(relative)),
+            DecodeTemporalIntermediate(EncodeTemporalIntermediate(relative, peak), peak),
             relative,
             1.0e-10));
     }

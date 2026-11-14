@@ -195,11 +195,17 @@ FindRenoDxFallout4Shader(std::uint32_t crc32) noexcept
     return UnknownShaderOutcome::disableHdrGeneration;
 }
 
-// The reversible positive-HDR adapter keeps Fallout 4's temporal body in its
-// original normalized gamma domain without selecting a display peak or
-// production tone mapper. The shipping HLSL uses the same equations.
-[[nodiscard]] double EncodeTemporalIntermediate(double linear) noexcept;
-[[nodiscard]] double DecodeTemporalIntermediate(double encoded) noexcept;
+// Fallout 4's temporal body runs in RenoDX's peak-relative gamma code, bounded
+// at the display peak; its R8 history luma is stored with a 203-nit knee
+// bounded at the same peak. The shipping HLSL uses the same equations.
+[[nodiscard]] double EncodeTemporalIntermediate(
+    double sceneRelative, double displayPeakNits) noexcept;
+[[nodiscard]] double DecodeTemporalIntermediate(
+    double temporalCode, double displayPeakNits) noexcept;
+[[nodiscard]] double EncodeTemporalHistory(
+    double temporalCode, double displayPeakNits) noexcept;
+[[nodiscard]] double DecodeTemporalHistory(
+    double history, double displayPeakNits) noexcept;
 
 struct PipelineHeartbeatEvaluation
 {

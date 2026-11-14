@@ -179,7 +179,13 @@ void VerifyPublicPresentationOutput(Device& device)
     VerifyPublicSdrContainment(device, inputs);
 }
 
-bool CheckUiRelativeTemporalScene(fo4hdr::LinearRgb sceneNits)
+[[nodiscard]] unsigned StoredTemporalHistory(double sceneRelative, double displayPeakNits)
+{
+    return TemporalHistoryCode(fo4hdr::EncodeTemporalHistory(
+        fo4hdr::EncodeTemporalIntermediate(sceneRelative, displayPeakNits), displayPeakNits));
+}
+
+bool CheckUiRelativeTemporalScene(fo4hdr::LinearRgb sceneNits, double displayPeakNits)
 {
     const std::array channels{sceneNits.red, sceneNits.green, sceneNits.blue};
     bool preservedAboveOne{};
@@ -189,19 +195,20 @@ bool CheckUiRelativeTemporalScene(fo4hdr::LinearRgb sceneNits)
                 FloatToBinary16(static_cast<float>(channel / white)));
             FO4HDR_WARP_CHECK(std::isfinite(stored) && stored >= 0.0F);
             preservedAboveOne = preservedAboveOne || stored > 1.0F;
-            // FP16 UI-relative storage may shift fixed-203-nit R8 history by one code.
+            // FP16 UI-relative storage may shift the stored R8 history by one code.
             const double compensated = static_cast<double>(stored) * white / kReferenceWhiteNits;
-            const double fixedReference = channel / kReferenceWhiteNits;
-            const auto actualHistory = TemporalHistoryCode(
-                fo4hdr::EncodeTemporalIntermediate(compensated));
-            const auto expectedHistory = TemporalHistoryCode(
-                fo4hdr::EncodeTemporalIntermediate(fixedReference));
+            const auto actualHistory = StoredTemporalHistory(compensated, displayPeakNits);
+            const auto expectedHistory = StoredTemporalHistory(
+                channel / kReferenceWhiteNits, displayPeakNits);
             FO4HDR_WARP_CHECK(std::max(actualHistory, expectedHistory) -
                 std::min(actualHistory, expectedHistory) <= 1U);
+            // FP16 rounding can lift a peak channel above the peak the code clamps to.
+            const double bounded =
+                std::min(static_cast<double>(stored), displayPeakNits / white);
             const double decoded = fo4hdr::DecodeTemporalIntermediate(
-                fo4hdr::EncodeTemporalIntermediate(compensated)) * kReferenceWhiteNits / white;
-            FO4HDR_WARP_CHECK(std::abs(decoded - static_cast<double>(stored)) <=
-                std::max(1.0e-9, static_cast<double>(stored) * 1.0e-9));
+                fo4hdr::EncodeTemporalIntermediate(compensated, displayPeakNits),
+                displayPeakNits) * kReferenceWhiteNits / white;
+            FO4HDR_WARP_CHECK(std::abs(decoded - bounded) <= std::max(1.0e-9, bounded * 1.0e-9));
         }
     }
     return preservedAboveOne;
@@ -224,7 +231,8 @@ void VerifyUiRelativeTemporalTransport(TestedToneMapper toneMapper)
         for (const auto& source : sourceScene) {
             const auto sceneNits = MapProductionOperator(
                 toneMapper, {source.red, source.green, source.blue}, peak);
-            preservedAboveOne = CheckUiRelativeTemporalScene(sceneNits) || preservedAboveOne;
+            preservedAboveOne =
+                CheckUiRelativeTemporalScene(sceneNits, peak) || preservedAboveOne;
         }
     }
     FO4HDR_WARP_CHECK(preservedAboveOne);

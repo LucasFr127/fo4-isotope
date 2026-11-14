@@ -3,7 +3,8 @@
 // Upstream: clshortfuse/renodx@9ac0ad2f0e4a7a28fcdd0c0ece912b5ac4772e27/src/games/fallout4/taa_0x8CAC3BD9.ps_5_0.hlsl
 // Adapted for FO4Isotope from the pinned TAA 0x8CAC3BD9 shader. Modification:
 // preserve the original Fallout 4 temporal body and bindings while wrapping
-// color in the project HDR intermediate defined by TemporalIntermediate.hlsli.
+// color in the project HDR intermediate defined by TemporalIntermediate.hlsli,
+// and convert the R8 history luma between that code and its stored form.
 // See THIRD_PARTY_NOTICES.md.
 #include "TemporalIntermediate.hlsli"
 
@@ -88,6 +89,7 @@ void main(float4 v0: SV_POSITION0, float2 v1: TEXCOORD0, out float4 o0: SV_Targe
   r0.yz = cb2[0].zw * r0.zw;
   r0.yz = v1.xy * cb2[5].zw + r0.yz;
   r6.xy = t1.Sample(s1_s, r0.yz).xz;
+  r6.x = Fo4HdrHistoryToTemporalCode(r6.x);
   r7.xyz = t0.Sample(s0_s, r2.xy).yxz;
   r7.yxz = convertRenderInput(r7.yxz);
 
@@ -223,9 +225,12 @@ void main(float4 v0: SV_POSITION0, float2 v1: TEXCOORD0, out float4 o0: SV_Targe
   r0.x = max(0, r0.x);
   r0.w = min(r3.x, r0.x);
   r3.x = r0.w * r0.z + r11.x;
-  r0.z = r0.w * r0.z;
-  r0.z = cmp(abs(r0.z) < 0.00999999978);
-  o0.x = saturate(r0.z ? r11.x : r3.x);
+  // The game compares this update with the luma it stores, so measure it in
+  // stored history codes.
+  const float storedCurrent = Fo4HdrTemporalCodeToHistory(r11.x);
+  const float storedUpdate = Fo4HdrTemporalCodeToHistory(r3.x);
+  o0.x = saturate(abs(storedUpdate - storedCurrent) < 0.00999999978 ?
+      storedCurrent : storedUpdate);
   o0.yw = float2(0, 0);
   r0.z = cmp(0.00999999978 < r2.x);
   r0.z = r0.z ? r1.x : 0.5;
