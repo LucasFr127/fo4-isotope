@@ -629,16 +629,17 @@ void VerifySeedDeviceIdentity(SharedUiFixture& fixture)
     FO4HDR_WARP_CHECK(ReadComposition(device, fixture.composition) == before);
 }
 
-void VerifyAliasedSeed(SharedUiFixture& fixture, const std::vector<HalfPixel>& scene)
+void VerifyAliasedSeed(SharedUiFixture& fixture, const std::vector<HalfPixel>& scene,
+    Texture& target, ID3D11UnorderedAccessView* uav = nullptr)
 {
     auto& context = *fixture.device.context.Get();
-    context.CopyResource(fixture.composition.texture.Get(), fixture.scene.texture.Get());
+    context.CopyResource(target.texture.Get(), fixture.scene.texture.Get());
     auto* previous = fixture.scene.rtv.Get();
-    auto* alias = fixture.composition.srv.Get();
+    auto* alias = target.srv.Get();
     context.OMSetRenderTargets(1, &previous, nullptr);
     context.PSSetShaderResources(90, 1, &alias);
     FO4HDR_WARP_CHECK(fixture.seed.Seed(fixture.device.context.Get(), fixture.context1.Get(),
-        {fixture.composition.srv.Get(), fixture.composition.rtv.Get(), {203, 203}}));
+        {target.srv.Get(), target.rtv.Get(), {203, 203}, SharedUiSeedMode::linearScene, uav}));
     ComPtr<ID3D11RenderTargetView> restoredTarget;
     context.OMGetRenderTargets(1, &restoredTarget, nullptr);
     FO4HDR_WARP_CHECK(restoredTarget.Get() == previous);
@@ -648,7 +649,115 @@ void VerifyAliasedSeed(SharedUiFixture& fixture, const std::vector<HalfPixel>& s
     alias = nullptr;
     context.PSSetShaderResources(90, 1, &alias);
     context.OMSetRenderTargets(0, nullptr, nullptr);
-    CheckTransport(fixture.device, fixture.composition, SeedOracle(scene, 203, true), "aliased seed");
+    CheckTransport(fixture.device, target, SeedOracle(scene, 203, true),
+        uav ? "in-place seed" : "aliased seed");
+}
+
+struct AliasedSeedRun
+{
+    bool seeded{};
+    UINT64 computeInvocations{};
+    UINT64 pixelInvocations{};
+    std::vector<HalfPixel> pixels;
+};
+
+// Seeds the scene from its own texture; pipeline statistics show which path ran.
+AliasedSeedRun RunAliasedSeed(SharedUiFixture& fixture, Texture& target,
+    const SharedUiSeedInputs& inputs)
+{
+    auto& device = fixture.device;
+    device.context->CopyResource(target.texture.Get(), fixture.scene.texture.Get());
+    const D3D11_QUERY_DESC description{D3D11_QUERY_PIPELINE_STATISTICS, 0};
+    ComPtr<ID3D11Query> statistics;
+    CheckHresult(device.device->CreateQuery(&description, &statistics),
+        "Create shared UI seed statistics");
+    device.context->Begin(statistics.Get());
+    AliasedSeedRun run;
+    run.seeded = fixture.seed.Seed(device.context.Get(), fixture.context1.Get(), inputs);
+    device.context->End(statistics.Get());
+    D3D11_QUERY_DATA_PIPELINE_STATISTICS data{};
+    HRESULT result{};
+    do result = device.context->GetData(statistics.Get(), &data, sizeof(data), 0);
+    while (result == S_FALSE);
+    CheckHresult(result, "Read shared UI seed statistics");
+    run.computeInvocations = data.CSInvocations;
+    run.pixelInvocations = data.PSInvocations;
+    run.pixels = ReadComposition(device, target);
+    return run;
+}
+
+bool Fp16TypedUavAvailable(ID3D11Device& device)
+{
+    D3D11_FEATURE_DATA_FORMAT_SUPPORT2 support{DXGI_FORMAT_R16G16B16A16_FLOAT, 0};
+    constexpr UINT typed = D3D11_FORMAT_SUPPORT2_UAV_TYPED_LOAD | D3D11_FORMAT_SUPPORT2_UAV_TYPED_STORE;
+    return SUCCEEDED(device.CheckFeatureSupport(D3D11_FEATURE_FORMAT_SUPPORT2,
+        &support, sizeof(support))) && (support.OutFormatSupport2 & typed) == typed;
+}
+
+void VerifyInPlaceSeedRestoresComputeUav(SharedUiFixture& fixture, Texture& target,
+    Texture& unrelated)
+{
+    auto& context = *fixture.device.context.Get();
+    auto* foreignUav = unrelated.uav.Get();
+    context.CSSetUnorderedAccessViews(1, 1, &foreignUav, nullptr);
+    FO4HDR_WARP_CHECK(fixture.seed.Seed(fixture.device.context.Get(), fixture.context1.Get(),
+        {target.srv.Get(), target.rtv.Get(), {203, 203}, SharedUiSeedMode::linearScene,
+            target.uav.Get()}));
+    ComPtr<ID3D11UnorderedAccessView> restoredUav;
+    context.CSGetUnorderedAccessViews(1, 1, &restoredUav);
+    FO4HDR_WARP_CHECK(restoredUav.Get() == foreignUav);
+    foreignUav = nullptr;
+    context.CSSetUnorderedAccessViews(1, 1, &foreignUav, nullptr);
+}
+
+// With a matching UAV an aliased seed runs in place; without one, or with a UAV
+// of another texture, it copies first. Both write identical codes.
+void VerifyInPlaceSeedMode(SharedUiFixture& fixture, Texture& target, Texture& unrelated,
+    SharedUiSeedMode mode)
+{
+    const SharedUiSeedInputs copied{target.srv.Get(), target.rtv.Get(), {203, 100}, mode};
+    auto inPlace = copied;
+    inPlace.outputUav = target.uav.Get();
+    auto mismatched = copied;
+    mismatched.outputUav = unrelated.uav.Get();
+    const auto fallback = RunAliasedSeed(fixture, target, copied);
+    FO4HDR_WARP_CHECK(fallback.seeded);
+    FO4HDR_WARP_CHECK(fallback.computeInvocations == 0);
+    FO4HDR_WARP_CHECK(fallback.pixelInvocations > 0);
+    const auto compute = RunAliasedSeed(fixture, target, inPlace);
+    FO4HDR_WARP_CHECK(compute.seeded);
+    FO4HDR_WARP_CHECK(compute.computeInvocations > 0);
+    FO4HDR_WARP_CHECK(compute.pixelInvocations == 0);
+    FO4HDR_WARP_CHECK(compute.pixels == fallback.pixels);
+    const auto refused = RunAliasedSeed(fixture, target, mismatched);
+    FO4HDR_WARP_CHECK(refused.seeded);
+    FO4HDR_WARP_CHECK(refused.computeInvocations == 0);
+    FO4HDR_WARP_CHECK(refused.pixels == fallback.pixels);
+}
+
+void VerifyInPlaceSeed(SharedUiFixture& fixture, const std::vector<HalfPixel>& scene)
+{
+    auto& device = fixture.device;
+    auto& gpu = *device.device.Get();
+    if (!Fp16TypedUavAvailable(gpu))
+    {
+        std::cout << "FP16 typed UAV load/store unavailable; in-place shared UI seed unverified.\n";
+        return;
+    }
+    constexpr UINT bindings = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET |
+        D3D11_BIND_UNORDERED_ACCESS;
+    auto target = CreateSizedTexture(gpu, {kCompositionWidth, kCompositionHeight,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, bindings});
+    auto unrelated = CreateSizedTexture(gpu, {kCompositionWidth, kCompositionHeight,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, bindings});
+    VerifyAliasedSeed(fixture, scene, target, target.uav.Get());
+    VerifyInPlaceSeedRestoresComputeUav(fixture, target, unrelated);
+    constexpr float sentinel[]{-2, 3, 4, 1};
+    device.context->ClearRenderTargetView(unrelated.rtv.Get(), sentinel);
+    const auto untouched = ReadComposition(device, unrelated);
+    for (const auto mode : {SharedUiSeedMode::linearScene, SharedUiSeedMode::scaleVanillaSdr})
+        VerifyInPlaceSeedMode(fixture, target, unrelated, mode);
+    FO4HDR_WARP_CHECK(ReadComposition(device, unrelated) == untouched);
 }
 
 void VerifyContentEpochs(SharedUiFixture& fixture, const std::vector<HalfPixel>& scene)
@@ -912,7 +1021,8 @@ void VerifySharedUiComposition(Device& device)
     const auto scene = UploadScene(fixture);
     VerifySeedResourceValidation(fixture);
     VerifySeedDeviceIdentity(fixture);
-    VerifyAliasedSeed(fixture, scene);
+    VerifyAliasedSeed(fixture, scene, fixture.composition);
+    VerifyInPlaceSeed(fixture, scene);
     VerifyContentEpochs(fixture, scene);
     VerifyBorrowingFailure(fixture);
     VerifyFinalExtremes(fixture);

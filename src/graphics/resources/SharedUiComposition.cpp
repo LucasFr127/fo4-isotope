@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "SharedUiComposition.hpp"
+#include "../d3d11/BorrowedComputeState.hpp"
 #include "../d3d11/BorrowedFullscreenState.hpp"
 #include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <algorithm>
@@ -68,6 +69,10 @@ bool SharedUiComposition::Create(ID3D11Device* device,
     const bool complete = candidate.CreateTextures() && candidate.CreatePipeline() &&
         candidate.CreateConstants();
     if (!complete) return false;
+    // Optional: without it, every aliased seed copies its source first.
+    if (FAILED(device->CreateComputeShader(generated::kSharedUiSeedCs.data(),
+            generated::kSharedUiSeedCs.size(), nullptr, &candidate.compute_)))
+        candidate.compute_.Reset();
     constexpr char scratchName[] = "FO4Isotope shared UI seed source";
     (void)candidate.scratch_->SetPrivateData(WKPDID_D3DDebugObjectName,
         static_cast<UINT>(sizeof(scratchName) - 1), scratchName);
@@ -170,9 +175,38 @@ bool SharedUiComposition::UploadWhite(ID3D11DeviceContext* context, const Shared
     return true;
 }
 
-void SharedUiComposition::Draw(ID3D11DeviceContext* context, ID3D11RenderTargetView* output) noexcept
+bool SharedUiComposition::InPlaceAvailable(const SharedUiSeedInputs& inputs,
+    ID3D11Resource* output) const noexcept
 {
-    auto* input = scratchSrv_.Get();
+    if (!compute_ || !inputs.outputUav) return false;
+    D3D11_UNORDERED_ACCESS_VIEW_DESC view{};
+    inputs.outputUav->GetDesc(&view);
+    ComPtr<ID3D11Resource> resource;
+    inputs.outputUav->GetResource(&resource);
+    const std::array valid{view.ViewDimension == D3D11_UAV_DIMENSION_TEXTURE2D,
+        view.Format == DXGI_FORMAT_R16G16B16A16_FLOAT, view.Texture2D.MipSlice == 0,
+        SameObject(resource.Get(), output)};
+    return std::ranges::all_of(valid, [](bool value) { return value; });
+}
+
+bool SharedUiComposition::SeedInPlace(ID3D11DeviceContext* context,
+    ID3D11DeviceContext1* context1, const SharedUiSeedInputs& inputs,
+    ID3D11Resource* output) noexcept
+{
+    BorrowedComputeState borrowed(context, context1, output);
+    if (!UploadWhite(context, inputs)) return false;
+    auto* constants = constants_.Get();
+    auto* target = inputs.outputUav;
+    context->CSSetShader(compute_.Get(), nullptr, 0);
+    context->CSSetConstantBuffers(0, 1, &constants);
+    context->CSSetUnorderedAccessViews(0, 1, &target, nullptr);
+    context->Dispatch((width_ + 7) / 8, (height_ + 7) / 8, 1);
+    return true;
+}
+
+void SharedUiComposition::Draw(ID3D11DeviceContext* context,
+    ID3D11ShaderResourceView* input, ID3D11RenderTargetView* output) noexcept
+{
     auto* constants = constants_.Get();
     context->PSSetShaderResources(0, 1, &input);
     context->OMSetRenderTargets(1, &output, nullptr);
@@ -198,11 +232,19 @@ bool SharedUiComposition::Seed(ID3D11DeviceContext* context,
     if (!ContextMatches(context, context1)) return false;
     ComPtr<ID3D11Resource> scene, output;
     if (!ResolveInputs(inputs, scene, output)) return false;
+    const bool aliased = SameObject(scene.Get(), output.Get());
+    if (aliased && InPlaceAvailable(inputs, output.Get()))
+        return SeedInPlace(context, context1, inputs, output.Get());
     BorrowedFullscreenState borrowed(context, context1, output.Get());
     if (!borrowed.Ready() || !UploadWhite(context, inputs)) return false;
-    // A private copy permits seeding the same image that currently holds the scene.
-    context->CopyResource(scratch_.Get(), scene.Get());
-    Draw(context, inputs.output);
+    auto* source = inputs.scene;
+    if (aliased)
+    {
+        // A private copy permits seeding the same image that currently holds the scene.
+        context->CopyResource(scratch_.Get(), scene.Get());
+        source = scratchSrv_.Get();
+    }
+    Draw(context, source, inputs.output);
     return true;
 }
 

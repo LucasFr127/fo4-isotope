@@ -141,6 +141,7 @@ $specifications = @(
     [ordered]@{ Name = "UiBackdrop"; Symbol = "kUiBackdrop"; Source = "shaders/fallout4/UiBackdrop.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[20], dynamicIndexed", "dcl_constantbuffer CB1[1]", "dcl_constantbuffer CB2[15]", "dcl_sampler s0", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "PresentPixelsPs"; Symbol = "kPresentPixelsPs"; Source = "shaders/output/PresentPixels.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[3]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
     [ordered]@{ Name = "SharedUiSeedPs"; Symbol = "kSharedUiSeedPs"; Source = "shaders/output/SharedUiSeed.ps.hlsl"; Profile = "ps_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[1]", "dcl_resource_texture2d (float,float,float,float) t0", "dcl_output o0.xyzw") },
+    [ordered]@{ Name = "SharedUiSeedCs"; Symbol = "kSharedUiSeedCs"; Source = "shaders/output/SharedUiSeed.cs.hlsl"; Profile = "cs_5_0"; RequiredReflectionTokens = @("dcl_constantbuffer CB0[1]", "dcl_uav_typed_texture2d (float,float,float,float) u0", "ld_uav_typed", "dcl_thread_group 8, 8, 1") },
     [ordered]@{ Name = "PresentFullscreenVs"; Symbol = "kPresentFullscreenVs"; Source = "shaders/output/PresentFullscreen.vs.hlsl"; Profile = "vs_5_0"; RequiredReflectionTokens = @("dcl_input_sgv v0.x, vertex_id", "dcl_output_siv o0.xyzw, position") }
 )
 $testSpecifications = @(

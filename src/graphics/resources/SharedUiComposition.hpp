@@ -26,6 +26,9 @@ struct SharedUiSeedInputs
     ID3D11RenderTargetView* output{};
     SharedUiWhite white;
     SharedUiSeedMode mode{};
+    // Optional UAV of the output texture. With it, a scene that already occupies
+    // the output is seeded in place instead of copied first.
+    ID3D11UnorderedAccessView* outputUav{};
 };
 
 class SharedUiComposition
@@ -49,13 +52,18 @@ private:
         Microsoft::WRL::ComPtr<ID3D11Resource>& scene,
         Microsoft::WRL::ComPtr<ID3D11Resource>& output) const noexcept;
     bool UploadWhite(ID3D11DeviceContext*, const SharedUiSeedInputs&) noexcept;
-    void Draw(ID3D11DeviceContext*, ID3D11RenderTargetView*) noexcept;
+    bool InPlaceAvailable(const SharedUiSeedInputs&, ID3D11Resource* output) const noexcept;
+    bool SeedInPlace(ID3D11DeviceContext*, ID3D11DeviceContext1*,
+        const SharedUiSeedInputs&, ID3D11Resource* output) noexcept;
+    void Draw(ID3D11DeviceContext*, ID3D11ShaderResourceView* input,
+        ID3D11RenderTargetView* output) noexcept;
 
     Microsoft::WRL::ComPtr<ID3D11Device> device_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> scratch_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> scratchSrv_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertex_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> pixel_;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> compute_;
     Microsoft::WRL::ComPtr<ID3D11RasterizerState> rasterizer_;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> depth_;
     Microsoft::WRL::ComPtr<ID3D11BlendState> blend_;

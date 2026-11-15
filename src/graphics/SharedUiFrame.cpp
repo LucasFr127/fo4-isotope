@@ -209,7 +209,8 @@ void BeginSharedUi(const ArmorUiScopeToken& token) noexcept
     const auto white = static_cast<float>(g_activeSettings.uiPaperWhiteNits);
     auto write = CaptureSharedUiWrite();
     const SharedUiSeedInputs inputs{g_scene.currentScene.Get(),
-        g_presentation.presentationProxyRtv.Get(), {write.white, white}};
+        g_presentation.presentationProxyRtv.Get(), {write.white, white},
+        SharedUiSeedMode::linearScene, g_presentation.presentationProxyUav.Get()};
     if (!g_content.Begin(CurrentIdentity(), token.serial, white))
     {
         Reject(SharedUiRejection::duplicateSeed);
