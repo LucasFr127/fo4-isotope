@@ -98,6 +98,9 @@ void TestExpectedDefaultConfiguration()
     FO4HDR_CHECK(reparsed.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(reparsed.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(reparsed.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(reparsed.value.lightingPrecision == LightingPrecision::full);
+    FO4HDR_CHECK(reparsed.value.interfaceSettings.lightingPrecision == LightingPrecision::full);
+    FO4HDR_CHECK(HasIniLine(expected, "LightingPrecision=Full"));
     FO4HDR_CHECK(!reparsed.value.developerMode);
     FO4HDR_CHECK(!reparsed.value.traceRenderPipeline);
     FO4HDR_CHECK(!reparsed.value.measurePerformance);
@@ -115,19 +118,22 @@ void TestExpectedDefaultConfiguration()
 // The INIs that 1.3.0 to 1.3.2 shipped upgrade to the expected default, keeping their values.
 void TestReleasedConfigurationUpgrade()
 {
+    // [Performance] LightingPrecision came after 1.3.2, so every released INI adds it.
+    auto addedOnly = RepairCounts{};
+    addedOnly[static_cast<std::size_t>(added)] = 1;
     // 1.3.0 and 1.3.1 shipped the former Fallback Grade names in both profiles.
     const auto previous =
         ParsePluginConfiguration(ReadText("tests/unit/config/FO4Isotope-1.3.1.ini"));
-    auto renamedOnly = RepairCounts{};
-    renamedOnly[static_cast<std::size_t>(renamed)] = 4;
+    auto renamedAndAdded = addedOnly;
+    renamedAndAdded[static_cast<std::size_t>(renamed)] = 4;
     FO4HDR_CHECK(previous.valid && previous.rewriteNeeded);
-    FO4HDR_CHECK(previous.repairs.counts == renamedOnly);
+    FO4HDR_CHECK(previous.repairs.counts == renamedAndAdded);
     FO4HDR_CHECK(previous.text == ReadText("config/FO4Isotope.ini"));
 
     const auto released = ReadText("tests/unit/config/FO4Isotope-1.3.2.ini");
     const auto upgraded = ParsePluginConfiguration(released);
     FO4HDR_CHECK(upgraded.valid && upgraded.rewriteNeeded);
-    FO4HDR_CHECK(upgraded.repairs.counts == RepairCounts{});
+    FO4HDR_CHECK(upgraded.repairs.counts == addedOnly);
     FO4HDR_CHECK(upgraded.text == ReadText("config/FO4Isotope.ini"));
 
     auto changed = released;
@@ -136,7 +142,7 @@ void TestReleasedConfigurationUpgrade()
     Replace(changed, "ShoulderStart=0.28", "ShoulderStart=0.3");
     const auto upgradedChanged = ParsePluginConfiguration(changed);
     FO4HDR_CHECK(upgradedChanged.valid);
-    FO4HDR_CHECK(upgradedChanged.repairs.counts == RepairCounts{});
+    FO4HDR_CHECK(upgradedChanged.repairs.counts == addedOnly);
     FO4HDR_CHECK(upgradedChanged.value.displayPeakNits == 1400.0);
     FO4HDR_CHECK(upgradedChanged.value.productionAlgorithm == ProductionToneMapperAlgorithm::agX);
     FO4HDR_CHECK(upgradedChanged.value.sdrSettings.toneMapperParameters.gt7ShoulderStart == 0.3);
@@ -643,6 +649,28 @@ void TestConfigurationCurveRepairs()
     FO4HDR_CHECK(repeatedCurve.value.colorGradingCurve == ColorGradingCurve::srgb);
 }
 
+// A global switch: any case parses, unknown text keeps Full, and the menu draft follows it.
+void TestConfigurationLightingPrecisionRepairs()
+{
+    for (const auto [token, precision] : {std::pair{"VANILLA", LightingPrecision::vanilla},
+             std::pair{"vanilla", LightingPrecision::vanilla}, std::pair{"full", LightingPrecision::full}})
+    {
+        const auto parsed = ParseWith(std::string("\n[Performance]\nLightingPrecision=") + token + "\n");
+        FO4HDR_CHECK(parsed.valid && parsed.value.lightingPrecision == precision);
+        FO4HDR_CHECK(parsed.value.interfaceSettings.lightingPrecision == precision);
+        FO4HDR_CHECK(parsed.value.enabled && parsed.value.productionRequested);
+        FO4HDR_CHECK(HasIniLine(parsed.text, "LightingPrecision=" + std::string(ToString(precision))));
+    }
+    for (const auto token : {"Low", "1", ""})
+    {
+        const auto text = std::string("\n[Performance]\nLightingPrecision=") + token + "\n";
+        FO4HDR_CHECK(ParseWith(text).value.lightingPrecision == LightingPrecision::full);
+        FO4HDR_CHECK(ExtraRepairs(text, defaulted) == 1);
+    }
+    const auto repeated = ParseWith("\n[Performance]\nLightingPrecision=Vanilla\nLightingPrecision=Full\n");
+    FO4HDR_CHECK(repeated.value.lightingPrecision == LightingPrecision::full);
+}
+
 void TestConfigurationMethodRepairs()
 {
     for (const auto token : {"Independent", "Native Reference", "RGB Ratio", "999"})
@@ -811,6 +839,7 @@ void TestConfigurationRepairs()
     TestConfigurationRepairEntries();
     TestConfigurationMethodRepairs();
     TestConfigurationCurveRepairs();
+    TestConfigurationLightingPrecisionRepairs();
     TestConfigurationOperatorRepairs();
     TestConfigurationRangeRepairs();
     TestConfigurationRepeatedEffects();

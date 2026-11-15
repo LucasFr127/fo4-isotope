@@ -4,7 +4,9 @@
 #include "FO4Isotope/ui/SettingsMenu.hpp"
 #include "SettingsStatus.hpp"
 #include "TestHarness.hpp"
+#include <cstdint>
 #include <string_view>
+#include <utility>
 
 namespace fo4hdr::tests {
 
@@ -34,6 +36,41 @@ void TestHdrRequestStatus()
     fallback.sdrMode = true;
     fallback.sdrModeReason = SdrModeReason::configurationDefaults;
     FO4HDR_CHECK(HdrRequestStatus(true, fallback) == nullptr);
+}
+
+void TestLightingPrecisionStatus()
+{
+    using enum LightingPrecision;
+    const auto hdr = [](LightingPrecision atStart, std::uint64_t targets) {
+        SettingsMenuView view{};
+        view.hdrActive = true;
+        view.lightingPrecisionAtStart = atStart;
+        view.vanillaLightingTargets = targets;
+        return view;
+    };
+    // The session's own choice applied: nothing to say.
+    FO4HDR_CHECK(LightingPrecisionStatus(full, hdr(full, 0)).text == nullptr);
+    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, hdr(vanilla, 2)).text == nullptr);
+    // A change waits for the next game start.
+    for (const auto [saved, atStart] : {std::pair{vanilla, full}, std::pair{full, vanilla}})
+    {
+        const auto status = LightingPrecisionStatus(saved, hdr(atStart, 0));
+        FO4HDR_CHECK(status.severity == StatusSeverity::warning &&
+            std::string_view{status.text}.starts_with("Restart the game"));
+    }
+    // Vanilla from the start, but no lighting texture kept the game's format.
+    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, hdr(vanilla, 0)).severity == StatusSeverity::error);
+    auto inactive = hdr(vanilla, 0);
+    inactive.hdrActive = false;
+    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, inactive).text == nullptr);
+    // SDR mode has no promotion, so the choice does nothing there.
+    auto sdr = hdr(full, 0);
+    sdr.sdrMode = true;
+    const auto sdrStatus = LightingPrecisionStatus(vanilla, sdr);
+    FO4HDR_CHECK(sdrStatus.severity == StatusSeverity::info && sdrStatus.text != nullptr);
+    // Defaults from an unreadable INI cannot save it.
+    sdr.sdrModeReason = SdrModeReason::configurationDefaults;
+    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, sdr).text == nullptr);
 }
 
 // Every handled cause of SDR mode names itself; HDR off, at start or since, needs no note
@@ -144,6 +181,7 @@ void TestSettingsMenuHealth()
 void TestSettingsStatus()
 {
     TestHdrRequestStatus();
+    TestLightingPrecisionStatus();
     TestSdrModeReasonText();
     TestWeatherResponseStatus();
     TestSettingsMenuHealth();

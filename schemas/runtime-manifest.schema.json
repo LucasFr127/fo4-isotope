@@ -125,6 +125,38 @@
         }
       }, "additionalProperties": false
     },
+    "lightingTargets": {
+      "type": "object",
+      "required": ["status", "scope", "abi", "authorityGap", "evidenceQualification", "lifetime", "thread", "sourceFormat", "mode", "target", "calls"],
+      "properties": {
+        "status": { "const": "unvalidated" },
+        "scope": { "const": "vanilla-precision-lighting-accumulation" },
+        "abi": { "const": "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)" },
+        "authorityGap": { "type": "string", "minLength": 1 },
+        "evidenceQualification": { "type": "string", "minLength": 1 },
+        "lifetime": { "type": "string", "minLength": 1 },
+        "thread": { "type": "string", "minLength": 1 },
+        "sourceFormat": { "const": 26 },
+        "mode": { "const": 1 },
+        "target": { "$ref": "#/properties/nativeUiResources/properties/target" },
+        "calls": {
+          "type": "array", "minItems": 2, "maxItems": 2,
+          "items": {
+            "type": "object", "required": ["callerAddressLibraryId", "callerRva", "rva", "slot", "expectedBytes"],
+            "properties": {
+              "callerAddressLibraryId": { "type": "integer", "minimum": 1 },
+              "callerRva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "rva": { "type": "string", "pattern": "^0x[0-9A-Fa-f]{8}$" },
+              "slot": { "enum": [33, 34] },
+              "expectedBytes": {
+                "type": "array", "minItems": 5, "maxItems": 5,
+                "items": { "type": "integer", "minimum": 0, "maximum": 255 }
+              }
+            }, "additionalProperties": false
+          }
+        }
+      }, "additionalProperties": false
+    },
     "imageSpaceObserver": {
       "type": "object",
       "required": ["status", "scope", "authorityGap", "lifetime", "thread", "weatherGrade", "globals", "targets", "calls"],

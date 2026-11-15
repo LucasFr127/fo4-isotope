@@ -6,6 +6,7 @@
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 
 #include <cstdint>
+#include <span>
 #include <string_view>
 
 namespace fo4hdr {
@@ -107,6 +108,8 @@ struct GraphicsObservationSnapshot
     std::uint64_t hdrCreationFallbackCount{};
     std::uint64_t hdrCreationFallbackSuccessCount{};
     std::uint64_t promotedResourceCount{};
+    // Lighting-pair textures kept at the game's own format under Vanilla lighting precision.
+    std::uint64_t vanillaLightingTargetCount{};
     std::uint64_t presentationProxyCreateCount{};
     std::uint64_t presentationRedirectCount{};
     std::uint64_t presentCount{};
@@ -153,6 +156,10 @@ struct GraphicsObservationSnapshot
     const PluginConfiguration& configuration) noexcept;
 void SetSharedUiPauseResourcesReady(bool ready) noexcept;
 void DisableSharedUiPauseResources() noexcept;
+// Where the initializer's slot-33/34 registrar calls return, published once at plugin
+// load before the device exists. With Vanilla lighting precision, a scene texture
+// created under either call keeps the game's format.
+void PublishLightingTargetSites(std::span<const std::uintptr_t, 2> returns) noexcept;
 // The game observer brackets the native deferred scene composite pass on its
 // calling thread. Scene-target initialization inside it accepts any bound pixel
 // shader, such as a Community Shaders replacement, under its other checks.

@@ -310,30 +310,19 @@ if ($null -ne $manifest.PSObject.Properties['nativeUiResources']) {
         @($nativeUi.target.expectedBytes).Count -ne 16) {
         throw 'The native pause resource allocation contract is incomplete.'
     }
-    $nativeUiLines = @(
-        "inline constexpr std::uintptr_t kNativeUiTargetRva = $($nativeUi.target.rva);",
-        "inline constexpr std::uint64_t kNativeUiTargetId = $($nativeUi.target.addressLibraryId);",
-        "inline constexpr std::array<std::uint8_t, 16> kNativeUiTargetBytes{{ $($nativeUi.target.expectedBytes -join ', ') }};",
-        "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallerRvas{{ $($nativeUi.calls.callerRva -join ', ') }};",
-        "inline constexpr std::array<std::uint64_t, 2> kNativeUiCallerIds{{ $($nativeUi.calls.callerAddressLibraryId -join ', ') }};",
-        "inline constexpr std::array<std::uintptr_t, 2> kNativeUiCallRvas{{ $($nativeUi.calls.rva -join ', ') }};",
-        'inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{'
-    )
-    for ($index = 0; $index -lt 2; ++$index) {
-        $call = $nativeUi.calls[$index]
-        if ($call.slot -ne (24 + $index) -or @($call.expectedBytes).Count -ne 5 -or
-            $call.expectedBytes[0] -ne 232) {
-            throw 'The native pause allocation call order/fingerprint is invalid.'
-        }
-        $nativeUiLines += "    {{ $($call.expectedBytes -join ', ') }},"
-    }
-    $nativeUiLines += '}};'
-    $nativeUiLines += @(
-        'inline constexpr NativeUiRuntimeProfile kNativeUiProfile{',
-        '    kNativeUiTargetRva, kNativeUiTargetId, kNativeUiTargetBytes,',
-        '    kNativeUiCallerRvas, kNativeUiCallerIds, kNativeUiCallRvas, kNativeUiCallBytes};'
-    )
+    $nativeUiLines = Get-Fo4HdrRegistrationProfileLines $nativeUi 'NativeUi' 24 `
+        'The native pause allocation call order/fingerprint is invalid.'
     $nativeUiProfile = '&kNativeUiProfile'
+}
+
+$lightingLines = @()
+$lightingProfile = 'nullptr'
+if ($null -ne $manifest.PSObject.Properties['lightingTargets']) {
+    $lighting = $manifest.lightingTargets
+    Assert-Fo4HdrLightingTargetsContract $lighting
+    $lightingLines = Get-Fo4HdrRegistrationProfileLines $lighting 'Lighting' 33 `
+        'The lighting-target registration call order/fingerprint is invalid.'
+    $lightingProfile = '&kLightingProfile'
 }
 
 $lut = $manifest.nativeLutObserver
@@ -465,6 +454,7 @@ $lines = @(
     ($screenUiLines -join "`n"),
     ($compositeLines -join "`n"),
     ($nativeUiLines -join "`n"),
+    ($lightingLines -join "`n"),
     ($lutLines -join "`n"),
     ($imageSpaceLines -join "`n"),
     ($weatherGradeLines -join "`n"),
@@ -508,6 +498,7 @@ $lines = @(
     '    .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,',
     '    .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash,',
     "    .nativeUi = $nativeUiProfile,",
+    "    .lightingTargets = $lightingProfile,",
     "    .imageSpace = $imageSpaceRuntimeProfile",
     '};',
     "}  // namespace fo4hdr::generated::$profileNamespace",

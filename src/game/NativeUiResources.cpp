@@ -237,29 +237,58 @@ void RegisterTargetHook(Manager* manager, std::int32_t slot, const Properties* p
     }
 }
 
-class NativeUiInstallation
+// The executing image's code and Address Library mappings, for registrar calls.
+class RegistrationImage
 {
-    const fo4hdr::NativeUiRuntimeProfile& identity_;
     REX::FModule module_{REX::FModule::GetExecutingModule()};
     std::uintptr_t base_{module_.GetBaseAddress()};
     REX::FModuleSection text_{};
     REL::Offset2ID mappings_;
-    TrampolineInterface allocator_{};
-    std::array<patch::Site, 2> sites_{};
-    std::uintptr_t target_{};
-    std::uintptr_t hook_{reinterpret_cast<std::uintptr_t>(&RegisterTargetHook)};
-    bool Code(std::uintptr_t address, std::size_t size) const
+public:
+    [[nodiscard]] bool Load()
+    {
+        if (!base_ || !fo4hdr::ActiveRuntimeProfile()) return false;
+        text_ = module_.GetSection(".text");
+        mappings_.load_v2();
+        return true;
+    }
+    [[nodiscard]] REX::FModuleSection Data() { return module_.GetSection(".data"); }
+    [[nodiscard]] bool Code(std::uintptr_t address, std::size_t size) const
     {
         return ContainsBytes(text_.GetAddress(), text_.GetSize(), address, size) &&
             Executable(reinterpret_cast<void*>(address), size, reinterpret_cast<void*>(base_));
     }
-    std::uintptr_t Resolve(std::uint64_t id) const
-    { return patch::ResolveMapping(mappings_, base_, id); }
+    // The registrar's live address, or zero.
+    [[nodiscard]] std::uintptr_t Target(const fo4hdr::RenderTargetRegistrationProfile& identity) const
+    {
+        const auto rva = patch::ResolveMapping(mappings_, base_, identity.targetId);
+        const auto target = rva ? base_ + rva : 0;
+        return target && Code(target, 1) ? target : 0;
+    }
+    // The pinned initializer call whose live rel32 reaches target, or zero.
+    [[nodiscard]] std::uintptr_t CallSite(const fo4hdr::RenderTargetRegistrationProfile& identity,
+        std::size_t index, std::uintptr_t target, patch::CallBytes& bytes) const
+    {
+        const auto caller = patch::ResolveMapping(mappings_, base_, identity.callerIds[index]);
+        const auto address = base_ + caller + (identity.callRvas[index] - identity.callerRvas[index]);
+        const bool valid = caller && Code(base_ + caller, 1) && Code(address, 5) &&
+            patch::ReadCallTo(address, target, bytes, Read);
+        return valid ? address : 0;
+    }
+};
+
+class NativeUiInstallation
+{
+    const fo4hdr::RenderTargetRegistrationProfile& identity_;
+    RegistrationImage image_;
+    TrampolineInterface allocator_{};
+    std::array<patch::Site, 2> sites_{};
+    std::uintptr_t target_{};
+    std::uintptr_t hook_{reinterpret_cast<std::uintptr_t>(&RegisterTargetHook)};
     bool Target()
     {
-        const auto rva = Resolve(identity_.targetId);
-        target_ = rva ? base_ + rva : 0;
-        return target_ && target_ != hook_ && Code(target_, 1);
+        target_ = image_.Target(identity_);
+        return target_ && target_ != hook_;
     }
     bool Allocator(const void* allocatorInterface, std::uint32_t handle)
     {
@@ -268,15 +297,10 @@ class NativeUiInstallation
     }
     bool PrepareSite(std::size_t index)
     {
-        const auto caller = Resolve(identity_.callerIds[index]);
-        const auto address = base_ + caller +
-            (identity_.callRvas[index] - identity_.callerRvas[index]);
         patch::CallBytes original{};
+        const auto address = image_.CallSite(identity_, index, target_, original);
         MEMORY_BASIC_INFORMATION info{};
-        const bool valid = caller && Code(base_ + caller, 1) && Code(address, 5) &&
-            patch::ReadCallTo(address, target_, original, Read) &&
-            Region(reinterpret_cast<void*>(address), 5, info);
-        if (!valid) return false;
+        if (!address || !Region(reinterpret_cast<void*>(address), 5, info)) return false;
         sites_[index] = {address, original, {}, info.Protect};
         return true;
     }
@@ -314,24 +338,38 @@ class NativeUiInstallation
     }
     bool Globals()
     {
-        const auto data = module_.GetSection(".data");
+        const auto data = image_.Data();
         g_managerAddress = reinterpret_cast<std::uintptr_t>(Manager::GetSingleton());
         g_rendererStorage = RE::ID::BSGraphics::GetRendererData.address();
         return ContainsBytes(data.GetAddress(), data.GetSize(), g_managerAddress, sizeof(Manager)) &&
             ContainsBytes(data.GetAddress(), data.GetSize(), g_rendererStorage, sizeof(void*));
     }
 public:
-    explicit NativeUiInstallation(const fo4hdr::NativeUiRuntimeProfile& identity) :
+    explicit NativeUiInstallation(const fo4hdr::RenderTargetRegistrationProfile& identity) :
         identity_(identity) {}
 
     bool Install(const void* allocatorInterface, std::uint32_t handle)
     {
-        if (!base_ || !fo4hdr::ActiveRuntimeProfile()) return false;
-        text_ = module_.GetSection(".text");
-        mappings_.load_v2();
-        return Target() && Globals() && Allocator(allocatorInterface, handle) && PrepareSites(handle) && Publish();
+        return image_.Load() && Target() && Globals() && Allocator(allocatorInterface, handle) &&
+            PrepareSites(handle) && Publish();
     }
 };
+
+// Read-only: where each slot-33/34 registrar call returns. No code is changed.
+[[nodiscard]] bool FindLightingTargetSites(const fo4hdr::RenderTargetRegistrationProfile& identity,
+    std::array<std::uintptr_t, 2>& returns)
+{
+    RegistrationImage image;
+    const auto target = image.Load() ? image.Target(identity) : 0;
+    for (std::size_t index = 0; target && index < returns.size(); ++index)
+    {
+        patch::CallBytes bytes{};
+        const auto site = image.CallSite(identity, index, target, bytes);
+        if (!site) return false;
+        returns[index] = site + bytes.size();
+    }
+    return target != 0;
+}
 }  // namespace
 
 namespace fo4hdr::game {
@@ -347,6 +385,18 @@ bool InitializeNativeUiResources(bool requested, const void* trampolineInterface
     try {
         NativeUiInstallation installation(*profile->nativeUi);
         return installation.Install(trampolineInterface, pluginHandle);
+    } catch (...) { return false; }
+}
+
+bool InitializeLightingTargets() noexcept
+{
+    const auto* profile = ActiveRuntimeProfile();
+    if (!profile || !profile->lightingTargets) return false;
+    try {
+        std::array<std::uintptr_t, 2> returns{};
+        if (!FindLightingTargetSites(*profile->lightingTargets, returns)) return false;
+        fo4hdr::PublishLightingTargetSites(returns);
+        return true;
     } catch (...) { return false; }
 }
 }  // namespace fo4hdr::game

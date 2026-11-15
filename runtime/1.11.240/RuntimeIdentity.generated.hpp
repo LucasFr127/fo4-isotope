@@ -66,9 +66,22 @@ inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kNativeUiCallBytes{{
     {{ 232, 145, 74, 96, 255 }},
     {{ 232, 121, 74, 96, 255 }},
 }};
-inline constexpr NativeUiRuntimeProfile kNativeUiProfile{
+inline constexpr RenderTargetRegistrationProfile kNativeUiProfile{
     kNativeUiTargetRva, kNativeUiTargetId, kNativeUiTargetBytes,
     kNativeUiCallerRvas, kNativeUiCallerIds, kNativeUiCallRvas, kNativeUiCallBytes};
+inline constexpr std::uintptr_t kLightingTargetRva = 0x01839130;
+inline constexpr std::uint64_t kLightingTargetId = 2277176;
+inline constexpr std::array<std::uint8_t, 16> kLightingTargetBytes{{ 64, 87, 65, 86, 65, 87, 72, 131, 236, 64, 72, 199, 68, 36, 32, 254 }};
+inline constexpr std::array<std::uintptr_t, 2> kLightingCallerRvas{{ 0x02233E60, 0x02233E60 }};
+inline constexpr std::array<std::uint64_t, 2> kLightingCallerIds{{ 2318909, 2318909 }};
+inline constexpr std::array<std::uintptr_t, 2> kLightingCallRvas{{ 0x02234B1E, 0x02234B3F }};
+inline constexpr std::array<std::array<std::uint8_t, 5>, 2> kLightingCallBytes{{
+    {{ 232, 13, 70, 96, 255 }},
+    {{ 232, 236, 69, 96, 255 }},
+}};
+inline constexpr RenderTargetRegistrationProfile kLightingProfile{
+    kLightingTargetRva, kLightingTargetId, kLightingTargetBytes,
+    kLightingCallerRvas, kLightingCallerIds, kLightingCallRvas, kLightingCallBytes};
 inline constexpr std::uintptr_t kNativeLutRenderRva = 0x0224E820;
 inline constexpr std::uint64_t kNativeLutRenderId = 2319297;
 inline constexpr std::size_t kNativeLutEffectSubobjectOffset = 400;
@@ -130,7 +143,7 @@ inline constexpr std::string_view kF4seRuntimeFile = "f4se_1_11_240.dll";
 inline constexpr std::string_view kF4seRuntimeSha256 = "25759ed8fb110ff3ce79f174d2acf15aa82834179d9e69c53d3fb9f59176a2ef";
 inline constexpr std::string_view kAddressLibraryFile = "version-1-11-240-0.bin";
 inline constexpr std::string_view kAddressLibrarySha256 = "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06";
-inline constexpr std::string_view kManifestSha256 = "fb5a7578b923fe8c63adf6fe1a1dbce169eda8a7478269a6f0eaa3bebab3d32e";
+inline constexpr std::string_view kManifestSha256 = "f0e5a367aa4e4999a2d6a96f8ef05ed2df9d3593062059a1e6255b4c0992f5f0";
 inline constexpr std::string_view kCommonLibCommit = "2ac026b6b31a6ef517641be081b2a7b6b585a125";
 inline constexpr bool kHasNativeSceneComposite = true;
 inline constexpr std::array<std::uint32_t, 4> kNativeSceneCompositeDxbcHash{{
@@ -159,6 +172,7 @@ inline constexpr RuntimeProfile kProfile{
     .lateGameUiCompositeHash = kLateGameUiCompositeDxbcHash,
     .lateGameUiBackdropHash = kLateGameUiBackdropDxbcHash,
     .nativeUi = &kNativeUiProfile,
+    .lightingTargets = &kLightingProfile,
     .imageSpace = &kImageSpaceProfile
 };
 }  // namespace fo4hdr::generated::ae

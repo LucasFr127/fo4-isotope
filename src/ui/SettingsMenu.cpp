@@ -109,7 +109,8 @@ void DrawPage()
     }
     auto& frame = CurrentSettingsFrame();
     frame = {&client, &g_state.draft, &g_state.sessionSettings, &g_state.interfaceDraft.hdrEnabled,
-        g_state.sessionInterfaceSettings.hdrEnabled, &view, &g_renderer, &g_state.commitRequested,
+        g_state.sessionInterfaceSettings.hdrEnabled, &g_state.interfaceDraft.lightingPrecision,
+        g_state.sessionInterfaceSettings.lightingPrecision, &view, &g_renderer, &g_state.commitRequested,
         PageProblems(view)};
     if (profilePage.sdr != g_state.sdrProfile)
     {
@@ -197,6 +198,10 @@ const std::array kPages{
     PageEntry{{.id = "tone-mapping", .displayName = "Tone Mapping", .categoryId = "display",
                   .summary = "Tone mapper and its settings.", .sortKey = 100, .iconName = "chart-line"},
         &DrawPage<BuildToneMappingPage>},
+    PageEntry{{.id = "performance", .displayName = "Performance", .categoryId = "display",
+                  .summary = "Options that trade image precision for speed.", .sortKey = 200,
+                  .iconName = "gauge"},
+        &DrawPage<BuildPerformancePage>},
     PageEntry{{.id = "adjustments", .displayName = "Adjustments", .categoryId = "image",
                   .summary = "Exposure, contrast, white balance and bloom.", .sortKey = 0,
                   .iconName = "sliders"},

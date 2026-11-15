@@ -61,6 +61,7 @@ struct AtomicEvidence
     std::atomic<std::uint64_t> hdrCreationFallbackCount{};
     std::atomic<std::uint64_t> hdrCreationFallbackSuccessCount{};
     std::atomic<std::uint64_t> promotedResourceCount{};
+    std::atomic<std::uint64_t> vanillaLightingTargetCount{};
     std::atomic<std::uint64_t> presentationProxyCreateCount{};
     std::atomic<std::uint64_t> presentationRedirectCount{};
     std::atomic<std::uint64_t> presentCount{};

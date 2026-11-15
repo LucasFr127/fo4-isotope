@@ -283,6 +283,8 @@ struct ScenePromotionLatch
 {
     bool eligible{};
     std::span<std::byte> gameImage;
+    // Nonzero when the lighting pair keeps the game's format this generation.
+    std::array<std::uintptr_t, 2> vanillaLightingSites{};
 };
 ScenePromotionLatch g_scenePromotion;
 }
@@ -955,7 +957,7 @@ private:
         (void)(*request_.context)->QueryInterface(IID_PPV_ARGS(&g_rendererDevice.activeContext1));
         ++g_deviceGeneration;
         g_scenePromotion = {HdrPathRequested() && hdrDescriptor_ && g_referenceHealthy && g_productionHealthy,
-            MainImage()};
+            MainImage(), VanillaLightingSites(g_configuration.lightingPrecision)};
         if (facade_)
         {
             auto* nativeChain = *request_.swapChain;
@@ -1121,7 +1123,9 @@ HRESULT STDMETHODCALLTYPE HookCreateTexture2D(
             return ForwardUnrecorded<CreateTexture2D>(E_FAIL,
                 HookAt(kDeviceCreateTexture2D, &HookCreateTexture2D),
                 device, description, initialData, texture);
-        if (!GameScenePromotion(device, description, initialData, caller))
+        // The lighting pair keeps its format under Vanilla lighting precision; a miss promotes.
+        if (!GameScenePromotion(device, description, initialData, caller) ||
+            KeepGameLightingFormat(g_scenePromotion.vanillaLightingSites))
             return InvokeCapturedNext(record->nextCreateTexture2D, device,
                 description, initialData, texture);
         auto promoted = *description;

@@ -184,6 +184,28 @@ try {
         param($profile) $profile.calls[0].slot = 25
     }
 
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration scope changed' {
+        param($profile) $profile.scope = 'dedicated-pause-blur-fp16'
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration format changed' {
+        param($profile) $profile.sourceFormat = 10
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration ABI changed' {
+        param($profile) $profile.abi = 'void()'
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration wrong CALL target' {
+        param($profile) $profile.calls[0].expectedBytes[1] = $profile.calls[0].expectedBytes[1] -bxor 1
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration duplicate CALL' {
+        param($profile) $profile.calls[1].rva = $profile.calls[0].rva
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration reversed slots' {
+        param($profile) $profile.calls[0].slot = 34
+    }
+    Assert-ManifestProfileRejected $fixture 'lightingTargets' 'lighting registration other initializer' {
+        param($profile) $profile.calls[0].callerRva = $profile.calls[0].rva
+    }
+
     Assert-ManifestProfileRejected $fixture 'experimentalScreenUiObserver' 'screen UI ABI changed' {
         param($profile) $profile.abi = 'void(UI*,uint32_t)'
     }

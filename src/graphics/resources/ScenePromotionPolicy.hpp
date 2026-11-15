@@ -3,8 +3,11 @@
 #pragma once
 
 #include "HdrResourcePolicy.hpp"
+#include "FO4Isotope/config/HdrSettings.hpp"
 
 #include <d3d11.h>
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -49,5 +52,30 @@ inline constexpr UINT kScenePromotionSharingFlags =
     const auto begin = reinterpret_cast<std::uintptr_t>(image.data());
     return !image.empty() && value >= begin && value - begin < image.size();
 }
+
+// The calling thread's return addresses, innermost first, unwound through the
+// game's frames by their .pdata. Returns how many were captured.
+inline std::size_t CaptureCallerFrames(std::span<void*> frames) noexcept
+{
+    return ::RtlCaptureStackBackTrace(0, static_cast<DWORD>(frames.size()), frames.data(), nullptr);
+}
+
+// A texture created while one of the initializer's slot-33/34 registrar calls is on
+// the stack is a lighting-accumulation target. Zero sites never match.
+[[nodiscard]] inline bool KeepsVanillaLightingTarget(
+    std::span<void* const> frames, std::span<const std::uintptr_t, 2> sites) noexcept
+{
+    return std::ranges::any_of(frames, [sites](const void* frame) {
+        const auto address = reinterpret_cast<std::uintptr_t>(frame);
+        return address != 0 && std::ranges::find(sites, address) != sites.end();
+    });
+}
+
+// The published registration sites under Vanilla lighting precision, latched per device
+// generation; zeros under Full or when the game layer verified none.
+[[nodiscard]] std::array<std::uintptr_t, 2> VanillaLightingSites(
+    LightingPrecision precision) noexcept;
+// Matches the creating thread's frames against latched sites and counts each kept texture.
+[[nodiscard]] bool KeepGameLightingFormat(std::span<const std::uintptr_t, 2> sites) noexcept;
 
 }  // namespace fo4hdr

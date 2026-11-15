@@ -27,6 +27,9 @@ struct SettingsFrame
     // [General] HdrEnabled saves like the other settings and applies at the next game start.
     bool* hdrEnabled{};
     bool sessionHdrEnabled{};
+    // [Performance] LightingPrecision, likewise saved now and applied at the next game start.
+    LightingPrecision* lightingPrecision{};
+    LightingPrecision sessionLightingPrecision{};
     const SettingsMenuView* view{};
     const SettingsMenuRenderer* renderer{};
     bool* commitRequested{};
@@ -131,6 +134,13 @@ private:
     bool sdr_;
 };
 
+[[nodiscard]] inline dmui::FieldFeedbackSeverity FeedbackSeverity(StatusSeverity severity) noexcept
+{
+    return severity == StatusSeverity::error ? dmui::FieldFeedbackSeverity::kError :
+        severity == StatusSeverity::warning ? dmui::FieldFeedbackSeverity::kWarning :
+        dmui::FieldFeedbackSeverity::kInfo;
+}
+
 // Commits once an edit completes, the slider's release or a click.
 void PublishOnRelease(const dmui::SettingEditEvent& edit);
 // Commits each change while a slider moves.
@@ -185,6 +195,7 @@ dmui::SettingDescriptor& SettingsPageBuilder::Choice(const FieldText& text,
 
 void BuildOutputPage(SettingsPageBuilder& page);
 void BuildToneMappingPage(SettingsPageBuilder& page);
+void BuildPerformancePage(SettingsPageBuilder& page);
 void BuildAdjustmentsPage(SettingsPageBuilder& page);
 void BuildColorGradingPage(SettingsPageBuilder& page);
 void BuildSelectiveColorPage(SettingsPageBuilder& page);

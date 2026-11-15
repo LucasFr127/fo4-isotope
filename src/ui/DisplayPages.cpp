@@ -279,6 +279,44 @@ void AddToneMapper(SettingsPageBuilder& page)
         .isVisible = [] { return Draft().productionAlgorithm != native; };
 }
 
+constexpr std::array<ChoiceEntry<LightingPrecision>, 2> kLightingPrecisions{{
+    {LightingPrecision::full, "full", "Full"}, {LightingPrecision::vanilla, "vanilla", "Vanilla"}}};
+
+// Like Enable HDR, an interface draft: saved now, applied at the next game start.
+void AddLightingPrecision(SettingsPageBuilder& page)
+{
+    page.Group("lighting", "Lighting", "lightbulb");
+    const std::span<const ChoiceEntry<LightingPrecision>> entries{kLightingPrecisions};
+    dmui::ChoiceSettingControl control;
+    for (const auto& entry : entries) control.options.push_back({entry.key, entry.label});
+    dmui::SettingDescriptor setting{.id = "lighting-precision", .label = "Lighting Precision",
+        .description = "Vanilla keeps the game's own precision for its two lighting buffers. The "
+            "lower memory traffic helps most on Steam Deck and integrated graphics; smooth lit "
+            "surfaces can show faint banding. HDR only. Applies after a restart.",
+        .control = std::move(control), .defaultValue = ChoiceKey(entries, LightingPrecision::full)};
+    setting.binding = dmui::BindSetting(
+        [entries] { return ChoiceKey(entries, *CurrentSettingsFrame().lightingPrecision); },
+        [entries](std::string selected) {
+            auto& value = *CurrentSettingsFrame().lightingPrecision;
+            SelectChoice(entries, selected, value);
+            return ChoiceKey(entries, value);
+        });
+    setting.isModified = [] { return *CurrentSettingsFrame().lightingPrecision != LightingPrecision::full; };
+    setting.isDirty = [] {
+        const auto& frame = CurrentSettingsFrame();
+        return *frame.lightingPrecision != frame.sessionLightingPrecision;
+    };
+    setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
+        const auto status = LightingPrecisionStatus(*CurrentSettingsFrame().lightingPrecision, View());
+        if (status.text == nullptr) return std::nullopt;
+        return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
+    };
+    (void)page.Custom(std::move(setting), [] {
+        auto& frame = CurrentSettingsFrame();
+        *frame.lightingPrecision = frame.sessionLightingPrecision;
+    });
+}
+
 }  // namespace
 
 void BuildOutputPage(SettingsPageBuilder& page)
@@ -295,6 +333,12 @@ void BuildToneMappingPage(SettingsPageBuilder& page)
     page.Status();
     AddToneMapper(page);
     AddToneMapperSettings(page);
+}
+
+void BuildPerformancePage(SettingsPageBuilder& page)
+{
+    page.Status();
+    AddLightingPrecision(page);
 }
 
 }  // namespace fo4hdr

@@ -192,6 +192,19 @@ Assert-Rejected {
     $null = Assert-Fo4HdrImageSpaceProfile $wrongLayoutConstant
 } "wrong private array-layout constant"
 
+# The generator's own lighting-registration contract, apart from the schema.
+$lighting = $manifest.lightingTargets
+Assert-Fo4HdrLightingTargetsContract $lighting
+$null = Get-Fo4HdrRegistrationProfileLines $lighting 'Lighting' 33 'lighting calls'
+$otherScope = Copy-Profile $lighting
+$otherScope.scope = 'dedicated-pause-blur-fp16'
+Assert-Rejected { Assert-Fo4HdrLightingTargetsContract $otherScope } "lighting registration scope"
+$reversed = Copy-Profile $lighting
+$reversed.calls[0].slot = 34
+Assert-Rejected {
+    $null = Get-Fo4HdrRegistrationProfileLines $reversed 'Lighting' 33 'lighting calls'
+} "lighting registration slot order"
+
 function Test-RuntimeIdentityGeneration {
     param([string]$Runtime, [string]$First, [string]$Second)
     & (Join-Path $repoRoot "scripts\generate-runtime-identity.ps1") `
@@ -209,6 +222,9 @@ function Test-RuntimeIdentityGeneration {
     if ($generated -notmatch '\.imageSpace = &kImageSpaceProfile' -or
         $generated -notmatch '\.nativeUi = &kNativeUiProfile') {
         throw "$runtime generated output omitted a qualified native adapter."
+    }
+    if ($generated -notmatch '\.lightingTargets = &kLightingProfile') {
+        throw "$runtime generated output omitted the lighting-target profile."
     }
     if ($generated -notmatch 'kHasNativeSceneComposite = true;') {
         throw "$runtime generated output omitted the qualified scene-clear identity."

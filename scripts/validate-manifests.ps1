@@ -141,15 +141,15 @@ function Assert-ImageSpaceRuntime {
     }
 }
 
-function Assert-NativeUiCallSequence {
-    param($Profile)
+function Assert-RegistrationCallSequence {
+    param($Profile, [int]$FirstSlot, [string]$Name)
     $target = [Convert]::ToInt64($profile.target.rva.Substring(2), 16)
     $seenCalls = @{}
     for ($index = 0; $index -lt 2; ++$index) {
         $call = $profile.calls[$index]
-        if ($call.slot -ne (24 + $index) -or
+        if ($call.slot -ne ($FirstSlot + $index) -or
             -not (Test-ObserverCallRelationship $call $target $seenCalls)) {
-            throw 'Native pause allocation CALL order/target/caller relationship is invalid.'
+            throw "$Name CALL order/target/caller relationship is invalid."
         }
         $seenCalls[[Convert]::ToInt64($call.rva.Substring(2), 16)] = $true
     }
@@ -159,7 +159,27 @@ function Assert-NativeUiResourcesRuntime {
     param($Manifest)
     $profileProperty = $Manifest.PSObject.Properties['nativeUiResources']
     if ($null -eq $profileProperty) { return }
-    Assert-NativeUiCallSequence $profileProperty.Value
+    Assert-RegistrationCallSequence $profileProperty.Value 24 'Native pause allocation'
+}
+
+function Assert-LightingTargetsRuntime {
+    param($Manifest)
+    $profileProperty = $Manifest.PSObject.Properties['lightingTargets']
+    if ($null -eq $profileProperty) { return }
+    $lighting = $profileProperty.Value
+    Assert-RegistrationCallSequence $lighting 33 'Lighting-target registration'
+    # Both sections name the same registrar and initializer.
+    $nativeUi = $Manifest.PSObject.Properties['nativeUiResources']
+    if ($null -ne $nativeUi -and
+        (Get-RegistrationAnchor $nativeUi.Value) -ne (Get-RegistrationAnchor $lighting)) {
+        throw 'Lighting-target registration must share the native pause registrar and initializer.'
+    }
+}
+
+# The registrar and initializer one registration section names.
+function Get-RegistrationAnchor {
+    param($Profile)
+    return "$($Profile.target.addressLibraryId)|$($Profile.target.rva)|$($Profile.calls[0].callerRva)"
 }
 
 function Assert-ScreenUiRuntime {
@@ -287,6 +307,7 @@ foreach ($runtime in @(
     Assert-LockedRuntimeIdentity $runtime $manifestPath $entry $definition
     Assert-ImageSpaceRuntime $manifest
     Assert-NativeUiResourcesRuntime $manifest
+    Assert-LightingTargetsRuntime $manifest
     Assert-ScreenUiRuntime $manifest
     Assert-SceneCompositeRuntime $manifest
     Assert-NativeLutRuntime $manifest

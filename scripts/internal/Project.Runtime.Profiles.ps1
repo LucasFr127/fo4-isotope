@@ -297,3 +297,53 @@ function Assert-Fo4HdrImageSpaceActiveFields {
     }
 
 }
+
+# A five-byte rel32 CALL (E8) recorded for the expected render-target slot.
+function Test-Fo4HdrRegistrationCall {
+    param($Call, [int]$Slot)
+    if ($Call.slot -ne $Slot) { return $false }
+    return @($Call.expectedBytes).Count -eq 5 -and $Call.expectedBytes[0] -eq 232
+}
+
+# The generated RenderTargetRegistrationProfile for a registrar and its two ordered
+# initializer calls, which register consecutive slots from FirstSlot.
+function Get-Fo4HdrRegistrationProfileLines {
+    param($Section, [string]$Prefix, [int]$FirstSlot, [string]$Failure)
+    $result = @(
+        "inline constexpr std::uintptr_t k$($Prefix)TargetRva = $($Section.target.rva);",
+        "inline constexpr std::uint64_t k$($Prefix)TargetId = $($Section.target.addressLibraryId);",
+        "inline constexpr std::array<std::uint8_t, 16> k$($Prefix)TargetBytes{{ $($Section.target.expectedBytes -join ', ') }};",
+        "inline constexpr std::array<std::uintptr_t, 2> k$($Prefix)CallerRvas{{ $($Section.calls.callerRva -join ', ') }};",
+        "inline constexpr std::array<std::uint64_t, 2> k$($Prefix)CallerIds{{ $($Section.calls.callerAddressLibraryId -join ', ') }};",
+        "inline constexpr std::array<std::uintptr_t, 2> k$($Prefix)CallRvas{{ $($Section.calls.rva -join ', ') }};",
+        "inline constexpr std::array<std::array<std::uint8_t, 5>, 2> k$($Prefix)CallBytes{{"
+    )
+    for ($index = 0; $index -lt 2; ++$index) {
+        $call = $Section.calls[$index]
+        if (-not (Test-Fo4HdrRegistrationCall $call ($FirstSlot + $index))) { throw $Failure }
+        $result += "    {{ $($call.expectedBytes -join ', ') }},"
+    }
+    $result += '}};'
+    $result += @(
+        "inline constexpr RenderTargetRegistrationProfile k$($Prefix)Profile{",
+        "    k$($Prefix)TargetRva, k$($Prefix)TargetId, k$($Prefix)TargetBytes,",
+        "    k$($Prefix)CallerRvas, k$($Prefix)CallerIds, k$($Prefix)CallRvas, k$($Prefix)CallBytes};"
+    )
+    return $result
+}
+
+# The lighting-target section's fixed contract; its calls are checked when their
+# profile lines are generated.
+function Assert-Fo4HdrLightingTargetsContract {
+    param($Section)
+    $expected = [ordered]@{
+        status = "unvalidated"; scope = "vanilla-precision-lighting-accumulation"
+        abi = "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)"
+        sourceFormat = 26; mode = 1
+    }
+    $complete = @($Section.calls).Count -eq 2 -and @($Section.target.expectedBytes).Count -eq 16
+    foreach ($name in $expected.Keys) {
+        $complete = $complete -and $Section.$name -eq $expected[$name]
+    }
+    if (-not $complete) { throw "The lighting-target registration contract is incomplete." }
+}

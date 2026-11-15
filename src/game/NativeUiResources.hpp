@@ -10,6 +10,10 @@ namespace fo4hdr::game {
 [[nodiscard]] bool InitializeNativeUiResources(bool requested, const void* trampolineInterface,
     std::uint32_t pluginHandle) noexcept;
 
+// Read-only: verifies the initializer's slot-33/34 registrar calls and
+// publishes where they return, so texture creation can recognize the lighting pair.
+[[nodiscard]] bool InitializeLightingTargets() noexcept;
+
 namespace detail {
 
 struct NativeUiRegistration

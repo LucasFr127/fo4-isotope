@@ -91,7 +91,7 @@
       "addressLibrarySha256": "d849ae8989c54a2ceebbc587c2a77f62a44f74d0c42a42e0bed30d65118d3395",
       "shaderManifestSha256": "FILL_AFTER_CAPTURE",
       "observedAtUtc": "2026-11-05T19:19:47.0633774Z",
-      "runtimeManifestCanonicalSha256": "7b94b78ff781920bbeba9bc8d427ae0c6e3948ce64d534003604bc54ab1ae5cc"
+      "runtimeManifestCanonicalSha256": "744b0d17bb15c8af9bbfd84f5d570f27c69ebb411ca058d12247029dd03f2747"
     },
     "1.10.984": {
       "platform": "steam",
@@ -103,7 +103,7 @@
       "addressLibrarySha256": "c13545f2dab806b7d19c5aa83a0d7524337b5afc89af79460f9915020e049d75",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-11-05T19:19:48.1380788Z",
-      "runtimeManifestCanonicalSha256": "52f11dc21223c56607e71c869a5dd88d031e964a83ad4c766d40322b95ecf889"
+      "runtimeManifestCanonicalSha256": "adc2215336b2ccf37bbc172c788fbb94e65964b9dbcd2d5eb1a07e1fa1cdafbc"
     },
     "1.11.240": {
       "platform": "steam",
@@ -115,7 +115,7 @@
       "addressLibrarySha256": "65985cc2259384a13cffb538d74776e422e62b0cd3766485a000620242b72b06",
       "shaderManifestSha256": "UNVALIDATED",
       "observedAtUtc": "2026-11-05T19:19:49.0305483Z",
-      "runtimeManifestCanonicalSha256": "fb5a7578b923fe8c63adf6fe1a1dbce169eda8a7478269a6f0eaa3bebab3d32e"
+      "runtimeManifestCanonicalSha256": "f0e5a367aa4e4999a2d6a96f8ef05ed2df9d3593062059a1e6255b4c0992f5f0"
     }
   },
   "aces2": {

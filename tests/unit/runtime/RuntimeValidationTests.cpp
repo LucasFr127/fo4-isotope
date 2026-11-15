@@ -56,7 +56,13 @@ void TestCompiledRuntimeProvenance()
         FO4HDR_CHECK(profile->manifestSha256.size() == 64);
         FO4HDR_CHECK(profile->manifestSha256.find_first_not_of("0123456789abcdef") ==
             std::string_view::npos);
-        FO4HDR_CHECK(profile->nativeUi && profile->imageSpace);
+        FO4HDR_CHECK(profile->nativeUi && profile->lightingTargets && profile->imageSpace);
+        // Both registration sections name the same registrar and initializer.
+        if (profile->nativeUi && profile->lightingTargets)
+        {
+            FO4HDR_CHECK(profile->lightingTargets->targetId == profile->nativeUi->targetId);
+            FO4HDR_CHECK(profile->lightingTargets->callerIds == profile->nativeUi->callerIds);
+        }
     }
 }
 

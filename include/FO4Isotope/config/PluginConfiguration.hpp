@@ -27,6 +27,8 @@ struct PluginConfiguration : HdrSettings
     bool sdrEnabled{};
     HdrSettings sdrSettings{DefaultSdrSettings()};
     bool productionRequested{};
+    // Latched with scene promotion when a device generation is published.
+    LightingPrecision lightingPrecision{LightingPrecision::full};
     double sceneExposureMultiplier{1.0};
     HdrInterfaceSettings interfaceSettings{};
     bool developerMode{};
@@ -115,6 +117,8 @@ LoadPluginConfiguration(
     ColorGradingMethod method) noexcept;
 [[nodiscard]] std::string_view ToString(
     ColorGradingCurve curve) noexcept;
+[[nodiscard]] std::string_view ToString(
+    LightingPrecision precision) noexcept;
 [[nodiscard]] std::string_view ToString(
     PluginConfigurationError error) noexcept;
 [[nodiscard]] std::string_view ToString(

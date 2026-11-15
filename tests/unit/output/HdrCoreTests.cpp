@@ -11,12 +11,14 @@
 #include "reference/OperatorLutTestSupport.hpp"
 #include "TestHarness.hpp"
 
+#include <intrin.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -528,6 +530,26 @@ void TestPromotionCallerImage()
     FO4HDR_CHECK(!ImageContains(view, image.data() + 16));
     FO4HDR_CHECK(!ImageContains(view, nullptr));
     FO4HDR_CHECK(!ImageContains({}, image.data()));
+}
+
+// Stands in for texture creation inside the game's allocator, capturing as the hook does.
+__declspec(noinline) bool CreatedUnderRegistration(std::array<std::uintptr_t, 2> sites)
+{
+    std::array<void*, 24> frames{};
+    return KeepsVanillaLightingTarget(std::span{frames}.first(CaptureCallerFrames(frames)), sites);
+}
+
+// A published site matches where a registration returns, frames up the stack;
+// other addresses and the zeros of unpublished sites never match, not even a null frame.
+void TestVanillaLightingTargetMatch()
+{
+    const auto site = reinterpret_cast<std::uintptr_t>(_ReturnAddress());
+    FO4HDR_CHECK(CreatedUnderRegistration({0x3005, site}));
+    const auto entry = reinterpret_cast<std::uintptr_t>(&CreatedUnderRegistration) + 1;
+    FO4HDR_CHECK(!CreatedUnderRegistration({entry, 0x3005}));
+    FO4HDR_CHECK(!CreatedUnderRegistration({}));
+    const std::array<void*, 2> nullFrames{};
+    FO4HDR_CHECK(!KeepsVanillaLightingTarget(nullFrames, std::array<std::uintptr_t, 2>{}));
 }
 
 HdrPathCapabilities AllCapabilities()
@@ -1078,6 +1100,7 @@ void RunHdrCoreTests()
     TestResourcePromotionPredicate();
     TestSceneTexturePromotionGate();
     TestPromotionCallerImage();
+    TestVanillaLightingTargetMatch();
     TestActivationPolicy();
     TestActivationCapabilityRequirements();
     TestDeviceCreationBypass();

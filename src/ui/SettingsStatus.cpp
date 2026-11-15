@@ -59,6 +59,14 @@ static_assert(kSdrModeHealth.size() == kSdrModeReasonTexts.size());
     return health;
 }
 
+// HDR runs with Vanilla from the start, yet no lighting texture kept the game's format.
+[[nodiscard]] bool VanillaLightingMissing(const SettingsMenuView& view) noexcept
+{
+    if (!view.hdrActive) return false;
+    return view.lightingPrecisionAtStart == LightingPrecision::vanilla &&
+        view.vanillaLightingTargets == 0;
+}
+
 }  // namespace
 
 const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept
@@ -99,6 +107,19 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
     // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
     if (!hdrEnabled && !view.sdrMode) return "Restart the game to turn HDR off.";
     return nullptr;
+}
+
+StatusMessage LightingPrecisionStatus(
+    LightingPrecision precision, const SettingsMenuView& view) noexcept
+{
+    // Defaults from an unreadable INI cannot save the choice; the SDR reason names the fix.
+    if (view.sdrModeReason == SdrModeReason::configurationDefaults) return {};
+    if (view.sdrMode) return {"Applies only to HDR output."};
+    if (precision != view.lightingPrecisionAtStart)
+        return {"Restart the game to apply.", StatusSeverity::warning};
+    if (VanillaLightingMissing(view))
+        return {"Vanilla was not applied this session. See FO4Isotope.log.", StatusSeverity::error};
+    return {};
 }
 
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept

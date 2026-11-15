@@ -169,6 +169,67 @@
       }
     ]
   },
+  "lightingTargets": {
+    "status": "unvalidated",
+    "scope": "vanilla-precision-lighting-accumulation",
+    "abi": "void(RenderTargetManager*,int32_t,const RenderTargetProperties*,uint8_t)",
+    "authorityGap": "Pinned CommonLibF4 has no named logical render-target IDs or mappings for the initializer's slot-33/34 registrations.",
+    "evidenceQualification": "Static review of the exact 1.10.163 executable, its SteamStub .text decoded offline for analysis, and Address Library mapping: both calls reach the registrar with full-screen format-26, non-UAV, mode-1 descriptors, and the named SetCurrentRenderTarget binds logical 33 and 34 to render-target slots 0 and 1 in the light passes. RenderDoc captures show that pair only cleared, written by additive light draws and read by the lighting composite. Native validation pending.",
+    "lifetime": "Mode 1 creates each dedicated texture synchronously inside the registrar call. Slot 34 is registered only while a game flag byte is set; every retained capture has both. The manager's create callback repeats the registrations after device creation and resize. Only the two call sites are read; no code is changed.",
+    "thread": "Textures are created on the thread that runs the initializer; the two return addresses are published once at plugin load.",
+    "sourceFormat": 26,
+    "mode": 1,
+    "target": {
+      "addressLibraryId": 43433,
+      "rva": "0x01D30E90",
+      "expectedBytes": [
+        64,
+        86,
+        87,
+        65,
+        86,
+        72,
+        131,
+        236,
+        64,
+        72,
+        199,
+        68,
+        36,
+        32,
+        254,
+        255
+      ]
+    },
+    "calls": [
+      {
+        "callerAddressLibraryId": 1118299,
+        "callerRva": "0x02896680",
+        "rva": "0x028972E9",
+        "slot": 33,
+        "expectedBytes": [
+          232,
+          162,
+          155,
+          73,
+          255
+        ]
+      },
+      {
+        "callerAddressLibraryId": 1118299,
+        "callerRva": "0x02896680",
+        "rva": "0x0289730B",
+        "slot": 34,
+        "expectedBytes": [
+          232,
+          128,
+          155,
+          73,
+          255
+        ]
+      }
+    ]
+  },
   "sceneCompositeObserver": {
     "status": "runtime-validated",
     "scope": "deferred-scene-composite-pass",

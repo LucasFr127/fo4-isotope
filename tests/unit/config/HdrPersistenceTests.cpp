@@ -172,8 +172,8 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
 }
 
-// The settings menu saves the HDR request for the next game start and keeps the
-// switches it does not edit.
+// The settings menu saves the HDR request and Lighting Precision for the next game
+// start and keeps the switches it does not edit.
 void CheckRewrittenHdrRequest(const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings, std::string_view original)
 {
@@ -185,6 +185,15 @@ void CheckRewrittenHdrRequest(const HdrSettings& settings,
         RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hdrOff));
     FO4HDR_CHECK(reloaded.valid && !reloaded.value.enabled);
     FO4HDR_CHECK(!reloaded.value.interfaceSettings.hdrEnabled);
+
+    auto vanilla = interfaceSettings;
+    vanilla.lightingPrecision = LightingPrecision::vanilla;
+    FO4HDR_CHECK(HasIniLine(IniSection(RewriteHdrSettingsIni(original, {settings}, vanilla),
+        "Performance"), "LightingPrecision=Vanilla"));
+    const auto vanillaReloaded = ParsePluginConfiguration(
+        RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, vanilla));
+    FO4HDR_CHECK(vanillaReloaded.valid && vanillaReloaded.value.lightingPrecision == LightingPrecision::vanilla);
+    FO4HDR_CHECK(vanillaReloaded.value.interfaceSettings.lightingPrecision == LightingPrecision::vanilla);
 
     const auto switches = RewriteHdrSettingsIni(
         "[General]\nSdrEnabled=0\nDeveloperMode=1\n[Debug]\nTraceRenderPipeline=1\n",

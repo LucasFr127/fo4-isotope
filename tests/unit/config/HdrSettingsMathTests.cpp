@@ -184,6 +184,9 @@ void TestSettingsEquality()
     interfaceCopy.hdrEnabled = false;
     FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
     interfaceCopy = interfaceDefaults;
+    interfaceCopy.lightingPrecision = LightingPrecision::vanilla;
+    FO4HDR_CHECK(interfaceCopy != interfaceDefaults);
+    interfaceCopy = interfaceDefaults;
     FO4HDR_CHECK(interfaceCopy == interfaceDefaults);
 
     const PluginConfiguration configurationDefaults{};
@@ -194,6 +197,9 @@ void TestSettingsEquality()
     configurationCopy = configurationDefaults;
     FO4HDR_CHECK(configurationCopy == configurationDefaults);
     configurationCopy.interfaceSettings.hdrEnabled = false;
+    FO4HDR_CHECK(configurationCopy != configurationDefaults);
+    configurationCopy = configurationDefaults;
+    configurationCopy.lightingPrecision = LightingPrecision::vanilla;
     FO4HDR_CHECK(configurationCopy != configurationDefaults);
     configurationCopy = configurationDefaults;
     configurationCopy.developerMode = true;

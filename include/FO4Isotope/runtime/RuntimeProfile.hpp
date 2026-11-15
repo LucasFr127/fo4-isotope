@@ -9,7 +9,8 @@
 #include <string_view>
 
 namespace fo4hdr {
-struct NativeUiRuntimeProfile
+// Two ordered calls from the render-target initializer to its registrar.
+struct RenderTargetRegistrationProfile
 {
     std::uintptr_t targetRva{};
     std::uint64_t targetId{};
@@ -50,7 +51,9 @@ struct RuntimeProfile
     std::array<std::uint32_t, 4> nativeSceneCompositeHash{};
     std::array<std::uint32_t, 4> lateGameUiCompositeHash{};
     std::array<std::uint32_t, 4> lateGameUiBackdropHash{};
-    const NativeUiRuntimeProfile* nativeUi{};
+    const RenderTargetRegistrationProfile* nativeUi{};
+    // The slot-33/34 lighting-accumulation registrations.
+    const RenderTargetRegistrationProfile* lightingTargets{};
     const ImageSpaceRuntimeProfile* imageSpace{};
 };
 

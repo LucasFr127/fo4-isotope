@@ -212,7 +212,8 @@ enum class SettingField : std::size_t
     weatherColorAmbient,
     weatherColorColorChange,
     sdrEnabled,
-    sdrOperatorWeatherResponse
+    sdrOperatorWeatherResponse,
+    lightingPrecision
 };
 
 // Which sections hold a key: a switch or HDR-only section, both an HDR
@@ -282,6 +283,10 @@ constexpr SettingKey kSettingKeys[]{
         "# Shoulder Start: 0.216 to 0.60; 0.216 starts the shoulder where the toe ends."},
     {"GT7", "ColorBlend", SettingField::gt7ColorBlend, SettingProfile::shared,
         "# Color Blend: 0 to 1."},
+    {"Performance", "LightingPrecision", SettingField::lightingPrecision, SettingProfile::global,
+        "# Lighting Precision, HDR only: Full or Vanilla; applies at game start. Vanilla keeps\n"
+        "# the game's own lighting buffers: faster on Steam Deck and integrated graphics, with\n"
+        "# possible faint banding on smooth lit surfaces."},
     {"Image", "ColorGradingMethod", SettingField::colorGradingMethod, SettingProfile::hdr,
         "# Grading Method, HDR only: RgbRatio or Affine."},
     {"Image", "ColorGradingCurve", SettingField::colorGradingCurve, SettingProfile::hdr,
@@ -789,6 +794,17 @@ bool* ProfileBooleanTarget(HdrSettings& profile, SettingField key) noexcept
     return false;
 }
 
+[[nodiscard]] bool ParseLightingPrecision(std::string_view text, LightingPrecision& target) noexcept
+{
+    for (const auto precision : {LightingPrecision::full, LightingPrecision::vanilla})
+    {
+        if (!EqualsIgnoreCase(text, ToString(precision))) continue;
+        target = precision;
+        return true;
+    }
+    return false;
+}
+
 struct AppliedValue
 {
     bool accepted{};
@@ -804,6 +820,19 @@ struct AppliedValue
     const auto canonical = CanonicalNumber(*number, precise);
     target = std::clamp(canonical, range[0], range[1]);
     return {.accepted = true, .clamped = target != canonical};
+}
+
+[[nodiscard]] bool ApplyFlag(
+    PluginConfiguration& stored, SettingField field, bool sdr, std::string_view text)
+{
+    auto* flag = KeyFlag(stored, field, sdr);
+    return flag != nullptr && ParseBoolean(text, *flag);
+}
+
+[[nodiscard]] std::string FormatFlag(PluginConfiguration& stored, SettingField field, bool sdr)
+{
+    const auto* flag = KeyFlag(stored, field, sdr);
+    return flag != nullptr && *flag ? "1" : "0";
 }
 
 [[nodiscard]] AppliedValue ApplySetting(PluginConfiguration& stored,
@@ -825,12 +854,12 @@ struct AppliedValue
     case SettingField::colorGradingCurve:
         applied.accepted = ParseGradingCurve(text, profile.colorGradingCurve);
         break;
-    default:
-    {
-        auto* flag = KeyFlag(stored, key.field, sdr);
-        applied.accepted = flag != nullptr && ParseBoolean(text, *flag);
+    case SettingField::lightingPrecision:
+        applied.accepted = ParseLightingPrecision(text, stored.lightingPrecision);
         break;
-    }
+    default:
+        applied.accepted = ApplyFlag(stored, key.field, sdr, text);
+        break;
     }
     return applied;
 }
@@ -846,11 +875,8 @@ struct AppliedValue
     case SettingField::algorithm: return std::string(ToString(profile.productionAlgorithm));
     case SettingField::colorGradingMethod: return std::string(ToString(profile.colorGradingMethod));
     case SettingField::colorGradingCurve: return std::string(ToString(profile.colorGradingCurve));
-    default:
-    {
-        const auto* flag = KeyFlag(stored, key.field, sdr);
-        return flag != nullptr && *flag ? "1" : "0";
-    }
+    case SettingField::lightingPrecision: return std::string(ToString(stored.lightingPrecision));
+    default: return FormatFlag(stored, key.field, sdr);
     }
 }
 
@@ -988,6 +1014,7 @@ private:
         (configuration.developerHdr10Reference || configuration.productionRequested);
     configuration.sceneExposureMultiplier = std::exp2(configuration.exposureEv);
     configuration.interfaceSettings.hdrEnabled = configuration.enabled;
+    configuration.interfaceSettings.lightingPrecision = configuration.lightingPrecision;
     return configuration;
 }
 
@@ -1117,6 +1144,16 @@ std::string_view ToString(
     {
     case ColorGradingCurve::gamma22: return "Gamma22";
     case ColorGradingCurve::srgb: return "sRGB";
+    }
+    return "unknown";
+}
+
+std::string_view ToString(LightingPrecision precision) noexcept
+{
+    switch (precision)
+    {
+    case LightingPrecision::full: return "Full";
+    case LightingPrecision::vanilla: return "Vanilla";
     }
     return "unknown";
 }

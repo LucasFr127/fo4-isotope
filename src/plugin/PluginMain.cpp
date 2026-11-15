@@ -566,6 +566,15 @@ bool ReportBoundary(std::string_view boundary, bool installed) noexcept
     return installed;
 }
 
+// Only Vanilla lighting precision reads the slot-33/34 call sites, so Full logs no boundary.
+void InitializeVanillaLighting(const fo4hdr::PluginConfigurationResult& configuration) noexcept
+{
+    if (!HdrPathRequested(configuration) ||
+        configuration.value.lightingPrecision != fo4hdr::LightingPrecision::vanilla)
+        return;
+    (void)ReportBoundary("lighting precision targets", fo4hdr::game::InitializeLightingTargets());
+}
+
 void InitializeObserverBoundaries(bool observerActive,
     bool graphicsActive, const fo4hdr::PluginConfigurationResult& diagnosticsConfiguration,
     const F4seServices& services)
@@ -609,6 +618,7 @@ void InitializeObserverBoundaries(bool observerActive,
     (void)ReportBoundary("native pause resource allocation",
         fo4hdr::game::InitializeNativeUiResources(
             sharedUiRequested, services.trampoline, services.pluginHandle));
+    InitializeVanillaLighting(diagnosticsConfiguration);
     (void)ReportBoundary("native screen-space UI",
         fo4hdr::game::InitializeScreenUiObserver(
             sharedUiRequested, services.trampoline, services.pluginHandle));

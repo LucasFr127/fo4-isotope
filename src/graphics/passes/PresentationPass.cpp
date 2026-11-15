@@ -130,6 +130,8 @@ SettingsMenuView UiSettingsSnapshot() noexcept
     result.hdrActive = g_evidence.hdrColorSpaceActive.load();
     result.sdrMode = g_sdrModeActive.load(std::memory_order_acquire);
     result.hdrEnabledAtStart = g_configuration.enabled;
+    result.lightingPrecisionAtStart = g_configuration.lightingPrecision;
+    result.vanillaLightingTargets = g_evidence.vanillaLightingTargetCount.load();
     result.sdrModeReason = static_cast<SdrModeReason>(g_evidence.sdrModeReason.load(std::memory_order_acquire));
     result.sdrControlsUnavailable = g_replacements.sdrSubstitutionDisabled;
     result.enbDetected = g_evidence.enbDetected.load(std::memory_order_acquire);

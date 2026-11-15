@@ -211,13 +211,6 @@ void DrawContributors() noexcept
     return EffectiveWeatherGradeResponse(Draft()).enabled;
 }
 
-[[nodiscard]] dmui::FieldFeedbackSeverity FeedbackSeverity(StatusSeverity severity) noexcept
-{
-    return severity == StatusSeverity::error ? dmui::FieldFeedbackSeverity::kError :
-        severity == StatusSeverity::warning ? dmui::FieldFeedbackSeverity::kWarning :
-        dmui::FieldFeedbackSeverity::kInfo;
-}
-
 // The current scene's state, with its explanation as the row's feedback.
 void AddStatus(SettingsPageBuilder& page)
 {
