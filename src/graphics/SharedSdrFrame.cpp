@@ -9,6 +9,7 @@
 #include "SharedUiFrame.hpp"
 #include "hooks/ContextHooks.hpp"
 #include "resources/PresentationResources.hpp"
+#include "resources/ScenePromotionPolicy.hpp"
 #include "resources/SceneResources.hpp"
 #include <Windows.h>
 #include <algorithm>
@@ -136,11 +137,7 @@ void SetOriginalLut(ComPtr<ID3D11Resource> resource) noexcept
 
 ComPtr<ID3D11Resource> OriginalLutResource(ID3D11RenderTargetView* view) noexcept
 {
-    if (!IsQualifiedSceneTarget(view)) return {};
-    D3D11_RENDER_TARGET_VIEW_DESC target{};
-    view->GetDesc(&target);
-    if (std::tuple{target.Format, target.ViewDimension, target.Texture2D.MipSlice} !=
-        std::tuple{DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_RTV_DIMENSION_TEXTURE2D, 0u}) return {};
+    if (!IsQualifiedSceneTarget(view) || !IsFirstSceneRenderTarget(view)) return {};
     auto resource = ViewResource(view);
     ComPtr<ID3D11Texture2D> texture;
     if (!resource || FAILED(resource.As(&texture)))
@@ -266,8 +263,9 @@ bool ConsumesOriginalLut(ID3D11DeviceContext* context, const DrawObservation& ob
     if (!input) return false;
     D3D11_SHADER_RESOURCE_VIEW_DESC view{};
     input->GetDesc(&view);
-    if (std::tuple{view.Format, view.ViewDimension, view.Texture2D.MostDetailedMip, view.Texture2D.MipLevels} !=
-        std::tuple{DXGI_FORMAT_R16G16B16A16_FLOAT, D3D11_SRV_DIMENSION_TEXTURE2D, 0u, 1u}) return false;
+    if (std::tuple{view.ViewDimension, view.Texture2D.MostDetailedMip, view.Texture2D.MipLevels} !=
+        std::tuple{D3D11_SRV_DIMENSION_TEXTURE2D, 0u, 1u}) return false;
+    if (!IsSceneTargetFormat(view.Format)) return false;
     return CanonicalResourceIdentity(ViewResource(input.Get()).Get()) == identity;
 }
 

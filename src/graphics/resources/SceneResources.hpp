@@ -38,6 +38,8 @@ struct DrawObservation;
 
 bool IsQualifiedSceneTarget(ID3D11RenderTargetView*) noexcept;
 bool IsFirstFp16RenderTarget(ID3D11RenderTargetView*) noexcept;
+// Mip zero of a 2D target in a format scene targets may have this device generation.
+bool IsFirstSceneRenderTarget(ID3D11RenderTargetView*) noexcept;
 bool SameResourceIdentity(ID3D11ShaderResourceView*, ID3D11ShaderResourceView*) noexcept;
 std::uintptr_t CanonicalResourceIdentity(ID3D11Resource*) noexcept;
 bool SameResourceObjects(ID3D11Resource*, ID3D11Resource*) noexcept;

@@ -12,6 +12,7 @@ namespace {
 
 // Where the slot-33/34 registrar calls return; zero until the game layer publishes them.
 std::array<std::atomic<std::uintptr_t>, 2> g_lightingSites{};
+std::atomic<DXGI_FORMAT> g_sceneTargetFormat{DXGI_FORMAT_R16G16B16A16_FLOAT};
 
 }  // namespace
 
@@ -21,11 +22,27 @@ void PublishLightingTargetSites(std::span<const std::uintptr_t, 2> returns) noex
         g_lightingSites[index].store(returns[index], std::memory_order_release);
 }
 
-std::array<std::uintptr_t, 2> VanillaLightingSites(LightingPrecision precision) noexcept
+void LatchSceneTargetFormat(DXGI_FORMAT format) noexcept
+{
+    g_sceneTargetFormat.store(format, std::memory_order_release);
+}
+
+DXGI_FORMAT LatchedSceneTargetFormat() noexcept
+{
+    return g_sceneTargetFormat.load(std::memory_order_acquire);
+}
+
+bool LatchScenePromotion(bool hdrGeneration, RenderPrecision precision) noexcept
+{
+    LatchSceneTargetFormat(SceneTargetFormat(hdrGeneration, precision));
+    return PromotesSceneTargets(hdrGeneration, precision);
+}
+
+std::array<std::uintptr_t, 2> VanillaLightingSites(RenderPrecision precision) noexcept
 {
     const std::array sites{g_lightingSites[0].load(std::memory_order_acquire),
         g_lightingSites[1].load(std::memory_order_acquire)};
-    if (precision != LightingPrecision::vanilla || std::ranges::find(sites, 0U) != sites.end())
+    if (precision != RenderPrecision::medium || std::ranges::find(sites, 0U) != sites.end())
         return {};
     return sites;
 }

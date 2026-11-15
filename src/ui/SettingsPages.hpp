@@ -27,9 +27,9 @@ struct SettingsFrame
     // [General] HdrEnabled saves like the other settings and applies at the next game start.
     bool* hdrEnabled{};
     bool sessionHdrEnabled{};
-    // [Performance] LightingPrecision, likewise saved now and applied at the next game start.
-    LightingPrecision* lightingPrecision{};
-    LightingPrecision sessionLightingPrecision{};
+    // [Performance] RenderPrecision, likewise saved now and applied at the next game start.
+    RenderPrecision* renderPrecision{};
+    RenderPrecision sessionRenderPrecision{};
     const SettingsMenuView* view{};
     const SettingsMenuRenderer* renderer{};
     bool* commitRequested{};

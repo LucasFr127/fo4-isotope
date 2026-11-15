@@ -47,7 +47,7 @@ private:
     bool CreatePipeline() noexcept;
     bool CreateConstants() noexcept;
     bool ContextMatches(ID3D11DeviceContext*, ID3D11DeviceContext1*) const noexcept;
-    bool TextureMatches(ID3D11Resource*) const noexcept;
+    bool TextureMatches(ID3D11Resource*, DXGI_FORMAT) const noexcept;
     bool ResolveInputs(const SharedUiSeedInputs&,
         Microsoft::WRL::ComPtr<ID3D11Resource>& scene,
         Microsoft::WRL::ComPtr<ID3D11Resource>& output) const noexcept;

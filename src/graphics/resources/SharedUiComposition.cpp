@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 
 #include "SharedUiComposition.hpp"
+#include "ScenePromotionPolicy.hpp"
 #include "../d3d11/BorrowedComputeState.hpp"
 #include "../d3d11/BorrowedFullscreenState.hpp"
 #include <FO4Isotope/ShippingShaders.generated.hpp>
@@ -49,7 +50,8 @@ bool ViewsValid(const SharedUiSeedInputs& inputs) noexcept
     inputs.output->GetDesc(&output);
     if (scene.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) return false;
     if (output.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D) return false;
-    const std::array valid{scene.Format == DXGI_FORMAT_R16G16B16A16_FLOAT,
+    // The seed only samples the scene, so a game-format scene target is a valid source.
+    const std::array valid{IsSceneTargetFormat(scene.Format),
         scene.Texture2D.MostDetailedMip == 0, scene.Texture2D.MipLevels == 1,
         output.Format == DXGI_FORMAT_R16G16B16A16_FLOAT,
         output.Texture2D.MipSlice == 0};
@@ -134,7 +136,7 @@ bool SharedUiComposition::ContextMatches(ID3D11DeviceContext* context,
         SameObject(device.Get(), device_.Get());
 }
 
-bool SharedUiComposition::TextureMatches(ID3D11Resource* resource) const noexcept
+bool SharedUiComposition::TextureMatches(ID3D11Resource* resource, DXGI_FORMAT format) const noexcept
 {
     if (!resource) return false;
     ComPtr<ID3D11Texture2D> texture;
@@ -144,7 +146,7 @@ bool SharedUiComposition::TextureMatches(ID3D11Resource* resource) const noexcep
     D3D11_TEXTURE2D_DESC description{};
     texture->GetDesc(&description);
     const std::array valid{SameObject(device.Get(), device_.Get()), description.Width == width_,
-        description.Height == height_, description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT,
+        description.Height == height_, description.Format == format,
         description.MipLevels == 1, description.ArraySize == 1,
         description.SampleDesc.Count == 1, description.SampleDesc.Quality == 0};
     return std::ranges::all_of(valid, [](bool value) { return value; });
@@ -156,7 +158,10 @@ bool SharedUiComposition::ResolveInputs(const SharedUiSeedInputs& inputs,
     if (!ViewsValid(inputs)) return false;
     inputs.scene->GetResource(&scene);
     inputs.output->GetResource(&output);
-    return TextureMatches(scene.Get()) && TextureMatches(output.Get());
+    D3D11_SHADER_RESOURCE_VIEW_DESC sceneView{};
+    inputs.scene->GetDesc(&sceneView);
+    return TextureMatches(scene.Get(), sceneView.Format) &&
+        TextureMatches(output.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT);
 }
 
 bool SharedUiComposition::InputsCompatible(const SharedUiSeedInputs& inputs) const noexcept

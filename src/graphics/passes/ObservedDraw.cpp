@@ -57,7 +57,7 @@ TemporalSceneEvidence ReadTemporalSceneEvidence(ID3D11DeviceContext* context,
         .presentationTarget = presentationTarget,
         .exactProxyReady = exactProxyReady,
         .internalSceneReady = record.currentReplacementActive && !presentationTarget &&
-            IsFirstFp16RenderTarget(record.currentSecondaryRtv) &&
+            IsFirstSceneRenderTarget(record.currentSecondaryRtv) &&
             IsQualifiedSceneTarget(record.currentSecondaryRtv)};
 }
 

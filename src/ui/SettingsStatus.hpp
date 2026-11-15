@@ -40,9 +40,9 @@ struct SettingsMenuHealth
 [[nodiscard]] const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;
 // The note on the saved HDR request, or null when it needs none.
 [[nodiscard]] const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept;
-// The note on the saved Lighting Precision; its text is null when it needs none.
-[[nodiscard]] StatusMessage LightingPrecisionStatus(
-    LightingPrecision precision, const SettingsMenuView& view) noexcept;
+// The note on the saved Render Precision; its text is null when it needs none.
+[[nodiscard]] StatusMessage RenderPrecisionStatus(
+    RenderPrecision precision, const SettingsMenuView& view) noexcept;
 // The renderer rejected the last change, or null when it applied.
 [[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
 // Reports SDR mode as HDR off once the saved request turns HDR off, so the reason's

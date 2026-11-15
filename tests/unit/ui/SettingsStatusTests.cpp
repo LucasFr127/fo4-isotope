@@ -38,39 +38,44 @@ void TestHdrRequestStatus()
     FO4HDR_CHECK(HdrRequestStatus(true, fallback) == nullptr);
 }
 
-void TestLightingPrecisionStatus()
+void TestRenderPrecisionStatus()
 {
-    using enum LightingPrecision;
-    const auto hdr = [](LightingPrecision atStart, std::uint64_t targets) {
+    using enum RenderPrecision;
+    const auto hdr = [](RenderPrecision atStart, std::uint64_t targets) {
         SettingsMenuView view{};
         view.hdrActive = true;
-        view.lightingPrecisionAtStart = atStart;
+        view.renderPrecisionAtStart = atStart;
         view.vanillaLightingTargets = targets;
         return view;
     };
-    // The session's own choice applied: nothing to say.
-    FO4HDR_CHECK(LightingPrecisionStatus(full, hdr(full, 0)).text == nullptr);
-    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, hdr(vanilla, 2)).text == nullptr);
+    // The session's own choice applied: nothing to say. Low keeps every target without
+    // counting lighting textures, so a zero count is expected there.
+    FO4HDR_CHECK(RenderPrecisionStatus(high, hdr(high, 0)).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(medium, hdr(medium, 2)).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(low, hdr(low, 0)).text == nullptr);
     // A change waits for the next game start.
-    for (const auto [saved, atStart] : {std::pair{vanilla, full}, std::pair{full, vanilla}})
+    for (const auto [saved, atStart] : {std::pair{low, high}, std::pair{high, low},
+             std::pair{medium, low}, std::pair{low, medium}})
     {
-        const auto status = LightingPrecisionStatus(saved, hdr(atStart, 0));
+        const auto status = RenderPrecisionStatus(saved, hdr(atStart, 0));
         FO4HDR_CHECK(status.severity == StatusSeverity::warning &&
             std::string_view{status.text}.starts_with("Restart the game"));
     }
-    // Vanilla from the start, but no lighting texture kept the game's format.
-    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, hdr(vanilla, 0)).severity == StatusSeverity::error);
-    auto inactive = hdr(vanilla, 0);
+    // Medium from the start, but no lighting texture kept the game's format.
+    const auto missing = RenderPrecisionStatus(medium, hdr(medium, 0));
+    FO4HDR_CHECK(missing.severity == StatusSeverity::error &&
+        std::string_view{missing.text}.starts_with("Medium was not applied"));
+    auto inactive = hdr(medium, 0);
     inactive.hdrActive = false;
-    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, inactive).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(medium, inactive).text == nullptr);
     // SDR mode has no promotion, so the choice does nothing there.
-    auto sdr = hdr(full, 0);
+    auto sdr = hdr(high, 0);
     sdr.sdrMode = true;
-    const auto sdrStatus = LightingPrecisionStatus(vanilla, sdr);
+    const auto sdrStatus = RenderPrecisionStatus(low, sdr);
     FO4HDR_CHECK(sdrStatus.severity == StatusSeverity::info && sdrStatus.text != nullptr);
     // Defaults from an unreadable INI cannot save it.
     sdr.sdrModeReason = SdrModeReason::configurationDefaults;
-    FO4HDR_CHECK(LightingPrecisionStatus(vanilla, sdr).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(low, sdr).text == nullptr);
 }
 
 // Every handled cause of SDR mode names itself; HDR off, at start or since, needs no note
@@ -181,7 +186,7 @@ void TestSettingsMenuHealth()
 void TestSettingsStatus()
 {
     TestHdrRequestStatus();
-    TestLightingPrecisionStatus();
+    TestRenderPrecisionStatus();
     TestSdrModeReasonText();
     TestWeatherResponseStatus();
     TestSettingsMenuHealth();

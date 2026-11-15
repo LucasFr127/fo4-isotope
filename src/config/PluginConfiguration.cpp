@@ -213,7 +213,7 @@ enum class SettingField : std::size_t
     weatherColorColorChange,
     sdrEnabled,
     sdrOperatorWeatherResponse,
-    lightingPrecision
+    renderPrecision
 };
 
 // Which sections hold a key: a switch or HDR-only section, both an HDR
@@ -283,10 +283,10 @@ constexpr SettingKey kSettingKeys[]{
         "# Shoulder Start: 0.216 to 0.60; 0.216 starts the shoulder where the toe ends."},
     {"GT7", "ColorBlend", SettingField::gt7ColorBlend, SettingProfile::shared,
         "# Color Blend: 0 to 1."},
-    {"Performance", "LightingPrecision", SettingField::lightingPrecision, SettingProfile::global,
-        "# Lighting Precision, HDR only: Full or Vanilla; applies at game start. Vanilla keeps\n"
-        "# the game's own lighting buffers: faster on Steam Deck and integrated graphics, with\n"
-        "# possible faint banding on smooth lit surfaces."},
+    {"Performance", "RenderPrecision", SettingField::renderPrecision, SettingProfile::global,
+        "# Render Precision, HDR only: High, Medium or Low; applies at game start. Medium keeps\n"
+        "# the two lighting buffers and Low every render target at the game's own 11-bit instead\n"
+        "# of 16-bit: half the memory per target, with possible banding in smooth gradients."},
     {"Image", "ColorGradingMethod", SettingField::colorGradingMethod, SettingProfile::hdr,
         "# Grading Method, HDR only: RgbRatio or Affine."},
     {"Image", "ColorGradingCurve", SettingField::colorGradingCurve, SettingProfile::hdr,
@@ -794,9 +794,10 @@ bool* ProfileBooleanTarget(HdrSettings& profile, SettingField key) noexcept
     return false;
 }
 
-[[nodiscard]] bool ParseLightingPrecision(std::string_view text, LightingPrecision& target) noexcept
+[[nodiscard]] bool ParseRenderPrecision(std::string_view text, RenderPrecision& target) noexcept
 {
-    for (const auto precision : {LightingPrecision::full, LightingPrecision::vanilla})
+    for (const auto precision :
+        {RenderPrecision::high, RenderPrecision::medium, RenderPrecision::low})
     {
         if (!EqualsIgnoreCase(text, ToString(precision))) continue;
         target = precision;
@@ -854,8 +855,8 @@ struct AppliedValue
     case SettingField::colorGradingCurve:
         applied.accepted = ParseGradingCurve(text, profile.colorGradingCurve);
         break;
-    case SettingField::lightingPrecision:
-        applied.accepted = ParseLightingPrecision(text, stored.lightingPrecision);
+    case SettingField::renderPrecision:
+        applied.accepted = ParseRenderPrecision(text, stored.renderPrecision);
         break;
     default:
         applied.accepted = ApplyFlag(stored, key.field, sdr, text);
@@ -875,7 +876,7 @@ struct AppliedValue
     case SettingField::algorithm: return std::string(ToString(profile.productionAlgorithm));
     case SettingField::colorGradingMethod: return std::string(ToString(profile.colorGradingMethod));
     case SettingField::colorGradingCurve: return std::string(ToString(profile.colorGradingCurve));
-    case SettingField::lightingPrecision: return std::string(ToString(stored.lightingPrecision));
+    case SettingField::renderPrecision: return std::string(ToString(stored.renderPrecision));
     default: return FormatFlag(stored, key.field, sdr);
     }
 }
@@ -1014,7 +1015,7 @@ private:
         (configuration.developerHdr10Reference || configuration.productionRequested);
     configuration.sceneExposureMultiplier = std::exp2(configuration.exposureEv);
     configuration.interfaceSettings.hdrEnabled = configuration.enabled;
-    configuration.interfaceSettings.lightingPrecision = configuration.lightingPrecision;
+    configuration.interfaceSettings.renderPrecision = configuration.renderPrecision;
     return configuration;
 }
 
@@ -1148,12 +1149,13 @@ std::string_view ToString(
     return "unknown";
 }
 
-std::string_view ToString(LightingPrecision precision) noexcept
+std::string_view ToString(RenderPrecision precision) noexcept
 {
     switch (precision)
     {
-    case LightingPrecision::full: return "Full";
-    case LightingPrecision::vanilla: return "Vanilla";
+    case RenderPrecision::high: return "High";
+    case RenderPrecision::medium: return "Medium";
+    case RenderPrecision::low: return "Low";
     }
     return "unknown";
 }

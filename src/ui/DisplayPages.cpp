@@ -279,41 +279,44 @@ void AddToneMapper(SettingsPageBuilder& page)
         .isVisible = [] { return Draft().productionAlgorithm != native; };
 }
 
-constexpr std::array<ChoiceEntry<LightingPrecision>, 2> kLightingPrecisions{{
-    {LightingPrecision::full, "full", "Full"}, {LightingPrecision::vanilla, "vanilla", "Vanilla"}}};
+constexpr std::array<ChoiceEntry<RenderPrecision>, 3> kRenderPrecisions{{
+    {RenderPrecision::high, "high", "High"},
+    {RenderPrecision::medium, "medium", "Medium"},
+    {RenderPrecision::low, "low", "Low"}}};
 
 // Like Enable HDR, an interface draft: saved now, applied at the next game start.
-void AddLightingPrecision(SettingsPageBuilder& page)
+void AddRenderPrecision(SettingsPageBuilder& page)
 {
-    page.Group("lighting", "Lighting", "lightbulb");
-    const std::span<const ChoiceEntry<LightingPrecision>> entries{kLightingPrecisions};
+    page.Group("precision", "Precision", "gradient");
+    const std::span<const ChoiceEntry<RenderPrecision>> entries{kRenderPrecisions};
     dmui::ChoiceSettingControl control;
     for (const auto& entry : entries) control.options.push_back({entry.key, entry.label});
-    dmui::SettingDescriptor setting{.id = "lighting-precision", .label = "Lighting Precision",
-        .description = "Vanilla keeps the game's own precision for its two lighting buffers. The "
-            "lower memory traffic helps most on Steam Deck and integrated graphics; smooth lit "
-            "surfaces can show faint banding. HDR only. Applies after a restart.",
-        .control = std::move(control), .defaultValue = ChoiceKey(entries, LightingPrecision::full)};
+    dmui::SettingDescriptor setting{.id = "render-precision", .label = "Render Precision",
+        .description = "Bit depth of the game's render targets in HDR. High: all 16-bit. Medium: "
+            "the two lighting buffers at the game's own 11-bit. Low: every target at 11-bit. "
+            "Lower settings halve the memory per target and can show banding in smooth "
+            "gradients. HDR only. Applies after a restart.",
+        .control = std::move(control), .defaultValue = ChoiceKey(entries, RenderPrecision::high)};
     setting.binding = dmui::BindSetting(
-        [entries] { return ChoiceKey(entries, *CurrentSettingsFrame().lightingPrecision); },
+        [entries] { return ChoiceKey(entries, *CurrentSettingsFrame().renderPrecision); },
         [entries](std::string selected) {
-            auto& value = *CurrentSettingsFrame().lightingPrecision;
+            auto& value = *CurrentSettingsFrame().renderPrecision;
             SelectChoice(entries, selected, value);
             return ChoiceKey(entries, value);
         });
-    setting.isModified = [] { return *CurrentSettingsFrame().lightingPrecision != LightingPrecision::full; };
+    setting.isModified = [] { return *CurrentSettingsFrame().renderPrecision != RenderPrecision::high; };
     setting.isDirty = [] {
         const auto& frame = CurrentSettingsFrame();
-        return *frame.lightingPrecision != frame.sessionLightingPrecision;
+        return *frame.renderPrecision != frame.sessionRenderPrecision;
     };
     setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
-        const auto status = LightingPrecisionStatus(*CurrentSettingsFrame().lightingPrecision, View());
+        const auto status = RenderPrecisionStatus(*CurrentSettingsFrame().renderPrecision, View());
         if (status.text == nullptr) return std::nullopt;
         return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
     };
     (void)page.Custom(std::move(setting), [] {
         auto& frame = CurrentSettingsFrame();
-        *frame.lightingPrecision = frame.sessionLightingPrecision;
+        *frame.renderPrecision = frame.sessionRenderPrecision;
     });
 }
 
@@ -338,7 +341,7 @@ void BuildToneMappingPage(SettingsPageBuilder& page)
 void BuildPerformancePage(SettingsPageBuilder& page)
 {
     page.Status();
-    AddLightingPrecision(page);
+    AddRenderPrecision(page);
 }
 
 }  // namespace fo4hdr

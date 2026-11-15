@@ -4,6 +4,7 @@
 #include "d3d11/PresentationFacadeFixture.hpp"
 #include "d3d11/BorrowedFullscreenState.hpp"
 #include "d3d11/ContextQuerySafety.hpp"
+#include "resources/ScenePromotionPolicy.hpp"
 #include "resources/SharedUiComposition.hpp"
 #include "FO4Isotope/TestShaders.generated.hpp"
 
@@ -1012,6 +1013,33 @@ void VerifyVanillaVideoWhite(SharedUiFixture& fixture)
     }
 }
 
+// A Low-precision generation leaves the game's scene targets at R11G11B10 and the seed then
+// samples one; in any other generation an unpromoted source stays refused.
+void VerifyGameFormatSeed(SharedUiFixture& fixture)
+{
+    auto& device = fixture.device;
+    constexpr float gray[4]{0.5F, 0.5F, 0.5F, 1};
+    auto game = CreateSizedTexture(*device.device.Get(), {kCompositionWidth, kCompositionHeight,
+        DXGI_FORMAT_R11G11B10_FLOAT, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET});
+    auto promoted = DescriptorTexture(device, fixture.composition, false);
+    device.context->ClearRenderTargetView(game.rtv.Get(), gray);
+    device.context->ClearRenderTargetView(promoted.rtv.Get(), gray);
+    const auto before = ReadComposition(device, fixture.composition);
+    const SharedUiSeedInputs inputs{game.srv.Get(), fixture.composition.rtv.Get(), {203, 203}};
+    FO4HDR_WARP_CHECK(!fixture.seed.Seed(device.context.Get(), fixture.context1.Get(), inputs));
+    FO4HDR_WARP_CHECK(ReadComposition(device, fixture.composition) == before);
+    LatchSceneTargetFormat(DXGI_FORMAT_R11G11B10_FLOAT);
+    const bool seededGame = fixture.seed.Seed(device.context.Get(), fixture.context1.Get(), inputs);
+    LatchSceneTargetFormat(DXGI_FORMAT_R16G16B16A16_FLOAT);
+    FO4HDR_WARP_CHECK(seededGame);
+    const auto seeded = ReadComposition(device, fixture.composition);
+    FO4HDR_WARP_CHECK(seeded != before);
+    // 0.5 is exact in both formats, so a promoted source seeds the same image.
+    FO4HDR_WARP_CHECK(fixture.seed.Seed(device.context.Get(), fixture.context1.Get(),
+        {promoted.srv.Get(), fixture.composition.rtv.Get(), {203, 203}}));
+    FO4HDR_WARP_CHECK(ReadComposition(device, fixture.composition) == seeded);
+}
+
 }  // namespace
 
 void VerifySharedUiComposition(Device& device)
@@ -1029,6 +1057,7 @@ void VerifySharedUiComposition(Device& device)
     VerifyWhiteUnits(fixture, scene);
     VerifyFinalStateRestoration(fixture);
     VerifyVanillaVideoWhite(fixture);
+    VerifyGameFormatSeed(fixture);
     CheckDebugMessages(device);
 }
 

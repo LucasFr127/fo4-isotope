@@ -98,9 +98,9 @@ void TestExpectedDefaultConfiguration()
     FO4HDR_CHECK(reparsed.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(reparsed.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(reparsed.value.interfaceSettings.hdrEnabled);
-    FO4HDR_CHECK(reparsed.value.lightingPrecision == LightingPrecision::full);
-    FO4HDR_CHECK(reparsed.value.interfaceSettings.lightingPrecision == LightingPrecision::full);
-    FO4HDR_CHECK(HasIniLine(expected, "LightingPrecision=Full"));
+    FO4HDR_CHECK(reparsed.value.renderPrecision == RenderPrecision::high);
+    FO4HDR_CHECK(reparsed.value.interfaceSettings.renderPrecision == RenderPrecision::high);
+    FO4HDR_CHECK(HasIniLine(expected, "RenderPrecision=High"));
     FO4HDR_CHECK(!reparsed.value.developerMode);
     FO4HDR_CHECK(!reparsed.value.traceRenderPipeline);
     FO4HDR_CHECK(!reparsed.value.measurePerformance);
@@ -118,7 +118,7 @@ void TestExpectedDefaultConfiguration()
 // The INIs that 1.3.0 to 1.3.2 shipped upgrade to the expected default, keeping their values.
 void TestReleasedConfigurationUpgrade()
 {
-    // [Performance] LightingPrecision came after 1.3.2, so every released INI adds it.
+    // [Performance] RenderPrecision came after 1.3.2, so every released INI adds it.
     auto addedOnly = RepairCounts{};
     addedOnly[static_cast<std::size_t>(added)] = 1;
     // 1.3.0 and 1.3.1 shipped the former Fallback Grade names in both profiles.
@@ -649,26 +649,31 @@ void TestConfigurationCurveRepairs()
     FO4HDR_CHECK(repeatedCurve.value.colorGradingCurve == ColorGradingCurve::srgb);
 }
 
-// A global switch: any case parses, unknown text keeps Full, and the menu draft follows it.
-void TestConfigurationLightingPrecisionRepairs()
+// A global switch: any case parses, unknown text keeps High, and the menu draft follows it.
+void TestConfigurationRenderPrecisionRepairs()
 {
-    for (const auto [token, precision] : {std::pair{"VANILLA", LightingPrecision::vanilla},
-             std::pair{"vanilla", LightingPrecision::vanilla}, std::pair{"full", LightingPrecision::full}})
+    for (const auto [token, precision] : {std::pair{"LOW", RenderPrecision::low},
+             std::pair{"low", RenderPrecision::low}, std::pair{"Medium", RenderPrecision::medium},
+             std::pair{"medium", RenderPrecision::medium}, std::pair{"high", RenderPrecision::high}})
     {
-        const auto parsed = ParseWith(std::string("\n[Performance]\nLightingPrecision=") + token + "\n");
-        FO4HDR_CHECK(parsed.valid && parsed.value.lightingPrecision == precision);
-        FO4HDR_CHECK(parsed.value.interfaceSettings.lightingPrecision == precision);
+        const auto parsed = ParseWith(std::string("\n[Performance]\nRenderPrecision=") + token + "\n");
+        FO4HDR_CHECK(parsed.valid && parsed.value.renderPrecision == precision);
+        FO4HDR_CHECK(parsed.value.interfaceSettings.renderPrecision == precision);
         FO4HDR_CHECK(parsed.value.enabled && parsed.value.productionRequested);
-        FO4HDR_CHECK(HasIniLine(parsed.text, "LightingPrecision=" + std::string(ToString(precision))));
+        FO4HDR_CHECK(HasIniLine(parsed.text, "RenderPrecision=" + std::string(ToString(precision))));
     }
-    for (const auto token : {"Low", "1", ""})
+    // The unreleased former values have no alias either.
+    for (const auto token : {"Lowest", "1", "", "Full", "VanillaLighting", "Vanilla"})
     {
-        const auto text = std::string("\n[Performance]\nLightingPrecision=") + token + "\n";
-        FO4HDR_CHECK(ParseWith(text).value.lightingPrecision == LightingPrecision::full);
+        const auto text = std::string("\n[Performance]\nRenderPrecision=") + token + "\n";
+        FO4HDR_CHECK(ParseWith(text).value.renderPrecision == RenderPrecision::high);
         FO4HDR_CHECK(ExtraRepairs(text, defaulted) == 1);
     }
-    const auto repeated = ParseWith("\n[Performance]\nLightingPrecision=Vanilla\nLightingPrecision=Full\n");
-    FO4HDR_CHECK(repeated.value.lightingPrecision == LightingPrecision::full);
+    const auto repeated = ParseWith("\n[Performance]\nRenderPrecision=High\nRenderPrecision=Low\n");
+    FO4HDR_CHECK(repeated.value.renderPrecision == RenderPrecision::low);
+    // The unreleased former key has no alias, so its value is not carried over.
+    const auto former = ParseWith("\n[Performance]\nLightingPrecision=Vanilla\n");
+    FO4HDR_CHECK(former.value.renderPrecision == RenderPrecision::high);
 }
 
 void TestConfigurationMethodRepairs()
@@ -839,7 +844,7 @@ void TestConfigurationRepairs()
     TestConfigurationRepairEntries();
     TestConfigurationMethodRepairs();
     TestConfigurationCurveRepairs();
-    TestConfigurationLightingPrecisionRepairs();
+    TestConfigurationRenderPrecisionRepairs();
     TestConfigurationOperatorRepairs();
     TestConfigurationRangeRepairs();
     TestConfigurationRepeatedEffects();

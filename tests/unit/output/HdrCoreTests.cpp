@@ -552,6 +552,15 @@ void TestVanillaLightingTargetMatch()
     FO4HDR_CHECK(!KeepsVanillaLightingTarget(nullFrames, std::array<std::uintptr_t, 2>{}));
 }
 
+// Only an HDR generation under Low keeps the game's format and promotes nothing; an
+// unpromoted target in every other case must still fail the FP16 expectation.
+static_assert(SceneTargetFormat(true, RenderPrecision::low) == DXGI_FORMAT_R11G11B10_FLOAT);
+static_assert(SceneTargetFormat(true, RenderPrecision::medium) == DXGI_FORMAT_R16G16B16A16_FLOAT);
+static_assert(SceneTargetFormat(false, RenderPrecision::low) == DXGI_FORMAT_R16G16B16A16_FLOAT);
+static_assert(!PromotesSceneTargets(true, RenderPrecision::low) &&
+    PromotesSceneTargets(true, RenderPrecision::medium) &&
+    !PromotesSceneTargets(false, RenderPrecision::high));
+
 HdrPathCapabilities AllCapabilities()
 {
     return {

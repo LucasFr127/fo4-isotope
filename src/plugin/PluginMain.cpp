@@ -566,13 +566,13 @@ bool ReportBoundary(std::string_view boundary, bool installed) noexcept
     return installed;
 }
 
-// Only Vanilla lighting precision reads the slot-33/34 call sites, so Full logs no boundary.
+// Only Medium render precision reads the slot-33/34 call sites, so High and Low log no boundary.
 void InitializeVanillaLighting(const fo4hdr::PluginConfigurationResult& configuration) noexcept
 {
     if (!HdrPathRequested(configuration) ||
-        configuration.value.lightingPrecision != fo4hdr::LightingPrecision::vanilla)
+        configuration.value.renderPrecision != fo4hdr::RenderPrecision::medium)
         return;
-    (void)ReportBoundary("lighting precision targets", fo4hdr::game::InitializeLightingTargets());
+    (void)ReportBoundary("vanilla lighting targets", fo4hdr::game::InitializeLightingTargets());
 }
 
 void InitializeObserverBoundaries(bool observerActive,

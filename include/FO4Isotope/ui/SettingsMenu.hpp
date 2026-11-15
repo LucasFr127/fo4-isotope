@@ -88,9 +88,9 @@ struct SettingsMenuView
     bool lutPending{}, liveSettingsError{}, developerMode{}, hdrActive{}, sdrMode{};
     // [General] HdrEnabled as this game session started.
     bool hdrEnabledAtStart{};
-    // [Performance] LightingPrecision as this game session started, and how many
-    // lighting textures kept the game's format.
-    LightingPrecision lightingPrecisionAtStart{};
+    // [Performance] RenderPrecision as this game session started, and how many
+    // lighting textures kept the game's format under Medium.
+    RenderPrecision renderPrecisionAtStart{};
     std::uint64_t vanillaLightingTargets{};
     SdrModeReason sdrModeReason{};
     // SDR mode kept the menu after its replacement shaders failed to build.

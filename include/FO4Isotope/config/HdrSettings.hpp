@@ -53,12 +53,14 @@ enum class ColorGradingCurve : std::uint8_t
     srgb
 };
 
-// Storage for the game's two lighting-accumulation targets in HDR mode: full promotes them
-// to FP16 like the other scene targets; vanilla keeps the game's own format.
-enum class LightingPrecision : std::uint8_t
+// Storage for the game's scene render targets in HDR mode: high promotes them all to
+// FP16; medium keeps the game's own format for the two lighting-accumulation targets;
+// low keeps it for every target.
+enum class RenderPrecision : std::uint8_t
 {
-    full,
-    vanilla
+    high,
+    medium,
+    low
 };
 
 inline constexpr double kMinimumSceneExposureEv{-4.0};
@@ -214,8 +216,8 @@ struct HdrInterfaceSettings
 {
     // [General] HdrEnabled; it applies at the next game start.
     bool hdrEnabled{true};
-    // [Performance] LightingPrecision; it applies at the next game start.
-    LightingPrecision lightingPrecision{LightingPrecision::full};
+    // [Performance] RenderPrecision; it applies at the next game start.
+    RenderPrecision renderPrecision{RenderPrecision::high};
     bool operator==(const HdrInterfaceSettings&) const = default;
 };
 

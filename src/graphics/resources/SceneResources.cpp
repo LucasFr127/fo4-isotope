@@ -14,6 +14,7 @@
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
 #include "PresentationResources.hpp"
 #include "HdrResourcePolicy.hpp"
+#include "ScenePromotionPolicy.hpp"
 #include "../DrawObservation.hpp"
 #include "../ShaderRegistry.hpp"
 #include "../GraphicsDiagnostics.hpp"
@@ -39,7 +40,7 @@ void ExitNativeSceneCompositePass() noexcept
 
 bool SceneTextureLayoutMatches(const D3D11_TEXTURE2D_DESC& description) noexcept
 {
-    return description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
+    return IsSceneTargetFormat(description.Format) &&
         description.Width != 0 && description.Height != 0 &&
         description.ArraySize == 1 && description.SampleDesc.Count == 1 &&
         (description.BindFlags & D3D11_BIND_RENDER_TARGET) != 0 &&
@@ -117,14 +118,25 @@ bool SameResourceObjects(ID3D11Resource* left, ID3D11Resource* right) noexcept
     return SameResourceObjects(actual.Get(), expected);
 }
 
-bool IsFirstFp16RenderTarget(ID3D11RenderTargetView* view) noexcept
+// The format of a view on mip zero of a 2D target; unknown for any other view.
+DXGI_FORMAT FirstMipTargetFormat(ID3D11RenderTargetView* view) noexcept
 {
-    if (view == nullptr) return false;
+    if (view == nullptr) return DXGI_FORMAT_UNKNOWN;
     D3D11_RENDER_TARGET_VIEW_DESC description{};
     view->GetDesc(&description);
-    return description.Format == DXGI_FORMAT_R16G16B16A16_FLOAT &&
-        description.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D &&
+    const bool firstMip = description.ViewDimension == D3D11_RTV_DIMENSION_TEXTURE2D &&
         description.Texture2D.MipSlice == 0;
+    return firstMip ? description.Format : DXGI_FORMAT_UNKNOWN;
+}
+
+bool IsFirstFp16RenderTarget(ID3D11RenderTargetView* view) noexcept
+{
+    return FirstMipTargetFormat(view) == DXGI_FORMAT_R16G16B16A16_FLOAT;
+}
+
+bool IsFirstSceneRenderTarget(ID3D11RenderTargetView* view) noexcept
+{
+    return IsSceneTargetFormat(FirstMipTargetFormat(view));
 }
 
 [[nodiscard]] bool IsPresentationProxyTarget(ID3D11RenderTargetView* view) noexcept
@@ -321,7 +333,7 @@ ComPtr<ID3D11RenderTargetView> NativeSceneTarget(ID3D11DeviceContext* context) n
         otherTarget |= views[index] != nullptr;
         if (views[index]) views[index]->Release();
     }
-    const std::array rejected{!depth, otherTarget, !IsFirstFp16RenderTarget(target.Get()),
+    const std::array rejected{!depth, otherTarget, !IsFirstSceneRenderTarget(target.Get()),
         IsPresentationProxyTarget(target.Get()),
         RenderTargetMatchesResource(target.Get(), g_presentation.presentationBackBuffer.Get())};
     if (std::ranges::any_of(rejected, [](bool value) { return value; }))

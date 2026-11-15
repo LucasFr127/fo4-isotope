@@ -71,11 +71,38 @@ inline std::size_t CaptureCallerFrames(std::span<void*> frames) noexcept
     });
 }
 
-// The published registration sites under Vanilla lighting precision, latched per device
-// generation; zeros under Full or when the game layer verified none.
+// The published registration sites under Medium render precision, latched per device
+// generation; zeros under High or Low, or when the game layer verified none.
 [[nodiscard]] std::array<std::uintptr_t, 2> VanillaLightingSites(
-    LightingPrecision precision) noexcept;
+    RenderPrecision precision) noexcept;
 // Matches the creating thread's frames against latched sites and counts each kept texture.
 [[nodiscard]] bool KeepGameLightingFormat(std::span<const std::uintptr_t, 2> sites) noexcept;
+
+// The format the game's scene targets have in one device generation. Low render
+// precision promotes nothing, so an HDR generation then keeps the game's own format.
+// Every other case expects FP16, which an unpromoted target fails.
+[[nodiscard]] constexpr DXGI_FORMAT SceneTargetFormat(
+    bool hdrGeneration, RenderPrecision precision) noexcept
+{
+    return hdrGeneration && precision == RenderPrecision::low ?
+        DXGI_FORMAT_R11G11B10_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT;
+}
+// Whether one device generation promotes the game's scene targets at all.
+[[nodiscard]] constexpr bool PromotesSceneTargets(
+    bool hdrGeneration, RenderPrecision precision) noexcept
+{
+    return hdrGeneration && precision != RenderPrecision::low;
+}
+void LatchSceneTargetFormat(DXGI_FORMAT format) noexcept;
+[[nodiscard]] DXGI_FORMAT LatchedSceneTargetFormat() noexcept;
+// Latches the scene target format when a device generation is published and returns
+// whether that generation promotes, so the two facts cannot disagree.
+[[nodiscard]] bool LatchScenePromotion(bool hdrGeneration, RenderPrecision precision) noexcept;
+// FP16 always qualifies, because the presentation proxy carries the scene too; the
+// latched game format qualifies beside it in a Low generation.
+[[nodiscard]] inline bool IsSceneTargetFormat(DXGI_FORMAT format) noexcept
+{
+    return format == DXGI_FORMAT_R16G16B16A16_FLOAT || format == LatchedSceneTargetFormat();
+}
 
 }  // namespace fo4hdr

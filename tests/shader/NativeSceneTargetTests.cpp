@@ -4,6 +4,7 @@
 #include "d3d11/PresentationContextFixture.hpp"
 #include "hooks/ContextHooks.hpp"
 #include "passes/ObservedDraw.hpp"
+#include "resources/ScenePromotionPolicy.hpp"
 #include "resources/SceneResources.hpp"
 #include "ShaderRegistry.hpp"
 #include "PresentFrame.hpp"
@@ -16,8 +17,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 
 namespace fo4hdr::tests::gpu {
 namespace {
@@ -441,6 +444,63 @@ struct NativeSceneInitializationFixture : SharedPresentationContextFixture
         g_presentation.width = width;
     }
 
+    // One packed texel of a game-format target; black is zero.
+    std::uint32_t GameTexel(Texture& target, UINT index)
+    {
+        device.context->CopyResource(target.staging.Get(), target.texture.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        CheckHresult(device.context->Map(target.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+            "Read game-format scene target");
+        std::uint32_t texel{};
+        std::memcpy(&texel, static_cast<const std::byte*>(mapped.pData) + index * sizeof(texel),
+            sizeof(texel));
+        device.context->Unmap(target.staging.Get(), 0);
+        return texel;
+    }
+
+    // The tone-map replacement bounds its output at the FP16 maximum, which is above this
+    // format's largest values. Storing it must saturate each channel, not produce infinity.
+    void CheckGameFormatSaturation(Texture& game)
+    {
+        HudConstants bright;
+        bright.color = {65504.0F, 65504.0F, 65504.0F, 1};
+        const auto constants = CreateConstantBuffer(*device.device.Get(), bright);
+        auto* buffer = constants.Get();
+        device.context->PSSetConstantBuffers(0, 1, &buffer);
+        device.context->DrawIndexed(3, 0, 0);
+        // 65024 in the 11-bit red and green fields and 64512 in the 10-bit blue field.
+        constexpr std::uint32_t largestFinite = 0x7BFU | (0x7BFU << 11) | (0x3DFU << 22);
+        FO4HDR_WARP_CHECK(GameTexel(game, 0) == largestFinite);
+    }
+
+    // A Low-precision generation keeps the game's scene targets at R11G11B10, so they qualify
+    // and get the clear. In any other generation an unpromoted target stays untouched.
+    void CheckGameFormatTarget()
+    {
+        auto game = CreateTexture(*device.device.Get(), DXGI_FORMAT_R11G11B10_FLOAT,
+            D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE);
+        auto* target = game.rtv.Get();
+        device.context->OMSetRenderTargets(1, &target, depthView.Get());
+        for (const auto [format, qualified] : {std::pair{DXGI_FORMAT_R16G16B16A16_FLOAT, false},
+                 std::pair{DXGI_FORMAT_R11G11B10_FLOAT, true}})
+        {
+            LatchSceneTargetFormat(format);
+            ResetSceneTargetInitialization();
+            Seed(game);
+            ObserveOnly();
+            FO4HDR_WARP_CHECK((GameTexel(game, 1) == 0) == qualified);
+            FO4HDR_WARP_CHECK(IsQualifiedSceneTarget(target) == qualified);
+            FO4HDR_WARP_CHECK((AcquireSceneView(target) != nullptr) == qualified);
+            // The FP16 proxy and promoted targets qualify in every generation.
+            FO4HDR_WARP_CHECK(IsQualifiedSceneTarget(scene.rtv.Get()));
+            FO4HDR_WARP_CHECK(IsQualifiedSceneTarget(proxy.rtv.Get()));
+        }
+        LatchSceneTargetFormat(DXGI_FORMAT_R16G16B16A16_FLOAT);
+        CheckGameFormatSaturation(game);
+        ResetSceneResources();
+        Bind();
+    }
+
     void CheckReducedViewport()
     {
         CheckReducedDraw();
@@ -482,6 +542,7 @@ void VerifyNativeSceneInitialization(Device& device)
     fixture.CheckReducedViewport();
     fixture.CheckCompositePassShader();
     fixture.CheckReducedTarget();
+    fixture.CheckGameFormatTarget();
 }
 
 } // namespace fo4hdr::tests::gpu

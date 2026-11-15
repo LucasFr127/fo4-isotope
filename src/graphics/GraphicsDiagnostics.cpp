@@ -601,8 +601,8 @@ namespace {
     const fo4hdr::GraphicsObservationSnapshot& graphics)
 {
     return std::format(
-        " hdr_attempts={} fallbacks={} fallback_successes={} promoted={} vanilla_lighting={} "
-        "backbuffer_proxies={} backbuffer_redirects={} presents={} resizes={} hdr_frames={} sdr_frames={} generation={} "
+        " hdr_attempts={} fallbacks={} fallback_successes={} render_precision={} promoted={} "
+        "vanilla_lighting={} backbuffer_proxies={} backbuffer_redirects={} presents={} resizes={} hdr_frames={} sdr_frames={} generation={} "
         "color_domain_generation={} color_domain_mismatches={} color_domain={} game_reset_epoch={} "
         "heartbeat_ready_frames={} heartbeat_incomplete_frames={} heartbeat_invalid_frames={} "
         "unpaired_scene_producers={} "
@@ -612,6 +612,7 @@ namespace {
         graphics.hdrCreationAttemptCount,
         graphics.hdrCreationFallbackCount,
         graphics.hdrCreationFallbackSuccessCount,
+        ToString(g_configuration.renderPrecision),
         graphics.promotedResourceCount,
         graphics.vanillaLightingTargetCount,
         graphics.presentationProxyCreateCount,
