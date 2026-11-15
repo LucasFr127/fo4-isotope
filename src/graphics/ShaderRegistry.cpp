@@ -38,16 +38,23 @@ struct ShaderRecord
     std::atomic<RenoDxShaderPass> pass{};
 };
 std::array<ShaderRecord, kMaximumShaders> g_shaders{};
+// Slots fill in order and clear only together, so lookups scan just the used ones.
+std::atomic<std::size_t> g_shaderCount{};
 std::array<std::atomic<ID3D11PixelShader*>, kMaximumObjects> g_lateGameUiShaders{};
 std::array<std::atomic<ID3D11PixelShader*>, kMaximumObjects> g_lateGameUiBackdropShaders{};
 std::atomic_flag g_shaderLock = ATOMIC_FLAG_INIT;
 thread_local NativeImageSpacePass g_imageSpacePass{};
 
+std::span<const ShaderRecord> RegisteredShaders() noexcept
+{
+    return std::span{g_shaders}.first(g_shaderCount.load(std::memory_order_acquire));
+}
+
 std::uint32_t RegisteredShaderPassMask() noexcept
 {
     std::uint32_t mask{};
     // A cleared slot keeps a stale pass, so only a live shader counts.
-    for (const auto& entry : g_shaders)
+    for (const auto& entry : RegisteredShaders())
         if (entry.shader.load(std::memory_order_acquire) != nullptr)
             mask |= RenoDxShaderBit(entry.pass.load(std::memory_order_relaxed));
     return mask;
@@ -73,7 +80,7 @@ void ExitNativeImageSpacePass(NativeImageSpacePass previous) noexcept { g_imageS
     ID3D11PixelShader* shader) noexcept
 {
     if (shader == nullptr) return nullptr;
-    for (const auto& entry : g_shaders)
+    for (const auto& entry : RegisteredShaders())
     {
         if (entry.shader.load(std::memory_order_acquire) == shader)
         {
@@ -164,7 +171,7 @@ template <std::size_t Count>
 
 bool ContainsRegisteredShader(ID3D11PixelShader* shader) noexcept
 {
-    for (auto& entry : g_shaders)
+    for (const auto& entry : RegisteredShaders())
     {
         if (entry.shader.load(std::memory_order_acquire) == shader) return true;
     }
@@ -173,16 +180,17 @@ bool ContainsRegisteredShader(ID3D11PixelShader* shader) noexcept
 
 void StoreRegisteredShader(ID3D11PixelShader* shader, RenoDxShaderPass pass) noexcept
 {
-    for (auto& entry : g_shaders)
+    const auto used = g_shaderCount.load(std::memory_order_relaxed);
+    if (used == g_shaders.size())
     {
-        if (entry.shader.load(std::memory_order_relaxed) == nullptr)
-        {
-            entry.pass.store(pass, std::memory_order_relaxed);
-            entry.shader.store(shader, std::memory_order_release);
-            return;
-        }
+        RecordFailure(GraphicsObservationFailure::registryExhausted);
+        return;
     }
-    RecordFailure(GraphicsObservationFailure::registryExhausted);
+    auto& entry = g_shaders[used];
+    entry.pass.store(pass, std::memory_order_relaxed);
+    // Count the slot before its shader appears, so no lookup skips a published shader.
+    g_shaderCount.store(used + 1, std::memory_order_release);
+    entry.shader.store(shader, std::memory_order_release);
 }
 
 void RegisterShader(
@@ -231,6 +239,7 @@ void ResetShaderRegistry() noexcept
         entry.shader.store(nullptr, std::memory_order_release);
         entry.pass.store(RenoDxShaderPass::toneMapA, std::memory_order_relaxed);
     }
+    g_shaderCount.store(0, std::memory_order_release);
     for (auto& entry : g_lateGameUiShaders)
         entry.store(nullptr, std::memory_order_release);
     for (auto& entry : g_lateGameUiBackdropShaders)
