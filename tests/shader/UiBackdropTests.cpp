@@ -374,6 +374,12 @@ void VerifyUiBackdropSubstitution(Device& device)
         const RefusingSetter setter(*fixture.record, fixture.native.Get());
         FO4HDR_WARP_CHECK(SamePixel(fixture.Draw(input, fixture.proxy), standIn));
     }
+    // A menu frame draws the backdrop with no scene, after draws the hooks do not observe.
+    CompletePresentFrame(false, false);
+    FO4HDR_WARP_CHECK(SamePixel(fixture.Draw(input, fixture.offscreen), standIn));
+    FO4HDR_WARP_CHECK(!g_scene.productionOperatorApplied && !g_scene.temporalSceneReady);
+    FO4HDR_WARP_CHECK(SharedSdrFrameHasNativeWriter(device.context.Get()));
+    FO4HDR_WARP_CHECK(SamePixel(fixture.Draw(input, fixture.proxy), replaced));
     g_presentation.uiBackdropShader.Reset();
     FO4HDR_WARP_CHECK(SamePixel(fixture.Draw(input, fixture.proxy), standIn));
 }

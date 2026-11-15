@@ -480,6 +480,16 @@ void ResetSharedSdrFrame() noexcept
     g_content = {};
 }
 
+// Once the frame's writer is marked, the two draw observers below return at their first
+// checks unless an SDR frame is armed or a startup declaration tracks UAV writes.
+bool SharedSdrDrawIdle(const DrawObservation& observation) noexcept
+{
+    if (g_armed.load(std::memory_order_acquire) || SharedUiStartupSdr()) return false;
+    const auto generation = g_evidence.resourceGeneration.load(std::memory_order_acquire);
+    return HasCurrentWriter({.generation = generation,
+        .contextGeneration = observation.generation, .frame = g_frame});
+}
+
 void ObserveSharedSdrDrawEntry(ID3D11DeviceContext* context) noexcept
 {
     if (context != g_rendererDevice.activeContext)

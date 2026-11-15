@@ -468,6 +468,15 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
             slot, 1, &uav, nullptr);
     }
 
+    // An unarmed frame still tracks a UAV write, which leaves its declaration assumed.
+    void DrawTrackedOutputUav(Texture& target, SdrUavFrame frame)
+    {
+        const bool declared = frame == SdrUavFrame::unarmedCleared && &target == &proxy;
+        FO4HDR_WARP_CHECK(!declared || SharedUiStartupSdr());
+        DrawWithOutputUav(target, frame);
+        FO4HDR_WARP_CHECK(!declared || SharedUiStartupAssumed());
+    }
+
     void CheckOutputUav()
     {
         auto unrelated = CreateTexture(*device.device.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT,
@@ -490,7 +499,7 @@ struct SharedSdrContextFixture : SharedPresentationContextFixture
             if (frame != SdrUavFrame::qualified)
                 device.context->ClearRenderTargetView(proxy.rtv.Get(), black);
             DrawOriginal(RenoDxShaderPass::lut, lut);
-            DrawWithOutputUav(*target, frame);
+            DrawTrackedOutputUav(*target, frame);
             DrawOriginal(RenoDxShaderPass::taa, history, lut.srv.Get());
             if (target == &unrelated && frame == SdrUavFrame::qualified)
                 CheckProducerPresentation(std::pow(0.5, 2.2) * 203);

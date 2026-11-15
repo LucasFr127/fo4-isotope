@@ -910,12 +910,34 @@ void ObserveCompletedNativeDraw(ID3D11DeviceContext* context, const DrawObservat
     return false;
 }
 
+[[nodiscard]] bool BindsNoObservedShader(const DrawObservation& record) noexcept
+{
+    return !record.currentPassKnown && !record.currentReplacementActive &&
+        !IsLateGameUiBackdropShader(record.expectedBoundShader);
+}
+
+// Nearly every draw binds no shader this renderer knows, before the frame has a scene.
+// Each observer in ExecuteObservedDraw then returns at its first check. These are those
+// checks: an observer that gains work for such a draw must add its condition here.
+[[nodiscard]] bool OrdinaryDraw(const DrawObservation& record, bool indexedTriangle) noexcept
+{
+    return !indexedTriangle && BindsNoObservedShader(record) && !g_armor.armorEncodedActive &&
+        g_pipboyWatchedContext.load(std::memory_order_acquire) == 0 &&
+        SharedUiDrawIdle() && SharedSdrDrawIdle(record);
+}
+
+[[nodiscard]] bool DrawNeedsNoObservation(const DrawObservation& record,
+    ID3D11DeviceContext* context, const DrawInvocation& draw) noexcept
+{
+    return context != g_rendererDevice.activeContext || OrdinaryDraw(record, draw.indexedTriangle);
+}
+
 void ExecuteObservedDraw(
     DrawObservation& record,
     ID3D11DeviceContext* context,
     const DrawInvocation& draw) noexcept
 {
-    if (context != g_rendererDevice.activeContext)
+    if (DrawNeedsNoObservation(record, context, draw))
     {
         draw();
         return;

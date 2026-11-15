@@ -243,6 +243,48 @@ void CheckQualifiedPublishRevokes(Device& device)
     FO4HDR_WARP_CHECK(!SharedUiStartupPresentation());
 }
 
+// A draw of a shader the hooks do not know skips their observers before the frame has a
+// scene, yet the frame's first one still marks its writer and one from another thread
+// still rejects the shared UI.
+void CheckUnobservedDraws(Device& device)
+{
+    UnpairedSceneFixture fixture(device);
+    const auto shader = CreatePixelShader(*device.device.Get(),
+        generated::test::kSharedUiSyntheticPs);
+    for (const bool foreign : {false, true})
+    {
+        CompletePresentFrame(false, false);
+        fixture.BindHud();
+        device.context->PSSetShader(shader.Get(), nullptr, 0);
+        FO4HDR_WARP_CHECK(!fixture.record->currentPassKnown);
+        FO4HDR_WARP_CHECK(!SharedSdrFrameHasNativeWriter(device.context.Get()));
+        device.context->Draw(3, 0);
+        FO4HDR_WARP_CHECK(SharedSdrFrameHasNativeWriter(device.context.Get()));
+        if (foreign) std::thread([&device] { device.context->Draw(3, 0); }).join();
+        else device.context->Draw(3, 0);
+        fixture.PrepareScene();
+        FO4HDR_WARP_CHECK(SharedUiFrameReady() == !foreign);
+    }
+    CompletePresentFrame(false, false);
+}
+
+// A known pass with no replacement stays observed before the frame has a scene, where
+// draws of unknown shaders skip observation: it still advances the selected scene.
+void CheckUnreplacedPassObserved(Device& device)
+{
+    UnpairedSceneFixture fixture(device);
+    device.context->Draw(3, 0);
+    FO4HDR_WARP_CHECK(SharedSdrFrameHasNativeWriter(device.context.Get()));
+    fixture.ObservePair();
+    g_scene.currentScene = fixture.source.srv;
+    g_scene.currentSceneDomain = LinearColorDomain::linearBt2020UiRelative;
+    (void)fixture.BindStock(Pass::dofBlender, fixture.proxy.rtv.Get());
+    FO4HDR_WARP_CHECK(fixture.record->currentPassKnown && !fixture.record->currentReplacementActive);
+    FO4HDR_WARP_CHECK(!g_scene.productionOperatorApplied && !g_scene.temporalSceneReady);
+    device.context->Draw(3, 0);
+    FO4HDR_WARP_CHECK(g_scene.currentScene.Get() == fixture.proxy.srv.Get());
+}
+
 // A foreign producer that took its pass through an engine scope is only assumed game output.
 void CheckForeignProducer(Device& device, NativeImageSpacePass scope, Pass pass,
     std::initializer_list<Pass> stockSet)
@@ -385,6 +427,8 @@ void VerifyUnpairedSceneFallback(Device& device)
     CheckKeptReplacements(native);
     CheckQualifiedTransitions(native);
     CheckQualifiedPublishRevokes(native);
+    CheckUnobservedDraws(native);
+    CheckUnreplacedPassObserved(native);
     CheckForeignProducer(native, NativeImageSpacePass::lut, Pass::lut,
         {Pass::toneMapNewA, Pass::toneMapNewB, Pass::lut});
     CheckForeignProducer(native, NativeImageSpacePass::temporalAa, Pass::taa2, {Pass::taa2});

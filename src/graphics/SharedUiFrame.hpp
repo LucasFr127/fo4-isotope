@@ -43,6 +43,8 @@ bool DeclareSharedUiNativeSdr(bool assumed) noexcept;
 void ResetSharedUiResources(bool retainContentProvenance = false) noexcept;
 void ResetSharedUiContent() noexcept;
 void SharedUiBoundary(const ArmorUiScopeToken& token, bool entering) noexcept;
+// True while ObserveSharedUiDraw would do nothing for a draw with no replacement or armor scope.
+bool SharedUiDrawIdle() noexcept;
 bool ObserveSharedUiDraw(const DrawObservation& observation) noexcept;
 bool ReplacementWritesPublic(const DrawObservation& observation) noexcept;
 SharedUiWriteEvidence CaptureSharedUiWrite(bool freshScene = false, float white = 0.0F) noexcept;

@@ -675,6 +675,16 @@ bool SeedablePublicCopy(bool publicDestination, ID3D11Resource* source) noexcept
 
 } // namespace
 
+// Until the frame has a scene to protect, ObserveSharedUiDraw does nothing for a
+// present-thread draw that binds no replacement and sits in no armor scope.
+bool SharedUiDrawIdle() noexcept
+{
+    const auto presentThread = g_observedPresentThread.load(std::memory_order_acquire);
+    if (GetCurrentThreadId() != presentThread) return false;
+    return !g_foreignMutation.load(std::memory_order_acquire) &&
+        !g_scene.temporalSceneReady && !g_scene.productionOperatorApplied;
+}
+
 bool ObserveSharedUiDraw(const DrawObservation& observation) noexcept
 {
     if (!ApplicationPresentationFacadeActive()) return false;

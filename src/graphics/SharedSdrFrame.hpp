@@ -15,6 +15,8 @@ bool ArmSharedSdrFrame(ID3D11DeviceContext* context) noexcept;
 bool SharedSdrFrameHasNativeWriter(ID3D11DeviceContext* context) noexcept;
 // Retires the same-frame original LUT reference before native resource reset/resize.
 void ResetSharedSdrFrame() noexcept;
+// True while the draw observers below would do nothing for this context's draws.
+bool SharedSdrDrawIdle(const DrawObservation& observation) noexcept;
 void ObserveSharedSdrDrawEntry(ID3D11DeviceContext* context) noexcept;
 void ObserveSharedSdrDraw(ID3D11DeviceContext* context,
     const DrawObservation& observation) noexcept;
