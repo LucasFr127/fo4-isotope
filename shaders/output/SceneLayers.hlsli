@@ -33,7 +33,12 @@ float3 EvaluateFrameLayers(uint2 pixel)
     uint sourceWidth, sourceHeight;
     FrameSource.GetDimensions(sourceWidth, sourceHeight);
     const uint2 sourceSize = max(uint2(sourceWidth, sourceHeight), 1u);
-    const uint2 sourcePixel = min(pixel * sourceSize / max(FrameSize, 1u), sourceSize - 1u);
+    // A native-size source maps each pixel to itself, so only a rescaled
+    // source pays for the emulated integer divide.
+    uint2 sourcePixel = pixel;
+    [branch] if (any(sourceSize != FrameSize))
+        sourcePixel = pixel * sourceSize / max(FrameSize, 1u);
+    sourcePixel = min(sourcePixel, sourceSize - 1u);
     float3 light = FrameSource.Load(int3(sourcePixel, 0)).rgb;
     if (FrameMode == 4u || FrameMode == 5u) light = Fo4HdrBoundSdrSource(light);
     if (SharedUiEncoded == 1u)

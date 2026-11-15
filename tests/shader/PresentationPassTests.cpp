@@ -160,6 +160,71 @@ void VerifyDirectPresentationExtremes(Device& device, Texture& scene, Texture& o
     device.context->Unmap(output.staging.Get(),0);
 }
 
+// Red levels vary by source column and green by row, so reading any other texel
+// changes a code.
+double ScaledPresentationLevel(UINT index, UINT count)
+{
+    return 5.0 * std::pow(200.0, double(index) / double(count - 1));
+}
+
+std::vector<Float4> ScaledPresentationPixels(UINT width, UINT height)
+{
+    std::vector<Float4> pixels(width * height);
+    for (UINT index = 0; index < pixels.size(); ++index)
+        pixels[index] = {float(ScaledPresentationLevel(index % width, width) / 203),
+            float(ScaledPresentationLevel(index / width, height) / 203), 0.5F, 1.0F};
+    return pixels;
+}
+
+void CheckScaledPresentationCode(UINT actual, const std::array<double, 3>& nits)
+{
+    for (UINT channel = 0; channel < 3; ++channel)
+        FO4HDR_WARP_CHECK(CodeDistance(static_cast<std::uint16_t>((actual >> (channel * 10)) & 1023),
+            fo4hdr::QuantizeR10Unorm(fo4hdr::EncodeSt2084Pq(nits[channel]))) <= 1);
+    FO4HDR_WARP_CHECK(actual >> 30 == 3);
+}
+
+void CheckScaledPresentation(Device& device, Texture& output, UINT sourceWidth, UINT sourceHeight)
+{
+    D3D11_TEXTURE2D_DESC frame{};
+    output.texture->GetDesc(&frame);
+    device.context->CopyResource(output.staging.Get(), output.texture.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    CheckHresult(device.context->Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+        "Read scaled presentation source");
+    for (UINT index = 0; index < frame.Width * frame.Height; ++index) {
+        const UINT x = index % frame.Width, y = index / frame.Width;
+        const auto* row = reinterpret_cast<const UINT*>(
+            static_cast<const std::byte*>(mapped.pData) + y * mapped.RowPitch);
+        const UINT sourceX = std::min(x * sourceWidth / frame.Width, sourceWidth - 1);
+        const UINT sourceY = std::min(y * sourceHeight / frame.Height, sourceHeight - 1);
+        CheckScaledPresentationCode(row[x], {ScaledPresentationLevel(sourceX, sourceWidth),
+            ScaledPresentationLevel(sourceY, sourceHeight), 101.5});
+    }
+    device.context->Unmap(output.staging.Get(), 0);
+}
+
+// Smaller, native-size and larger sources map each output pixel to texel
+// pixel * source / frame.
+void VerifyScaledPresentationSource(Device& device, const PresentationShaders* shader)
+{
+    constexpr UINT width = 37, height = 19;
+    auto output = CreateSizedTexture(*device.device.Get(), {width, height,
+        DXGI_FORMAT_R10G10B10A2_UNORM, D3D11_BIND_RENDER_TARGET});
+    const auto constants = CreateConstantBuffer(*device.device.Get(),
+        CompositionConstants{width, height, 3, 203, 203, 1000, 0, 0});
+    constexpr std::array<std::array<UINT, 2>, 3> sources{{{13, 7}, {width, height}, {74, 38}}};
+    for (const auto& [sourceWidth, sourceHeight] : sources) {
+        const auto pixels = ScaledPresentationPixels(sourceWidth, sourceHeight);
+        const D3D11_SUBRESOURCE_DATA data{pixels.data(), sourceWidth * sizeof(Float4), 0};
+        auto source = CreateSizedTexture(*device.device.Get(), {sourceWidth, sourceHeight,
+            DXGI_FORMAT_R32G32B32A32_FLOAT, D3D11_BIND_SHADER_RESOURCE, &data});
+        DrawPresentation(device, {shader, constants.Get(), {source.srv.Get(), nullptr, nullptr, nullptr},
+            output.rtv.Get(), width, height});
+        CheckScaledPresentation(device, output, sourceWidth, sourceHeight);
+    }
+}
+
 ComPtr<ID3D11InfoQueue> VerifyRejectedPresentationView(Device& device, Texture& output)
 {
     D3D11_TEXTURE2D_DESC description{};
@@ -210,6 +275,7 @@ void VerifyDirectPresentation(Device& device)
         CheckHresult(chain->Present(0, 0), "Present retained RTV test");
     }
     VerifyDirectPresentationExtremes(device, scene, output, &shader);
+    VerifyScaledPresentationSource(device, &shader);
     VerifyPublicPresentationOutput(device);
     CheckDebugMessages(device);
     FO4HDR_WARP_CHECK(FAILED(chain->ResizeBuffers(2, 17, 11, DXGI_FORMAT_UNKNOWN, 0)));
