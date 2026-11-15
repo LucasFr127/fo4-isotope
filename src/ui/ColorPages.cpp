@@ -100,7 +100,7 @@ void AddHdrConversion(SettingsPageBuilder& page)
 {
     page.Group("hdr-conversion", "HDR Conversion", "intersect-square");
     page.Choice<ColorGradingMethod>({"grading-method", "Grading Method",
-        "RGB Ratio reads the LUT at each color's own hue and saturation.\n"
+        "RGB Ratio reads the LUT at each color's own hue and saturation. "
         "Affine reads it as the game does for closer vanilla tints, at a higher GPU cost."},
         [](HdrSettings& settings) -> ColorGradingMethod& { return settings.colorGradingMethod; },
         std::span<const ChoiceEntry<ColorGradingMethod>>{kGradingMethods})
