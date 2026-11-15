@@ -199,7 +199,7 @@ const std::array kPages{
                   .summary = "Tone mapper and its settings.", .sortKey = 100, .iconName = "chart-line"},
         &DrawPage<BuildToneMappingPage>},
     PageEntry{{.id = "performance", .displayName = "Performance", .categoryId = "display",
-                  .summary = "Options that trade image precision for speed.", .sortKey = 200,
+                  .summary = "Options that trade image quality for speed.", .sortKey = 200,
                   .iconName = "gauge"},
         &DrawPage<BuildPerformancePage>},
     PageEntry{{.id = "adjustments", .displayName = "Adjustments", .categoryId = "image",
