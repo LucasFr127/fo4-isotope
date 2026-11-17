@@ -56,7 +56,8 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     const auto& view = View();
     StatusList messages{};
     if (const auto* hosted = HostedHdrStatusText(view))
-        messages[0] = {hosted, view.hostStateMismatch ? StatusSeverity::warning : StatusSeverity::info};
+        messages[0] = {hosted,
+            view.hostStateMismatch ? StatusSeverity::warning : StatusSeverity::info};
     if (!view.sdrMode) return messages;
     // An SDR display, hosted presentation and the host's own HDR are normal setups;
     // their notes only point at the switch that changes them.
@@ -82,6 +83,7 @@ struct RestartSwitch
 void AddRestartSwitch(SettingsPageBuilder& page, const RestartSwitch& control)
 {
     const auto flag = control.flag;
+    const auto status = control.status;
     dmui::SettingDescriptor setting{.id = control.text.id, .label = control.text.label,
         .description = control.text.description,
         .control = dmui::CheckboxSettingControl{}, .defaultValue = control.defaultValue};
@@ -95,7 +97,7 @@ void AddRestartSwitch(SettingsPageBuilder& page, const RestartSwitch& control)
         const auto& frame = CurrentSettingsFrame();
         return frame.interfaceDraft->*flag != frame.sessionInterface.*flag;
     };
-    setting.resolveFeedback = [flag, status = control.status]() -> std::optional<dmui::FieldFeedback> {
+    setting.resolveFeedback = [flag, status]() -> std::optional<dmui::FieldFeedback> {
         const auto* note = status(CurrentSettingsFrame().interfaceDraft->*flag, View());
         if (note == nullptr) return std::nullopt;
         return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, note};
@@ -349,7 +351,9 @@ void AddRenderPrecision(SettingsPageBuilder& page)
             "gradients. HDR only. Applies after a restart.",
         .control = std::move(control), .defaultValue = ChoiceKey(entries, RenderPrecision::high)};
     setting.binding = dmui::BindSetting(
-        [entries] { return ChoiceKey(entries, CurrentSettingsFrame().interfaceDraft->renderPrecision); },
+        [entries] {
+            return ChoiceKey(entries, CurrentSettingsFrame().interfaceDraft->renderPrecision);
+        },
         [entries](std::string selected) {
             auto& value = CurrentSettingsFrame().interfaceDraft->renderPrecision;
             SelectChoice(entries, selected, value);
