@@ -184,5 +184,19 @@
         "sha256": "3ab675ed68e3e2ea3f8d92dbeeb271a09b03183d303d5bc302ab37202a090497"
       }
     ]
+  },
+  "communityShadersApi": {
+    "status": "imported",
+    "sourceRepository": "https://github.com/LucasFr127/fallout4-community-shaders.git",
+    "sourceCommit": "9a5463055e7309bd33f3a20a34cf1b6c429312cf",
+    "license": "LicenseRef-CommunityShaders-GPL-3.0-or-later-with-Exceptions",
+    "licensePath": "EXCEPTIONS.md",
+    "licenseSha256": "f836c5f1d2021ee0daa8c43c923a1e94cebeb25f53f8a94384c6e19bb40ba1da",
+    "sourceFiles": [
+      {
+        "path": "src/Api/CommunityShadersAPI.h",
+        "sha256": "d8c533d6301e59218f486858a0801b1dafbb25122fb10d9ab7853363925ebc8c"
+      }
+    ]
   }
 }

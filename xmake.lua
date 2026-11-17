@@ -193,6 +193,8 @@ target("fo4hdr-core")
         "src/output/PerformanceStatistics.cpp")
     add_headerfiles("include/FO4Isotope/**.hpp")
     add_includedirs("include", { public = true })
+    -- Community Shaders' public C API header, retained byte for byte.
+    add_includedirs("third_party/community-shaders/upstream", { public = true })
 target_end()
 
 target("fo4hdr-renderer")

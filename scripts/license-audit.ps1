@@ -210,6 +210,25 @@ function Register-Fo4HdrGt7Sources {
     }
 }
 
+# Community Shaders' public C API header is retained byte for byte at its pin.
+function Register-Fo4HdrCommunityShadersApi {
+    param([Parameter(Mandatory = $true)]$Authority)
+
+    $source = Join-Path $auditRoot $communityShadersApiRelative
+    if ($Authority.status -cne "imported" -or
+        -not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw (
+            "The Community Shaders API header and its versions.lock.json " +
+            "pin must be present together."
+        )
+    }
+    $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -cne $Authority.sourceFiles[0].sha256.ToLowerInvariant()) {
+        throw "The Community Shaders API header differs from its pinned upstream bytes."
+    }
+    [void]$registeredThirdPartyPaths.Add($communityShadersApiRelative)
+}
+
 function Test-Fo4HdrRuntimeAuthority {
     param($Actual, [Collections.IDictionary]$Expected)
     foreach ($field in $Expected.Keys) {
@@ -415,13 +434,17 @@ $gt7SourceRelative = "third_party/gt7/upstream/gt7_tone_mapping.cpp"
 $gt7LockRelative = "third_party/gt7/UPSTREAM.lock.json"
 $gt7Source = Join-Path $auditRoot $gt7SourceRelative
 $gt7Lock = Join-Path $auditRoot $gt7LockRelative
-$gt7Authority = (Get-Content -LiteralPath (
-        Join-Path $auditRoot "versions.lock.json"
-    ) -Raw | ConvertFrom-Json).gt7
+$versionsLock = Get-Content -LiteralPath (
+    Join-Path $auditRoot "versions.lock.json"
+) -Raw | ConvertFrom-Json
+$gt7Authority = $versionsLock.gt7
 $officialGt7Url =
 "https://blog.selfshadow.com/publications/s2025-shading-course/" +
 "pdi/supplemental/gt7_tone_mapping.cpp"
 Register-Fo4HdrGt7Sources
+
+$communityShadersApiRelative = "third_party/community-shaders/upstream/CommunityShadersAPI.h"
+Register-Fo4HdrCommunityShadersApi $versionsLock.communityShadersApi
 
 if ($PackageRoot) {
     Add-Fo4HdrRegisteredPackageArchives

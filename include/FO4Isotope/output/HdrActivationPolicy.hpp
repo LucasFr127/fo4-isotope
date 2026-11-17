@@ -5,6 +5,8 @@
 #include <atomic>
 #include <limits>
 
+#include <CommunityShadersAPI.h>
+
 namespace fo4hdr {
 
 enum class HdrActivationMode : std::uint8_t
@@ -144,20 +146,11 @@ struct SdrModeInputs
 
 [[nodiscard]] SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept;
 
-// What a hosting presenter reports about its HDR output. The layout is the
-// host's exported contract; size is set by the caller.
-struct HostHdrOutputState
-{
-    std::uint32_t size{};
-    std::uint32_t hdrActive{};
-    float paperWhiteNits{};
-    float peakNits{};
-    // Not checked; it describes the image the host's own LUT pass reads.
-    std::uint32_t sceneEncoding{};
-    // Zero is signed gamma 2.2, BT.709, 1.0 at paper white: the format FO4Isotope
-    // writes, and the one a host older than this field decodes, leaving it unwritten.
-    std::uint32_t lutOutputEncoding{};
-};
+// What a hosting presenter reports about its HDR output, as Community Shaders'
+// public header declares it. The caller sets size and zeroes the rest, so a host
+// older than lutOutputEncoding leaves it at signed gamma 2.2, the format
+// FO4Isotope writes.
+using HostHdrOutputState = CS_HdrOutputState;
 static_assert(sizeof(HostHdrOutputState) == 24U);
 
 // Trusts a host's answer, null when it gave none, only when it is complete and
@@ -176,6 +169,7 @@ enum class HostOutput : std::uint8_t
 };
 
 // HDR needs a complete answer, whatever its paper white; no answer means SDR.
+// sceneEncoding is not checked: it describes the image the host's own LUT pass reads.
 [[nodiscard]] HostOutput ClassifyHostOutput(const HostHdrOutputState* answer) noexcept;
 // While the host shows HDR, a hosted SDR reason gives way to the reason SDR mode
 // yields, which names an unknown format only when HDR was requested; ENB, an

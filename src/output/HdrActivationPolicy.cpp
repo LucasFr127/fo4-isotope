@@ -147,7 +147,10 @@ HostOutput ClassifyHostOutput(const HostHdrOutputState* answer) noexcept
 {
     if (answer == nullptr || answer->size < sizeof(HostHdrOutputState)) return HostOutput::sdr;
     if (answer->hdrActive == 0U) return HostOutput::sdr;
-    return answer->lutOutputEncoding == 0U ? HostOutput::hdr : HostOutput::hdrUnknownFormat;
+    constexpr auto kSignedGamma22 =
+        static_cast<std::uint32_t>(CS_HdrLutOutputEncoding_SignedGamma22PaperWhite);
+    return answer->lutOutputEncoding == kSignedGamma22 ? HostOutput::hdr :
+        HostOutput::hdrUnknownFormat;
 }
 
 SdrModeReason SdrModeReasonForHost(SdrModeReason latched, HostOutput host) noexcept

@@ -132,3 +132,15 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+## Community Shaders API header
+
+Copyright 2026 FO4CommunityShaders. GPL-3.0-or-later with the Community
+Shaders Modding Exception and GPL-3.0 Linking Exception (with Corresponding
+Source). The public C header
+`third_party/community-shaders/upstream/CommunityShadersAPI.h` is retained byte
+for byte from Community Shaders for Fallout 4
+(<https://github.com/northaxosky/fallout4-community-shaders>), commit
+`9a5463055e7309bd33f3a20a34cf1b6c429312cf`, and compiled into the plugin. The
+header carries no copyright notice of its own. See the
+[combined terms](LICENSES/LicenseRef-CommunityShaders-GPL-3.0-or-later-with-Exceptions.txt).

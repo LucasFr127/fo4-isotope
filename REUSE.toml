@@ -24,3 +24,11 @@ precedence = "closest"
 SPDX-FileCopyrightText = "2025 Polyphony Digital Inc."
 SPDX-License-Identifier = "MIT"
 
+# Community Shaders' public C API header is retained byte-for-byte; it carries no
+# notice of its own, so its project's license applies.
+[[annotations]]
+path = "third_party/community-shaders/upstream/CommunityShadersAPI.h"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 FO4CommunityShaders"
+SPDX-License-Identifier = "LicenseRef-CommunityShaders-GPL-3.0-or-later-with-Exceptions"
+
