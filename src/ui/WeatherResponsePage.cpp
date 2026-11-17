@@ -218,8 +218,11 @@ void AddStatus(SettingsPageBuilder& page)
     page.Value({"current-scene", "Current Scene",
         "Whether the weather response reaches the current scene's color grading."}, [] {
             const auto scene = WeatherResponseStatus(Response(), ResponseActive());
+            // No success tone while the page says the settings have no effect.
+            const auto success = scene.detail.text == nullptr &&
+                ColorSettingsStatus(*CurrentSettingsFrame().view).text == nullptr;
             const auto tone = scene.detail.severity != StatusSeverity::info ? dmui::TextTone::kWarning :
-                scene.detail.text == nullptr ? dmui::TextTone::kSuccess : dmui::TextTone::kInherit;
+                success ? dmui::TextTone::kSuccess : dmui::TextTone::kInherit;
             (void)dmui::DrawStyledText(*CurrentSettingsFrame().client, scene.value, {.tone = tone});
         }).resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
             const auto detail = WeatherResponseStatus(Response(), ResponseActive()).detail;
@@ -228,7 +231,7 @@ void AddStatus(SettingsPageBuilder& page)
         };
     page.Messages([] {
         const auto& view = Response();
-        return StatusList{HostToneMappingStatus(*CurrentSettingsFrame().view), view.status,
+        return StatusList{ColorSettingsStatus(*CurrentSettingsFrame().view), view.status,
             view.imageSpaceStatus};
     });
 }

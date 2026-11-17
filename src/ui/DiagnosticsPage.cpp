@@ -46,9 +46,12 @@ void AddTextRow(SettingsPageBuilder& page, const FieldText& text, const char* (*
 void AddStatusRows(SettingsPageBuilder& page)
 {
     page.Group("renderer-status", "Renderer", "cpu");
-    AddTextRow(page, {"output", "Output"}, [] {
+    AddTextRow(page, {"output", "Output"}, []() -> const char* {
         const auto& view = View();
-        return view.sdrMode ? "SDR" : view.hdrActive ? "HDR10 active" : "HDR10 inactive";
+        if (view.sdrMode) return "SDR";
+        // A hosted chain never activates FO4Isotope's own HDR10 color space.
+        if (view.hostedHdr) return "HDR through Community Shaders";
+        return view.hdrActive ? "HDR10 active" : "HDR10 inactive";
     });
     AddFormattedRow(page, {"tone-mapper", "Tone Mapper"}, [](Text& text) {
         const auto& view = View();

@@ -64,7 +64,7 @@ void ForEachMessage(const StatusList& messages, Visit&& visit)
 
 SettingsFrame& CurrentSettingsFrame() noexcept { return g_frame; }
 
-StatusList ColorSettingsMessages() noexcept { return {HostToneMappingStatus(*g_frame.view)}; }
+StatusList ColorSettingsMessages() noexcept { return {ColorSettingsStatus(*g_frame.view)}; }
 
 void RequestSettingsCommit() noexcept
 {

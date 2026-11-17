@@ -40,16 +40,22 @@ struct SettingsMenuHealth
 [[nodiscard]] const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept;
 // The note on the saved HDR request, or null when it needs none.
 [[nodiscard]] const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noexcept;
-// The note on the saved Render Precision; its text is null when it needs none.
+// The note on the saved Render Precision, which the saved Hosted Presentation switch
+// decides too; its text is null when it needs none.
 [[nodiscard]] StatusMessage RenderPrecisionStatus(
-    RenderPrecision precision, const SettingsMenuView& view) noexcept;
-// The Output note of a hosted-HDR session, or null outside one.
-[[nodiscard]] const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept;
+    const HdrInterfaceSettings& saved, const SettingsMenuView& view) noexcept;
+// The Output note of a hosted-HDR session; its text is null outside one.
+[[nodiscard]] StatusMessage HostedHdrStatus(const SettingsMenuView& view) noexcept;
 // The note on the saved hosted-presentation request, or null when it needs none.
 [[nodiscard]] const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) noexcept;
-// The color pages' warning while Community Shaders' own tone mapping is shown;
-// its text is null otherwise.
+// The color pages' warning while Community Shaders' own tone mapping is shown, or
+// their error after the hosted shaders failed; its text is null otherwise.
 [[nodiscard]] StatusMessage HostToneMappingStatus(const SettingsMenuView& view) noexcept;
+// SDR mode's error after its shaders failed to build; its text is null otherwise.
+[[nodiscard]] StatusMessage SdrShadersStatus(const SettingsMenuView& view) noexcept;
+// What the Output and color pages report when the color settings cannot act: the ENB
+// note, then the host's note, then the SDR shader error; its text is null while they act.
+[[nodiscard]] StatusMessage ColorSettingsStatus(const SettingsMenuView& view) noexcept;
 // The renderer rejected the last change, or null when it applied.
 [[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
 // Reports SDR mode as HDR off once the saved request turns HDR off, so the reason's

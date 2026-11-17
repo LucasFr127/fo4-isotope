@@ -68,6 +68,18 @@ static_assert(kSdrModeHealth.size() == kSdrModeReasonTexts.size());
 
 constexpr auto kHostStateMismatchText = "Community Shaders' HDR setting changed since the game "
     "started, so its tone mapping is shown. Restart the game to use Isotope's.";
+constexpr auto kHostedShadersFailedText = "The color settings are unavailable this session "
+    "because their shaders could not be built. Restart the game to retry.";
+constexpr auto kSdrShadersFailedText = "The SDR color settings are unavailable this session "
+    "because their shaders could not be built. Restart the game to retry.";
+constexpr auto kEnbText = "ENB is installed, so the color settings have no effect and ENB's own "
+    "effects stay intact.";
+
+// A failed build, publish or draw ends hosted substitution, so the host's own shaders draw.
+[[nodiscard]] bool HostedShadersFailed(const SettingsMenuView& view) noexcept
+{
+    return view.hostedHdr && view.sdrControlsUnavailable;
+}
 
 [[nodiscard]] SettingsMenuHealth DescribeSdrHealth(const SettingsMenuView& view) noexcept
 {
@@ -81,6 +93,21 @@ constexpr auto kHostStateMismatchText = "Community Shaders' HDR setting changed 
     auto health = kSdrModeHealth[index];
     health.detail = detail;
     return health;
+}
+
+[[nodiscard]] SettingsMenuHealth DescribeHdrHealth(const SettingsMenuView& view) noexcept
+{
+    if (HostedShadersFailed(view))
+        return {HealthSeverity::error,
+            "Isotope's tone mapping could not start; Community Shaders' is shown.",
+            "Color settings unavailable", kHostedShadersFailedText};
+    if (view.hostStateMismatch)
+        return {HealthSeverity::warning, "Community Shaders' HDR setting changed.",
+            "Restart needed", kHostStateMismatchText};
+    if (view.hostedHdr)
+        return {HealthSeverity::success, "HDR10 output through Community Shaders."};
+    if (view.hdrActive) return {HealthSeverity::success, "HDR10 output active."};
+    return {HealthSeverity::info, "HDR10 output inactive."};
 }
 
 // HDR runs with Medium from the start, yet no lighting texture kept the game's format.
@@ -112,14 +139,7 @@ SettingsMenuHealth DescribeSettingsMenuHealth(
     if (const auto* rejected = LiveSettingsErrorText(view))
         return {HealthSeverity::warning, "The last change was not applied.", "Change not applied",
             rejected};
-    if (view.sdrMode) return DescribeSdrHealth(view);
-    if (view.hostStateMismatch)
-        return {HealthSeverity::warning, "Community Shaders' HDR setting changed.",
-            "Restart needed", kHostStateMismatchText};
-    if (view.hostedHdr)
-        return {HealthSeverity::success, "HDR10 output through Community Shaders."};
-    if (view.hdrActive) return {HealthSeverity::success, "HDR10 output active."};
-    return {HealthSeverity::info, "HDR10 output inactive."};
+    return view.sdrMode ? DescribeSdrHealth(view) : DescribeHdrHealth(view);
 }
 
 const char* SettingsOperatorDisplayName(ProductionToneMapperAlgorithm algorithm) noexcept
@@ -139,14 +159,14 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
 }
 
 StatusMessage RenderPrecisionStatus(
-    RenderPrecision precision, const SettingsMenuView& view) noexcept
+    const HdrInterfaceSettings& saved, const SettingsMenuView& view) noexcept
 {
     // Defaults from an unreadable INI cannot save the choice; the SDR reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return {};
+    // A hosted start never promotes the game's render targets, in HDR or SDR.
+    if (saved.hostedPresentation) return {"Hosted Presentation keeps the game's own precision."};
     if (view.sdrMode) return {"Applies only to HDR output."};
-    // A hosted session never promotes the game's render targets.
-    if (view.hostedHdr) return {"Hosted Presentation keeps the game's own precision."};
-    if (precision != view.renderPrecisionAtStart)
+    if (saved.renderPrecision != view.renderPrecisionAtStart)
         return {"Restart the game to apply.", StatusSeverity::warning};
     if (VanillaLightingMissing(view))
         return {"Medium was not applied this session. See FO4Isotope.log.", StatusSeverity::error};
@@ -171,28 +191,52 @@ const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) 
 }
 
 // Community Shaders' own shaders draw until its state matches the session again.
-const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept
+StatusMessage HostedHdrStatus(const SettingsMenuView& view) noexcept
 {
-    if (!view.hostedHdr) return nullptr;
-    return view.hostStateMismatch ? kHostStateMismatchText :
-        "Community Shaders presents in HDR with Isotope's tone mapping and color settings. "
-        "Its HDR Display settings set menu and HUD brightness.";
+    if (!view.hostedHdr) return {};
+    if (HostedShadersFailed(view)) return {kHostedShadersFailedText, StatusSeverity::error};
+    if (view.hostStateMismatch) return {kHostStateMismatchText, StatusSeverity::warning};
+    return {"Community Shaders presents in HDR with Isotope's tone mapping and color settings. "
+        "Its HDR Display settings set menu and HUD brightness."};
 }
 
 StatusMessage HostToneMappingStatus(const SettingsMenuView& view) noexcept
 {
-    if (view.sdrModeReason != SdrModeReason::hostFormatUnknown &&
-        view.sdrModeReason != SdrModeReason::hostPresentsHdr)
-        return {};
+    if (HostedShadersFailed(view)) return {kHostedShadersFailedText, StatusSeverity::error};
+    const bool hostShown = view.sdrModeReason == SdrModeReason::hostFormatUnknown ||
+        view.sdrModeReason == SdrModeReason::hostPresentsHdr ||
+        (view.hostedHdr && view.hostStateMismatch);
+    if (!hostShown) return {};
     return {"The color settings have no effect while Community Shaders' tone mapping is shown.",
         StatusSeverity::warning};
 }
 
+StatusMessage SdrShadersStatus(const SettingsMenuView& view) noexcept
+{
+    if (!view.sdrMode || !view.sdrControlsUnavailable) return {};
+    return {kSdrShadersFailedText, StatusSeverity::error};
+}
+
+// ENB first: nothing substitutes under it, so a failed shader build changes nothing.
+StatusMessage ColorSettingsStatus(const SettingsMenuView& view) noexcept
+{
+    if (view.enbDetected) return {kEnbText, StatusSeverity::warning};
+    const auto host = HostToneMappingStatus(view);
+    return host.text != nullptr ? host : SdrShadersStatus(view);
+}
+
+// Once HDR is turned off, SDR is the user's choice. A hosted chain that asked for HDR
+// would start with the hosted-presentation note instead.
+[[nodiscard]] constexpr SdrModeReason ReasonWithHdrOff(SdrModeReason reason) noexcept
+{
+    if (reason == SdrModeReason::hostPresentsSdr || reason == SdrModeReason::hostNotFound)
+        return SdrModeReason::hostedPresentation;
+    return KeepsReasonWithHdrOff(reason) ? reason : SdrModeReason::hdrOff;
+}
+
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept
 {
-    // Once HDR is turned off, SDR is the user's choice.
-    if (!hdrEnabled && !KeepsReasonWithHdrOff(view.sdrModeReason))
-        view.sdrModeReason = SdrModeReason::hdrOff;
+    if (!hdrEnabled) view.sdrModeReason = ReasonWithHdrOff(view.sdrModeReason);
 }
 
 const char* SdrModeReasonText(const SettingsMenuView& view) noexcept

@@ -38,55 +38,74 @@ void TestHdrRequestStatus()
     FO4HDR_CHECK(HdrRequestStatus(true, fallback) == nullptr);
 }
 
+[[nodiscard]] SettingsMenuView HdrSession(RenderPrecision atStart, std::uint64_t targets = 0)
+{
+    SettingsMenuView view{};
+    view.hdrActive = true;
+    view.renderPrecisionAtStart = atStart;
+    view.vanillaLightingTargets = targets;
+    return view;
+}
+
+[[nodiscard]] HdrInterfaceSettings SavedPrecision(RenderPrecision precision, bool hosted = false)
+{
+    return HdrInterfaceSettings{.hostedPresentation = hosted, .renderPrecision = precision};
+}
+
+[[nodiscard]] bool Says(const StatusMessage& status, StatusSeverity severity, std::string_view text)
+{
+    return status.text != nullptr && status.severity == severity &&
+        std::string_view{status.text}.contains(text);
+}
+
 void TestRenderPrecisionStatus()
 {
     using enum RenderPrecision;
-    const auto hdr = [](RenderPrecision atStart, std::uint64_t targets) {
-        SettingsMenuView view{};
-        view.hdrActive = true;
-        view.renderPrecisionAtStart = atStart;
-        view.vanillaLightingTargets = targets;
-        return view;
-    };
     // The session's own choice applied: nothing to say. Low keeps every target without
     // counting lighting textures, so a zero count is expected there.
-    FO4HDR_CHECK(RenderPrecisionStatus(high, hdr(high, 0)).text == nullptr);
-    FO4HDR_CHECK(RenderPrecisionStatus(medium, hdr(medium, 2)).text == nullptr);
-    FO4HDR_CHECK(RenderPrecisionStatus(low, hdr(low, 0)).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(SavedPrecision(high), HdrSession(high)).text == nullptr);
+    FO4HDR_CHECK(
+        RenderPrecisionStatus(SavedPrecision(medium), HdrSession(medium, 2)).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(SavedPrecision(low), HdrSession(low)).text == nullptr);
     // A change waits for the next game start.
-    for (const auto [saved, atStart] : {std::pair{low, high}, std::pair{high, low},
+    for (const auto [choice, atStart] : {std::pair{low, high}, std::pair{high, low},
              std::pair{medium, low}, std::pair{low, medium}})
-    {
-        const auto status = RenderPrecisionStatus(saved, hdr(atStart, 0));
-        FO4HDR_CHECK(status.severity == StatusSeverity::warning &&
-            std::string_view{status.text}.starts_with("Restart the game"));
-    }
+        FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(choice), HdrSession(atStart)),
+            StatusSeverity::warning, "Restart the game"));
     // Medium from the start, but no lighting texture kept the game's format.
-    const auto missing = RenderPrecisionStatus(medium, hdr(medium, 0));
-    FO4HDR_CHECK(missing.severity == StatusSeverity::error &&
-        std::string_view{missing.text}.starts_with("Medium was not applied"));
-    auto inactive = hdr(medium, 0);
+    FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(medium), HdrSession(medium)),
+        StatusSeverity::error, "Medium was not applied"));
+    auto inactive = HdrSession(medium);
     inactive.hdrActive = false;
-    FO4HDR_CHECK(RenderPrecisionStatus(medium, inactive).text == nullptr);
+    FO4HDR_CHECK(RenderPrecisionStatus(SavedPrecision(medium), inactive).text == nullptr);
     // SDR mode has no promotion, so the choice does nothing there.
-    auto sdr = hdr(high, 0);
+    auto sdr = HdrSession(high);
     sdr.sdrMode = true;
-    const auto sdrStatus = RenderPrecisionStatus(low, sdr);
-    FO4HDR_CHECK(sdrStatus.severity == StatusSeverity::info && sdrStatus.text != nullptr);
+    FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(low), sdr), StatusSeverity::info,
+        "Applies only to HDR"));
     // Defaults from an unreadable INI cannot save it.
     sdr.sdrModeReason = SdrModeReason::configurationDefaults;
-    FO4HDR_CHECK(RenderPrecisionStatus(low, sdr).text == nullptr);
-    // Hosted HDR promotes nothing either, so a changed choice asks for no restart.
-    SettingsMenuView hosted{};
-    hosted.hostedHdr = true;
-    hosted.renderPrecisionAtStart = high;
-    const auto hostedStatus = RenderPrecisionStatus(low, hosted);
-    FO4HDR_CHECK(hostedStatus.severity == StatusSeverity::info &&
-        std::string_view{hostedStatus.text}.contains("Hosted Presentation"));
+    FO4HDR_CHECK(RenderPrecisionStatus(SavedPrecision(low, true), sdr).text == nullptr);
+}
+
+// A saved Hosted Presentation promotes nothing at the next start, in HDR or SDR, so a
+// changed choice asks for no restart; turning the switch off lets the choice apply again.
+void TestHostedRenderPrecisionStatus()
+{
+    using enum RenderPrecision;
+    auto sdr = HdrSession(high);
+    sdr.sdrMode = true;
+    for (const auto& view : {HdrSession(high), sdr})
+        FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(low, true), view),
+            StatusSeverity::info, "Hosted Presentation"));
+    auto hostedSession = HdrSession(high);
+    hostedSession.hostedHdr = true;
+    FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(low), hostedSession),
+        StatusSeverity::warning, "Restart the game"));
 }
 
 // The color pages warn only while Community Shaders' own tone mapping is shown.
-void TestHostToneMappingStatus()
+void TestHostToneMappingReasons()
 {
     SettingsMenuView view{};
     for (const auto reason : {SdrModeReason::none, SdrModeReason::enbDetected,
@@ -98,10 +117,42 @@ void TestHostToneMappingStatus()
     for (const auto reason : {SdrModeReason::hostPresentsHdr, SdrModeReason::hostFormatUnknown})
     {
         view.sdrModeReason = reason;
-        const auto status = HostToneMappingStatus(view);
-        FO4HDR_CHECK(status.severity == StatusSeverity::warning &&
-            std::string_view{status.text}.contains("no effect"));
+        FO4HDR_CHECK(Says(HostToneMappingStatus(view), StatusSeverity::warning, "no effect"));
     }
+}
+
+// A hosted HDR latch whose host setting changed draws the host's shaders too, and failed
+// hosted shaders are an error whatever the host shows.
+void TestHostedToneMappingStatus()
+{
+    SettingsMenuView hosted{};
+    hosted.hostedHdr = true;
+    FO4HDR_CHECK(HostToneMappingStatus(hosted).text == nullptr);
+    hosted.hostStateMismatch = true;
+    FO4HDR_CHECK(Says(HostToneMappingStatus(hosted), StatusSeverity::warning, "no effect"));
+    hosted.sdrControlsUnavailable = true;
+    FO4HDR_CHECK(Says(HostToneMappingStatus(hosted), StatusSeverity::error, "could not be built"));
+}
+
+// The color pages report what the Output page does: the ENB note, then the host's note,
+// then SDR mode's failed shader build.
+void TestColorSettingsStatus()
+{
+    SettingsMenuView view{};
+    view.sdrControlsUnavailable = true;
+    FO4HDR_CHECK(ColorSettingsStatus(view).text == nullptr);
+    view.sdrMode = true;
+    FO4HDR_CHECK(Says(ColorSettingsStatus(view), StatusSeverity::error, "The SDR color settings"));
+    FO4HDR_CHECK(Says(SdrShadersStatus(view), StatusSeverity::error, "could not be built"));
+    view.sdrModeReason = SdrModeReason::hostPresentsHdr;
+    FO4HDR_CHECK(Says(ColorSettingsStatus(view), StatusSeverity::warning, "no effect"));
+    // Nothing substitutes under ENB, so its note outranks the host's and the build's.
+    view.enbDetected = true;
+    FO4HDR_CHECK(Says(ColorSettingsStatus(view), StatusSeverity::warning, "ENB is installed"));
+    view = SettingsMenuView{};
+    view.sdrMode = true;
+    FO4HDR_CHECK(ColorSettingsStatus(view).text == nullptr);
+    FO4HDR_CHECK(SdrShadersStatus(view).text == nullptr);
 }
 
 // Every handled cause of SDR mode names itself; HDR off, at start or since, needs no note
@@ -132,6 +183,9 @@ void TestSdrModeReasonText()
     FO4HDR_CHECK(text(SdrModeReason::hostedPresentation, false).contains("Community Shaders"));
     FO4HDR_CHECK(text(SdrModeReason::hostPresentsSdr).contains("reports SDR"));
     FO4HDR_CHECK(text(SdrModeReason::hostNotFound).contains("HDR Display"));
+    // With HDR turned off, those hosted chains would start with the hosted note.
+    for (const auto reason : {SdrModeReason::hostPresentsSdr, SdrModeReason::hostNotFound})
+        FO4HDR_CHECK(text(reason, false).contains("Enable HDR is off"));
     // While the host shows HDR, SDR mode yields whatever Enable HDR says, so these notes stay.
     for (const auto hdrEnabled : {true, false})
     {
@@ -145,16 +199,29 @@ void TestHostedHdrStatus()
 {
     SettingsMenuView view{};
     view.presenting = true;
-    FO4HDR_CHECK(HostedHdrStatusText(view) == nullptr);
+    FO4HDR_CHECK(HostedHdrStatus(view).text == nullptr);
     view.hostedHdr = true;
-    FO4HDR_CHECK(std::string_view{HostedHdrStatusText(view)}.contains("presents in HDR"));
+    FO4HDR_CHECK(Says(HostedHdrStatus(view), StatusSeverity::info, "presents in HDR"));
     auto health = DescribeSettingsMenuHealth(view, nullptr);
     FO4HDR_CHECK(health.severity == HealthSeverity::success);
     FO4HDR_CHECK(std::string_view{health.status}.contains("through Community Shaders"));
     view.hostStateMismatch = true;
-    FO4HDR_CHECK(std::string_view{HostedHdrStatusText(view)}.contains("Restart the game"));
+    FO4HDR_CHECK(Says(HostedHdrStatus(view), StatusSeverity::warning, "Restart the game"));
     health = DescribeSettingsMenuHealth(view, nullptr);
     FO4HDR_CHECK(health.severity == HealthSeverity::warning && health.summary != nullptr);
+}
+
+// Failed hosted shaders are an error on the Output page and in the host status.
+void TestHostedHdrFailure()
+{
+    SettingsMenuView view{};
+    view.presenting = true;
+    view.hostedHdr = true;
+    view.sdrControlsUnavailable = true;
+    FO4HDR_CHECK(Says(HostedHdrStatus(view), StatusSeverity::error, "could not be built"));
+    const auto health = DescribeSettingsMenuHealth(view, nullptr);
+    FO4HDR_CHECK(health.severity == HealthSeverity::error &&
+        std::string_view{health.status}.contains("could not start"));
 }
 
 // The hosted-presentation switch asks for a restart only when it differs from this session.
@@ -258,10 +325,14 @@ void TestSettingsStatus()
 {
     TestHdrRequestStatus();
     TestRenderPrecisionStatus();
+    TestHostedRenderPrecisionStatus();
     TestSdrModeReasonText();
     TestHostedPresentationStatus();
     TestHostedHdrStatus();
-    TestHostToneMappingStatus();
+    TestHostedHdrFailure();
+    TestHostToneMappingReasons();
+    TestHostedToneMappingStatus();
+    TestColorSettingsStatus();
     TestWeatherResponseStatus();
     TestSettingsMenuHealth();
 }

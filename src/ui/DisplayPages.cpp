@@ -40,13 +40,7 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
 // Whether the SDR color controls act on this session's image.
 [[nodiscard]] StatusMessage SdrControlsMessage(const SettingsMenuView& view) noexcept
 {
-    if (view.enbDetected)
-        return {"ENB is installed, so the color settings have no effect and ENB's own effects "
-            "stay intact.", StatusSeverity::warning};
-    if (const auto host = HostToneMappingStatus(view); host.text != nullptr) return host;
-    if (view.sdrControlsUnavailable)
-        return {"The SDR color settings are unavailable this session because their shaders "
-            "could not be built. Restart the game to retry.", StatusSeverity::error};
+    if (const auto blocked = ColorSettingsStatus(view); blocked.text != nullptr) return blocked;
     return {"SDR output is active. The color settings apply to the game's SDR image."};
 }
 
@@ -54,10 +48,7 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
 [[nodiscard]] StatusList OutputMessages() noexcept
 {
     const auto& view = View();
-    StatusList messages{};
-    if (const auto* hosted = HostedHdrStatusText(view))
-        messages[0] = {hosted,
-            view.hostStateMismatch ? StatusSeverity::warning : StatusSeverity::info};
+    StatusList messages{HostedHdrStatus(view)};
     if (!view.sdrMode) return messages;
     // An SDR display, hosted presentation and the host's own HDR are normal setups;
     // their notes only point at the switch that changes them.
@@ -367,13 +358,12 @@ void AddRenderPrecision(SettingsPageBuilder& page)
         return frame.interfaceDraft->renderPrecision != frame.sessionInterface.renderPrecision;
     };
     setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
-        const auto status =
-            RenderPrecisionStatus(CurrentSettingsFrame().interfaceDraft->renderPrecision, View());
+        const auto status = RenderPrecisionStatus(*CurrentSettingsFrame().interfaceDraft, View());
         if (status.text == nullptr) return std::nullopt;
         return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
     };
-    // A hosted HDR session never promotes the game's render targets.
-    setting.isEnabled = [] { return !View().hostedHdr; };
+    // A hosted start never promotes the game's render targets, so the saved switch decides.
+    setting.isEnabled = [] { return !CurrentSettingsFrame().interfaceDraft->hostedPresentation; };
     (void)page.Custom(std::move(setting), [] {
         auto& frame = CurrentSettingsFrame();
         frame.interfaceDraft->renderPrecision = frame.sessionInterface.renderPrecision;
