@@ -47,6 +47,9 @@ struct SettingsMenuHealth
 [[nodiscard]] const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept;
 // The note on the saved hosted-presentation request, or null when it needs none.
 [[nodiscard]] const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) noexcept;
+// The color pages' warning while Community Shaders' own tone mapping is shown;
+// its text is null otherwise.
+[[nodiscard]] StatusMessage HostToneMappingStatus(const SettingsMenuView& view) noexcept;
 // The renderer rejected the last change, or null when it applied.
 [[nodiscard]] const char* LiveSettingsErrorText(const SettingsMenuView& view) noexcept;
 // Reports SDR mode as HDR off once the saved request turns HDR off, so the reason's

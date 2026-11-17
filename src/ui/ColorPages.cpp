@@ -229,7 +229,7 @@ void DrawRegionTable(const SelectiveColorSettings& defaults, char32_t glyph) noe
 
 void BuildAdjustmentsPage(SettingsPageBuilder& page)
 {
-    page.Status();
+    page.Status(ColorSettingsMessages);
     page.Group("brightness-detail", "Brightness & Detail", "sun");
     AddImageControls(page, kBrightnessControls);
     page.Group("color", "Color", "palette");
@@ -240,7 +240,7 @@ void BuildAdjustmentsPage(SettingsPageBuilder& page)
 
 void BuildColorGradingPage(SettingsPageBuilder& page)
 {
-    page.Status();
+    page.Status(ColorSettingsMessages);
     page.Group("grading-strength", "Strength", "intersect-three");
     AddImageControls(page, kGradingControls);
     if (!page.Sdr()) AddHdrConversion(page);
@@ -248,7 +248,7 @@ void BuildColorGradingPage(SettingsPageBuilder& page)
 
 void BuildSelectiveColorPage(SettingsPageBuilder& page)
 {
-    page.Status();
+    page.Status(ColorSettingsMessages);
     page.Group("selective-color", "Selective Color", "swatches");
     (void)page.Toggle({"selective-enabled", "Enabled", "Applies the per-color adjustments below."},
         [](HdrSettings& settings) -> bool& { return settings.selectiveColor.enabled; });

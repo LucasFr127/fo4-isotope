@@ -228,7 +228,8 @@ void AddStatus(SettingsPageBuilder& page)
         };
     page.Messages([] {
         const auto& view = Response();
-        return StatusList{view.status, view.imageSpaceStatus};
+        return StatusList{HostToneMappingStatus(*CurrentSettingsFrame().view), view.status,
+            view.imageSpaceStatus};
     });
 }
 

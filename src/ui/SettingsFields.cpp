@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Compiles the GPL-3.0-only DearModdingUI API headers; the CommonLib exceptions do not apply.
 #include "SettingsPages.hpp"
+#include "SettingsStatus.hpp"
 
 #include <array>
 #include <cstddef>
@@ -62,6 +63,8 @@ void ForEachMessage(const StatusList& messages, Visit&& visit)
 }  // namespace
 
 SettingsFrame& CurrentSettingsFrame() noexcept { return g_frame; }
+
+StatusList ColorSettingsMessages() noexcept { return {HostToneMappingStatus(*g_frame.view)}; }
 
 void RequestSettingsCommit() noexcept
 {

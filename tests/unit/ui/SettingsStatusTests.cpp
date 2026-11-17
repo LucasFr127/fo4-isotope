@@ -76,6 +76,32 @@ void TestRenderPrecisionStatus()
     // Defaults from an unreadable INI cannot save it.
     sdr.sdrModeReason = SdrModeReason::configurationDefaults;
     FO4HDR_CHECK(RenderPrecisionStatus(low, sdr).text == nullptr);
+    // Hosted HDR promotes nothing either, so a changed choice asks for no restart.
+    SettingsMenuView hosted{};
+    hosted.hostedHdr = true;
+    hosted.renderPrecisionAtStart = high;
+    const auto hostedStatus = RenderPrecisionStatus(low, hosted);
+    FO4HDR_CHECK(hostedStatus.severity == StatusSeverity::info &&
+        std::string_view{hostedStatus.text}.contains("Hosted Presentation"));
+}
+
+// The color pages warn only while Community Shaders' own tone mapping is shown.
+void TestHostToneMappingStatus()
+{
+    SettingsMenuView view{};
+    for (const auto reason : {SdrModeReason::none, SdrModeReason::enbDetected,
+             SdrModeReason::hostedPresentation, SdrModeReason::hostPresentsSdr})
+    {
+        view.sdrModeReason = reason;
+        FO4HDR_CHECK(HostToneMappingStatus(view).text == nullptr);
+    }
+    for (const auto reason : {SdrModeReason::hostPresentsHdr, SdrModeReason::hostFormatUnknown})
+    {
+        view.sdrModeReason = reason;
+        const auto status = HostToneMappingStatus(view);
+        FO4HDR_CHECK(status.severity == StatusSeverity::warning &&
+            std::string_view{status.text}.contains("no effect"));
+    }
 }
 
 // Every handled cause of SDR mode names itself; HDR off, at start or since, needs no note
@@ -235,6 +261,7 @@ void TestSettingsStatus()
     TestSdrModeReasonText();
     TestHostedPresentationStatus();
     TestHostedHdrStatus();
+    TestHostToneMappingStatus();
     TestWeatherResponseStatus();
     TestSettingsMenuHealth();
 }

@@ -45,6 +45,8 @@ using SettingField = std::function<Value&(HdrSettings&)>;
 
 // Up to four page-specific messages; null entries draw nothing.
 using StatusList = std::array<StatusMessage, 4>;
+// The Status messages of every page whose settings act through FO4Isotope's tone map and LUT.
+[[nodiscard]] StatusList ColorSettingsMessages() noexcept;
 
 enum class Publish : std::uint8_t
 {

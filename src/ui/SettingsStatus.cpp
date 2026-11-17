@@ -144,6 +144,8 @@ StatusMessage RenderPrecisionStatus(
     // Defaults from an unreadable INI cannot save the choice; the SDR reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return {};
     if (view.sdrMode) return {"Applies only to HDR output."};
+    // A hosted session never promotes the game's render targets.
+    if (view.hostedHdr) return {"Hosted Presentation keeps the game's own precision."};
     if (precision != view.renderPrecisionAtStart)
         return {"Restart the game to apply.", StatusSeverity::warning};
     if (VanillaLightingMissing(view))
@@ -175,6 +177,15 @@ const char* HostedHdrStatusText(const SettingsMenuView& view) noexcept
     return view.hostStateMismatch ? kHostStateMismatchText :
         "Community Shaders presents in HDR with Isotope's tone mapping and color settings. "
         "Its HDR Display settings set menu and HUD brightness.";
+}
+
+StatusMessage HostToneMappingStatus(const SettingsMenuView& view) noexcept
+{
+    if (view.sdrModeReason != SdrModeReason::hostFormatUnknown &&
+        view.sdrModeReason != SdrModeReason::hostPresentsHdr)
+        return {};
+    return {"The color settings have no effect while Community Shaders' tone mapping is shown.",
+        StatusSeverity::warning};
 }
 
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept

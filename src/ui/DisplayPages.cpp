@@ -43,10 +43,7 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     if (view.enbDetected)
         return {"ENB is installed, so the color settings have no effect and ENB's own effects "
             "stay intact.", StatusSeverity::warning};
-    if (view.sdrModeReason == SdrModeReason::hostFormatUnknown ||
-        view.sdrModeReason == SdrModeReason::hostPresentsHdr)
-        return {"The color settings have no effect while Community Shaders' tone mapping is "
-            "shown.", StatusSeverity::warning};
+    if (const auto host = HostToneMappingStatus(view); host.text != nullptr) return host;
     if (view.sdrControlsUnavailable)
         return {"The SDR color settings are unavailable this session because their shaders "
             "could not be built. Restart the game to retry.", StatusSeverity::error};
@@ -371,6 +368,8 @@ void AddRenderPrecision(SettingsPageBuilder& page)
         if (status.text == nullptr) return std::nullopt;
         return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
     };
+    // A hosted HDR session never promotes the game's render targets.
+    setting.isEnabled = [] { return !View().hostedHdr; };
     (void)page.Custom(std::move(setting), [] {
         auto& frame = CurrentSettingsFrame();
         frame.interfaceDraft->renderPrecision = frame.sessionInterface.renderPrecision;
@@ -391,7 +390,7 @@ void BuildOutputPage(SettingsPageBuilder& page)
 
 void BuildToneMappingPage(SettingsPageBuilder& page)
 {
-    page.Status();
+    page.Status(ColorSettingsMessages);
     AddToneMapper(page);
     AddToneMapperSettings(page);
 }

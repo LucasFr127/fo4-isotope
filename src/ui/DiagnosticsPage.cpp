@@ -111,6 +111,8 @@ void AddExposure(SettingsPageBuilder& page)
         if (note == nullptr) return std::nullopt;
         return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, note};
     };
+    // The capture reads FO4Isotope's own HDR10 present, which a hosted session never draws.
+    lock.isEnabled = [] { return !View().hostedHdr; };
 }
 
 void CopyPipboyReport() noexcept
