@@ -50,6 +50,25 @@ float3 Fo4HdrEncodeSdrLight(float3 nits, float white)
     return pow(Fo4HdrBoundLight(Fo4HdrReducePrimaries(nits / white), 1.0f), 1.0f / 2.2f);
 }
 
+// A hosting presenter's scene format: signed gamma 2.2 with BT.709 primaries,
+// where 1.0 is the host's paper white. The input is linear BT.2020 already
+// relative to that white. Containment contracts chroma about BT.709 luminance
+// until no channel is negative, for a target that cannot store negative values.
+float3 Fo4HdrEncodeHostedScene(float3 relativeBt2020, bool contain709)
+{
+    float3 linear709 = Fo4HdrReducePrimaries(Fo4HdrBoundSdrSource(relativeBt2020));
+    if (contain709)
+    {
+        const float luminance = dot(linear709, float3(0.2126f, 0.7152f, 0.0722f));
+        const float lowest = min(linear709.r, min(linear709.g, linear709.b));
+        if (luminance <= 0.0f) linear709 = 0.0f;
+        else if (lowest < 0.0f)
+            linear709 = luminance + (linear709 - luminance) * (luminance / (luminance - lowest));
+    }
+    const float3 encoded = pow(abs(linear709), 1.0f / 2.2f);
+    return linear709 < 0.0f ? -encoded : encoded;
+}
+
 // BT.2100 Table 4 inverse EOTF: input is display light, not camera light.
 // https://www.itu.int/rec/R-REC-BT.2100-3-202502-I/en
 float3 Fo4HdrEncodeAbsoluteLight(float3 nits)

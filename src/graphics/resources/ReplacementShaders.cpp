@@ -15,6 +15,7 @@
 #include "PresentationResources.hpp"
 #include "../GraphicsDiagnostics.hpp"
 #include "../RendererLifetime.hpp"
+#include "../HostedPresentation.hpp"
 #include "../LiveSettings.hpp"
 #include <FO4Isotope/ShippingShaders.generated.hpp>
 #include <algorithm>
@@ -56,6 +57,17 @@ constexpr ReplacementProgram kSdrReplacementPrograms[]{
     {RenoDxShaderPass::lut, generated::kCreativeGradeLutSdr, &ReplacementShaderSet::lutSdr}
 };
 
+// Hosted HDR selects by pass from the first five rows; the draw picks the contained LUT.
+constexpr ReplacementProgram kHostedReplacementPrograms[]{
+    {RenoDxShaderPass::toneMapA, generated::kToneMapA, &ReplacementShaderSet::toneMapA},
+    {RenoDxShaderPass::toneMapB, generated::kToneMapB, &ReplacementShaderSet::toneMapB},
+    {RenoDxShaderPass::toneMapNewA, generated::kToneMapNewA, &ReplacementShaderSet::toneMapNewA},
+    {RenoDxShaderPass::toneMapNewB, generated::kToneMapNewB, &ReplacementShaderSet::toneMapNewB},
+    {RenoDxShaderPass::lut, generated::kCreativeGradeLutHosted, &ReplacementShaderSet::lutHosted},
+    {RenoDxShaderPass::lut, generated::kCreativeGradeLutHostedContained,
+        &ReplacementShaderSet::lutHostedContained}
+};
+
 [[nodiscard]] ID3D11PixelShader* FindReplacement(RenoDxShaderPass pass) noexcept
 {
     const auto resourcesReady = IsWideGamutGenerationReady(
@@ -67,12 +79,18 @@ constexpr ReplacementProgram kSdrReplacementPrograms[]{
     return (g_replacements.*program->destination).Get();
 }
 
-// ENB applies its effects only when it receives the game's own shaders.
+// ENB applies its effects only when it receives the game's own shaders, and a
+// host that shows HDR would cap an SDR replacement's image at paper white.
+[[nodiscard]] bool SdrSubstitutionBlocked() noexcept
+{
+    return g_evidence.enbDetected.load(std::memory_order_acquire) ||
+        g_hostedState.output.load(std::memory_order_acquire) != HostOutput::sdr;
+}
+
 [[nodiscard]] bool SdrReplacementsReady() noexcept
 {
     return g_sdrModeActive.load(std::memory_order_acquire) &&
-        !g_replacements.sdrSubstitutionDisabled &&
-        !g_evidence.enbDetected.load(std::memory_order_acquire) &&
+        !g_replacements.sdrSubstitutionDisabled && !SdrSubstitutionBlocked() &&
         g_replacements.device == g_rendererDevice.activeDevice &&
         ReplacementConstantBuffersReady() && ReplacementSetMatchesConfiguration();
 }
@@ -85,6 +103,25 @@ constexpr ReplacementProgram kSdrReplacementPrograms[]{
     const auto neutral = pass == RenoDxShaderPass::lut ?
         SdrGradeControlsNeutral(g_activeSettings) : SdrSceneControlsNeutral(g_activeSettings);
     return neutral ? nullptr : (g_replacements.*program->destination).Get();
+}
+
+// Menus and loading screens keep the game's shaders; the host shows them as SDR.
+[[nodiscard]] bool HostedReplacementsReady() noexcept
+{
+    if (!g_hostedHdrActive.load(std::memory_order_acquire)) return false;
+    const bool live = g_hostedState.matches.load(std::memory_order_acquire) &&
+        g_gameplayReadyApplied.load(std::memory_order_acquire);
+    if (!live || g_replacements.sdrSubstitutionDisabled) return false;
+    return g_replacements.device == g_rendererDevice.activeDevice &&
+        ReplacementConstantBuffersReady() && ReplacementSetMatchesConfiguration();
+}
+
+[[nodiscard]] ID3D11PixelShader* FindHostedReplacement(RenoDxShaderPass pass) noexcept
+{
+    if (!HostedReplacementsReady()) return nullptr;
+    const auto program = std::ranges::find(kHostedReplacementPrograms, pass, &ReplacementProgram::pass);
+    if (program == std::end(kHostedReplacementPrograms)) return nullptr;
+    return (g_replacements.*program->destination).Get();
 }
 
 void DisableSdrSubstitution() noexcept
@@ -114,6 +151,8 @@ void ResetReplacementShaders() noexcept
     g_replacements.toneMapNewASdr.Reset();
     g_replacements.toneMapNewBSdr.Reset();
     g_replacements.lutSdr.Reset();
+    g_replacements.lutHosted.Reset();
+    g_replacements.lutHostedContained.Reset();
     g_replacements.sdrSubstitutionDisabled = false;
     g_replacements.bypassConstants.Reset();
     g_replacements.operatorConstants.Reset();
@@ -343,6 +382,14 @@ void PublishReplacementConfiguration(
     if (device == nullptr || !g_sdrModeActive.load(std::memory_order_acquire)) return false;
     ReplacementShaderSet candidate;
     return CreateReplacementPrograms(device, candidate, kSdrReplacementPrograms) &&
+        PublishReplacementSet(device, candidate);
+}
+
+[[nodiscard]] bool BuildHostedReplacementShaders(ID3D11Device* device) noexcept
+{
+    if (device == nullptr || !g_hostedHdrActive.load(std::memory_order_acquire)) return false;
+    ReplacementShaderSet candidate;
+    return CreateReplacementPrograms(device, candidate, kHostedReplacementPrograms) &&
         PublishReplacementSet(device, candidate);
 }
 

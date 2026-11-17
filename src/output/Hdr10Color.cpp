@@ -87,6 +87,44 @@ LinearRgb ContainBt2020Nits(LinearRgb value, double displayPeakNits) noexcept
         BoundLight(value.blue, displayPeakNits)};
 }
 
+namespace {
+
+// Moves the color toward its own luminance until the lowest channel is zero.
+[[nodiscard]] LinearRgb ContractToNonNegative(LinearRgb value) noexcept
+{
+    const double luminance = 0.2126 * value.red + 0.7152 * value.green + 0.0722 * value.blue;
+    if (!(luminance > 0.0)) return {};
+    const double lowest = std::min({value.red, value.green, value.blue});
+    if (lowest >= 0.0) return value;
+    const double scale = luminance / (luminance - lowest);
+    return {luminance + (value.red - luminance) * scale,
+        luminance + (value.green - luminance) * scale,
+        luminance + (value.blue - luminance) * scale};
+}
+
+[[nodiscard]] double EncodeSignedGamma22(double value) noexcept
+{
+    return std::copysign(std::pow(std::abs(value), 1.0 / 2.2), value);
+}
+
+}  // namespace
+
+LinearRgb EncodeHostedScene(
+    LinearRgb bt2020Nits, double hostPaperWhiteNits, bool containBt709) noexcept
+{
+    if (!(std::isfinite(hostPaperWhiteNits) && hostPaperWhiteNits > 0.0)) return {};
+    // Contain storage as the shader does: NaN to zero, the rest to FP16's finite range.
+    const auto relative = [hostPaperWhiteNits](double nits) {
+        const double value = nits / hostPaperWhiteNits;
+        return std::isnan(value) ? 0.0 : std::clamp(value, -65504.0, 65504.0);
+    };
+    auto linear = ConvertBt2020ToBt709(
+        {relative(bt2020Nits.red), relative(bt2020Nits.green), relative(bt2020Nits.blue)});
+    if (containBt709) linear = ContractToNonNegative(linear);
+    return {EncodeSignedGamma22(linear.red), EncodeSignedGamma22(linear.green),
+        EncodeSignedGamma22(linear.blue)};
+}
+
 double EncodeSt2084Pq(double nits) noexcept
 {
     // Inverse display EOTF, BT.2100 Table 4; the scene operator runs earlier.

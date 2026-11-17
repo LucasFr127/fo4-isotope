@@ -24,12 +24,10 @@ struct SettingsFrame
     HdrSettings* draft{};
     // The values when the menu opened; Revert restores them.
     HdrSettings* session{};
-    // [General] HdrEnabled saves like the other settings and applies at the next game start.
-    bool* hdrEnabled{};
-    bool sessionHdrEnabled{};
-    // [Performance] RenderPrecision, likewise saved now and applied at the next game start.
-    RenderPrecision* renderPrecision{};
-    RenderPrecision sessionRenderPrecision{};
+    // [General] HdrEnabled and HostedPresentation and [Performance] RenderPrecision
+    // save like the other settings and apply at the next game start.
+    HdrInterfaceSettings* interfaceDraft{};
+    HdrInterfaceSettings sessionInterface{};
     const SettingsMenuView* view{};
     const SettingsMenuRenderer* renderer{};
     bool* commitRequested{};
@@ -121,8 +119,8 @@ public:
     // Muted text across the row, for a short explanation inside a group.
     void Note(const char* id, const char* text);
     void Messages(std::function<StatusList()> messages);
-    void Action(const FieldText& text, const char* button, std::function<void()> activate,
-        std::function<bool()> visible = {});
+    dmui::SettingsActionRow& Action(const FieldText& text, const char* button,
+        std::function<void()> activate, std::function<bool()> visible = {});
 
 private:
     dmui::SettingDescriptor& Add(dmui::SettingDescriptor setting);

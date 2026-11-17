@@ -98,6 +98,7 @@ void TestExpectedDefaultConfiguration()
     FO4HDR_CHECK(reparsed.value.fallbackGradeColorPercent == 67.0);
     FO4HDR_CHECK(reparsed.value.bloomStrengthPercent == 50.0);
     FO4HDR_CHECK(reparsed.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(!reparsed.value.hostedPresentation);
     FO4HDR_CHECK(reparsed.value.renderPrecision == RenderPrecision::high);
     FO4HDR_CHECK(reparsed.value.interfaceSettings.renderPrecision == RenderPrecision::high);
     FO4HDR_CHECK(HasIniLine(expected, "RenderPrecision=High"));
@@ -118,9 +119,10 @@ void TestExpectedDefaultConfiguration()
 // The INIs that 1.3.0 to 1.3.2 shipped upgrade to the expected default, keeping their values.
 void TestReleasedConfigurationUpgrade()
 {
-    // [Performance] RenderPrecision came after 1.3.2, so every released INI adds it.
+    // [General] HostedPresentation and [Performance] RenderPrecision came after 1.3.2,
+    // so every released INI adds them.
     auto addedOnly = RepairCounts{};
-    addedOnly[static_cast<std::size_t>(added)] = 1;
+    addedOnly[static_cast<std::size_t>(added)] = 2;
     // 1.3.0 and 1.3.1 shipped the former Fallback Grade names in both profiles.
     const auto previous =
         ParsePluginConfiguration(ReadText("tests/unit/config/FO4Isotope-1.3.1.ini"));
@@ -367,6 +369,45 @@ void TestOptionalDiagnosticKeys()
     FO4HDR_CHECK(!parsed.value.developerMode && !parsed.value.traceRenderPipeline);
     FO4HDR_CHECK(!parsed.value.measurePerformance && !parsed.value.developerHdr10Reference);
     FO4HDR_CHECK(!parsed.value.forceHdrSwapChainFailure);
+}
+
+// Hosted presentation keeps the saved HDR request but never requests the HDR path.
+void TestHostedPresentationConfiguration()
+{
+    const auto minimal = ParsePluginConfiguration(MinimalProductionConfiguration());
+    FO4HDR_CHECK(minimal.valid && !minimal.value.hostedPresentation);
+    FO4HDR_CHECK(!minimal.value.interfaceSettings.hostedPresentation);
+    const auto hosted = ParseWith("\n[General]\nHostedPresentation=1\n");
+    FO4HDR_CHECK(hosted.valid && hosted.value.hostedPresentation);
+    FO4HDR_CHECK(hosted.value.enabled && !hosted.value.productionRequested);
+    // HdrEnabled then asks for HDR through the host.
+    FO4HDR_CHECK(hosted.value.hostedHdrRequested && !minimal.value.hostedHdrRequested);
+    FO4HDR_CHECK(HasIniLine(IniSection(hosted.text, "General"), "HostedPresentation=1"));
+    const auto hostedSdr = ParsePluginConfiguration(
+        "[General]\nHdrEnabled=0\nHostedPresentation=1\n");
+    FO4HDR_CHECK(hostedSdr.valid && hostedSdr.value.hostedPresentation);
+    FO4HDR_CHECK(!hostedSdr.value.hostedHdrRequested);
+    FO4HDR_CHECK(hosted.value.sdrEnabled);
+    FO4HDR_CHECK(hosted.value.interfaceSettings.hdrEnabled);
+    FO4HDR_CHECK(hosted.value.interfaceSettings.hostedPresentation);
+}
+
+// The developer reference and the forced failure need an HDR chain that hosted
+// presentation never creates, so they have no effect; unparsable text keeps 0.
+void TestHostedPresentationRepairs()
+{
+    for (const std::string_view debug : {"DeveloperHdr10Reference=1\n", "ForceHdrSwapChainFailure=1\n"})
+    {
+        const auto parsed = ParsePluginConfiguration("[General]\nHdrEnabled=1\nDeveloperMode=1\n"
+            "HostedPresentation=1\n[Debug]\n" + std::string(debug));
+        FO4HDR_CHECK(parsed.valid && parsed.value.hostedHdrRequested);
+        FO4HDR_CHECK(!parsed.value.productionRequested);
+        FO4HDR_CHECK(!parsed.value.developerHdr10Reference);
+        FO4HDR_CHECK(!parsed.value.forceHdrSwapChainFailure);
+    }
+    const std::string_view unparsable{"\n[General]\nHostedPresentation=2\n"};
+    FO4HDR_CHECK(!ParseWith(unparsable).value.hostedPresentation);
+    FO4HDR_CHECK(ExtraRepairs(unparsable, defaulted) == 1);
 }
 
 // The former AgX name still loads; with both names the current one wins.
@@ -618,6 +659,7 @@ void TestConfigurationValues()
     TestFormerAgxColorResponseName();
     TestFormerFallbackGradeNames();
     TestOptionalDiagnosticKeys();
+    TestHostedPresentationConfiguration();
     TestToneMapperConfigurationRanges();
     TestConfigurationEndpoints();
     TestExtendedConfiguration();
@@ -845,6 +887,7 @@ void TestConfigurationRepairs()
     TestConfigurationMethodRepairs();
     TestConfigurationCurveRepairs();
     TestConfigurationRenderPrecisionRepairs();
+    TestHostedPresentationRepairs();
     TestConfigurationOperatorRepairs();
     TestConfigurationRangeRepairs();
     TestConfigurationRepeatedEffects();

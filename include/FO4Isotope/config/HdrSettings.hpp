@@ -216,6 +216,8 @@ struct HdrInterfaceSettings
 {
     // [General] HdrEnabled; it applies at the next game start.
     bool hdrEnabled{true};
+    // [General] HostedPresentation; it applies at the next game start.
+    bool hostedPresentation{};
     // [Performance] RenderPrecision; it applies at the next game start.
     RenderPrecision renderPrecision{RenderPrecision::high};
     bool operator==(const HdrInterfaceSettings&) const = default;

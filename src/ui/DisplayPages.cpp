@@ -37,51 +37,99 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     return text;
 }
 
+// Whether the SDR color controls act on this session's image.
+[[nodiscard]] StatusMessage SdrControlsMessage(const SettingsMenuView& view) noexcept
+{
+    if (view.enbDetected)
+        return {"ENB is installed, so the color settings have no effect and ENB's own effects "
+            "stay intact.", StatusSeverity::warning};
+    if (view.sdrModeReason == SdrModeReason::hostFormatUnknown ||
+        view.sdrModeReason == SdrModeReason::hostPresentsHdr)
+        return {"The color settings have no effect while Community Shaders' tone mapping is "
+            "shown.", StatusSeverity::warning};
+    if (view.sdrControlsUnavailable)
+        return {"The SDR color settings are unavailable this session because their shaders "
+            "could not be built. Restart the game to retry.", StatusSeverity::error};
+    return {"SDR output is active. The color settings apply to the game's SDR image."};
+}
+
 // The SDR menu shows why HDR is off and whether the color controls act; HDR has no notes.
 [[nodiscard]] StatusList OutputMessages() noexcept
 {
     const auto& view = View();
     StatusList messages{};
+    if (const auto* hosted = HostedHdrStatusText(view))
+        messages[0] = {hosted, view.hostStateMismatch ? StatusSeverity::warning : StatusSeverity::info};
     if (!view.sdrMode) return messages;
-    // An SDR display is a normal setup; its note only points at the HDR switch.
+    // An SDR display, hosted presentation and the host's own HDR are normal setups;
+    // their notes only point at the switch that changes them.
+    const auto chosen = view.sdrModeReason == SdrModeReason::displayNotHdr10 ||
+        view.sdrModeReason == SdrModeReason::hostedPresentation ||
+        view.sdrModeReason == SdrModeReason::hostPresentsHdr;
     messages[0] = {SdrModeReasonText(view),
-        view.sdrModeReason == SdrModeReason::displayNotHdr10 ? StatusSeverity::info :
-            StatusSeverity::warning};
-    messages[1] = view.enbDetected ? StatusMessage{"ENB is installed, so the color settings have no "
-            "effect and ENB's own effects stay intact.", StatusSeverity::warning} :
-        view.sdrControlsUnavailable ? StatusMessage{"The SDR color settings are unavailable this "
-            "session because their shaders could not be built. Restart the game to retry.",
-            StatusSeverity::error} :
-        StatusMessage{"SDR output is active. The color settings apply to the game's SDR image."};
+        chosen ? StatusSeverity::info : StatusSeverity::warning};
+    messages[1] = SdrControlsMessage(view);
     return messages;
 }
 
-// HdrEnabled is the interface draft's, not the color profile's, and applies at the next start.
+struct RestartSwitch
+{
+    FieldText text;
+    bool HdrInterfaceSettings::* flag;
+    bool defaultValue;
+    // The restart note for the saved value, or null when it needs none.
+    const char* (*status)(bool value, const SettingsMenuView& view) noexcept;
+};
+
+// These switches are the interface draft's, not the color profile's, and apply at the next start.
+void AddRestartSwitch(SettingsPageBuilder& page, const RestartSwitch& control)
+{
+    const auto flag = control.flag;
+    dmui::SettingDescriptor setting{.id = control.text.id, .label = control.text.label,
+        .description = control.text.description,
+        .control = dmui::CheckboxSettingControl{}, .defaultValue = control.defaultValue};
+    setting.binding = dmui::BindSetting(
+        [flag] { return CurrentSettingsFrame().interfaceDraft->*flag; },
+        [flag](bool enabled) { return CurrentSettingsFrame().interfaceDraft->*flag = enabled; });
+    setting.isModified = [flag, defaultValue = control.defaultValue] {
+        return CurrentSettingsFrame().interfaceDraft->*flag != defaultValue;
+    };
+    setting.isDirty = [flag] {
+        const auto& frame = CurrentSettingsFrame();
+        return frame.interfaceDraft->*flag != frame.sessionInterface.*flag;
+    };
+    setting.resolveFeedback = [flag, status = control.status]() -> std::optional<dmui::FieldFeedback> {
+        const auto* note = status(CurrentSettingsFrame().interfaceDraft->*flag, View());
+        if (note == nullptr) return std::nullopt;
+        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, note};
+    };
+    (void)page.Custom(std::move(setting), [flag] {
+        auto& frame = CurrentSettingsFrame();
+        frame.interfaceDraft->*flag = frame.sessionInterface.*flag;
+    });
+}
+
 void AddHdrRequest(SettingsPageBuilder& page)
 {
     page.Group("hdr", "HDR", "circle-half");
-    dmui::SettingDescriptor setting{.id = "hdr-enabled", .label = "Enable HDR",
-        .description = "Uses HDR10 output on an HDR display with Windows HDR on. "
-            "Applies after a restart.",
-        .control = dmui::CheckboxSettingControl{}, .defaultValue = true};
-    setting.binding = dmui::BindSetting(
-        [] { return *CurrentSettingsFrame().hdrEnabled; },
-        [](bool enabled) { return *CurrentSettingsFrame().hdrEnabled = enabled; });
-    setting.isModified = [] { return !*CurrentSettingsFrame().hdrEnabled; };
-    setting.isDirty = [] {
-        const auto& frame = CurrentSettingsFrame();
-        return *frame.hdrEnabled != frame.sessionHdrEnabled;
-    };
-    setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
-        const auto* status = HdrRequestStatus(*CurrentSettingsFrame().hdrEnabled, View());
-        if (status == nullptr) return std::nullopt;
-        return dmui::FieldFeedback{dmui::FieldFeedbackSeverity::kWarning, status};
-    };
-    (void)page.Custom(std::move(setting), [] {
-        auto& frame = CurrentSettingsFrame();
-        *frame.hdrEnabled = frame.sessionHdrEnabled;
-    });
+    AddRestartSwitch(page, {{"hdr-enabled", "Enable HDR",
+        "Uses HDR10 output on an HDR display with Windows HDR on. Applies after a restart."},
+        &HdrInterfaceSettings::hdrEnabled, true, &HdrRequestStatus});
 }
+
+void AddPresentation(SettingsPageBuilder& page)
+{
+    page.Group("presentation", "Presentation", "monitor-play");
+    AddRestartSwitch(page, {{"hosted-presentation", "Hosted Presentation",
+        "Lets Community Shaders present the game, including HDR output, upscaling and "
+        "frame generation. Isotope applies its tone mapping and color settings. "
+        "For HDR, also turn on Community Shaders' HDR Display. Applies after a restart."},
+        &HdrInterfaceSettings::hostedPresentation, false, &HostedPresentationStatus});
+}
+
+// Under hosted HDR the host owns the menu, HUD and video brightness; their rows
+// stay visible but disabled.
+[[nodiscard]] bool OwnsWhiteLevels() noexcept { return !View().hostedHdr; }
 
 void AddBrightness(SettingsPageBuilder& page)
 {
@@ -90,12 +138,18 @@ void AddBrightness(SettingsPageBuilder& page)
         "The brightest level highlights reach. Match your display's HDR peak."},
         {kMinimumPeakNits, kMaximumPeakNits, "%.0f nits"},
         [](HdrSettings& settings) -> double& { return settings.displayPeakNits; });
-    (void)page.Number({"ui-white", "Menu & HUD White", "Brightness of white menus and HUD."},
+    page.Number({"ui-white", "Menu & HUD White", "Brightness of white menus and HUD."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
-        [](HdrSettings& settings) -> double& { return settings.uiPaperWhiteNits; });
-    (void)page.Number({"video-white", "Video White", "Brightness of white in videos."},
+        [](HdrSettings& settings) -> double& { return settings.uiPaperWhiteNits; })
+        .isEnabled = OwnsWhiteLevels;
+    page.Number({"video-white", "Video White", "Brightness of white in videos."},
         {kMinimumWhiteNits, kMaximumWhiteNits, "%.0f nits", 1.0, Publish::whileDragging},
-        [](HdrSettings& settings) -> double& { return settings.videoWhiteNits; });
+        [](HdrSettings& settings) -> double& { return settings.videoWhiteNits; })
+        .isEnabled = OwnsWhiteLevels;
+    page.Value({"host-paper-white", "Host Paper White",
+        "Community Shaders' Paper White. It sets menu and HUD brightness, not the scene's."},
+        [] { dmui::ui::TextUnformatted(Nits(View().hostPaperWhiteNits).data()); })
+        .isVisible = [] { return View().hostedHdr; };
 }
 
 void DrawDisplayName() noexcept
@@ -145,7 +199,7 @@ void AddInfo(SettingsPageBuilder& page)
             Draft().uiPaperWhiteNits = std::clamp(
                 static_cast<double>(View().display.sdrWhiteNits), kMinimumWhiteNits, kMaximumWhiteNits);
             RequestSettingsCommit();
-        }, known(&SettingsDisplayView::sdrWhiteNits));
+        }, known(&SettingsDisplayView::sdrWhiteNits)).isEnabled = OwnsWhiteLevels;
 }
 
 struct OperatorControl
@@ -298,25 +352,28 @@ void AddRenderPrecision(SettingsPageBuilder& page)
             "gradients. HDR only. Applies after a restart.",
         .control = std::move(control), .defaultValue = ChoiceKey(entries, RenderPrecision::high)};
     setting.binding = dmui::BindSetting(
-        [entries] { return ChoiceKey(entries, *CurrentSettingsFrame().renderPrecision); },
+        [entries] { return ChoiceKey(entries, CurrentSettingsFrame().interfaceDraft->renderPrecision); },
         [entries](std::string selected) {
-            auto& value = *CurrentSettingsFrame().renderPrecision;
+            auto& value = CurrentSettingsFrame().interfaceDraft->renderPrecision;
             SelectChoice(entries, selected, value);
             return ChoiceKey(entries, value);
         });
-    setting.isModified = [] { return *CurrentSettingsFrame().renderPrecision != RenderPrecision::high; };
+    setting.isModified = [] {
+        return CurrentSettingsFrame().interfaceDraft->renderPrecision != RenderPrecision::high;
+    };
     setting.isDirty = [] {
         const auto& frame = CurrentSettingsFrame();
-        return *frame.renderPrecision != frame.sessionRenderPrecision;
+        return frame.interfaceDraft->renderPrecision != frame.sessionInterface.renderPrecision;
     };
     setting.resolveFeedback = []() -> std::optional<dmui::FieldFeedback> {
-        const auto status = RenderPrecisionStatus(*CurrentSettingsFrame().renderPrecision, View());
+        const auto status =
+            RenderPrecisionStatus(CurrentSettingsFrame().interfaceDraft->renderPrecision, View());
         if (status.text == nullptr) return std::nullopt;
         return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
     };
     (void)page.Custom(std::move(setting), [] {
         auto& frame = CurrentSettingsFrame();
-        *frame.renderPrecision = frame.sessionRenderPrecision;
+        frame.interfaceDraft->renderPrecision = frame.sessionInterface.renderPrecision;
     });
 }
 
@@ -326,6 +383,7 @@ void BuildOutputPage(SettingsPageBuilder& page)
 {
     page.Status(OutputMessages);
     AddHdrRequest(page);
+    AddPresentation(page);
     if (page.Sdr()) return;
     AddBrightness(page);
     AddInfo(page);

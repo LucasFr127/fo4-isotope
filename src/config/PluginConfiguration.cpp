@@ -213,7 +213,8 @@ enum class SettingField : std::size_t
     weatherColorColorChange,
     sdrEnabled,
     sdrOperatorWeatherResponse,
-    renderPrecision
+    renderPrecision,
+    hostedPresentation
 };
 
 // Which sections hold a key: a switch or HDR-only section, both an HDR
@@ -245,7 +246,12 @@ constexpr SettingKey kSettingKeys[]{
         "# Enable HDR: needs an HDR10 display with Windows HDR on; applies at game start."},
     {"General", "SdrEnabled", SettingField::sdrEnabled, SettingProfile::global,
         "# SDR color controls (the Sdr sections) when HDR is off or unavailable; they\n"
-        "# have no effect under ENB."},
+        "# have no effect under ENB or while Community Shaders presents HDR."},
+    {"General", "HostedPresentation", SettingField::hostedPresentation, SettingProfile::global,
+        "# Hosted Presentation: lets Community Shaders present the game, including HDR\n"
+        "# output, upscaling and frame generation. Isotope applies its tone mapping and\n"
+        "# color settings. For HDR, also turn on Community Shaders' HDR Display. Applies\n"
+        "# at game start."},
     {"General", "DeveloperMode", SettingField::developerMode, SettingProfile::global,
         "# Required by the [Debug] keys; adds the Diagnostics menu and detailed logging."},
     {"Output", "DisplayPeakNits", SettingField::displayPeakNits, SettingProfile::hdr,
@@ -667,7 +673,8 @@ bool& BooleanTarget(PluginConfiguration& parsed, SettingField key) noexcept
         {SettingField::measurePerformance, &parsed.measurePerformance},
         {SettingField::developerHdr10Reference, &parsed.developerHdr10Reference},
         {SettingField::forceHdrSwapChainFailure, &parsed.forceHdrSwapChainFailure},
-        {SettingField::sdrEnabled, &parsed.sdrEnabled}};
+        {SettingField::sdrEnabled, &parsed.sdrEnabled},
+        {SettingField::hostedPresentation, &parsed.hostedPresentation}};
     const auto found = std::ranges::find(targets, key, &Target::key);
     return found == std::end(targets) ? parsed.enabled : *found->value;
 }
@@ -1008,13 +1015,19 @@ private:
         configuration.developerHdr10Reference = false;
         configuration.forceHdrSwapChainFailure = false;
     }
-    // An explicit diagnostic reference request suppresses the production path.
-    configuration.productionRequested =
-        configuration.enabled && !configuration.developerHdr10Reference;
+    // The reference requests its own HDR chain, which hosted presentation never creates.
+    if (configuration.hostedPresentation) configuration.developerHdr10Reference = false;
+    // An explicit diagnostic reference request suppresses the production path, and
+    // hosted presentation leaves the swap chain to Community Shaders: HdrEnabled
+    // then asks for HDR through it.
+    const bool hdrRequested = configuration.enabled && !configuration.developerHdr10Reference;
+    configuration.productionRequested = hdrRequested && !configuration.hostedPresentation;
+    configuration.hostedHdrRequested = hdrRequested && configuration.hostedPresentation;
     configuration.forceHdrSwapChainFailure = configuration.forceHdrSwapChainFailure &&
         (configuration.developerHdr10Reference || configuration.productionRequested);
     configuration.sceneExposureMultiplier = std::exp2(configuration.exposureEv);
     configuration.interfaceSettings.hdrEnabled = configuration.enabled;
+    configuration.interfaceSettings.hostedPresentation = configuration.hostedPresentation;
     configuration.interfaceSettings.renderPrecision = configuration.renderPrecision;
     return configuration;
 }

@@ -86,6 +86,8 @@ struct GraphicsObservationSnapshot
     std::uint32_t candidateCreatedFormat{};
     // Why SDR mode runs, and whether the renderer installed.
     SdrModeReason sdrModeReason{SdrModeReason::none};
+    // Hosted HDR is latched: the host presents FO4Isotope's HDR scene.
+    bool hostedHdrActive{};
     bool rendererInstalled{};
     // A foreign Present hook runs before final HDR composition overwrites it.
     bool presentHookConflict{};
@@ -154,6 +156,9 @@ struct GraphicsObservationSnapshot
 // reference diagnostics still require it.
 [[nodiscard]] bool InitializeGraphicsObservation(
     const PluginConfiguration& configuration) noexcept;
+// Hosted presentation prepares the renderer without the D3D11 import, which
+// this installs once every plugin has loaded. Returns whether it is installed.
+bool InstallDeferredGraphicsImport() noexcept;
 void SetSharedUiPauseResourcesReady(bool ready) noexcept;
 void DisableSharedUiPauseResources() noexcept;
 // Where the initializer's slot-33/34 registrar calls return, published once at plugin

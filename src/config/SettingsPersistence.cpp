@@ -229,6 +229,7 @@ std::string RewriteHdrSettingsIni(
     static_cast<HdrSettings&>(stored) = settings.hdr;
     stored.sdrSettings = settings.sdr;
     stored.enabled = interfaceSettings.hdrEnabled;
+    stored.hostedPresentation = interfaceSettings.hostedPresentation;
     stored.renderPrecision = interfaceSettings.renderPrecision;
     return RenderPluginConfiguration(stored);
 }

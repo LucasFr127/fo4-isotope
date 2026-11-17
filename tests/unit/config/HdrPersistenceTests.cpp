@@ -172,8 +172,8 @@ void CheckRewrittenMigration(const HdrSettings& settings, const HdrInterfaceSett
     FO4HDR_CHECK(preciseLoaded.value.exposureEv == 0.123);
 }
 
-// The settings menu saves the HDR request and Render Precision for the next game
-// start and keeps the switches it does not edit.
+// The settings menu saves the HDR request, Hosted Presentation and Render Precision
+// for the next game start and keeps the switches it does not edit.
 void CheckRewrittenHdrRequest(const HdrSettings& settings,
     const HdrInterfaceSettings& interfaceSettings, std::string_view original)
 {
@@ -185,6 +185,19 @@ void CheckRewrittenHdrRequest(const HdrSettings& settings,
         RewriteHdrSettingsIni(MinimalProductionConfiguration(), {settings}, hdrOff));
     FO4HDR_CHECK(reloaded.valid && !reloaded.value.enabled);
     FO4HDR_CHECK(!reloaded.value.interfaceSettings.hdrEnabled);
+
+    // The key stays inside the one [General] section, where a Win32 profile reader finds it.
+    auto hosted = interfaceSettings;
+    hosted.hostedPresentation = true;
+    const auto hostedText = RewriteHdrSettingsIni(original, {settings}, hosted);
+    FO4HDR_CHECK(HasIniLine(IniSection(hostedText, "General"), "HostedPresentation=1"));
+    FO4HDR_CHECK(hostedText.find("[General]") == hostedText.rfind("[General]"));
+    const auto hostedReloaded = ParsePluginConfiguration(hostedText);
+    FO4HDR_CHECK(hostedReloaded.valid && hostedReloaded.value.hostedPresentation);
+    FO4HDR_CHECK(hostedReloaded.value.interfaceSettings == hosted);
+    hosted.hostedPresentation = false;
+    FO4HDR_CHECK(HasIniLine(IniSection(RewriteHdrSettingsIni(hostedText, {settings}, hosted),
+        "General"), "HostedPresentation=0"));
 
     for (const auto [precision, line] : {
              std::pair{RenderPrecision::medium, "RenderPrecision=Medium"},

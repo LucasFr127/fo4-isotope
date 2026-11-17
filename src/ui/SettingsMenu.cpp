@@ -108,9 +108,8 @@ void DrawPage()
         return;
     }
     auto& frame = CurrentSettingsFrame();
-    frame = {&client, &g_state.draft, &g_state.sessionSettings, &g_state.interfaceDraft.hdrEnabled,
-        g_state.sessionInterfaceSettings.hdrEnabled, &g_state.interfaceDraft.renderPrecision,
-        g_state.sessionInterfaceSettings.renderPrecision, &view, &g_renderer, &g_state.commitRequested,
+    frame = {&client, &g_state.draft, &g_state.sessionSettings, &g_state.interfaceDraft,
+        g_state.sessionInterfaceSettings, &view, &g_renderer, &g_state.commitRequested,
         PageProblems(view)};
     if (profilePage.sdr != g_state.sdrProfile)
     {

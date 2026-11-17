@@ -4,6 +4,7 @@
 #include "SharedUiFrame.hpp"
 #include "SharedSdrFrame.hpp"
 #include "RendererLifetime.hpp"
+#include "HostedPresentation.hpp"
 #include "GraphicsDiagnostics.hpp"
 #include "LiveSettings.hpp"
 #include "OperatorConstants.hpp"
@@ -1061,6 +1062,7 @@ struct PresentFrame
         CompleteSharedUiFrame(rendered);
         if (commitSettings)
         {
+            RefreshHostedState(g_rendererDevice.activeContext);
             CommitLiveSettingsAtEndPresent(
                 g_rendererDevice.activeDevice,
                 g_rendererDevice.activeContext);

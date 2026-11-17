@@ -103,7 +103,20 @@ enum class SdrModeReason : std::uint8_t
     displayNotHdr10,
     descriptorUnsupported,
     hdrCandidateRejected,
-    hdrInstallFailed
+    hdrInstallFailed,
+    // Hosted presentation leaves the swap chain to Community Shaders; HDR is off.
+    hostedPresentation,
+    // Hosted HDR was requested and the host answered without starting it: it
+    // presents SDR, or its HDR failed one of the latch's checks.
+    hostPresentsSdr,
+    // Hosted HDR was requested and no host answered the state query.
+    hostNotFound,
+    // Reported, never latched, with HDR requested: the host shows HDR in a LUT output
+    // format FO4Isotope does not write, so hosted HDR cannot latch and SDR mode yields.
+    hostFormatUnknown,
+    // Reported, never latched: the host shows HDR on a chain latched to SDR mode,
+    // which yields so the host's own tone map and LUT draw.
+    hostPresentsHdr
 };
 
 // SDR mode runs on every owner chain without an HDR descriptor, so the settings
@@ -120,9 +133,69 @@ struct SdrModeInputs
     bool hdrInstallFailed{};
     // FO4Isotope.ini could not be read, so startup took the SDR-only defaults.
     bool configurationDefaults{};
+    // [General] HostedPresentation, which never requests the HDR path.
+    bool hostedPresentation{};
+    // HdrEnabled under hosted presentation, and whether a host answered.
+    bool hostedHdrRequested{};
+    bool hostAnswered{};
+    // Hosted HDR latched, so the chain runs the HDR profile instead of SDR mode.
+    bool hostedHdr{};
 };
 
 [[nodiscard]] SdrModeReason DecideSdrModeReason(const SdrModeInputs& inputs) noexcept;
+
+// What a hosting presenter reports about its HDR output. The layout is the
+// host's exported contract; size is set by the caller.
+struct HostHdrOutputState
+{
+    std::uint32_t size{};
+    std::uint32_t hdrActive{};
+    float paperWhiteNits{};
+    float peakNits{};
+    // Not checked; it describes the image the host's own LUT pass reads.
+    std::uint32_t sceneEncoding{};
+    // Zero is signed gamma 2.2, BT.709, 1.0 at paper white: the format FO4Isotope
+    // writes, and the one a host older than this field decodes, leaving it unwritten.
+    std::uint32_t lutOutputEncoding{};
+};
+static_assert(sizeof(HostHdrOutputState) == 24U);
+
+// Trusts a host's answer, null when it gave none, only when it is complete and
+// its paper white is usable.
+[[nodiscard]] bool HostReportsHdr(const HostHdrOutputState* answer) noexcept;
+
+// What a hosting presenter shows. Its HDR setting is live, so this can change
+// every frame; the LUT output format is fixed for a host build.
+enum class HostOutput : std::uint8_t
+{
+    sdr,
+    // HDR in the LUT output format FO4Isotope writes.
+    hdr,
+    // HDR in another LUT output format, which only the host's own shaders write.
+    hdrUnknownFormat
+};
+
+// HDR needs a complete answer, whatever its paper white; no answer means SDR.
+[[nodiscard]] HostOutput ClassifyHostOutput(const HostHdrOutputState* answer) noexcept;
+// While the host shows HDR, a hosted SDR reason gives way to the reason SDR mode
+// yields, which names an unknown format only when HDR was requested; ENB, an
+// unusable INI and a hosted HDR latch keep theirs.
+[[nodiscard]] SdrModeReason SdrModeReasonForHost(SdrModeReason latched, HostOutput host) noexcept;
+
+// Hosted HDR runs on the host's HDR container: a chain that reports
+// R8G8B8A8_UNORM while its back buffer is FP16.
+struct HostedHdrInputs
+{
+    bool hostedHdrRequested{};
+    bool enbDetected{};
+    bool configurationDefaults{};
+    bool hostReportsHdr{};
+    bool hostFormatUnknown{};
+    bool chainRgba8Unorm{};
+    bool backBufferFp16{};
+};
+
+[[nodiscard]] bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept;
 [[nodiscard]] const char* SdrModeReasonName(SdrModeReason reason) noexcept;
 
 enum class HdrRendererState : std::uint8_t

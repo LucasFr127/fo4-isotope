@@ -219,12 +219,13 @@ void SettingsPageBuilder::Messages(std::function<StatusList()> messages)
     };
 }
 
-void SettingsPageBuilder::Action(const FieldText& text, const char* button,
+dmui::SettingsActionRow& SettingsPageBuilder::Action(const FieldText& text, const char* button,
     std::function<void()> activate, std::function<bool()> visible)
 {
     if (page_.groups.empty()) Group("settings", "Settings", "sliders");
-    page_.groups.back().actionRows.push_back({.id = text.id, .label = text.label,
-        .buttonLabel = button, .description = text.description ? text.description : "",
+    return page_.groups.back().actionRows.emplace_back(dmui::SettingsActionRow{.id = text.id,
+        .label = text.label, .buttonLabel = button,
+        .description = text.description ? text.description : "",
         .activate = std::move(activate), .isVisible = std::move(visible)});
 }
 

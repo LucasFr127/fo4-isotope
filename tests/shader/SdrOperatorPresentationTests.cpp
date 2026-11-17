@@ -3,6 +3,7 @@
 #include "ShaderTestSuite.hpp"
 #include "d3d11/PresentationContextFixture.hpp"
 #include "d3d11/BorrowedFullscreenState.hpp"
+#include "HostedPresentation.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "FO4Isotope/ui/SettingsMenu.hpp"
 
@@ -260,6 +261,26 @@ void CheckEnbKeepsGameShaders(Device& device)
     }
 }
 
+// While a host shows HDR, in either format, SDR mode leaves the tone map and LUT
+// to the host, and substitutes again once it shows SDR.
+void CheckHostHdrKeepsGameShaders(Device& device)
+{
+    SdrOperatorFixture fixture(device, ProductionToneMapperAlgorithm::gt7);
+    SdrOperatorFixture::RetainSdrTable();
+    FO4HDR_WARP_CHECK(PrepareSdrMode({.requested = true}, device.device.Get()));
+    auto* game = fixture.hudShader.Get();
+    // SDR last, so later checks find substitution on.
+    for (const auto output : {HostOutput::hdr, HostOutput::hdrUnknownFormat, HostOutput::sdr})
+    {
+        g_hostedState.output.store(output, std::memory_order_release);
+        const bool yields = output != HostOutput::sdr;
+        FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) ==
+            (yields ? game : g_replacements.toneMapASdr.Get()));
+        FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::lut) ==
+            (yields ? game : g_replacements.lutSdr.Get()));
+    }
+}
+
 // ID3D11DeviceContext declaration order.
 constexpr std::size_t kContextPsGetShader{74};
 constexpr std::size_t kContextVsGetShader{76};
@@ -378,6 +399,7 @@ void VerifySdrOperatorPresentation(Device& device)
     CheckFailedTableUpload(device);
     CheckFailedSdrShaderBuild(device);
     CheckEnbKeepsGameShaders(device);
+    CheckHostHdrKeepsGameShaders(device);
     CheckClassInstanceOverrun(device);
 }
 
