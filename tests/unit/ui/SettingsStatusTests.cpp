@@ -102,6 +102,13 @@ void TestHostedRenderPrecisionStatus()
     hostedSession.hostedHdr = true;
     FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(low), hostedSession),
         StatusSeverity::warning, "Restart the game"));
+    // Without a host this start ran unhosted, and so will the next one.
+    auto noHost = HdrSession(high);
+    noHost.hostedPresentationIgnored = true;
+    FO4HDR_CHECK(!HostedAtNextStart(SavedPrecision(low, true), noHost));
+    FO4HDR_CHECK(HostedAtNextStart(SavedPrecision(low, true), HdrSession(high)));
+    FO4HDR_CHECK(Says(RenderPrecisionStatus(SavedPrecision(low, true), noHost),
+        StatusSeverity::warning, "Restart the game"));
 }
 
 // The color pages warn only while Community Shaders' own tone mapping is shown.
@@ -239,6 +246,12 @@ void TestHostedPresentationStatus()
     SettingsMenuView fallback{};
     fallback.sdrModeReason = SdrModeReason::configurationDefaults;
     FO4HDR_CHECK(HostedPresentationStatus(true, fallback) == nullptr);
+    // Without a host the saved switch is named, and turning it off needs no restart.
+    SettingsMenuView noHost{};
+    noHost.hostedPresentationIgnored = true;
+    const auto* note = HostedPresentationStatus(true, noHost);
+    FO4HDR_CHECK(note != nullptr && std::string_view{note}.starts_with("Community Shaders is not"));
+    FO4HDR_CHECK(HostedPresentationStatus(false, noHost) == nullptr);
 }
 
 

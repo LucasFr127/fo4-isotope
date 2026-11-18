@@ -29,6 +29,9 @@ struct PluginConfiguration : HdrSettings
     bool hostedPresentation{};
     // HdrEnabled under hosted presentation: HDR through the host when it reports HDR.
     bool hostedHdrRequested{};
+    // HostedPresentation=1 found no installed plugin that can host, so this session
+    // runs as if it were 0; interfaceSettings keeps the saved 1.
+    bool hostedPresentationIgnored{};
     HdrSettings sdrSettings{DefaultSdrSettings()};
     bool productionRequested{};
     // Latched with scene promotion when a device generation is published.
@@ -111,6 +114,9 @@ ParsePluginConfiguration(std::string_view text) noexcept;
 [[nodiscard]] PluginConfigurationResult
 LoadPluginConfiguration(
     const std::filesystem::path& path) noexcept;
+// Without a plugin that can host it, hosted presentation could only give SDR
+// mode, so the session takes HostedPresentation=0's path. stored and text keep 1.
+void IgnoreHostedPresentation(PluginConfigurationResult& configuration) noexcept;
 // The canonical INI text, comments included, for stored values; throws on
 // allocation failure.
 [[nodiscard]] std::string RenderPluginConfiguration(

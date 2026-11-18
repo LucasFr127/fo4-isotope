@@ -5,11 +5,16 @@
 #include "FO4Isotope/hooks/PeIat.hpp"
 #include "TestHarness.hpp"
 
+#include <Windows.h>
+
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -162,6 +167,76 @@ void TestPeIat()
     FO4HDR_CHECK(FindPe32PlusIatSlot(
         malformed, "d3d11.dll", "D3D11CreateDeviceAndSwapChain").status ==
         PeIatStatus::duplicateSymbol);
+}
+
+// MakePeImage plus an export directory at 0x800 naming two symbols.
+std::vector<std::byte> MakeExportImage()
+{
+    auto image = MakePeImage();
+    Write<std::uint32_t>(image, 0x118 + 112, 0x800);
+    Write<std::uint32_t>(image, 0x118 + 116, 40);
+    Write<std::uint32_t>(image, 0x800 + 24, 2);
+    Write<std::uint32_t>(image, 0x800 + 32, 0x900);
+    Write<std::uint32_t>(image, 0x900, 0x980);
+    Write<std::uint32_t>(image, 0x904, 0x9A0);
+    const char version[] = "F4SEPlugin_Version";
+    std::memcpy(image.data() + 0x980, version, sizeof(version));
+    const char query[] = "CS_GetHdrOutputState";
+    std::memcpy(image.data() + 0x9A0, query, sizeof(query));
+    return image;
+}
+
+void TestPeExports()
+{
+    const auto image = MakeExportImage();
+    FO4HDR_CHECK(FindPe32PlusExport(image, "CS_GetHdrOutputState") == PeExportStatus::found);
+    FO4HDR_CHECK(FindPe32PlusExport(image, "F4SEPlugin_Version") == PeExportStatus::found);
+    FO4HDR_CHECK(FindPe32PlusExport(image, "cs_gethdroutputstate") == PeExportStatus::notFound);
+    FO4HDR_CHECK(FindPe32PlusExport(image, "") == PeExportStatus::malformed);
+    FO4HDR_CHECK(FindPe32PlusExport(MakePeImage(), "CS_GetHdrOutputState") ==
+        PeExportStatus::notFound);
+
+    auto other = image;
+    Write<std::uint16_t>(other, 0x104, 0x014C);
+    FO4HDR_CHECK(FindPe32PlusExport(other, "CS_GetHdrOutputState") == PeExportStatus::notFound);
+    other = image;
+    Write<std::uint16_t>(other, 0, 0);
+    FO4HDR_CHECK(FindPe32PlusExport(other, "CS_GetHdrOutputState") == PeExportStatus::malformed);
+    other = image;
+    Write<std::uint32_t>(other, 0x800 + 24, 0x10000);
+    FO4HDR_CHECK(FindPe32PlusExport(other, "CS_GetHdrOutputState") == PeExportStatus::malformed);
+    other = image;
+    Write<std::uint32_t>(other, 0x900, 0x2000);
+    FO4HDR_CHECK(FindPe32PlusExport(other, "CS_GetHdrOutputState") == PeExportStatus::malformed);
+    other.resize(0x810);
+    FO4HDR_CHECK(FindPe32PlusExport(other, "CS_GetHdrOutputState") == PeExportStatus::malformed);
+}
+
+// Real DLLs in a scratch folder: a found export wins, an unreadable file only
+// turns an absent result into unknown, and other extensions are skipped.
+void TestPluginExportScan()
+{
+    const auto root = std::filesystem::temp_directory_path() /
+        ("FO4Isotope-plugin-scan-" + std::to_string(GetCurrentProcessId()) + "-" +
+         std::to_string(GetTickCount64()));
+    FO4HDR_CHECK(ScanPluginExports(root, "GetFileVersionInfoW") == PluginExportScan::unknown);
+    FO4HDR_CHECK(std::filesystem::create_directory(root));
+    FO4HDR_CHECK(ScanPluginExports(root, "GetFileVersionInfoW") == PluginExportScan::absent);
+
+    std::array<wchar_t, MAX_PATH> system{};
+    FO4HDR_CHECK(GetSystemDirectoryW(system.data(), static_cast<UINT>(system.size())) != 0);
+    std::error_code error;
+    std::filesystem::copy_file(std::filesystem::path(system.data()) / L"version.dll",
+        root / L"Plugin.DLL", error);
+    FO4HDR_CHECK(!error);
+    std::ofstream(root / L"notes.txt") << "not a plugin";
+    FO4HDR_CHECK(ScanPluginExports(root, "GetFileVersionInfoW") == PluginExportScan::found);
+    FO4HDR_CHECK(ScanPluginExports(root, "CS_GetHdrOutputState") == PluginExportScan::absent);
+
+    std::ofstream(root / L"broken.dll") << "not a portable executable";
+    FO4HDR_CHECK(ScanPluginExports(root, "CS_GetHdrOutputState") == PluginExportScan::unknown);
+    FO4HDR_CHECK(ScanPluginExports(root, "GetFileVersionInfoW") == PluginExportScan::found);
+    std::filesystem::remove_all(root, error);
 }
 
 void TestPointerOwnershipAndChain()
@@ -409,6 +484,8 @@ void TestProductionObservationPolicies()
 void RunHookTests()
 {
     TestPeIat();
+    TestPeExports();
+    TestPluginExportScan();
     TestPointerOwnershipAndChain();
     TestExactForwarding();
     TestConcurrentInstallation();

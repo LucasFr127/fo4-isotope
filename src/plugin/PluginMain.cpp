@@ -3,6 +3,7 @@
 #include "PluginPch.hpp"
 #include "FO4Isotope/config/PluginConfiguration.hpp"
 #include "FO4Isotope/graphics/HdrRenderer.hpp"
+#include "FO4Isotope/hooks/PeIat.hpp"
 #include "FO4Isotope/output/HdrActivationPolicy.hpp"
 #include "FO4Isotope/output/RenderPipelineContract.hpp"
 #include "FO4Isotope/config/SettingsPersistence.hpp"
@@ -523,6 +524,36 @@ void UseFallbackConfiguration(fo4hdr::PluginConfigurationResult& configuration)
         fo4hdr::ToString(configuration.error));
 }
 
+[[nodiscard]] constexpr std::string_view ToString(fo4hdr::PluginExportScan scan) noexcept
+{
+    switch (scan)
+    {
+    case fo4hdr::PluginExportScan::found: return "found";
+    case fo4hdr::PluginExportScan::absent: return "absent";
+    case fo4hdr::PluginExportScan::unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+// The hook stage and the facade's boundaries are decided here, before any plugin
+// presents, so the host is found among the plugin files. Community Shaders lifts its
+// own restrictions from the saved key alone, so a scan that cannot read every file
+// keeps hosted presentation.
+void ApplyHostAvailability(fo4hdr::PluginConfigurationResult& configuration,
+    const std::optional<std::filesystem::path>& executable)
+{
+    const bool requested = configuration.valid && configuration.value.hostedPresentation;
+    if (!requested || !executable) return;
+    const auto scan = fo4hdr::ScanPluginExports(
+        executable->parent_path() / L"Data" / L"F4SE" / L"Plugins", fo4hdr::kHostStateQueryExport);
+    if (scan == fo4hdr::PluginExportScan::absent) fo4hdr::IgnoreHostedPresentation(configuration);
+    if (configuration.value.hostedPresentationIgnored)
+        REX::WARN("hosted_presentation requested=true host_plugin={} active=false "
+                  "hint=install-community-shaders-or-turn-off-hosted-presentation", ToString(scan));
+    else
+        REX::INFO("hosted_presentation requested=true host_plugin={} active=true", ToString(scan));
+}
+
 void ReportGameObserverStatus(bool observerActive) noexcept
 {
     try
@@ -726,6 +757,7 @@ void PrepareAdmittedStartup() noexcept
         g_startup.executable = ExecutablePath();
         g_startup.configuration = LoadDiagnosticsConfiguration(g_startup.executable);
         UseFallbackConfiguration(g_startup.configuration);
+        ApplyHostAvailability(g_startup.configuration, g_startup.executable);
         // Non-Debug builds log per-item lifecycle detail only in developer mode.
         if (g_startup.configuration.valid && g_startup.configuration.value.developerMode)
         {

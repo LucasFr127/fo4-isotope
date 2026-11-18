@@ -164,7 +164,8 @@ StatusMessage RenderPrecisionStatus(
     // Defaults from an unreadable INI cannot save the choice; the SDR reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return {};
     // A hosted start never promotes the game's render targets, in HDR or SDR.
-    if (saved.hostedPresentation) return {"Hosted Presentation keeps the game's own precision."};
+    if (HostedAtNextStart(saved, view))
+        return {"Hosted Presentation keeps the game's own precision."};
     if (view.sdrMode) return {"Applies only to HDR output."};
     if (saved.renderPrecision != view.renderPrecisionAtStart)
         return {"Restart the game to apply.", StatusSeverity::warning};
@@ -177,7 +178,16 @@ const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) 
 {
     // Defaults from an unreadable INI cannot save the request; the reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return nullptr;
+    // Without a host the next start runs without it too, so neither choice needs a restart.
+    if (view.hostedPresentationIgnored)
+        return hosted ? "Community Shaders is not installed, so Hosted Presentation is off this "
+                        "session." : nullptr;
     return hosted != view.hostedPresentationAtStart ? "Restart the game to apply." : nullptr;
+}
+
+bool HostedAtNextStart(const HdrInterfaceSettings& saved, const SettingsMenuView& view) noexcept
+{
+    return saved.hostedPresentation && !view.hostedPresentationIgnored;
 }
 
 // An unreadable INI still needs a fix, and hosted presentation keeps its own note.

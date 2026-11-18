@@ -363,7 +363,9 @@ void AddRenderPrecision(SettingsPageBuilder& page)
         return dmui::FieldFeedback{FeedbackSeverity(status.severity), status.text};
     };
     // A hosted start never promotes the game's render targets, so the saved switch decides.
-    setting.isEnabled = [] { return !CurrentSettingsFrame().interfaceDraft->hostedPresentation; };
+    setting.isEnabled = [] {
+        return !HostedAtNextStart(*CurrentSettingsFrame().interfaceDraft, View());
+    };
     (void)page.Custom(std::move(setting), [] {
         auto& frame = CurrentSettingsFrame();
         frame.interfaceDraft->renderPrecision = frame.sessionInterface.renderPrecision;

@@ -1127,6 +1127,16 @@ PluginConfigurationResult LoadPluginConfiguration(
     }
 }
 
+void IgnoreHostedPresentation(PluginConfigurationResult& configuration) noexcept
+{
+    if (!configuration.valid || !configuration.stored.hostedPresentation) return;
+    auto session = configuration.stored;
+    session.hostedPresentation = false;
+    configuration.value = EffectiveConfiguration(session);
+    configuration.value.interfaceSettings.hostedPresentation = true;
+    configuration.value.hostedPresentationIgnored = true;
+}
+
 std::string_view ToString(
     ProductionToneMapperAlgorithm algorithm) noexcept
 {

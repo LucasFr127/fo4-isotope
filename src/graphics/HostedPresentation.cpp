@@ -73,7 +73,7 @@ struct HostedLatch
     // Hosted SDR asks too: SDR mode yields while the host shows HDR.
     if (!g_configuration.hostedPresentation) return latch;
     g_hostedState.query = reinterpret_cast<HostedPresentationState::Query>(
-        FindLoadedModuleExport("CS_GetHdrOutputState"));
+        FindLoadedModuleExport(kHostStateQueryExport));
     latch.answered = g_hostedState.query != nullptr && g_hostedState.query(&latch.state);
     const auto* answer = latch.answered ? &latch.state : nullptr;
     latch.output = ClassifyHostOutput(answer);

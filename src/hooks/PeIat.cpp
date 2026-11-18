@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: LicenseRef-FO4Isotope-GPL-3.0-or-later-with-CommonLibF4-Exceptions
 #include "FO4Isotope/hooks/PeIat.hpp"
 
+#include <Windows.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <limits>
+#include <optional>
 
 namespace fo4hdr {
 namespace {
 
 [[nodiscard]] bool Range(
-    std::span<std::byte> image,
+    std::span<const std::byte> image,
     std::uint64_t offset,
     std::uint64_t bytes) noexcept
 {
@@ -21,7 +25,7 @@ namespace {
 
 template <class T>
 [[nodiscard]] bool Read(
-    std::span<std::byte> image,
+    std::span<const std::byte> image,
     std::size_t offset,
     T& value) noexcept
 {
@@ -49,7 +53,7 @@ template <class T>
 }
 
 [[nodiscard]] bool ReadString(
-    std::span<std::byte> image,
+    std::span<const std::byte> image,
     std::uint32_t rva,
     std::string_view& value) noexcept
 {
@@ -85,14 +89,31 @@ struct NtHeader
     }
 };
 
-struct ImportDirectory
+struct DataDirectory
 {
     std::uint32_t rva{};
     std::uint32_t size{};
 };
 
+// IMAGE_EXPORT_DIRECTORY.
+struct ExportDirectory
+{
+    std::uint32_t characteristics;
+    std::uint32_t timeDateStamp;
+    std::uint16_t majorVersion;
+    std::uint16_t minorVersion;
+    std::uint32_t name;
+    std::uint32_t base;
+    std::uint32_t functionCount;
+    std::uint32_t nameCount;
+    std::uint32_t functions;
+    std::uint32_t names;
+    std::uint32_t ordinals;
+};
+static_assert(sizeof(ExportDirectory) == 40);
+
 [[nodiscard]] bool ReadNtHeader(
-    std::span<std::byte> image, std::size_t offset, NtHeader& header) noexcept
+    std::span<const std::byte> image, std::size_t offset, NtHeader& header) noexcept
 {
     std::array<std::byte, 26> bytes;
     if (!Read(image, offset, bytes)) return false;
@@ -104,23 +125,29 @@ struct ImportDirectory
     return signature == 0x00004550;
 }
 
-[[nodiscard]] PeIatStatus ReadImportDirectory(
-    std::span<std::byte> image, std::size_t optional, ImportDirectory& imports) noexcept
+// The optional header's directory count, then 8-byte RVA/size entries from offset 112.
+[[nodiscard]] bool ReadDataDirectory(std::span<const std::byte> image, std::size_t optional,
+    std::uint32_t index, DataDirectory& directory) noexcept
 {
     std::uint32_t directoryCount{};
-    if (!Read(image, optional + 108, directoryCount) || directoryCount < 2)
-        return PeIatStatus::importsUnavailable;
-    if (!Read(image, optional + 120, imports.rva) ||
-        !Read(image, optional + 124, imports.size))
-        return PeIatStatus::importsUnavailable;
+    if (!Read(image, optional + 108, directoryCount) || directoryCount <= index) return false;
+    const auto entry = optional + 112 + std::size_t{index} * sizeof(DataDirectory);
+    return Read(image, entry, directory.rva) && Read(image, entry + 4, directory.size);
+}
+
+[[nodiscard]] PeIatStatus ReadImportDirectory(
+    std::span<const std::byte> image, std::size_t optional, DataDirectory& imports) noexcept
+{
+    if (!ReadDataDirectory(image, optional, 1, imports)) return PeIatStatus::importsUnavailable;
     if (imports.rva == 0 || imports.size < sizeof(ImportDescriptor))
         return PeIatStatus::importsUnavailable;
     return Range(image, imports.rva, imports.size) ?
         PeIatStatus::success : PeIatStatus::malformedImports;
 }
 
-[[nodiscard]] PeIatStatus ReadPeImports(
-    std::span<std::byte> image, ImportDirectory& imports) noexcept
+// Finds the PE32+ AMD64 optional header.
+[[nodiscard]] PeIatStatus ReadOptionalHeader(
+    std::span<const std::byte> image, std::size_t& optional) noexcept
 {
     std::uint16_t dosMagic{};
     std::uint32_t ntOffset{};
@@ -131,11 +158,20 @@ struct ImportDirectory
     NtHeader header;
     if (!ReadNtHeader(image, ntOffset, header)) return PeIatStatus::invalidNt;
     if (!header.IsPe32PlusAmd64()) return PeIatStatus::notPe32PlusAmd64;
-    return ReadImportDirectory(image, static_cast<std::size_t>(ntOffset) + 24, imports);
+    optional = static_cast<std::size_t>(ntOffset) + 24;
+    return PeIatStatus::success;
+}
+
+[[nodiscard]] PeIatStatus ReadPeImports(
+    std::span<const std::byte> image, DataDirectory& imports) noexcept
+{
+    std::size_t optional{};
+    const auto status = ReadOptionalHeader(image, optional);
+    return status == PeIatStatus::success ? ReadImportDirectory(image, optional, imports) : status;
 }
 
 [[nodiscard]] bool ReadImportedSymbol(
-    std::span<std::byte> image, std::uint64_t nameThunk, std::string_view& symbol) noexcept
+    std::span<const std::byte> image, std::uint64_t nameThunk, std::string_view& symbol) noexcept
 {
     if (nameThunk > std::numeric_limits<std::uint32_t>::max() - 2) return false;
     const auto nameRva = static_cast<std::uint32_t>(nameThunk);
@@ -155,7 +191,7 @@ public:
     ImportLookup(std::span<std::byte> image, std::string_view module,
         std::string_view symbol) noexcept : image_(image), module_(module), symbol_(symbol) {}
 
-    [[nodiscard]] PeIatResult Find(const ImportDirectory& imports) noexcept
+    [[nodiscard]] PeIatResult Find(const DataDirectory& imports) noexcept
     {
         const auto descriptorCount = imports.size / sizeof(ImportDescriptor);
         for (std::size_t index = 0; index < descriptorCount; ++index)
@@ -235,10 +271,134 @@ PeIatResult FindPe32PlusIatSlot(
 {
     if (image.empty()) return {PeIatStatus::invalidArgument};
     if (importedModule.empty() || importedSymbol.empty()) return {PeIatStatus::invalidArgument};
-    ImportDirectory imports;
+    DataDirectory imports;
     const auto status = ReadPeImports(image, imports);
     if (status != PeIatStatus::success) return {status};
     return ImportLookup(image, importedModule, importedSymbol).Find(imports);
+}
+
+namespace {
+
+// The answer for an image without a readable export table, or nullopt once
+// directory holds one.
+[[nodiscard]] std::optional<PeExportStatus> ReadExportDirectory(
+    std::span<const std::byte> image, ExportDirectory& directory) noexcept
+{
+    std::size_t optional{};
+    const auto header = ReadOptionalHeader(image, optional);
+    // Another machine type can never be a loaded x64 plugin.
+    if (header == PeIatStatus::notPe32PlusAmd64) return PeExportStatus::notFound;
+    DataDirectory exports;
+    if (header != PeIatStatus::success || !ReadDataDirectory(image, optional, 0, exports))
+        return PeExportStatus::malformed;
+    if (exports.rva == 0) return PeExportStatus::notFound;
+    if (!Read(image, exports.rva, directory)) return PeExportStatus::malformed;
+    return std::nullopt;
+}
+
+[[nodiscard]] PeExportStatus FindExportName(std::span<const std::byte> image,
+    const ExportDirectory& directory, std::string_view symbol) noexcept
+{
+    if (!Range(image, directory.names, std::uint64_t{directory.nameCount} * sizeof(std::uint32_t)))
+        return PeExportStatus::malformed;
+    for (std::uint32_t index = 0; index < directory.nameCount; ++index)
+    {
+        std::uint32_t nameRva{};
+        std::string_view name;
+        if (!Read(image, directory.names + std::size_t{index} * sizeof(nameRva), nameRva) ||
+            !ReadString(image, nameRva, name))
+            return PeExportStatus::malformed;
+        if (name == symbol) return PeExportStatus::found;
+    }
+    return PeExportStatus::notFound;
+}
+
+// An image mapping always commits its first page, which holds the headers.
+constexpr std::size_t kHeaderPage = 4096;
+
+// SizeOfImage of a PE32+ AMD64 image, or 0.
+[[nodiscard]] std::size_t ImageSize(std::span<const std::byte> headers) noexcept
+{
+    std::size_t optional{};
+    std::uint32_t size{};
+    const bool read = ReadOptionalHeader(headers, optional) == PeIatStatus::success &&
+        Read(headers, optional + 56, size);
+    return read ? size : 0;
+}
+
+[[nodiscard]] PeExportStatus FindFileExport(
+    const std::filesystem::path& file, std::string_view symbol) noexcept
+{
+    // Mapped as an image resource, the file is laid out by RVA without running it.
+    const auto module = ::LoadLibraryExW(
+        file.c_str(), nullptr, LOAD_LIBRARY_AS_IMAGE_RESOURCE | LOAD_LIBRARY_AS_DATAFILE);
+    if (module == nullptr) return PeExportStatus::malformed;
+    // The handle's low bits mark a resource mapping; the image starts at the rest.
+    const auto* base = reinterpret_cast<const std::byte*>(
+        reinterpret_cast<std::uintptr_t>(module) & ~std::uintptr_t{3});
+    const std::span headers{base, kHeaderPage};
+    const auto size = ImageSize(headers);
+    // Without a PE32+ size, the headers still tell another machine type from a broken file.
+    const auto status = FindPe32PlusExport(
+        size >= kHeaderPage ? std::span<const std::byte>{base, size} : headers, symbol);
+    ::FreeLibrary(module);
+    return status;
+}
+
+[[nodiscard]] bool IsDll(const std::filesystem::path& file)
+{
+    return ::_wcsicmp(file.extension().c_str(), L".dll") == 0;
+}
+
+// What one folder entry adds: anything but a DLL is absent, and a DLL that
+// cannot be read is unknown.
+[[nodiscard]] PluginExportScan ScanEntry(
+    const std::filesystem::directory_entry& entry, std::string_view symbol)
+{
+    std::error_code error;
+    const bool file = entry.is_regular_file(error);
+    if (error) return PluginExportScan::unknown;
+    if (!file || !IsDll(entry.path())) return PluginExportScan::absent;
+    switch (FindFileExport(entry.path(), symbol))
+    {
+    case PeExportStatus::found: return PluginExportScan::found;
+    case PeExportStatus::notFound: return PluginExportScan::absent;
+    case PeExportStatus::malformed: break;
+    }
+    return PluginExportScan::unknown;
+}
+
+}  // namespace
+
+PeExportStatus FindPe32PlusExport(
+    std::span<const std::byte> image, std::string_view symbol) noexcept
+{
+    if (image.empty() || symbol.empty()) return PeExportStatus::malformed;
+    ExportDirectory directory{};
+    if (const auto answer = ReadExportDirectory(image, directory)) return *answer;
+    return FindExportName(image, directory, symbol);
+}
+
+PluginExportScan ScanPluginExports(
+    const std::filesystem::path& directory, std::string_view symbol) noexcept
+{
+    try
+    {
+        std::error_code error;
+        auto result = PluginExportScan::absent;
+        for (std::filesystem::directory_iterator entry(directory, error), end;
+             !error && entry != end; entry.increment(error))
+        {
+            const auto scanned = ScanEntry(*entry, symbol);
+            if (scanned == PluginExportScan::found) return scanned;
+            if (scanned == PluginExportScan::unknown) result = scanned;
+        }
+        return error ? PluginExportScan::unknown : result;
+    }
+    catch (...)
+    {
+        return PluginExportScan::unknown;
+    }
 }
 
 }  // namespace fo4hdr

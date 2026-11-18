@@ -153,6 +153,9 @@ struct SdrModeInputs
 using HostHdrOutputState = CS_HdrOutputState;
 static_assert(sizeof(HostHdrOutputState) == 24U);
 
+// The host's state query; a plugin that exports it can host presentation.
+inline constexpr char kHostStateQueryExport[] = "CS_GetHdrOutputState";
+
 // Trusts a host's answer, null when it gave none, only when it is complete and
 // its paper white is usable.
 [[nodiscard]] bool HostReportsHdr(const HostHdrOutputState* answer) noexcept;

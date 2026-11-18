@@ -134,6 +134,7 @@ SettingsMenuView UiSettingsSnapshot() noexcept
     result.renderPrecisionAtStart = g_configuration.renderPrecision;
     result.vanillaLightingTargets = g_evidence.vanillaLightingTargetCount.load();
     result.hostedPresentationAtStart = g_configuration.hostedPresentation;
+    result.hostedPresentationIgnored = g_configuration.hostedPresentationIgnored;
     result.hostedHdr = g_hostedHdrActive.load(std::memory_order_acquire);
     result.hostStateMismatch = result.hostedHdr &&
         !g_hostedState.matches.load(std::memory_order_acquire);

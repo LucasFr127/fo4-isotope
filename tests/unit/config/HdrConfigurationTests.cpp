@@ -410,6 +410,28 @@ void TestHostedPresentationRepairs()
     FO4HDR_CHECK(ExtraRepairs(unparsable, defaulted) == 1);
 }
 
+// Without a host the session takes HostedPresentation=0's path, the developer
+// reference included, while the saved switch and the INI keep 1.
+void TestIgnoredHostedPresentation()
+{
+    auto hosted = ParsePluginConfiguration("[General]\nHdrEnabled=1\nDeveloperMode=1\n"
+        "HostedPresentation=1\n[Debug]\nDeveloperHdr10Reference=1\n");
+    const auto text = hosted.text;
+    IgnoreHostedPresentation(hosted);
+    FO4HDR_CHECK(!hosted.value.hostedPresentation && hosted.value.hostedPresentationIgnored);
+    FO4HDR_CHECK(!hosted.value.hostedHdrRequested && hosted.value.developerHdr10Reference);
+    FO4HDR_CHECK(hosted.value.interfaceSettings.hostedPresentation);
+    FO4HDR_CHECK(hosted.stored.hostedPresentation && hosted.text == text);
+
+    auto production = ParseWith("\n[General]\nHostedPresentation=1\n");
+    IgnoreHostedPresentation(production);
+    FO4HDR_CHECK(production.value.productionRequested && !production.value.hostedHdrRequested);
+    auto direct = ParseWith("");
+    const auto before = direct.value;
+    IgnoreHostedPresentation(direct);
+    FO4HDR_CHECK(direct.value == before);
+}
+
 // The former AgX name still loads; with both names the current one wins.
 void TestFormerAgxColorResponseName()
 {
@@ -888,6 +910,7 @@ void TestConfigurationRepairs()
     TestConfigurationCurveRepairs();
     TestConfigurationRenderPrecisionRepairs();
     TestHostedPresentationRepairs();
+    TestIgnoredHostedPresentation();
     TestConfigurationOperatorRepairs();
     TestConfigurationRangeRepairs();
     TestConfigurationRepeatedEffects();

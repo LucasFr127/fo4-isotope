@@ -89,6 +89,8 @@ struct SettingsMenuView
     // [General] HdrEnabled and HostedPresentation as this game session started.
     bool hdrEnabledAtStart{};
     bool hostedPresentationAtStart{};
+    // HostedPresentation=1 found no plugin that can host, so this session runs without it.
+    bool hostedPresentationIgnored{};
     // [Performance] RenderPrecision as this game session started, and how many
     // lighting textures kept the game's format under Medium.
     RenderPrecision renderPrecisionAtStart{};

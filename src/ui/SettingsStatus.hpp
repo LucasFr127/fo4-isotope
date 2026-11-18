@@ -48,6 +48,9 @@ struct SettingsMenuHealth
 [[nodiscard]] StatusMessage HostedHdrStatus(const SettingsMenuView& view) noexcept;
 // The note on the saved hosted-presentation request, or null when it needs none.
 [[nodiscard]] const char* HostedPresentationStatus(bool hosted, const SettingsMenuView& view) noexcept;
+// Whether the next start would be hosted: saved on, unless this start found no host.
+[[nodiscard]] bool HostedAtNextStart(
+    const HdrInterfaceSettings& saved, const SettingsMenuView& view) noexcept;
 // The color pages' warning while Community Shaders' own tone mapping is shown, or
 // their error after the hosted shaders failed; its text is null otherwise.
 [[nodiscard]] StatusMessage HostToneMappingStatus(const SettingsMenuView& view) noexcept;
