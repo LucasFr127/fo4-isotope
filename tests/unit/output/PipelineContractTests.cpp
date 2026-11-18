@@ -246,6 +246,15 @@ void TestHostOutput()
     state = hdr;
     state.size = sizeof(HostHdrOutputState) - 1U;
     FO4HDR_CHECK(ClassifyHostOutput(&state) == HostOutput::sdr);
+    // The format is known while the host shows SDR, so a session can follow it later.
+    state = hdr;
+    state.hdrActive = 0U;
+    FO4HDR_CHECK(HostFormatSupported(&hdr) && HostFormatSupported(&state));
+    state.lutOutputEncoding = 1U;
+    FO4HDR_CHECK(!HostFormatSupported(&state) && !HostFormatSupported(nullptr));
+    state = hdr;
+    state.size = sizeof(HostHdrOutputState) - 1U;
+    FO4HDR_CHECK(!HostFormatSupported(&state));
     // While the host shows HDR, SDR mode on a hosted chain yields and says why.
     for (const auto latched : {SdrModeReason::hostedPresentation, SdrModeReason::hostPresentsSdr,
              SdrModeReason::hostNotFound})
@@ -290,21 +299,55 @@ void TestHostedHdrDecision()
         FO4HDR_CHECK(!HostReportsHdr(&state));
     }
     const HostedHdrInputs latched{.hostedHdrRequested = true, .hostReportsHdr = true,
-        .chainRgba8Unorm = true, .backBufferFp16 = true};
-    FO4HDR_CHECK(DecideHostedHdr(latched));
+        .hostFormatSupported = true, .chainRgba8Unorm = true, .backBufferFp16 = true};
+    FO4HDR_CHECK(DecideHostedHdr(latched) && HostedHdrAvailable(latched));
     const auto without = [&](bool HostedHdrInputs::* flag, bool value) {
         auto inputs = latched;
         inputs.*flag = value;
-        return DecideHostedHdr(inputs);
+        return DecideHostedHdr(inputs) || HostedHdrAvailable(inputs);
     };
     FO4HDR_CHECK(!without(&HostedHdrInputs::hostedHdrRequested, false));
-    FO4HDR_CHECK(!without(&HostedHdrInputs::hostReportsHdr, false));
     // A plain chain or the host's SDR container cannot carry the hosted scene.
     FO4HDR_CHECK(!without(&HostedHdrInputs::chainRgba8Unorm, false));
     FO4HDR_CHECK(!without(&HostedHdrInputs::backBufferFp16, false));
     FO4HDR_CHECK(!without(&HostedHdrInputs::enbDetected, true));
     FO4HDR_CHECK(!without(&HostedHdrInputs::configurationDefaults, true));
-    FO4HDR_CHECK(!without(&HostedHdrInputs::hostFormatUnknown, true));
+    FO4HDR_CHECK(!without(&HostedHdrInputs::hostFormatSupported, false));
+    // A host showing SDR keeps hosted HDR available for later.
+    auto sdr = latched;
+    sdr.hostReportsHdr = false;
+    FO4HDR_CHECK(!DecideHostedHdr(sdr) && HostedHdrAvailable(sdr));
+}
+
+// An available session follows the host's HDR setting once nothing holds it.
+void TestHostedSwitch()
+{
+    using enum HostedSwitch;
+    // SDR mode facing a host that now reports HDR, with the HDR table retained.
+    const HostedSwitchInputs toHdrReady{.available = true, .hostReportsHdr = true,
+        .hdrTableRetained = true, .threadCompatible = true};
+    FO4HDR_CHECK(DecideHostedSwitch(toHdrReady) == toHdr);
+    const auto with = [&](bool HostedSwitchInputs::* flag, bool value) {
+        auto inputs = toHdrReady;
+        inputs.*flag = value;
+        return DecideHostedSwitch(inputs);
+    };
+    FO4HDR_CHECK(with(&HostedSwitchInputs::available, false) == hold);
+    FO4HDR_CHECK(with(&HostedSwitchInputs::hostReportsHdr, false) == hold);
+    FO4HDR_CHECK(with(&HostedSwitchInputs::hdrTableRetained, false) == hold);
+    FO4HDR_CHECK(with(&HostedSwitchInputs::threadCompatible, false) == hold);
+    FO4HDR_CHECK(with(&HostedSwitchInputs::commitPending, true) == hold);
+    FO4HDR_CHECK(with(&HostedSwitchInputs::failed, true) == hold);
+    // Hosted HDR leaves only for the host's SDR, not for an HDR answer it cannot use.
+    auto hosted = toHdrReady;
+    hosted.hostedHdr = true;
+    FO4HDR_CHECK(DecideHostedSwitch(hosted) == hold);
+    hosted.hostReportsHdr = false;
+    FO4HDR_CHECK(DecideHostedSwitch(hosted) == hold);
+    hosted.hostShowsSdr = true;
+    FO4HDR_CHECK(DecideHostedSwitch(hosted) == toSdr);
+    hosted.failed = true;
+    FO4HDR_CHECK(DecideHostedSwitch(hosted) == hold);
 }
 
 void TestHostedSdrModeReason()
@@ -438,6 +481,7 @@ void RunPipelineContractTests()
     TestHostedSceneEncoding();
     TestHostOutput();
     TestHostedHdrDecision();
+    TestHostedSwitch();
     TestHostedSdrModeReason();
     TestNativeImageSpacePassResolution();
     TestDeveloperConfiguration();

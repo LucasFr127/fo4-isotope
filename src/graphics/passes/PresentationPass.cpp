@@ -136,6 +136,7 @@ SettingsMenuView UiSettingsSnapshot() noexcept
     result.hostedPresentationAtStart = g_configuration.hostedPresentation;
     result.hostedPresentationIgnored = g_configuration.hostedPresentationIgnored;
     result.hostedHdr = g_hostedHdrActive.load(std::memory_order_acquire);
+    result.hostedHdrAvailable = HostedHdrFollowable();
     result.hostStateMismatch = result.hostedHdr &&
         !g_hostedState.matches.load(std::memory_order_acquire);
     result.hostPaperWhiteNits = g_hostedState.paperWhiteNits;

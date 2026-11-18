@@ -143,14 +143,19 @@ bool HostReportsHdr(const HostHdrOutputState* answer) noexcept
     return answer->hdrActive != 0U && whiteUsable;
 }
 
+bool HostFormatSupported(const HostHdrOutputState* answer) noexcept
+{
+    constexpr auto kSignedGamma22 =
+        static_cast<std::uint32_t>(CS_HdrLutOutputEncoding_SignedGamma22PaperWhite);
+    return answer != nullptr && answer->size >= sizeof(HostHdrOutputState) &&
+        answer->lutOutputEncoding == kSignedGamma22;
+}
+
 HostOutput ClassifyHostOutput(const HostHdrOutputState* answer) noexcept
 {
     if (answer == nullptr || answer->size < sizeof(HostHdrOutputState)) return HostOutput::sdr;
     if (answer->hdrActive == 0U) return HostOutput::sdr;
-    constexpr auto kSignedGamma22 =
-        static_cast<std::uint32_t>(CS_HdrLutOutputEncoding_SignedGamma22PaperWhite);
-    return answer->lutOutputEncoding == kSignedGamma22 ? HostOutput::hdr :
-        HostOutput::hdrUnknownFormat;
+    return HostFormatSupported(answer) ? HostOutput::hdr : HostOutput::hdrUnknownFormat;
 }
 
 SdrModeReason SdrModeReasonForHost(SdrModeReason latched, HostOutput host) noexcept
@@ -164,13 +169,36 @@ SdrModeReason SdrModeReasonForHost(SdrModeReason latched, HostOutput host) noexc
     return SdrModeReason::hostFormatUnknown;
 }
 
-bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept
+bool HostedHdrAvailable(const HostedHdrInputs& inputs) noexcept
 {
     const bool blocked =
-        inputs.enbDetected || inputs.configurationDefaults || inputs.hostFormatUnknown;
+        inputs.enbDetected || inputs.configurationDefaults || !inputs.hostFormatSupported;
     const bool container = inputs.chainRgba8Unorm && inputs.backBufferFp16;
-    if (!inputs.hostedHdrRequested || blocked) return false;
-    return inputs.hostReportsHdr && container;
+    return inputs.hostedHdrRequested && !blocked && container;
+}
+
+bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept
+{
+    return HostedHdrAvailable(inputs) && inputs.hostReportsHdr;
+}
+
+namespace {
+
+// Nothing substitutes in a failed generation, so rebuilding for a switch gains nothing.
+[[nodiscard]] bool HostedSwitchReady(const HostedSwitchInputs& inputs) noexcept
+{
+    const bool settled = !inputs.commitPending && !inputs.failed;
+    return inputs.available && inputs.threadCompatible && settled;
+}
+
+}  // namespace
+
+HostedSwitch DecideHostedSwitch(const HostedSwitchInputs& inputs) noexcept
+{
+    if (!HostedSwitchReady(inputs)) return HostedSwitch::hold;
+    if (inputs.hostedHdr) return inputs.hostShowsSdr ? HostedSwitch::toSdr : HostedSwitch::hold;
+    const bool hdrReady = inputs.hostReportsHdr && inputs.hdrTableRetained;
+    return hdrReady ? HostedSwitch::toHdr : HostedSwitch::hold;
 }
 
 const char* SdrModeReasonName(SdrModeReason reason) noexcept

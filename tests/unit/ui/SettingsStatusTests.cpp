@@ -31,6 +31,15 @@ void TestHdrRequestStatus()
     // HDR off at start: turning it on needs a restart.
     FO4HDR_CHECK(status(false, false, true).empty());
     FO4HDR_CHECK(status(true, false, true).starts_with("Restart the game to turn HDR on"));
+    // A hosted SDR session that follows the host still turns HDR on this session.
+    SettingsMenuView following{};
+    following.hdrEnabledAtStart = true;
+    following.sdrMode = true;
+    following.hostedHdrAvailable = true;
+    const auto* note = HdrRequestStatus(false, following);
+    FO4HDR_CHECK(note != nullptr &&
+        std::string_view{note}.starts_with("Restart the game to turn HDR off"));
+    FO4HDR_CHECK(HdrRequestStatus(true, following) == nullptr);
     // Defaults from an unreadable INI cannot save the request, so no restart is offered.
     SettingsMenuView fallback{};
     fallback.sdrMode = true;
@@ -188,8 +197,16 @@ void TestSdrModeReasonText()
     // Hosted presentation keeps its note with HDR on or off.
     FO4HDR_CHECK(text(SdrModeReason::hostedPresentation).contains("Community Shaders"));
     FO4HDR_CHECK(text(SdrModeReason::hostedPresentation, false).contains("Community Shaders"));
-    FO4HDR_CHECK(text(SdrModeReason::hostPresentsSdr).contains("reports SDR"));
+    FO4HDR_CHECK(text(SdrModeReason::hostPresentsSdr).contains("restart the game"));
     FO4HDR_CHECK(text(SdrModeReason::hostNotFound).contains("HDR Display"));
+    // A session that follows the host needs no restart to switch to HDR.
+    SettingsMenuView following{};
+    following.sdrMode = true;
+    following.sdrModeReason = SdrModeReason::hostPresentsSdr;
+    following.hostedHdrAvailable = true;
+    const std::string_view switching{SdrModeReasonText(following)};
+    FO4HDR_CHECK(switching.contains("reports SDR") && switching.contains("to switch to HDR") &&
+        !switching.contains("restart"));
     // With HDR turned off, those hosted chains would start with the hosted note.
     for (const auto reason : {SdrModeReason::hostPresentsSdr, SdrModeReason::hostNotFound})
         FO4HDR_CHECK(text(reason, false).contains("Enable HDR is off"));

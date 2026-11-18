@@ -95,9 +95,12 @@ struct SettingsMenuView
     // lighting textures kept the game's format under Medium.
     RenderPrecision renderPrecisionAtStart{};
     std::uint64_t vanillaLightingTargets{};
-    // Hosted HDR is latched: the host presents HDR10 from FO4Isotope's HDR scene.
+    // Hosted HDR is active: the host presents HDR10 from FO4Isotope's HDR scene.
     bool hostedHdr{};
-    // The host's HDR setting changed since the latch, so its own shaders draw.
+    // Hosted HDR still follows the host's HDR setting this session, without a restart.
+    bool hostedHdrAvailable{};
+    // The host stopped showing HDR and the session could not follow, so its own
+    // shaders draw.
     bool hostStateMismatch{};
     float hostPaperWhiteNits{};
     SdrModeReason sdrModeReason{};

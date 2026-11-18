@@ -4,6 +4,7 @@
 #include "d3d11/PresentationContextFixture.hpp"
 #include "d3d11/BorrowedFullscreenState.hpp"
 #include "HostedPresentation.hpp"
+#include "LiveSettings.hpp"
 #include "FO4Isotope/tonemap/OperatorLut.hpp"
 #include "FO4Isotope/ui/SettingsMenu.hpp"
 
@@ -281,6 +282,140 @@ void CheckHostHdrKeepsGameShaders(Device& device)
     }
 }
 
+// The answer the state query gives while a test plays the host.
+HostHdrOutputState g_hostAnswer{.size = sizeof(HostHdrOutputState)};
+
+bool AnswerAsHost(HostHdrOutputState* state) noexcept
+{
+    const auto size = state->size;
+    *state = g_hostAnswer;
+    state->size = size;
+    return true;
+}
+
+// A hosted session that can follow the host, cleared when the test ends.
+struct PlayedHost
+{
+    explicit PlayedHost(const SdrModeInputs& inputs) noexcept
+    {
+        g_hostedState.query = &AnswerAsHost;
+        g_hostedState.available = true;
+        g_hostedState.inputs = inputs;
+    }
+    ~PlayedHost()
+    {
+        ClearLatchedModes();
+        g_hostedState.inputs = {};
+        g_liveSettingsThreadCompatible.store(true, std::memory_order_release);
+        g_observedQualifiedDrawThread.store(0, std::memory_order_release);
+        ResetReplacementShaders();
+        // Drops the HDR table build a deferred operator queued.
+        InitializeLiveSettings(PluginConfiguration{});
+    }
+    PlayedHost(const PlayedHost&) = delete;
+    PlayedHost& operator=(const PlayedHost&) = delete;
+
+    // The end of a Present while the host shows HDR or SDR.
+    static void Show(Device& device, bool hdr)
+    {
+        g_hostAnswer.hdrActive = hdr ? 1U : 0U;
+        g_hostAnswer.paperWhiteNits = 203.0F;
+        RefreshHostedState(device.context.Get());
+    }
+};
+
+// SDR mode facing a host that reports HDR holds, and the host's own shaders draw, when
+// the frame drew off the Present thread, when the last qualified draw ran on another
+// thread, and without a retained HDR table.
+void CheckHostedSwitchHolds(Device& device, SdrOperatorFixture& fixture,
+    std::unique_ptr<OperatorLutBuildResult>& hdrTable)
+{
+    auto* game = fixture.hudShader.Get();
+    const auto holds = [&] {
+        PlayedHost::Show(device, true);
+        return !g_hostedHdrActive.load() && fixture.Bind(RenoDxShaderPass::toneMapA) == game;
+    };
+    g_liveSettingsThreadCompatible.store(false, std::memory_order_release);
+    FO4HDR_WARP_CHECK(holds());
+    g_liveSettingsThreadCompatible.store(true, std::memory_order_release);
+    g_observedQualifiedDrawThread.store(
+        g_observedPresentThread.load() + 1U, std::memory_order_release);
+    FO4HDR_WARP_CHECK(holds());
+    g_observedQualifiedDrawThread.store(0, std::memory_order_release);
+    auto retained = std::move(hdrTable);
+    FO4HDR_WARP_CHECK(holds() && !HostedHdrFollowable());
+    hdrTable = std::move(retained);
+}
+
+// An available session follows the host's HDR setting at the end of Present: hosted
+// HDR with the HDR profile while it reports HDR, SDR mode with the SDR profile while it
+// reports SDR, and a retained HDR table of another key until the profile's own is built.
+void CheckHostedModeFollowsHost(Device& device)
+{
+    using enum ProductionToneMapperAlgorithm;
+    // GT7 in the HDR profile and AgX in the SDR one tell the profiles apart.
+    SdrOperatorFixture fixture(device, agX);
+    // A hosted session prepares the HDR profile's table at startup.
+    SetSdrModeActive(false);
+    auto& hdrTable = RetainedCpuLut(OperatorLutTarget::hdr10);
+    hdrTable = std::make_unique<OperatorLutBuildResult>();
+    hdrTable->request = OperatorLutKeyFor(g_activeSettings, OperatorLutTarget::hdr10);
+    hdrTable->data = BuildOperatorLut(g_activeSettings.productionAlgorithm,
+        g_activeSettings.displayPeakNits, ActiveToneMapperParameters(
+            g_activeSettings.productionAlgorithm, g_activeSettings.toneMapperParameters));
+    SetSdrModeActive(true);
+    SdrOperatorFixture::RetainSdrTable();
+    const SdrModeInputs inputs{.requested = true, .hostedPresentation = true,
+        .hostedHdrRequested = true, .hostAnswered = true};
+    FO4HDR_WARP_CHECK(PrepareSdrMode(inputs, device.device.Get()));
+    const PlayedHost host(inputs);
+    auto* game = fixture.hudShader.Get();
+    FO4HDR_WARP_CHECK(HostedHdrFollowable());
+
+    PlayedHost::Show(device, true);
+    FO4HDR_WARP_CHECK(g_hostedHdrActive.load() && !g_sdrModeActive.load());
+    FO4HDR_WARP_CHECK(g_activeSettings.productionAlgorithm == gt7);
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == g_replacements.toneMapA.Get());
+    PlayedHost::Show(device, false);
+    FO4HDR_WARP_CHECK(!g_hostedHdrActive.load() && g_sdrModeActive.load());
+    FO4HDR_WARP_CHECK(g_activeSettings.productionAlgorithm == agX);
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == g_replacements.toneMapASdr.Get());
+
+    // A retained HDR table for another key, as after an operator change whose build
+    // the switch retired, draws until the profile's own table is built.
+    const auto stalePeak = hdrTable->data.displayPeakNits + 500.0;
+    hdrTable->request.displayPeakNits = stalePeak;
+    hdrTable->data = BuildOperatorLut(gt7, stalePeak,
+        ActiveToneMapperParameters(gt7, hdrTable->request.toneMapperParameters));
+    PlayedHost::Show(device, true);
+    FO4HDR_WARP_CHECK(g_hostedHdrActive.load() && !g_replacements.sdrSubstitutionDisabled);
+    FO4HDR_WARP_CHECK(g_activeSettings.displayPeakNits == stalePeak);
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == g_replacements.toneMapA.Get());
+    PlayedHost::Show(device, false);
+    CheckHostedSwitchHolds(device, fixture, hdrTable);
+
+    // With SdrEnabled=0 the host's SDR leaves neither mode substituting.
+    g_hostedState.inputs.requested = false;
+    PlayedHost::Show(device, true);
+    PlayedHost::Show(device, false);
+    FO4HDR_WARP_CHECK(!g_hostedHdrActive.load() && !g_sdrModeActive.load());
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == game);
+    g_hostedState.inputs.requested = true;
+
+    // A build that fails during a switch disables substitution, and the failed
+    // generation then keeps its mode.
+    {
+        const FailingDeviceCreation failure(device.device.Get(), kDeviceCreatePixelShader,
+            reinterpret_cast<void*>(&FailPixelShader));
+        PlayedHost::Show(device, true);
+    }
+    FO4HDR_WARP_CHECK(g_hostedHdrActive.load() && g_replacements.sdrSubstitutionDisabled);
+    FO4HDR_WARP_CHECK(!HostedHdrFollowable());
+    PlayedHost::Show(device, false);
+    FO4HDR_WARP_CHECK(g_hostedHdrActive.load() && !g_sdrModeActive.load());
+    FO4HDR_WARP_CHECK(fixture.Bind(RenoDxShaderPass::toneMapA) == game);
+}
+
 // ID3D11DeviceContext declaration order.
 constexpr std::size_t kContextPsGetShader{74};
 constexpr std::size_t kContextVsGetShader{76};
@@ -400,6 +535,7 @@ void VerifySdrOperatorPresentation(Device& device)
     CheckFailedSdrShaderBuild(device);
     CheckEnbKeepsGameShaders(device);
     CheckHostHdrKeepsGameShaders(device);
+    CheckHostedModeFollowsHost(device);
     CheckClassInstanceOverrun(device);
 }
 

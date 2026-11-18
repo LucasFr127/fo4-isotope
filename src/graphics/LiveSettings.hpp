@@ -40,6 +40,9 @@ bool HdrPathRequested() noexcept;
 void InitializeLiveSettings(const PluginConfiguration&) noexcept;
 // Latches SDR mode and selects the live profile it renders.
 void SetSdrModeActive(bool active) noexcept;
+// The HDR operators have no native curve, so an operator without its retained
+// table draws the retained one's until its own table is built.
+void DeferUnpreparedHdrOperator() noexcept;
 OperatorLutBuildRequest DesiredOperatorLutBuild() noexcept;
 // Applies the settings draft; end Present calls it when a commit is requested.
 void CommitUiDraft(ID3D11Device*, ID3D11DeviceContext*) noexcept;

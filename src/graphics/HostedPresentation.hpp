@@ -9,8 +9,9 @@
 
 namespace fo4hdr {
 
-// Hosted HDR, latched per device generation when the host reports HDR at
-// creation: the HDR profile and operator on the host's chain, without a facade.
+// Hosted HDR: the HDR profile and operator on the host's chain, without a facade.
+// Set at device creation, and at the end of Present while the session follows
+// the host's HDR setting.
 extern std::atomic<bool> g_hostedHdrActive;
 
 // The host's state query and what is kept of its answers. The query is another
@@ -19,7 +20,12 @@ struct HostedPresentationState
 {
     using Query = bool (*)(HostHdrOutputState*) noexcept;
     Query query{};
-    // False once the host's answer stops matching the latch, so its own shaders draw.
+    // Hosted HDR can follow the host's live HDR setting this device generation.
+    std::atomic<bool> available{};
+    // The device generation's SDR mode inputs, for a later switch.
+    SdrModeInputs inputs{};
+    // False once the host's answer stops matching hosted HDR and the session cannot
+    // follow it this frame, so its own shaders draw.
     std::atomic<bool> matches{};
     // What the host shows now. SDR mode substitutes only while it is SDR, since an
     // SDR image inside the host's HDR would be capped at paper white.
@@ -28,15 +34,19 @@ struct HostedPresentationState
 };
 extern HostedPresentationState g_hostedState;
 
-// Latches SDR mode or hosted HDR for a published device generation. The hosted
-// request and the host's answer complete the inputs; a failed replacement
-// build keeps either latch with substitution disabled.
+// Starts SDR mode or hosted HDR for a published device generation and records
+// whether hosted HDR is available to follow the host later. The hosted request
+// and the host's answer complete the inputs; a failed replacement build keeps
+// either mode with substitution disabled.
 void PrepareLatchedModes(SdrModeInputs inputs, IDXGISwapChain*, ID3D11Device*) noexcept;
 // A rolled-back installation leaves neither mode latched.
 void ClearLatchedModes() noexcept;
-// Once per Present in a hosted session: follows the host's live HDR setting and
-// paper white.
+// Once per Present in a hosted session: switches between hosted HDR and SDR mode
+// with the host's live HDR setting when available, and follows its paper white.
 void RefreshHostedState(ID3D11DeviceContext*) noexcept;
+// Present thread only: the session can still switch to hosted HDR, since a failed
+// build or a missing HDR table holds it.
+[[nodiscard]] bool HostedHdrFollowable() noexcept;
 // The latched SDR mode reason, or the reason SDR mode yields while the host shows HDR.
 [[nodiscard]] SdrModeReason ReportedSdrModeReason() noexcept;
 

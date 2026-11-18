@@ -50,11 +50,11 @@ constexpr auto kDisplayDescription = "The display the game runs on, as Windows r
     const auto& view = View();
     StatusList messages{HostedHdrStatus(view)};
     if (!view.sdrMode) return messages;
-    // An SDR display, hosted presentation and the host's own HDR are normal setups;
-    // their notes only point at the switch that changes them.
+    // An SDR display, hosted presentation, the host's own HDR and the host's SDR in a
+    // session that follows it are normal setups; their notes only point at the switch.
     const auto chosen = view.sdrModeReason == SdrModeReason::displayNotHdr10 ||
         view.sdrModeReason == SdrModeReason::hostedPresentation ||
-        view.sdrModeReason == SdrModeReason::hostPresentsHdr;
+        view.sdrModeReason == SdrModeReason::hostPresentsHdr || FollowsHostSdr(view);
     messages[0] = {SdrModeReasonText(view),
         chosen ? StatusSeverity::info : StatusSeverity::warning};
     messages[1] = SdrControlsMessage(view);

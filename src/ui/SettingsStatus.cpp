@@ -153,8 +153,10 @@ const char* HdrRequestStatus(bool hdrEnabled, const SettingsMenuView& view) noex
     // Defaults from an unreadable INI cannot save the request; the reason names the fix.
     if (view.sdrModeReason == SdrModeReason::configurationDefaults) return nullptr;
     if (hdrEnabled && !view.hdrEnabledAtStart) return "Restart the game to turn HDR on.";
-    // A session already in SDR mode starts the same way with HDR off, so it needs no restart.
-    if (!hdrEnabled && !view.sdrMode) return "Restart the game to turn HDR off.";
+    // A session already in SDR mode starts the same way with HDR off, so it needs no
+    // restart, unless it still follows the host into HDR.
+    const bool sdrForSession = view.sdrMode && !view.hostedHdrAvailable;
+    if (!hdrEnabled && !sdrForSession) return "Restart the game to turn HDR off.";
     return nullptr;
 }
 
@@ -249,8 +251,17 @@ void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept
     if (!hdrEnabled) view.sdrModeReason = ReasonWithHdrOff(view.sdrModeReason);
 }
 
+bool FollowsHostSdr(const SettingsMenuView& view) noexcept
+{
+    return view.sdrModeReason == SdrModeReason::hostPresentsSdr && view.hostedHdrAvailable;
+}
+
 const char* SdrModeReasonText(const SettingsMenuView& view) noexcept
 {
+    // A session that follows the host switches to HDR without a restart.
+    if (FollowsHostSdr(view))
+        return "SDR is shown because Community Shaders reports SDR output. Turn on HDR in its "
+               "HDR Display settings to switch to HDR.";
     const auto index = static_cast<std::size_t>(view.sdrModeReason);
     return index < kSdrModeReasonTexts.size() ? kSdrModeReasonTexts[index] : nullptr;
 }

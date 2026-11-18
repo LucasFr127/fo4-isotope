@@ -329,6 +329,14 @@ void ReportSkippedHdrCandidate(const fo4hdr::GraphicsObservationSnapshot& graphi
     }
 }
 
+// The host's SDR is the user's choice in a session that follows it into HDR.
+[[nodiscard]] bool SdrModeWarned(const fo4hdr::GraphicsObservationSnapshot& graphics) noexcept
+{
+    const bool followsHost = graphics.sdrModeReason == fo4hdr::SdrModeReason::hostPresentsSdr &&
+        graphics.hostedHdrAvailable;
+    return SdrModeRedirected(graphics.sdrModeReason) && !followsHost;
+}
+
 void ReportHostedHdr() noexcept
 {
     static std::atomic<bool> reported{};
@@ -365,7 +373,7 @@ void ReportRendererCompatibility(const fo4hdr::GameHdrSnapshot& snapshot) noexce
     }
     ReportSkippedHdrCandidate(graphics);
     if (graphics.hostedHdrActive) ReportHostedHdr();
-    if (SdrModeRedirected(graphics.sdrModeReason))
+    if (SdrModeWarned(graphics))
     {
         WarnOnceFormatted(sdrModeReported, "renderer sdr_mode=true reason={} hint=see-output-tab",
             fo4hdr::SdrModeReasonName(graphics.sdrModeReason));

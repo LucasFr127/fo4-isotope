@@ -750,6 +750,19 @@ void DeferUnpreparedSdrOperator() noexcept
     DeferSdrOperator();
 }
 
+}  // namespace
+
+void DeferUnpreparedHdrOperator() noexcept
+{
+    const auto& retained = RetainedCpuLut(OperatorLutTarget::hdr10);
+    const auto key = OperatorLutKeyFor(g_activeSettings, OperatorLutTarget::hdr10);
+    if (!retained || PreparedOperatorLutMatches(retained->data, key)) return;
+    ApplyOperatorKey(retained->request, g_activeSettings);
+    if (!PendingOperatorKeyMatches(ReadSettingsDraft())) QueueDesiredOperatorLutBuild();
+}
+
+namespace {
+
 // The native curve needs no table, so a retained table that fails to upload
 // waits for a rebuild like a missing one instead of disabling SDR mode.
 [[nodiscard]] bool BuildSdrReplacementsOrDeferOperator(ID3D11Device* device) noexcept

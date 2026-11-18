@@ -130,6 +130,7 @@ void ReadOwnershipSnapshot(GraphicsObservationSnapshot& snapshot, HookOwnershipS
     snapshot.candidateCreatedFormat = g_evidence.candidateCreatedFormat.load();
     snapshot.sdrModeReason = ReportedSdrModeReason();
     snapshot.hostedHdrActive = g_hostedHdrActive.load(std::memory_order_acquire);
+    snapshot.hostedHdrAvailable = g_hostedState.available.load(std::memory_order_acquire);
     snapshot.rendererInstalled = g_evidence.rendererInstalled.load();
     snapshot.presentHookConflict = g_evidence.presentHookConflict.load();
     snapshot.liveSettingsThreadCompatible = g_liveSettingsThreadCompatible.load();

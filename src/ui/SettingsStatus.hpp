@@ -66,6 +66,8 @@ struct SettingsMenuHealth
 void ApplyHdrRequest(SettingsMenuView& view, bool hdrEnabled) noexcept;
 // Why this session runs SDR mode, or null when HDR was simply off.
 [[nodiscard]] const char* SdrModeReasonText(const SettingsMenuView& view) noexcept;
+// The host shows SDR in a session that switches to hosted HDR when it shows HDR.
+[[nodiscard]] bool FollowsHostSdr(const SettingsMenuView& view) noexcept;
 // Whether the weather response reaches the current frame's LUT draw.
 [[nodiscard]] WeatherResponseState WeatherResponseStatus(
     const WeatherLutResponseView& view, bool active) noexcept;

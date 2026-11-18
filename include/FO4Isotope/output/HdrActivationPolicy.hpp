@@ -159,6 +159,9 @@ inline constexpr char kHostStateQueryExport[] = "CS_GetHdrOutputState";
 // Trusts a host's answer, null when it gave none, only when it is complete and
 // its paper white is usable.
 [[nodiscard]] bool HostReportsHdr(const HostHdrOutputState* answer) noexcept;
+// A complete answer in the LUT output format FO4Isotope writes, whatever the
+// host shows now; the format is fixed for a host build.
+[[nodiscard]] bool HostFormatSupported(const HostHdrOutputState* answer) noexcept;
 
 // What a hosting presenter shows. Its HDR setting is live, so this can change
 // every frame; the LUT output format is fixed for a host build.
@@ -187,12 +190,47 @@ struct HostedHdrInputs
     bool enbDetected{};
     bool configurationDefaults{};
     bool hostReportsHdr{};
-    bool hostFormatUnknown{};
+    bool hostFormatSupported{};
     bool chainRgba8Unorm{};
     bool backBufferFp16{};
 };
 
+// Hosted HDR is available for the device generation: requested with a usable
+// INI and no ENB, in a supported host format, on the host's HDR container. The
+// host keeps that container whatever its HDR setting, so the session follows it.
+[[nodiscard]] bool HostedHdrAvailable(const HostedHdrInputs& inputs) noexcept;
+// Hosted HDR starts when it is available and the host reports HDR now.
 [[nodiscard]] bool DecideHostedHdr(const HostedHdrInputs& inputs) noexcept;
+
+// Whether a hosted session changes mode at the end of Present.
+enum class HostedSwitch : std::uint8_t
+{
+    hold,
+    toHdr,
+    toSdr
+};
+
+struct HostedSwitchInputs
+{
+    bool available{};
+    bool hostedHdr{};
+    // A complete HDR answer with a usable paper white, which hosted HDR needs.
+    bool hostReportsHdr{};
+    // The host shows SDR, which SDR mode needs.
+    bool hostShowsSdr{};
+    // The HDR operators have no native curve, so hosted HDR needs its retained table.
+    bool hdrTableRetained{};
+    // Qualified draws ran only on the Present thread, where the settings menu commits.
+    bool threadCompatible{};
+    // A requested settings commit belongs to the profile it was made in.
+    bool commitPending{};
+    // A failed build disabled substitution for the generation.
+    bool failed{};
+};
+
+// An available session follows the host's HDR setting. Otherwise the mode holds,
+// and a mismatch yields to the host's own shaders.
+[[nodiscard]] HostedSwitch DecideHostedSwitch(const HostedSwitchInputs& inputs) noexcept;
 [[nodiscard]] const char* SdrModeReasonName(SdrModeReason reason) noexcept;
 
 enum class HdrRendererState : std::uint8_t

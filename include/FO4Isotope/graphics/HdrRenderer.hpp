@@ -86,8 +86,10 @@ struct GraphicsObservationSnapshot
     std::uint32_t candidateCreatedFormat{};
     // Why SDR mode runs, and whether the renderer installed.
     SdrModeReason sdrModeReason{SdrModeReason::none};
-    // Hosted HDR is latched: the host presents FO4Isotope's HDR scene.
+    // Hosted HDR is active: the host presents FO4Isotope's HDR scene.
     bool hostedHdrActive{};
+    // Hosted HDR follows the host's HDR setting this device generation.
+    bool hostedHdrAvailable{};
     bool rendererInstalled{};
     // A foreign Present hook runs before final HDR composition overwrites it.
     bool presentHookConflict{};

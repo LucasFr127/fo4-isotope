@@ -6,6 +6,7 @@
 #include "LiveSettings.hpp"
 #include "RendererLifetime.hpp"
 #include "resources/ReplacementShaders.hpp"
+#include "FO4Isotope/ui/SettingsMenu.hpp"
 #include <Windows.h>
 #include <psapi.h>
 #include <wrl/client.h>
@@ -60,6 +61,7 @@ struct HostedChainFormats
 struct HostedLatch
 {
     bool hdr{};
+    bool available{};
     bool answered{};
     HostOutput output{};
     HostHdrOutputState state{.size = sizeof(HostHdrOutputState)};
@@ -78,11 +80,13 @@ struct HostedLatch
     const auto* answer = latch.answered ? &latch.state : nullptr;
     latch.output = ClassifyHostOutput(answer);
     const auto formats = ReadHostedChainFormats(swapChain);
-    latch.hdr = DecideHostedHdr({.hostedHdrRequested = g_configuration.hostedHdrRequested,
+    const HostedHdrInputs hosted{.hostedHdrRequested = g_configuration.hostedHdrRequested,
         .enbDetected = inputs.enbDetected, .configurationDefaults = inputs.configurationDefaults,
         .hostReportsHdr = HostReportsHdr(answer),
-        .hostFormatUnknown = latch.output == HostOutput::hdrUnknownFormat,
-        .chainRgba8Unorm = formats.chainRgba8Unorm, .backBufferFp16 = formats.backBufferFp16});
+        .hostFormatSupported = HostFormatSupported(answer),
+        .chainRgba8Unorm = formats.chainRgba8Unorm, .backBufferFp16 = formats.backBufferFp16};
+    latch.available = HostedHdrAvailable(hosted);
+    latch.hdr = DecideHostedHdr(hosted);
     return latch;
 }
 
@@ -93,12 +97,51 @@ void PrepareHostedHdr(const HostedLatch& latch, ID3D11Device* device) noexcept
     g_hostedState.matches.store(latch.hdr, std::memory_order_release);
     g_hostedHdrActive.store(latch.hdr, std::memory_order_release);
     if (!latch.hdr) return;
+    DeferUnpreparedHdrOperator();
     // A failed build keeps the latch for the settings menu; nothing substitutes.
     if (!BuildHostedReplacementShaders(device))
     {
         DisableSdrSubstitution();
         RecordFailure(GraphicsObservationFailure::shaderCreationFailed);
     }
+}
+
+// SDR mode goes first: leaving it selects the HDR profile the hosted set is built from.
+void PrepareHostedModes(
+    SdrModeInputs inputs, const HostedLatch& hosted, ID3D11Device* device) noexcept
+{
+    inputs.hostedHdr = hosted.hdr;
+    (void)PrepareSdrMode(inputs, device);
+    PrepareHostedHdr(hosted, device);
+}
+
+// A frame without qualified draws says nothing about their thread, so the last one
+// observed must have been on the Present thread too.
+[[nodiscard]] bool SwitchThreadCompatible() noexcept
+{
+    const auto drawThread = g_observedQualifiedDrawThread.load(std::memory_order_acquire);
+    const bool presentThread = drawThread == 0 ||
+        drawThread == g_observedPresentThread.load(std::memory_order_acquire);
+    return presentThread && g_liveSettingsThreadCompatible.load(std::memory_order_acquire);
+}
+
+// An available session follows the host's HDR setting on the thread the settings menu
+// commits on, which also swaps the menu's profile.
+void FollowHostMode(const HostHdrOutputState* answer) noexcept
+{
+    const bool hdr = HostReportsHdr(answer);
+    const auto change = DecideHostedSwitch({
+        .available = g_hostedState.available.load(std::memory_order_acquire),
+        .hostedHdr = g_hostedHdrActive.load(std::memory_order_acquire), .hostReportsHdr = hdr,
+        .hostShowsSdr = ClassifyHostOutput(answer) == HostOutput::sdr,
+        .hdrTableRetained = RetainedCpuLut(OperatorLutTarget::hdr10) != nullptr,
+        .threadCompatible = SwitchThreadCompatible(), .commitPending = SettingsCommitRequested(),
+        .failed = g_replacements.sdrSubstitutionDisabled});
+    auto* device = g_rendererDevice.activeDevice;
+    if (change == HostedSwitch::hold || device == nullptr) return;
+    HostedLatch latch{.hdr = hdr, .output = ClassifyHostOutput(answer)};
+    if (answer != nullptr) latch.state = *answer;
+    PrepareHostedModes(g_hostedState.inputs, latch, device);
 }
 
 }  // namespace
@@ -111,10 +154,9 @@ void PrepareLatchedModes(SdrModeInputs inputs, IDXGISwapChain* swapChain, ID3D11
     inputs.hostedPresentation = g_configuration.hostedPresentation;
     inputs.hostedHdrRequested = g_configuration.hostedHdrRequested;
     inputs.hostAnswered = hosted.answered;
-    inputs.hostedHdr = hosted.hdr;
-    // SDR mode goes first: leaving it selects the HDR profile the hosted set is built from.
-    (void)PrepareSdrMode(inputs, device);
-    PrepareHostedHdr(hosted, device);
+    g_hostedState.available.store(hosted.available, std::memory_order_release);
+    g_hostedState.inputs = inputs;
+    PrepareHostedModes(inputs, hosted, device);
 }
 
 void ClearLatchedModes() noexcept
@@ -122,6 +164,7 @@ void ClearLatchedModes() noexcept
     SetSdrModeActive(false);
     g_hostedHdrActive.store(false, std::memory_order_release);
     g_hostedState.query = nullptr;
+    g_hostedState.available.store(false, std::memory_order_release);
     g_hostedState.output.store(HostOutput::sdr, std::memory_order_release);
 }
 
@@ -132,6 +175,7 @@ void RefreshHostedState(ID3D11DeviceContext* context) noexcept
     const auto* answer = g_hostedState.query(&state) ? &state : nullptr;
     // The host's HDR switch takes effect on its next frame, so SDR mode follows it here.
     g_hostedState.output.store(ClassifyHostOutput(answer), std::memory_order_release);
+    FollowHostMode(answer);
     if (!g_hostedHdrActive.load(std::memory_order_acquire)) return;
     // The format is fixed for a host build and was checked at the latch.
     const bool hdr = HostReportsHdr(answer);
@@ -141,6 +185,12 @@ void RefreshHostedState(ID3D11DeviceContext* context) noexcept
     g_hostedState.paperWhiteNits = state.paperWhiteNits;
     if (!PublishReplacementSettings(context, g_activeSettings, g_settingsGeneration))
         DisableSdrSubstitution();
+}
+
+bool HostedHdrFollowable() noexcept
+{
+    return g_hostedState.available.load(std::memory_order_acquire) &&
+        !g_replacements.sdrSubstitutionDisabled && RetainedCpuLut(OperatorLutTarget::hdr10);
 }
 
 SdrModeReason ReportedSdrModeReason() noexcept
