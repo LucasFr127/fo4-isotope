@@ -44,7 +44,7 @@
 namespace {
 
 // Keep equal to runtime/PluginVersion.cpp, xmake.lua and the DMUI client version.
-constexpr REL::Version kPluginVersion{1, 3, 4};
+constexpr REL::Version kPluginVersion{1, 3, 5};
 
 enum class PluginLoadState : std::uint8_t
 {
