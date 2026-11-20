@@ -267,6 +267,9 @@
         "armorRendererIdentity",
         "rainRendererIdentity",
         "workshopRendererIdentity",
+        "containerItemRendererIdentity",
+        "workbenchItemRendererIdentity",
+        "scopeRendererIdentity",
         "target",
         "calls"
       ],
@@ -363,6 +366,15 @@
             "evidenceQualification": { "type": "string", "minLength": 1 }
           },
           "additionalProperties": false
+        },
+        "containerItemRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/workshopRendererIdentity"
+        },
+        "workbenchItemRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/workshopRendererIdentity"
+        },
+        "scopeRendererIdentity": {
+          "$ref": "#/properties/experimentalArmorUiObserver/properties/hudRendererIdentity"
         },
         "target": {
           "type": "object",

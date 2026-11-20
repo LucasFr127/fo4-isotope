@@ -797,7 +797,7 @@ struct SharedUiContextFixture : SharedPresentationContextFixture
     {
         PrepareFlatScene();
         DrawFlatMenu(1, owner);
-        if (owner == ArmorUiOwner::flatMenu || owner == ArmorUiOwner::workshop)
+        if (owner != ArmorUiOwner::powerArmor && owner != ArmorUiOwner::powerArmorRain)
         {
             FO4HDR_WARP_CHECK(!SharedUiFrameReady());
             PresentReadable(0.5);
@@ -1022,6 +1022,7 @@ struct SharedUiContextFixture : SharedPresentationContextFixture
 
 void VerifySharedUiContext(Device& device)
 {
+    using enum ArmorUiOwner;
     for (const bool contextUnsafe : {false, true})
     {
         SharedUiContextFixture failure(device);
@@ -1047,28 +1048,27 @@ void VerifySharedUiContext(Device& device)
     fixture.CheckFlatMenuBindBeforeScene();
     fixture.CheckInternalTemporalContinuation();
     fixture.CheckInternalTemporalRejections();
-    for (const auto owner : {ArmorUiOwner::flatMenu, ArmorUiOwner::workshop})
+    for (const auto owner : {flatMenu, workshop, itemPreview, scopeMenu})
     {
         fixture.CheckFlatMenuAdmission(owner);
         fixture.CheckFlatMenuMutations(owner);
         fixture.CheckFlatMenuScopeRetirement(owner);
         fixture.CheckNativeScopeGuards(owner);
     }
-    fixture.CheckWorkshopSequence({ArmorUiOwner::workshop, ArmorUiOwner::flatMenu,
-        ArmorUiOwner::screenSpace});
-    fixture.CheckWorkshopSequence({ArmorUiOwner::workshop, ArmorUiOwner::hud, ArmorUiOwner::flatMenu,
-        ArmorUiOwner::screenSpace});
-    fixture.CheckWorkshopSequence({ArmorUiOwner::workshop, ArmorUiOwner::screenSpace});
-    fixture.CheckWorkshopSequence({ArmorUiOwner::workshop, ArmorUiOwner::hud,
-        ArmorUiOwner::screenSpace});
+    // These owners submit before HUD and Flat, so each must seed for the owners after it.
+    for (const auto first : {workshop, itemPreview, scopeMenu})
+    {
+        fixture.CheckWorkshopSequence({first, flatMenu, screenSpace});
+        fixture.CheckWorkshopSequence({first, hud, flatMenu, screenSpace});
+        fixture.CheckWorkshopSequence({first, screenSpace});
+        fixture.CheckWorkshopSequence({first, hud, screenSpace});
+    }
     fixture.CheckFrozenWhitePresentation();
     fixture.CheckSequentialNativeScopes();
     fixture.CheckRejectedFrames();
     fixture.CheckEmptyNativeScopes();
-    fixture.CheckNestedScope(ArmorUiOwner::hud, false);
-    fixture.CheckNestedScope(ArmorUiOwner::hud, true);
-    fixture.CheckNestedScope(ArmorUiOwner::screenSpace, false);
-    fixture.CheckNestedScope(ArmorUiOwner::screenSpace, true);
+    for (const auto owner : {hud, screenSpace})
+        for (const bool write : {false, true}) fixture.CheckNestedScope(owner, write);
     fixture.CheckUnrelatedScope();
     fixture.CheckFrozenWhitePresentation();
     fixture.CheckArmorSharedScope();

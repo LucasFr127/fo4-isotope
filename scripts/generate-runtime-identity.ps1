@@ -226,6 +226,7 @@ $rendererKeys = [ordered]@{
     Flat = $armor.flatRendererIdentity
     Armor = $armor.armorRendererIdentity
     Rain = $armor.rainRendererIdentity
+    Scope = $armor.scopeRendererIdentity
 }
 foreach ($key in $rendererKeys.GetEnumerator()) {
     $identity = $key.Value
@@ -246,20 +247,28 @@ foreach ($key in $rendererKeys.GetEnumerator()) {
     )
 }
 
-$workshop = $armor.workshopRendererIdentity
-if ($workshop.status -ne 'static-reviewed-native-unvalidated' -or
-    $workshop.comparison -ne 'non-null-native-pooled-entry-pointer' -or
-    $workshop.keyStorageSection -ne '.data' -or
-    @($workshop.keyInitializerExpectedBytes).Count -ne 39) {
-    throw 'The native Workshop pooled-key initializer contract is incomplete.'
+$eagerRendererKeys = [ordered]@{
+    Workshop = $armor.workshopRendererIdentity
+    ContainerItem = $armor.containerItemRendererIdentity
+    WorkbenchItem = $armor.workbenchItemRendererIdentity
 }
-$armorLines += @(
-    "inline constexpr std::uintptr_t kWorkshopUiKeyStorageRva = $($workshop.keyStorageRva);",
-    "inline constexpr std::uint64_t kWorkshopUiKeyStorageId = $($workshop.keyStorageAddressLibraryId);",
-    "inline constexpr std::uintptr_t kWorkshopUiKeyInitializerRva = $($workshop.keyInitializerRva);",
-    "inline constexpr std::uint64_t kWorkshopUiKeyInitializerId = $($workshop.keyInitializerAddressLibraryId);",
-    "inline constexpr std::array<std::uint8_t, 39> kWorkshopUiKeyInitializerBytes{{ $($workshop.keyInitializerExpectedBytes -join ', ') }};"
-)
+foreach ($key in $eagerRendererKeys.GetEnumerator()) {
+    $identity = $key.Value
+    if ($identity.status -ne 'static-reviewed-native-unvalidated' -or
+        $identity.comparison -ne 'non-null-native-pooled-entry-pointer' -or
+        $identity.keyStorageSection -ne '.data' -or
+        @($identity.keyInitializerExpectedBytes).Count -ne 39) {
+        throw "The native $($key.Key) pooled-key initializer contract is incomplete."
+    }
+    $prefix = "k$($key.Key)UiKey"
+    $armorLines += @(
+        "inline constexpr std::uintptr_t $($prefix)StorageRva = $($identity.keyStorageRva);",
+        "inline constexpr std::uint64_t $($prefix)StorageId = $($identity.keyStorageAddressLibraryId);",
+        "inline constexpr std::uintptr_t $($prefix)InitializerRva = $($identity.keyInitializerRva);",
+        "inline constexpr std::uint64_t $($prefix)InitializerId = $($identity.keyInitializerAddressLibraryId);",
+        "inline constexpr std::array<std::uint8_t, 39> $($prefix)InitializerBytes{{ $($identity.keyInitializerExpectedBytes -join ', ') }};"
+    )
+}
 
 $screenUi = $manifest.experimentalScreenUiObserver
 if ($screenUi.status -ne 'unvalidated' -or

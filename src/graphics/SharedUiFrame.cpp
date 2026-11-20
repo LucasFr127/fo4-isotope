@@ -154,12 +154,18 @@ bool UncompositedSceneReady() noexcept
     return std::ranges::all_of(ready, [](bool value) { return value; });
 }
 
+bool PresentationTargetOwner(ArmorUiOwner owner) noexcept
+{
+    // Item previews draw pre-AA in vanilla; NativeScopeReady admits them only when moved post-AA.
+    return owner == ArmorUiOwner::flatMenu || owner == ArmorUiOwner::workshop ||
+        owner == ArmorUiOwner::itemPreview || owner == ArmorUiOwner::scopeMenu;
+}
+
 bool SupportedOwner(const ArmorUiScopeToken& token) noexcept
 {
     return token.owner == ArmorUiOwner::hud ||
         token.owner == ArmorUiOwner::powerArmor || token.owner == ArmorUiOwner::powerArmorRain ||
-        ((token.owner == ArmorUiOwner::flatMenu || token.owner == ArmorUiOwner::workshop) &&
-            token.targetArgument == 0);
+        (PresentationTargetOwner(token.owner) && token.targetArgument == 0);
 }
 
 bool NativeScopeReady(const ArmorUiScopeToken& token) noexcept

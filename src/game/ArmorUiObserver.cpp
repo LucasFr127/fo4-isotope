@@ -41,9 +41,14 @@ static_assert(sizeof(RE::BSFixedString) == sizeof(void*));
 ObserverState<ScreenSubmit> g_armorObserver;
 ObserverState<ScreenUiSubmit> g_screenObserver;
 ObserverState<CompositePass> g_compositeObserver;
+// Owners in kKeyIds order; installation requires only the HUD key.
+constexpr std::array kKeyOwners{fo4hdr::ArmorUiOwner::hud, fo4hdr::ArmorUiOwner::flatMenu,
+    fo4hdr::ArmorUiOwner::powerArmor, fo4hdr::ArmorUiOwner::powerArmorRain,
+    fo4hdr::ArmorUiOwner::workshop, fo4hdr::ArmorUiOwner::itemPreview,
+    fo4hdr::ArmorUiOwner::itemPreview, fo4hdr::ArmorUiOwner::scopeMenu};
 // Written once before installation's release; ObserveScope acquires before reading.
-bool g_flatKeyReady{}, g_armorKeyReady{}, g_rainKeyReady{}, g_workshopKeyReady{};
-std::array<std::uintptr_t, 5> g_keyRvas{};
+std::array<bool, kKeyOwners.size()> g_keyReady{};
+std::array<std::uintptr_t, kKeyOwners.size()> g_keyRvas{};
 
 bool Read(const void* source, void* destination, std::size_t size) noexcept
 {
@@ -143,15 +148,8 @@ bool IsRendererName(const RE::BSFixedString& name, std::uintptr_t keyRva, bool r
 
 fo4hdr::ArmorUiOwner RendererOwner(const RE::BSFixedString& name) noexcept
 {
-    if (IsRendererName(name, g_keyRvas[0], true)) return fo4hdr::ArmorUiOwner::hud;
-    if (IsRendererName(name, g_keyRvas[1], g_flatKeyReady))
-        return fo4hdr::ArmorUiOwner::flatMenu;
-    if (IsRendererName(name, g_keyRvas[2], g_armorKeyReady))
-        return fo4hdr::ArmorUiOwner::powerArmor;
-    if (IsRendererName(name, g_keyRvas[3], g_rainKeyReady))
-        return fo4hdr::ArmorUiOwner::powerArmorRain;
-    if (IsRendererName(name, g_keyRvas[4], g_workshopKeyReady))
-        return fo4hdr::ArmorUiOwner::workshop;
+    for (std::size_t i = 0; i < kKeyOwners.size(); ++i)
+        if (IsRendererName(name, g_keyRvas[i], g_keyReady[i])) return kKeyOwners[i];
     return fo4hdr::ArmorUiOwner::other;
 }
 
@@ -259,7 +257,7 @@ struct BoundaryIdentity
     std::array<std::uintptr_t, N> callerRvas{};
     std::array<std::uint64_t, N> callerIds{};
     std::array<std::uintptr_t, N> callRvas{};
-    const std::array<std::uint64_t, 5>* rendererKeyIds{};
+    const std::array<std::uint64_t, kKeyOwners.size()>* rendererKeyIds{};
     // Pinned CommonLibF4 mappings, when present, locate the target and callers instead.
     const REL::VariantID* targetMapping{};
     const REL::VariantID* callerMapping{};
@@ -273,8 +271,9 @@ constexpr BoundaryIdentity<1> CompositeBoundary(std::uintptr_t callOffset) noexc
 }
 namespace og {
 using namespace fo4hdr::generated::og;
-constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
-    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr std::array<std::uint64_t, kKeyOwners.size()> kKeyIds{kHudUiKeyStorageId,
+    kFlatUiKeyStorageId, kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId,
+    kContainerItemUiKeyStorageId, kWorkbenchItemUiKeyStorageId, kScopeUiKeyStorageId};
 constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
@@ -283,8 +282,9 @@ constexpr auto kComposite = CompositeBoundary(kSceneCompositeCallOffset);
 }
 namespace ng {
 using namespace fo4hdr::generated::ng;
-constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
-    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr std::array<std::uint64_t, kKeyOwners.size()> kKeyIds{kHudUiKeyStorageId,
+    kFlatUiKeyStorageId, kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId,
+    kContainerItemUiKeyStorageId, kWorkbenchItemUiKeyStorageId, kScopeUiKeyStorageId};
 constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
@@ -293,8 +293,9 @@ constexpr auto kComposite = CompositeBoundary(kSceneCompositeCallOffset);
 }
 namespace ae {
 using namespace fo4hdr::generated::ae;
-constexpr std::array<std::uint64_t, 5> kKeyIds{kHudUiKeyStorageId, kFlatUiKeyStorageId,
-    kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId};
+constexpr std::array<std::uint64_t, kKeyOwners.size()> kKeyIds{kHudUiKeyStorageId,
+    kFlatUiKeyStorageId, kArmorUiKeyStorageId, kRainUiKeyStorageId, kWorkshopUiKeyStorageId,
+    kContainerItemUiKeyStorageId, kWorkbenchItemUiKeyStorageId, kScopeUiKeyStorageId};
 constexpr BoundaryIdentity<kArmorUiCallRvas.size()> kArmor{kArmorUiTargetId,
     kArmorUiCallerRvas, kArmorUiCallerIds, kArmorUiCallRvas, &kKeyIds};
 constexpr BoundaryIdentity<kScreenUiCallRvas.size()> kScreen{kScreenUiTargetId,
@@ -419,10 +420,9 @@ class ObserverInstallation
     {
         const auto& ids = *identity_.rendererKeyIds;
         if (!RendererKey(ids[0], g_keyRvas[0])) return false;
-        g_flatKeyReady = OptionalKey(ids[1], g_keyRvas[1]);
-        g_armorKeyReady = OptionalKey(ids[2], g_keyRvas[2]);
-        g_rainKeyReady = OptionalKey(ids[3], g_keyRvas[3]);
-        g_workshopKeyReady = OptionalKey(ids[4], g_keyRvas[4]);
+        g_keyReady[0] = true;
+        for (std::size_t i = 1; i < ids.size(); ++i)
+            g_keyReady[i] = OptionalKey(ids[i], g_keyRvas[i]);
         return true;
     }
 public:

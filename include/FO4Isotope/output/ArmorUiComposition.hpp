@@ -15,7 +15,9 @@ enum class ArmorUiOwner : std::uint32_t
     flatMenu,
     powerArmorRain,
     screenSpace,
-    workshop
+    workshop,
+    itemPreview,
+    scopeMenu
 };
 
 void SetArmorUiCorrectionEnabled(bool enabled) noexcept;

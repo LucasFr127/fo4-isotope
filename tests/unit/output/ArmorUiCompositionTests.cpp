@@ -195,8 +195,8 @@ void TestNativeRendererPooledKey(const char* text)
     FO4HDR_CHECK(!game::detail::SameNativeRendererKey(PooledString{}, canonical));
     FO4HDR_CHECK(!game::detail::SameNativeRendererKey(canonical, PooledString{}));
     FO4HDR_CHECK(!game::detail::SameNativeRendererKey(PooledString{}, PooledString{}));
-    constexpr std::array otherKeys{"HUDScreenModel", "FlatScreenModel",
-        "PowerArmorRenderer", "HUDRainRenderer", "WorkshopMenu3D"};
+    constexpr std::array otherKeys{"HUDScreenModel", "FlatScreenModel", "PowerArmorRenderer",
+        "HUDRainRenderer", "WorkshopMenu3D", "Container3D", "WorkbenchItem3D", "ScopeMenu"};
     for (const auto* other : otherKeys)
         if (std::string_view(other) != text)
             FO4HDR_CHECK(!game::detail::SameNativeRendererKey(PooledString{other}, canonical));
@@ -341,12 +341,17 @@ void RunArmorUiCompositionTests()
     TestNativeRendererScopeIdentity(ArmorUiOwner::powerArmor);
     TestNativeRendererScopeIdentity(ArmorUiOwner::powerArmorRain);
     TestNativeRendererScopeIdentity(ArmorUiOwner::workshop);
+    TestNativeRendererScopeIdentity(ArmorUiOwner::itemPreview);
+    TestNativeRendererScopeIdentity(ArmorUiOwner::scopeMenu);
     TestNativeRendererCodeFingerprint();
     TestNativeRendererPooledKey("HUDScreenModel");
     TestNativeRendererPooledKey("FlatScreenModel");
     TestNativeRendererPooledKey("PowerArmorRenderer");
     TestNativeRendererPooledKey("HUDRainRenderer");
     TestNativeRendererPooledKey("WorkshopMenu3D");
+    TestNativeRendererPooledKey("Container3D");
+    TestNativeRendererPooledKey("WorkbenchItem3D");
+    TestNativeRendererPooledKey("ScopeMenu");
     TestObservationOnlyScopesAndNames();
     TestRejectedNestedScopeMasksOuterScope();
     TestDepthLimitAndThreadIsolation();

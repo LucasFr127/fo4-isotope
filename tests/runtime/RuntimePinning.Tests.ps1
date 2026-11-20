@@ -35,6 +35,31 @@ function Assert-ManifestProfileRejected {
     }
 }
 
+function Assert-EagerRendererKeysRejected {
+    param([string]$Fixture)
+    foreach ($profile in @('workshopRendererIdentity', 'containerItemRendererIdentity',
+            'workbenchItemRendererIdentity')) {
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile promoted status" {
+            param($key) $key.status = 'runtime-validated'
+        }
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile missing storage mapping" {
+            param($key) $key.PSObject.Properties.Remove('keyStorageAddressLibraryId')
+        }
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile executable storage" {
+            param($key) $key.keyStorageSection = '.text'
+        }
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile incomplete fingerprint" {
+            param($key) $key.keyInitializerExpectedBytes = @($key.keyInitializerExpectedBytes[0..37])
+        }
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile addresses another key" {
+            param($key) $key.keyInitializerExpectedBytes[14] = $key.keyInitializerExpectedBytes[14] -bxor 1
+        }
+        Assert-ManifestProfileRejected $Fixture "experimentalArmorUiObserver.$profile" "$profile reuses one mapping" {
+            param($key) $key.keyInitializerAddressLibraryId = $key.keyStorageAddressLibraryId
+        }
+    }
+}
+
 Assert-Fo4HdrExactRuntimeFileVersion -Runtime "1.10.163" -FileVersion "1.10.163.0"
 Assert-Rejected {
     Assert-Fo4HdrExactRuntimeFileVersion `
@@ -120,7 +145,7 @@ try {
     }
 
     foreach ($profile in @('hudRendererIdentity', 'flatRendererIdentity',
-            'armorRendererIdentity', 'rainRendererIdentity')) {
+            'armorRendererIdentity', 'rainRendererIdentity', 'scopeRendererIdentity')) {
         Assert-ManifestProfileRejected $fixture "experimentalArmorUiObserver.$profile" "$profile promoted status" {
             param($key) $key.status = 'runtime-validated'
         }
@@ -143,24 +168,7 @@ try {
         }
     }
 
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop promoted status' {
-        param($key) $key.status = 'runtime-validated'
-    }
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop missing storage mapping' {
-        param($key) $key.PSObject.Properties.Remove('keyStorageAddressLibraryId')
-    }
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop executable storage' {
-        param($key) $key.keyStorageSection = '.text'
-    }
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop incomplete fingerprint' {
-        param($key) $key.keyInitializerExpectedBytes = @($key.keyInitializerExpectedBytes[0..37])
-    }
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop addresses another key' {
-        param($key) $key.keyInitializerExpectedBytes[14] = $key.keyInitializerExpectedBytes[14] -bxor 1
-    }
-    Assert-ManifestProfileRejected $fixture 'experimentalArmorUiObserver.workshopRendererIdentity' 'workshop reuses one mapping' {
-        param($key) $key.keyInitializerAddressLibraryId = $key.keyStorageAddressLibraryId
-    }
+    Assert-EagerRendererKeysRejected $fixture
 
     Assert-ManifestProfileRejected $fixture 'nativeUiResources' 'pause allocation mode changed' {
         param($profile) $profile.mode = 0

@@ -33,19 +33,19 @@ function Assert-NativeRendererKeyRelationship {
     }
 }
 
-function Assert-WorkshopRendererKeyRelationship {
-    param([Parameter(Mandatory)]$Identity)
+function Assert-EagerRendererKeyRelationship {
+    param([Parameter(Mandatory)]$Identity, [Parameter(Mandatory)][string]$Name)
     $initializer = [Convert]::ToInt64($Identity.keyInitializerRva.Substring(2), 16)
     $storage = [Convert]::ToInt64($Identity.keyStorageRva.Substring(2), 16)
     $bytes = [byte[]]@($Identity.keyInitializerExpectedBytes)
     if ($Identity.keyStorageAddressLibraryId -eq $Identity.keyInitializerAddressLibraryId) {
-        throw 'Workshop renderer key storage and initializer require distinct mappings.'
+        throw "$Name renderer key storage and initializer require distinct mappings."
     }
     if (($bytes[11..13] -join ',') -ne '72,141,13') {
-        throw 'Workshop renderer key initializer requires a RIP-relative canonical-storage instruction.'
+        throw "$Name renderer key initializer requires a RIP-relative canonical-storage instruction."
     }
     if ($initializer + 18 + [BitConverter]::ToInt32($bytes, 14) -ne $storage) {
-        throw 'Workshop renderer key initializer does not address its canonical pooled-key storage.'
+        throw "$Name renderer key initializer does not address its canonical pooled-key storage."
     }
 }
 
@@ -245,7 +245,10 @@ function Assert-ArmorUiRuntime {
     Assert-NativeRendererKeyRelationship $armor.flatRendererIdentity
     Assert-NativeRendererKeyRelationship $armor.armorRendererIdentity
     Assert-NativeRendererKeyRelationship $armor.rainRendererIdentity
-    Assert-WorkshopRendererKeyRelationship $armor.workshopRendererIdentity
+    Assert-NativeRendererKeyRelationship $armor.scopeRendererIdentity
+    Assert-EagerRendererKeyRelationship $armor.workshopRendererIdentity 'Workshop'
+    Assert-EagerRendererKeyRelationship $armor.containerItemRendererIdentity 'Container item'
+    Assert-EagerRendererKeyRelationship $armor.workbenchItemRendererIdentity 'Workbench item'
     $target = [Convert]::ToInt64($armor.target.rva.Substring(2), 16)
     $seenCalls = @{}
     foreach ($call in $armor.calls) {
